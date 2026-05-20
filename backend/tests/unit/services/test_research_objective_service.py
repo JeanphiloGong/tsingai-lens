@@ -1381,6 +1381,319 @@ def test_research_objective_report_context_is_llm_sized(tmp_path):
     assert len(payload) < 9000
 
 
+def test_research_objective_report_context_uses_cross_objective_material_states(
+    tmp_path,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Report States")
+    collection_id = collection["collection_id"]
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    target_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How do energy density and scan strategy affect LPBF 316L properties?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scan strategy"],
+            "property_axes": ["density", "mechanical properties"],
+        }
+    )
+    mechanics_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How do process conditions affect LPBF 316L mechanical properties?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "scan speed"],
+            "property_axes": ["yield strength", "tensile strength", "elongation"],
+        }
+    )
+    heat_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does heat treatment affect SLM 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["hardness", "tensile strength"],
+        }
+    )
+    density_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does porosity affect SLM 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "scan speed"],
+            "property_axes": ["relative density"],
+        }
+    )
+    texture_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How do scan strategy and build orientation affect texture?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan strategy", "build orientation"],
+            "property_axes": ["ODF correlation coefficient", "yield strength"],
+        }
+    )
+
+    def unit(
+        *,
+        objective: ResearchObjective,
+        document_id: str,
+        property_name: str,
+        sample_context: dict[str, Any],
+        process_context: dict[str, Any] | None,
+        value: float,
+        source_value_text: str,
+        unit_label: str | None = None,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": document_id,
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "material_system": {"family": "316L stainless steel"},
+                "sample_context": sample_context,
+                "process_context": process_context or {},
+                "value_payload": {
+                    "value": value,
+                    "source_value_text": source_value_text,
+                },
+                "unit": unit_label,
+                "source_refs": [
+                    {
+                        "display_label": f"{document_id} Table",
+                        "source_kind": "table",
+                        "page": 5,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    sample_14 = {"Condition number": "6", "Sample number": "14"}
+    p001_process = {
+        "Energy density (J/mm 3 )": "150",
+        "Scan strategy": "A",
+        "Scanning speed (mm/s)": "0.111",
+    }
+    p004_sample = {"Specimens": "as-SLM(140/ 100)", "sample_number": "20"}
+    p004_process = {
+        "Laser power (W)": "140",
+        "Scan speed (mm/s)": "100",
+        "Type of heat treatment": "-",
+    }
+    p005_sample = {"sample_id": "255 W-1400 mm·s -1", "sample_number": "2"}
+    p005_process = {
+        "Laser power (W)": "255",
+        "Scan speed (mm·s -1)": "1400",
+    }
+    p006_sample = {"Case": "7", "sample_number": "7"}
+    p006_process = {
+        "scan strategy rotation angle": "45",
+        "build orientation alpha": "45",
+        "build orientation beta": "22.5",
+    }
+    evidence_units = (
+        unit(
+            objective=target_objective,
+            document_id="P001",
+            property_name="relative density",
+            sample_context={**sample_14, **p001_process},
+            process_context={},
+            value=99.45,
+            source_value_text="99.45",
+            unit_label="%",
+        ),
+        unit(
+            objective=mechanics_objective,
+            document_id="P001",
+            property_name="yield strength",
+            sample_context=sample_14,
+            process_context={},
+            value=462.02,
+            source_value_text="462.02",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=mechanics_objective,
+            document_id="P001",
+            property_name="tensile strength",
+            sample_context=sample_14,
+            process_context={},
+            value=584.44,
+            source_value_text="584.44",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=mechanics_objective,
+            document_id="P001",
+            property_name="elongation",
+            sample_context=sample_14,
+            process_context={},
+            value=41.9,
+            source_value_text="41.9",
+            unit_label="%",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="hardness",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=198.4,
+            source_value_text="198.4 (±3.7)",
+            unit_label="HV",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="yield strength",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=455.2,
+            source_value_text="455.2",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="tensile strength",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=585.8,
+            source_value_text="585.8",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="elongation",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=40.8,
+            source_value_text="40.8",
+            unit_label="%",
+        ),
+        unit(
+            objective=density_objective,
+            document_id="P005",
+            property_name="relative density",
+            sample_context=p005_sample,
+            process_context=p005_process,
+            value=99.5,
+            source_value_text="99.5",
+            unit_label="%",
+        ),
+        unit(
+            objective=texture_objective,
+            document_id="P006",
+            property_name="odf correlation coefficient",
+            sample_context=p006_sample,
+            process_context=p006_process,
+            value=0.6584,
+            source_value_text="0.6584",
+            unit_label="Experiment vs. Prediction",
+        ),
+        unit(
+            objective=texture_objective,
+            document_id="P006",
+            property_name="predicted yield strength",
+            sample_context=p006_sample,
+            process_context=p006_process,
+            value=347.14,
+            source_value_text="347.14",
+            unit_label="MPa",
+        ),
+    )
+    repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping({"document_id": "P001", "title": "P001"}),
+            PaperSkim.from_mapping({"document_id": "P004", "title": "P004"}),
+            PaperSkim.from_mapping({"document_id": "P005", "title": "P005"}),
+            PaperSkim.from_mapping({"document_id": "P006", "title": "P006"}),
+        ),
+        (
+            target_objective,
+            mechanics_objective,
+            heat_objective,
+            density_objective,
+            texture_objective,
+        ),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": target_objective.objective_id,
+                    "question": target_objective.question,
+                    "material_scope": ["316L stainless steel"],
+                    "target_property_axes": ["density", "mechanical properties"],
+                }
+            ),
+        ),
+        (
+            ObjectivePaperFrame.from_mapping(
+                {
+                    "objective_id": target_objective.objective_id,
+                    "document_id": "P001",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                }
+            ),
+        ),
+        (),
+        evidence_units,
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": target_objective.objective_id,
+                    "chain_scope": "objective",
+                    "question": target_objective.question,
+                    "evidence_unit_ids": [evidence_units[0].evidence_unit_id],
+                    "chain_payload": {},
+                    "summary": "Energy density affects density and mechanics.",
+                    "confidence": 0.8,
+                }
+            ),
+        ),
+    )
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        core_fact_repository=repository,
+    )
+
+    context = service._build_objective_report_context(
+        collection_id,
+        target_objective.objective_id,
+    )
+    states = context["representative_material_states"]
+    material_measurements = context["representative_material_measurements"]
+    payload = json.dumps(states, ensure_ascii=False)
+    measurement_payload = json.dumps(material_measurements, ensure_ascii=False)
+
+    assert [state["sample"] for state in states] == [
+        "14",
+        "as-SLM(140/ 100)",
+        "255 W-1400 mm·s -1",
+        "7",
+    ]
+    for expected in (
+        "99.45",
+        "462.02",
+        "584.44",
+        "41.9",
+        "198.4",
+        "455.2",
+        "585.8",
+        "40.8",
+        "99.5",
+        "0.6584",
+        "347.14",
+    ):
+        assert expected in payload
+        assert expected in measurement_payload
+    assert material_measurements[0]["sample"] == "Sample 14"
+    assert material_measurements[0]["process"]
+    markdown = service._objective_report_material_state_markdown(context)
+    assert "| Sample 14 |" in markdown
+    assert "462.02" in markdown
+
+
 def test_research_objective_report_section_plan_and_packets_are_scoped(tmp_path):
     service = ResearchObjectiveService(
         collection_service=CollectionService(tmp_path / "collections"),

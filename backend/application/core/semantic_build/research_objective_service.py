@@ -29,6 +29,7 @@ from domain.core import (
     ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
+    project_objective_material_rows,
 )
 from domain.ports import CoreFactRepository, SourceArtifactRepository
 from domain.source import SourceArtifactSet
@@ -57,8 +58,11 @@ _OBJECTIVE_REPORT_CONTEXT_FINDING_LIMIT = 4
 _OBJECTIVE_REPORT_CONTEXT_CONTRIBUTION_LIMIT = 4
 _OBJECTIVE_REPORT_CONTEXT_COMPARISON_LIMIT = 3
 _OBJECTIVE_REPORT_CONTEXT_MECHANISM_EVIDENCE_LIMIT = 2
+_OBJECTIVE_REPORT_CONTEXT_MECHANISM_UNIT_LIMIT = 4
 _OBJECTIVE_REPORT_CONTEXT_LIMITATION_LIMIT = 3
 _OBJECTIVE_REPORT_CONTEXT_MEASUREMENT_ROW_LIMIT = 6
+_OBJECTIVE_REPORT_CONTEXT_MATERIAL_STATE_LIMIT = 4
+_OBJECTIVE_REPORT_CONTEXT_MATERIAL_MEASUREMENT_LIMIT = 16
 _OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT = 120
 _OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
     {
@@ -2723,6 +2727,12 @@ class ResearchObjectiveService:
             detail["evidence_units"],
             limit=_OBJECTIVE_REPORT_CONTEXT_EVIDENCE_LIMIT,
         )
+        representative_measurements = self._objective_report_measurement_rows(
+            conclusion_package.get("primary_evidence_tables"),
+        )
+        representative_material_states = self._objective_report_material_state_rows(
+            collection_id
+        )
         context = {
             "schema_version": "objective_report_context.v2",
             "objective": self._objective_report_objective(detail["objective"]),
@@ -2747,9 +2757,13 @@ class ResearchObjectiveService:
                 ),
             },
             "report_seed": self._objective_report_seed(expert_report),
-            "representative_measurements": self._objective_report_measurement_rows(
-                conclusion_package.get("primary_evidence_tables"),
+            "representative_measurements": representative_measurements,
+            "representative_material_measurements": (
+                self._objective_report_material_measurement_rows(
+                    representative_material_states
+                )
             ),
+            "representative_material_states": representative_material_states,
             "evidence_units": evidence_units,
             "source_refs": self._objective_report_source_refs(
                 source_refs,
@@ -2819,6 +2833,12 @@ class ResearchObjectiveService:
                     "representative_measurements": context.get(
                         "representative_measurements"
                     ),
+                    "representative_material_measurements": context.get(
+                        "representative_material_measurements"
+                    ),
+                    "representative_material_states": context.get(
+                        "representative_material_states"
+                    ),
                     "source_refs": self._objective_report_source_refs(
                         context.get("source_refs"),
                         limit=3,
@@ -2860,6 +2880,12 @@ class ResearchObjectiveService:
                     "representative_measurements": context.get(
                         "representative_measurements"
                     ),
+                    "representative_material_measurements": context.get(
+                        "representative_material_measurements"
+                    ),
+                    "representative_material_states": context.get(
+                        "representative_material_states"
+                    ),
                     "evidence_units": self._objective_report_units_by_kind(
                         context.get("evidence_units"),
                         {"measurement", "comparison"},
@@ -2876,9 +2902,8 @@ class ResearchObjectiveService:
                 key: value
                 for key, value in {
                     "mechanism_chain": report_seed.get("mechanism_chain"),
-                    "evidence_units": self._objective_report_units_by_kind(
-                        context.get("evidence_units"),
-                        {"characterization", "interpretation"},
+                    "evidence_units": self._objective_report_mechanism_units(
+                        context.get("evidence_units")
                     ),
                     "source_refs": self._objective_report_source_refs(
                         context.get("source_refs"),
@@ -2918,6 +2943,40 @@ class ResearchObjectiveService:
             for unit in evidence_units
             if isinstance(unit, dict) and unit.get("unit_kind") in kinds
         ] if isinstance(evidence_units, list) else []
+
+    def _objective_report_mechanism_units(
+        self,
+        evidence_units: Any,
+    ) -> list[dict[str, Any]]:
+        units = self._objective_report_units_by_kind(
+            evidence_units,
+            {"characterization", "interpretation"},
+        )
+        if not units:
+            return []
+        ranked = sorted(
+            units,
+            key=lambda unit: self._objective_report_mechanism_unit_score(unit),
+            reverse=True,
+        )
+        return ranked[:_OBJECTIVE_REPORT_CONTEXT_MECHANISM_UNIT_LIMIT]
+
+    def _objective_report_mechanism_unit_score(self, unit: dict[str, Any]) -> int:
+        text = json.dumps(unit, ensure_ascii=False).casefold()
+        score = 0
+        for token in (
+            "marangoni",
+            "temperature gradient",
+            "solidification rate",
+            "melt pool",
+            "molten pool",
+            "sub-grain",
+            "cellular",
+            "columnar",
+        ):
+            if token in text:
+                score += 10
+        return score
 
     def _objective_report_objective(
         self,
@@ -2968,6 +3027,586 @@ class ResearchObjectiveService:
                 if len(rows) >= _OBJECTIVE_REPORT_CONTEXT_MEASUREMENT_ROW_LIMIT:
                     return rows
         return rows
+
+    def _objective_report_material_state_rows(
+        self,
+        collection_id: str,
+    ) -> list[dict[str, Any]]:
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        projected_rows = [
+            row.to_record()
+            for row in project_objective_material_rows(facts.objective_evidence_units)
+        ]
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in projected_rows:
+            if str(row.get("unit_kind") or "") != "measurement":
+                continue
+            document_id = str(row.get("document_id") or "")
+            sample = self._objective_report_material_sample_label(row)
+            if not document_id or not sample:
+                continue
+            grouped.setdefault((document_id, sample), []).append(row)
+
+        states = [
+            self._objective_report_material_state_from_rows(document_id, sample, rows)
+            for (document_id, sample), rows in grouped.items()
+        ]
+        ranked = sorted(
+            states,
+            key=lambda state: (
+                self._objective_report_material_state_slot_score(state),
+                self._objective_report_material_state_numeric_score(state),
+                state.get("sample") or "",
+            ),
+            reverse=True,
+        )
+        selected: list[dict[str, Any]] = []
+        selected_keys: set[tuple[str, str]] = set()
+        for selector in (
+            self._objective_report_material_integrated_score,
+            self._objective_report_material_heat_score,
+            self._objective_report_material_density_process_score,
+            self._objective_report_material_texture_score,
+        ):
+            candidate = self._select_objective_report_material_state(
+                ranked,
+                selector,
+                selected_keys,
+            )
+            if candidate is None:
+                continue
+            selected.append(candidate)
+            selected_keys.add(
+                (str(candidate.get("document_id") or ""), str(candidate.get("sample") or ""))
+            )
+            if len(selected) >= _OBJECTIVE_REPORT_CONTEXT_MATERIAL_STATE_LIMIT:
+                break
+        return selected
+
+    def _objective_report_material_measurement_rows(
+        self,
+        states: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for state in states:
+            sample = self._objective_report_display_sample_label(
+                state.get("sample")
+            )
+            document_id = self._safe_report_text(state.get("document_id"))
+            process = self._objective_report_material_process_label(state)
+            for measurement in (
+                state.get("measurements", [])
+                if isinstance(state.get("measurements"), list)
+                else []
+            ):
+                if not isinstance(measurement, dict):
+                    continue
+                row = {
+                    key: value
+                    for key, value in {
+                        "sample": sample,
+                        "document_id": document_id,
+                        "property": measurement.get("property"),
+                        "value": measurement.get("value"),
+                        "unit": measurement.get("unit"),
+                        "process": process,
+                        "source": measurement.get("source"),
+                    }.items()
+                    if value not in (None, "", [], {})
+                }
+                key = json.dumps(row, ensure_ascii=False, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(row)
+                if len(rows) >= _OBJECTIVE_REPORT_CONTEXT_MATERIAL_MEASUREMENT_LIMIT:
+                    return rows
+        return rows
+
+    def _objective_report_display_sample_label(self, value: Any) -> str | None:
+        sample = self._safe_report_text(value)
+        if sample and re.fullmatch(r"\d+", sample):
+            return f"Sample {sample}"
+        return sample
+
+    def _objective_report_material_state_markdown(
+        self,
+        context: dict[str, Any],
+    ) -> str:
+        material_rows = context.get("representative_material_measurements")
+        if not isinstance(material_rows, list) or not material_rows:
+            return ""
+        lines = [
+            "## 关键材料状态证据",
+            "",
+            "| Sample | Property | Value | Unit | Process | Source |",
+            "|---|---|---:|---|---|---|",
+        ]
+        for row in material_rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| "
+                + " | ".join(
+                    self._objective_report_table_cell(row.get(key))
+                    for key in (
+                        "sample",
+                        "property",
+                        "value",
+                        "unit",
+                        "process",
+                        "source",
+                    )
+                )
+                + " |"
+            )
+        return "\n".join(lines)
+
+    def _objective_report_representative_measurement_markdown(
+        self,
+        context: dict[str, Any],
+    ) -> str:
+        rows = context.get("representative_measurements")
+        if not isinstance(rows, list) or not rows:
+            return ""
+        lines = [
+            "## 目标内代表测量",
+            "",
+            "| Sample | Property | Value | Unit | Source |",
+            "|---|---|---:|---|---|",
+        ]
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| "
+                + " | ".join(
+                    self._objective_report_table_cell(row.get(key))
+                    for key in ("sample", "property", "value", "unit", "source")
+                )
+                + " |"
+            )
+        return "\n".join(lines)
+
+    def _objective_report_mechanism_evidence_markdown(
+        self,
+        packet: dict[str, Any],
+    ) -> str:
+        units = packet.get("evidence_units")
+        if not isinstance(units, list) or not units:
+            return ""
+        rows: list[dict[str, Any]] = []
+        for unit in units:
+            if not isinstance(unit, dict):
+                continue
+            value_payload = unit.get("value_payload")
+            summary = ""
+            if isinstance(value_payload, dict):
+                summary = str(value_payload.get("source_value_text") or "").strip()
+            if not summary:
+                summary = str(unit.get("interpretation") or "").strip()
+            if not summary:
+                continue
+            rows.append(
+                {
+                    "sample": unit.get("sample"),
+                    "property": unit.get("property_normalized"),
+                    "mechanism": summary,
+                    "source": self._objective_report_first_source_label(
+                        unit.get("source_refs")
+                    ),
+                }
+            )
+        if not rows:
+            return ""
+        lines = [
+            "## 关键机制证据",
+            "",
+            "| Sample | Property | Mechanism Evidence | Source |",
+            "|---|---|---|---|",
+        ]
+        for row in rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    self._objective_report_table_cell(row.get(key))
+                    for key in ("sample", "property", "mechanism", "source")
+                )
+                + " |"
+            )
+        return "\n".join(lines)
+
+    def _objective_report_table_cell(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        return text.replace("|", "\\|").replace("\n", " ")
+
+    def _objective_report_material_process_label(
+        self,
+        state: dict[str, Any],
+    ) -> str | None:
+        process = state.get("process")
+        if not isinstance(process, dict):
+            return self._truncate_report_context_text(process)
+        parts: list[str] = []
+        for key, value in process.items():
+            normalized_key = str(key).casefold()
+            if not any(
+                token in normalized_key
+                for token in (
+                    "energy",
+                    "laser",
+                    "power",
+                    "scan",
+                    "speed",
+                    "strategy",
+                    "orientation",
+                    "alpha",
+                    "beta",
+                    "θ",
+                    "ɵ",
+                    "α",
+                    "β",
+                )
+            ):
+                continue
+            if value in (None, "", [], {}):
+                continue
+            parts.append(f"{key}={value}")
+            if len(parts) >= 4:
+                break
+        return self._truncate_report_context_text("; ".join(parts))
+
+    def _select_objective_report_material_state(
+        self,
+        ranked: list[dict[str, Any]],
+        score_fn: Callable[[dict[str, Any]], float],
+        selected_keys: set[tuple[str, str]],
+    ) -> dict[str, Any] | None:
+        candidates = []
+        selected_documents = {document_id for document_id, _sample in selected_keys}
+        for state in ranked:
+            key = (str(state.get("document_id") or ""), str(state.get("sample") or ""))
+            if key in selected_keys:
+                continue
+            score = score_fn(state)
+            if score <= 0:
+                continue
+            if state.get("document_id") in selected_documents:
+                score -= 1000
+            candidates.append((score, state))
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda item: (
+                item[0],
+                self._objective_report_material_state_numeric_score(item[1]),
+            ),
+        )[1]
+
+    def _objective_report_material_state_from_rows(
+        self,
+        document_id: str,
+        sample: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        measurements = []
+        seen_measurements: set[str] = set()
+        process_context: dict[str, Any] = {}
+        test_context: dict[str, Any] = {}
+        source_refs: list[dict[str, Any]] = []
+        for row in rows:
+            process_context.update(self._as_report_mapping(row.get("process_context")))
+            test_context.update(self._as_report_mapping(row.get("test_condition")))
+            sample_context = self._as_report_mapping(row.get("sample_context"))
+            for key, value in sample_context.items():
+                normalized = str(key).strip().casefold()
+                if any(
+                    token in normalized
+                    for token in (
+                        "energy",
+                        "power",
+                        "scan",
+                        "hatch",
+                        "layer",
+                        "density",
+                    )
+                ):
+                    process_context.setdefault(str(key), value)
+            value_payload = self._as_report_mapping(row.get("value_payload"))
+            value = (
+                value_payload.get("source_value_text")
+                or value_payload.get("value")
+                or value_payload.get("current_value")
+                or value_payload.get("source_value_numeric")
+                or value_payload.get("normalized_value")
+            )
+            unit = (
+                row.get("unit")
+                or value_payload.get("unit")
+                or value_payload.get("source_value_unit")
+                or value_payload.get("source_unit_text")
+                or self._objective_report_material_inferred_unit(row)
+            )
+            measurement = {
+                key: compact_value
+                for key, compact_value in {
+                    "property": row.get("property_normalized"),
+                    "value": value,
+                    "unit": unit,
+                    "source": self._objective_report_first_source_label(
+                        row.get("source_refs")
+                    ),
+                }.items()
+                if compact_value not in (None, "", [], {})
+            }
+            measurement_key = json.dumps(
+                measurement,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            if measurement_key not in seen_measurements:
+                seen_measurements.add(measurement_key)
+                measurements.append(measurement)
+            source_refs.extend(
+                self._objective_report_source_refs(row.get("source_refs"), limit=1)
+            )
+        return {
+            key: value
+            for key, value in {
+                "document_id": document_id,
+                "sample": sample,
+                "process": self._truncate_report_context_text(
+                    self._compact_report_context_value(process_context)
+                )
+                if isinstance(self._compact_report_context_value(process_context), str)
+                else self._compact_report_context_value(process_context),
+                "test": self._compact_report_context_value(test_context),
+                "measurements": measurements[:8],
+                "source_refs": source_refs[:4],
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _objective_report_material_inferred_unit(
+        self,
+        row: dict[str, Any],
+    ) -> str | None:
+        property_name = str(row.get("property_normalized") or "").casefold()
+        if "relative density" in property_name or "densification" in property_name:
+            return "%"
+        if "elongation" in property_name:
+            return "%"
+        if "hardness" in property_name:
+            return "HV"
+        if "yield strength" in property_name or "tensile strength" in property_name:
+            return "MPa"
+        if property_name == "density":
+            row_text = json.dumps(row, ensure_ascii=False).casefold()
+            if "density (%)" in row_text:
+                return "%"
+        return None
+
+    def _objective_report_material_sample_label(self, row: dict[str, Any]) -> str | None:
+        sample_context = self._as_report_mapping(row.get("sample_context"))
+        for key in (
+            "sample_label",
+            "sample_id",
+            "variant_label",
+            "sample_name",
+            "specimen",
+            "Specimens",
+            "Case",
+            "condition",
+            "sample",
+            "Sample #",
+            "Sample number",
+            "sample_number",
+            "Condition number",
+            "condition_number",
+        ):
+            if value := self._safe_report_text(sample_context.get(key)):
+                return value
+        return self._safe_report_text(row.get("evidence_unit_id"))
+
+    def _objective_report_material_state_slot_score(self, state: dict[str, Any]) -> float:
+        return max(
+            self._objective_report_material_integrated_score(state),
+            self._objective_report_material_heat_score(state),
+            self._objective_report_material_density_process_score(state),
+            self._objective_report_material_texture_score(state),
+        )
+
+    def _objective_report_material_integrated_score(self, state: dict[str, Any]) -> float:
+        properties = self._objective_report_material_properties(state)
+        required = (
+            any(token in properties for token in ("relative density", "density", "densification")),
+            "yield strength" in properties,
+            any(token in properties for token in ("ultimate tensile strength", "tensile strength")),
+            "elongation" in properties,
+        )
+        if not all(required):
+            return 0
+        return 1000 + self._objective_report_material_state_numeric_score(state)
+
+    def _objective_report_material_heat_score(self, state: dict[str, Any]) -> float:
+        text = self._objective_report_material_route_text(state)
+        properties = self._objective_report_material_properties(state)
+        if not any(token in text for token in ("as-slm", "ht-slm", "hip-slm", "heat treatment", "hip")):
+            return 0
+        if not any(token in properties for token in ("hardness", "yield strength", "tensile strength", "elongation")):
+            return 0
+        bonus = 1200 if "as-slm" in text else 0
+        if "hip-slm" in text:
+            bonus -= 900
+        if "ht-slm" in text or "furnace ht" in text:
+            bonus -= 500
+        return (
+            800
+            + bonus
+            + self._objective_report_material_state_numeric_score(state)
+            - self._objective_report_material_fragment_penalty(state)
+        )
+
+    def _objective_report_material_density_process_score(self, state: dict[str, Any]) -> float:
+        properties = self._objective_report_material_properties(state)
+        if not any(token in properties for token in ("relative density", "density", "densification")):
+            return 0
+        text = self._objective_report_material_state_text(state)
+        axis_count = sum(
+            1
+            for token in ("laser", "power", "scan", "speed", "energy", "density")
+            if token in text
+        )
+        if axis_count <= 0:
+            return 0
+        return 600 + axis_count * 100 + self._objective_report_material_density_value(state)
+
+    def _objective_report_material_texture_score(self, state: dict[str, Any]) -> float:
+        properties = self._objective_report_material_properties(state)
+        if "odf correlation coefficient" not in properties or "predicted yield strength" not in properties:
+            return 0
+        has_experiment = any(
+            token in properties
+            for token in ("experimental yield strength", "yield strength experiment")
+        )
+        return 500 + (100 if has_experiment else 0) + self._objective_report_material_axis_score(state)
+
+    def _objective_report_material_state_numeric_score(self, state: dict[str, Any]) -> float:
+        weights = {
+            "relative density": 3.0,
+            "density": 3.0,
+            "densification": 3.0,
+            "yield strength": 1.0,
+            "ultimate tensile strength": 1.0,
+            "tensile strength": 1.0,
+            "elongation": 2.0,
+            "hardness": 1.0,
+            "predicted yield strength": 0.5,
+            "experimental yield strength": 0.5,
+        }
+        score = 0.0
+        for measurement in state.get("measurements", []):
+            if not isinstance(measurement, dict):
+                continue
+            property_name = str(measurement.get("property") or "").casefold()
+            numeric = self._report_numeric_or_none(measurement.get("value"))
+            if numeric is None:
+                continue
+            for token, weight in weights.items():
+                if token in property_name:
+                    score += numeric * weight
+                    break
+        return score
+
+    def _objective_report_material_density_value(self, state: dict[str, Any]) -> float:
+        values = []
+        for measurement in state.get("measurements", []):
+            if not isinstance(measurement, dict):
+                continue
+            property_name = str(measurement.get("property") or "").casefold()
+            if not any(token in property_name for token in ("relative density", "density", "densification")):
+                continue
+            if (numeric := self._report_numeric_or_none(measurement.get("value"))) is not None:
+                values.append(numeric)
+        return max(values) if values else 0.0
+
+    def _objective_report_material_axis_score(self, state: dict[str, Any]) -> float:
+        total = 0.0
+        for mapping_name in ("process", "test"):
+            mapping = state.get(mapping_name)
+            if not isinstance(mapping, dict):
+                continue
+            for key, value in mapping.items():
+                normalized_key = str(key).casefold()
+                if not any(
+                    token in normalized_key
+                    for token in ("rotation", "orientation", "alpha", "beta", "θ", "ɵ", "α", "β")
+                ):
+                    continue
+                if (numeric := self._report_numeric_or_none(value)) is not None:
+                    total += abs(numeric)
+        return total
+
+    def _objective_report_material_fragment_penalty(
+        self,
+        state: dict[str, Any],
+    ) -> float:
+        label = str(state.get("sample") or "")
+        text = self._objective_report_material_state_text(state)
+        penalty = 0.0
+        if re.search(r"\(\s*\d+\s*/\s*$", label):
+            penalty += 1500
+        if label.count("(") > label.count(")"):
+            penalty += 1000
+        if "table 2 ( continued )" in text:
+            penalty += 250
+        if '"table 2 ( continued )"' in text or "'table 2 ( continued )'" in text:
+            penalty += 500
+        return penalty
+
+    def _objective_report_material_properties(self, state: dict[str, Any]) -> set[str]:
+        return {
+            str(measurement.get("property") or "").casefold()
+            for measurement in state.get("measurements", [])
+            if isinstance(measurement, dict) and measurement.get("property")
+        }
+
+    def _objective_report_material_state_text(self, state: dict[str, Any]) -> str:
+        return json.dumps(state, ensure_ascii=False).casefold()
+
+    def _objective_report_material_route_text(self, state: dict[str, Any]) -> str:
+        return json.dumps(
+            {
+                "sample": state.get("sample"),
+                "process": state.get("process"),
+            },
+            ensure_ascii=False,
+        ).casefold()
+
+    def _as_report_mapping(self, value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    def _safe_report_text(self, value: Any) -> str | None:
+        if value in (None, "", [], {}) or isinstance(value, (dict, list, tuple, set)):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    def _report_numeric_or_none(self, value: Any) -> float | None:
+        if value in (None, "", [], {}) or isinstance(value, (dict, list, tuple, set)):
+            return None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if math.isnan(float(value)) or math.isinf(float(value)):
+                return None
+            return float(value)
+        match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", str(value))
+        if not match:
+            return None
+        return float(match.group(0))
 
     def _objective_report_first_source_label(self, value: Any) -> str | None:
         refs = self._objective_report_source_refs(value, limit=1)
@@ -3163,40 +3802,89 @@ class ResearchObjectiveService:
     ) -> list[dict[str, Any]]:
         compact_units: list[dict[str, Any]] = []
         for unit in evidence_units:
-            compact_units.append(
-                {
-                    key: value
-                    for key, value in {
-                        "evidence_unit_id": unit.get("evidence_unit_id"),
-                        "unit_kind": unit.get("unit_kind"),
-                        "property_normalized": unit.get("property_normalized"),
-                        "sample": self._compact_sample_label(
-                            unit.get("sample_context")
-                        ),
-                        "process": self._compact_process_label(
-                            unit.get("process_context")
-                        ),
-                        "value_payload": self._compact_report_value_payload(
-                            unit.get("value_payload")
-                        ),
-                        "unit": unit.get("unit"),
-                        "baseline_context": unit.get("baseline_context"),
-                        "interpretation": self._truncate_report_context_text(
-                            unit.get("interpretation")
-                        ),
-                        "source_refs": self._objective_report_source_refs(
-                            unit.get("source_refs"),
-                            limit=1,
-                        ),
-                        "resolution_status": unit.get("resolution_status"),
-                        "confidence": unit.get("confidence"),
-                    }.items()
-                    if value not in (None, "", [], {})
-                }
-            )
+            compact_units.append(self._objective_report_evidence_unit(unit))
             if limit is not None and len(compact_units) >= limit:
                 break
+        if limit is not None:
+            compact_units = self._objective_report_add_priority_mechanism_units(
+                compact_units,
+                evidence_units,
+                limit=limit,
+            )
         return compact_units
+
+    def _objective_report_add_priority_mechanism_units(
+        self,
+        compact_units: list[dict[str, Any]],
+        evidence_units: list[dict[str, Any]],
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        selected_ids = {
+            str(unit.get("evidence_unit_id") or "")
+            for unit in compact_units
+            if isinstance(unit, dict)
+        }
+        priority_units: list[dict[str, Any]] = []
+        for unit in evidence_units:
+            if not isinstance(unit, dict):
+                continue
+            if unit.get("unit_kind") not in {"characterization", "interpretation"}:
+                continue
+            unit_id = str(unit.get("evidence_unit_id") or "")
+            if not unit_id or unit_id in selected_ids:
+                continue
+            compact = self._objective_report_evidence_unit(unit)
+            if self._objective_report_mechanism_unit_score(compact) <= 0:
+                continue
+            priority_units.append(compact)
+        priority_units = sorted(
+            priority_units,
+            key=self._objective_report_mechanism_unit_score,
+            reverse=True,
+        )
+        for unit in priority_units:
+            if len(compact_units) >= max(
+                limit,
+                _OBJECTIVE_REPORT_CONTEXT_MECHANISM_UNIT_LIMIT,
+            ):
+                break
+            compact_units.append(unit)
+        return compact_units
+
+    def _objective_report_evidence_unit(
+        self,
+        unit: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "evidence_unit_id": unit.get("evidence_unit_id"),
+                "unit_kind": unit.get("unit_kind"),
+                "property_normalized": unit.get("property_normalized"),
+                "sample": self._compact_sample_label(
+                    unit.get("sample_context")
+                ),
+                "process": self._compact_process_label(
+                    unit.get("process_context")
+                ),
+                "value_payload": self._compact_report_value_payload(
+                    unit.get("value_payload")
+                ),
+                "unit": unit.get("unit"),
+                "baseline_context": unit.get("baseline_context"),
+                "interpretation": self._truncate_report_context_text(
+                    unit.get("interpretation")
+                ),
+                "source_refs": self._objective_report_source_refs(
+                    unit.get("source_refs"),
+                    limit=1,
+                ),
+                "resolution_status": unit.get("resolution_status"),
+                "confidence": unit.get("confidence"),
+            }.items()
+            if value not in (None, "", [], {})
+        }
 
     def _compact_report_value_payload(self, value: Any) -> Any:
         if not isinstance(value, dict):
@@ -3303,6 +3991,25 @@ class ResearchObjectiveService:
             )
             if markdown:
                 generated_sections.append(markdown)
+            if entry["section"]["key"] == "mechanism_chain":
+                mechanism_section = self._objective_report_mechanism_evidence_markdown(
+                    entry["packet"]
+                )
+                if mechanism_section:
+                    generated_sections.append(mechanism_section)
+            if entry["section"]["key"] == "collection_conclusion":
+                measurement_section = (
+                    self._objective_report_representative_measurement_markdown(
+                        context
+                    )
+                )
+                if measurement_section:
+                    generated_sections.append(measurement_section)
+                material_section = self._objective_report_material_state_markdown(
+                    context
+                )
+                if material_section:
+                    generated_sections.append(material_section)
         return "\n\n".join(generated_sections).strip()
 
     def _generate_objective_report_section_markdown(
@@ -3326,6 +4033,11 @@ class ResearchObjectiveService:
             "Start with exactly the requested heading. Do not write other "
             "report sections. If the packet contains representative_measurements, "
             "include a Markdown table with every representative measurement row. "
+            "If the packet contains representative_material_measurements, include "
+            "a Markdown table with every representative material measurement row. "
+            "If the packet contains representative_material_states, use those "
+            "states as the main sample/process/result evidence and include their "
+            "reported values in the scientific discussion. "
             "If the packet lacks evidence, say so explicitly instead of filling "
             "it with generic text.\n\n"
             f"SectionEvidencePacket:\n{json.dumps(packet, ensure_ascii=False, separators=(',', ':'))}"
@@ -3333,7 +4045,7 @@ class ResearchObjectiveService:
         completion = self._get_report_llm_client().chat.completions.create(
             model=self.report_model,
             temperature=0,
-            max_tokens=500,
+            max_tokens=1200,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -3417,16 +4129,37 @@ class ResearchObjectiveService:
             unit = str(row.get("unit") or "").strip()
             if not value:
                 continue
-            value_text = value
+            required_values.append(value)
             if unit and unit.casefold() not in value.casefold():
-                value_text = f"{value} {unit}"
-            required_values.append(value_text)
+                required_values.append(f"{value} {unit}")
+        for row in packet.get("representative_material_measurements", []):
+            if not isinstance(row, dict):
+                continue
+            value = str(row.get("value") or "").strip()
+            unit = str(row.get("unit") or "").strip()
+            if not value:
+                continue
+            required_values.append(value)
+            if unit and unit.casefold() not in value.casefold():
+                required_values.append(f"{value} {unit}")
         return required_values
 
     def _report_text_contains_value(self, markdown: str, value_text: str) -> bool:
-        return self._normalize_report_value_text(
-            value_text
-        ) in self._normalize_report_value_text(markdown)
+        normalized_value = self._normalize_report_value_text(value_text)
+        normalized_markdown = self._normalize_report_value_text(markdown)
+        if normalized_value in normalized_markdown:
+            return True
+        match = re.fullmatch(
+            r"(.+?)(%|MPa|GPa|Pa|HV|C/s|°C/s|mm/s|J/mm(?:3|³))",
+            value_text.strip(),
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return False
+        return (
+            self._normalize_report_value_text(match.group(1)) in normalized_markdown
+            and self._normalize_report_value_text(match.group(2)) in normalized_markdown
+        )
 
     def _normalize_report_value_text(self, value: str) -> str:
         return re.sub(r"\s+", "", value).casefold()
@@ -3442,6 +4175,7 @@ class ResearchObjectiveService:
                 json.dumps(context, ensure_ascii=False)
             )
         }
+        allowed_numbers.update(self._objective_report_context_number_tokens(context))
         warnings: list[str] = []
         seen: set[str] = set()
         for token in self._objective_report_number_tokens(markdown):
@@ -3453,6 +4187,39 @@ class ResearchObjectiveService:
             if len(warnings) >= 5:
                 break
         return warnings
+
+    def _objective_report_context_number_tokens(
+        self,
+        context: dict[str, Any],
+    ) -> set[str]:
+        tokens: set[str] = set()
+        for key in (
+            "representative_measurements",
+            "representative_material_measurements",
+        ):
+            rows = context.get(key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                value = str(row.get("value") or "").strip()
+                unit = str(row.get("unit") or "").strip()
+                if not value:
+                    continue
+                numeric = self._report_numeric_or_none(value)
+                numeric_text = (
+                    f"{numeric:g}" if numeric is not None else ""
+                )
+                for token in (
+                    value,
+                    f"{value} {unit}" if unit else "",
+                    numeric_text,
+                    f"{numeric_text} {unit}" if numeric_text and unit else "",
+                ):
+                    if token:
+                        tokens.add(self._normalize_report_number_token(token))
+        return tokens
 
     def _objective_report_number_tokens(self, text: str) -> list[str]:
         return re.findall(

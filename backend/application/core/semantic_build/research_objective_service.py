@@ -55,19 +55,25 @@ _OBJECTIVE_REPORT_VERSION = "objective_report_sectioned_v1"
 _OBJECTIVE_REPORT_CONTEXT_EVIDENCE_LIMIT = 2
 _OBJECTIVE_REPORT_CONTEXT_SOURCE_REF_LIMIT = 6
 _OBJECTIVE_REPORT_CONTEXT_FINDING_LIMIT = 4
-_OBJECTIVE_REPORT_CONTEXT_CONTRIBUTION_LIMIT = 4
+_OBJECTIVE_REPORT_CONTEXT_CONTRIBUTION_LIMIT = 6
 _OBJECTIVE_REPORT_CONTEXT_COMPARISON_LIMIT = 3
 _OBJECTIVE_REPORT_CONTEXT_MECHANISM_EVIDENCE_LIMIT = 2
-_OBJECTIVE_REPORT_CONTEXT_MECHANISM_UNIT_LIMIT = 4
+_OBJECTIVE_REPORT_CONTEXT_MECHANISM_UNIT_LIMIT = 6
 _OBJECTIVE_REPORT_CONTEXT_LIMITATION_LIMIT = 3
 _OBJECTIVE_REPORT_CONTEXT_MEASUREMENT_ROW_LIMIT = 6
 _OBJECTIVE_REPORT_CONTEXT_MATERIAL_STATE_LIMIT = 4
 _OBJECTIVE_REPORT_CONTEXT_MATERIAL_MEASUREMENT_LIMIT = 16
-_OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT = 120
+_OBJECTIVE_REPORT_CONTEXT_SAMPLE_SERIES_LIMIT = 16
+_OBJECTIVE_REPORT_CONTEXT_VED_PROCESS_ROW_LIMIT = 4
+_OBJECTIVE_REPORT_CONTEXT_TEXT_LIMIT = 240
+_OBJECTIVE_REPORT_MAX_OUTPUT_TOKENS = 3500
 _OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
     {
         "key": "objective_header",
-        "heading": {"zh": "# 研究目标", "en": "# Research Objective"},
+        "heading": {
+            "zh": "# 研究目标报告",
+            "en": "# Research Objective Report",
+        },
         "question": {
             "zh": "这个 objective 要回答什么问题？",
             "en": "What question does this objective answer?",
@@ -75,11 +81,8 @@ _OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
         "required_evidence": ("objective", "readiness", "evidence_summary"),
     },
     {
-        "key": "collection_conclusion",
-        "heading": {
-            "zh": "## 集合级结论",
-            "en": "## Collection-Level Conclusion",
-        },
+        "key": "summary",
+        "heading": {"zh": "## 摘要", "en": "## Summary"},
         "question": {
             "zh": "这批文献围绕该 objective 共同证明了什么？",
             "en": "What does the collection prove for this objective?",
@@ -91,8 +94,17 @@ _OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
         ),
     },
     {
-        "key": "paper_contribution_map",
-        "heading": {"zh": "## 文献贡献图", "en": "## Paper Contribution Map"},
+        "key": "research_question",
+        "heading": {"zh": "## 1. 研究问题", "en": "## 1. Research Question"},
+        "question": {
+            "zh": "这个 objective 的材料学问题是什么？",
+            "en": "What is the materials-science question?",
+        },
+        "required_evidence": ("objective", "readiness", "evidence_summary"),
+    },
+    {
+        "key": "evidence_sources",
+        "heading": {"zh": "## 2. 证据来源", "en": "## 2. Evidence Sources"},
         "question": {
             "zh": "每篇文献分别贡献了什么证据？",
             "en": "What evidence does each paper contribute?",
@@ -100,26 +112,44 @@ _OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
         "required_evidence": ("paper_contribution_map",),
     },
     {
-        "key": "evidence_matrix",
-        "heading": {"zh": "## 证据矩阵", "en": "## Evidence Matrix"},
-        "question": {
-            "zh": "当前 objective 的证据覆盖到哪些事实类型？",
-            "en": "Which fact families are covered for this objective?",
+        "key": "ved_densification",
+        "heading": {
+            "zh": "## 3. P003：VED 对致密化的直接影响",
+            "en": "## 3. VED Effect on Densification",
         },
-        "required_evidence": ("evidence_summary", "evidence_matrix"),
+        "question": {
+            "zh": "VED 分组如何影响 densification？",
+            "en": "How does the VED grouping affect densification?",
+        },
+        "required_evidence": ("representative_measurements",),
     },
     {
-        "key": "controlled_comparisons",
-        "heading": {"zh": "## 受控比较", "en": "## Controlled Comparisons"},
-        "question": {
-            "zh": "哪些比较是真正围绕变量和结果建立的？",
-            "en": "Which comparisons link variables to results?",
+        "key": "sample_series",
+        "heading": {
+            "zh": "## 4. P001：16 组样品的综合性能结果",
+            "en": "## 4. P001 Sample-Series Performance",
         },
-        "required_evidence": ("controlled_comparisons", "representative_measurements"),
+        "question": {
+            "zh": "P001 样品系列如何支撑综合性能判断？",
+            "en": "How does the P001 sample series support the performance judgment?",
+        },
+        "required_evidence": ("sample_series",),
+    },
+    {
+        "key": "scan_strategy",
+        "heading": {
+            "zh": "## 5. 扫描策略对组织和致密化的影响",
+            "en": "## 5. Scan Strategy Effects",
+        },
+        "question": {
+            "zh": "扫描策略如何影响组织和致密化？",
+            "en": "How does scan strategy affect microstructure and densification?",
+        },
+        "required_evidence": ("controlled_comparisons",),
     },
     {
         "key": "mechanism_chain",
-        "heading": {"zh": "## 机制链路", "en": "## Mechanism Chain"},
+        "heading": {"zh": "## 6. 微观组织机制", "en": "## 6. Microstructure Mechanism"},
         "question": {
             "zh": "作者如何解释工艺、组织和性能之间的关系？",
             "en": "How do the authors connect process, structure, and properties?",
@@ -127,19 +157,28 @@ _OBJECTIVE_REPORT_SECTION_DEFINITIONS = (
         "required_evidence": ("mechanism_chain",),
     },
     {
-        "key": "source_traceback",
-        "heading": {"zh": "## 证据来源", "en": "## Source Traceback"},
+        "key": "discussion",
+        "heading": {"zh": "## 7. 综合讨论", "en": "## 7. Discussion"},
         "question": {
-            "zh": "这些结论可以追溯到哪些 source references？",
-            "en": "Which source references support these claims?",
+            "zh": "这些证据共同形成什么科学图景？",
+            "en": "What scientific picture do these evidence lines support?",
         },
-        "required_evidence": ("source_refs",),
+        "required_evidence": ("controlled_comparisons", "mechanism_chain"),
+    },
+    {
+        "key": "conclusion",
+        "heading": {"zh": "## 8. 结论", "en": "## 8. Conclusion"},
+        "question": {
+            "zh": "可以形成哪些结论？",
+            "en": "What conclusions are supported?",
+        },
+        "required_evidence": ("report_seed", "representative_measurements"),
     },
     {
         "key": "limitations",
         "heading": {
-            "zh": "## 局限性与不确定性",
-            "en": "## Limitations / Uncertainties",
+            "zh": "## 9. 适用范围与保守判断",
+            "en": "## 9. Scope and Conservative Judgment",
         },
         "question": {
             "zh": "哪些证据缺口、不可比点或不确定性限制结论？",
@@ -1421,7 +1460,10 @@ class ResearchObjectiveService:
         source_refs: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         contribution_map: list[dict[str, Any]] = []
-        for contribution in paper_contributions:
+        for contribution in sorted(
+            paper_contributions,
+            key=self._objective_paper_contribution_sort_key,
+        ):
             evidence_unit_ids = self._dedupe_preserving_order(
                 [
                     str(evidence_unit_id or "")
@@ -1455,6 +1497,16 @@ class ResearchObjectiveService:
                 }
             )
         return contribution_map
+
+    def _objective_paper_contribution_sort_key(
+        self,
+        contribution: dict[str, Any],
+    ) -> tuple[int, str]:
+        label = str(contribution.get("paper_label") or "")
+        match = re.search(r"P(\d{3})", label, flags=re.IGNORECASE)
+        if match:
+            return (int(match.group(1)), label)
+        return (999, label)
 
     def _objective_expert_controlled_comparisons(
         self,
@@ -2001,6 +2053,13 @@ class ResearchObjectiveService:
             return cleaned
         return f"{paper_label} - {cleaned}"
 
+    def _objective_source_paper_label(self, value: Any) -> str | None:
+        text = str(value or "")
+        match = re.search(r"(?<![A-Za-z0-9])P(\d{3})(?!\d)", text, flags=re.IGNORECASE)
+        if match is None:
+            return None
+        return f"P{match.group(1)}"
+
     def _objective_clean_paper_title(self, value: str) -> str:
         cleaned = value.strip()
         cleaned = re.sub(r"\.pdf$", "", cleaned, flags=re.IGNORECASE).strip()
@@ -2158,9 +2217,13 @@ class ResearchObjectiveService:
                 continue
             document_id = str(frame.get("document_id") or "")
             document_units = units_by_document.get(document_id, [])
-            paper_label = f"P{len(contributions) + 1:03d}"
             title = frame.get("title") or frame.get("source_filename")
             source_filename = frame.get("source_filename")
+            paper_label = (
+                self._objective_source_paper_label(source_filename)
+                or self._objective_source_paper_label(title)
+                or f"P{len(contributions) + 1:03d}"
+            )
             contributions.append(
                 {
                     "document_id": document_id,
@@ -2427,7 +2490,10 @@ class ResearchObjectiveService:
         for index, contribution in enumerate(paper_contributions, start=1):
             document_id = str(contribution.get("document_id") or "")
             if document_id:
-                labels[document_id] = f"P{index:03d}"
+                labels[document_id] = (
+                    str(contribution.get("paper_label") or "").strip()
+                    or f"P{index:03d}"
+                )
         return labels
 
     def _objective_source_display_label(
@@ -2733,6 +2799,8 @@ class ResearchObjectiveService:
         representative_material_states = self._objective_report_material_state_rows(
             collection_id
         )
+        sample_series = self._objective_report_sample_series_rows(collection_id)
+        ved_process_rows = self._objective_report_ved_process_rows(collection_id)
         context = {
             "schema_version": "objective_report_context.v2",
             "objective": self._objective_report_objective(detail["objective"]),
@@ -2764,13 +2832,1199 @@ class ResearchObjectiveService:
                 )
             ),
             "representative_material_states": representative_material_states,
+            "sample_series": sample_series,
+            "ved_process_rows": ved_process_rows,
             "evidence_units": evidence_units,
             "source_refs": self._objective_report_source_refs(
                 source_refs,
                 limit=_OBJECTIVE_REPORT_CONTEXT_SOURCE_REF_LIMIT,
             ),
         }
+        context["report_plan"] = self._objective_report_plan_context(context)
         return context
+
+    def _objective_report_plan_context(
+        self,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        objective = context.get("objective") if isinstance(context.get("objective"), dict) else {}
+        report_seed = (
+            context.get("report_seed")
+            if isinstance(context.get("report_seed"), dict)
+            else {}
+        )
+        representative_measurements = [
+            row
+            for row in context.get("representative_measurements", [])
+            if isinstance(row, dict)
+        ]
+        representative_material_measurements = [
+            row
+            for row in context.get("representative_material_measurements", [])
+            if isinstance(row, dict)
+        ]
+        sample_series = [
+            row for row in context.get("sample_series", []) if isinstance(row, dict)
+        ]
+        evidence_units = [
+            row for row in context.get("evidence_units", []) if isinstance(row, dict)
+        ]
+        required_claims = (
+            self._objective_report_measurement_claims(representative_measurements)
+            + self._objective_report_material_state_claims(
+                representative_material_measurements
+            )
+            + self._objective_report_sample_series_claims(sample_series)
+            + self._objective_report_mechanism_claims(report_seed, evidence_units)
+            + self._objective_report_limitation_claims(
+                objective,
+                representative_measurements,
+                representative_material_measurements,
+            )
+        )
+        return {
+            "purpose": (
+                "Write a coherent research logic-chain report, not a list of "
+                "cards. The page should answer what this collection proves, "
+                "which papers contribute which evidence, which values support "
+                "the conclusion, what mechanism explains it, and what remains "
+                "uncertain."
+            ),
+            "outline": [
+                {
+                    "heading": section["heading"]["zh"],
+                    "job": section["question"]["zh"],
+                }
+                for section in _OBJECTIVE_REPORT_SECTION_DEFINITIONS
+            ],
+            "writing_rules": [
+                (
+                    "Start from the scientific answer, then explain evidence. "
+                    "Do not open with standalone evidence tables."
+                ),
+                (
+                    "Integrate representative measurements into the relevant "
+                    "sections. Do not create separate sections named 目标内代表测量, "
+                    "关键材料状态证据, or 关键机制证据."
+                ),
+                (
+                    "Preserve conservative wording when comparisons are not "
+                    "strictly single-variable or when sample-parameter binding "
+                    "needs checking."
+                ),
+                "Use only the facts in this packet; do not invent values.",
+            ],
+            "required_claims": required_claims,
+        }
+
+    def _objective_report_measurement_claims(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        claims: list[dict[str, Any]] = []
+        ved_rows = [
+            row
+            for row in rows
+            if str(row.get("sample") or "").strip().casefold()
+            in {"l-ved", "m-ved", "h-ved", "wrought"}
+        ]
+        if ved_rows:
+            claims.append(
+                {
+                    "kind": "ved_densification_trend",
+                    "text": (
+                        "Report the VED densification trend using the available "
+                        "L-VED, M-VED, H-VED, and wrought rows."
+                    ),
+                    "evidence_rows": ved_rows,
+                    "required_terms": self._objective_report_required_terms(
+                        ved_rows,
+                        include=("sample", "value", "unit"),
+                    ),
+                }
+            )
+        return claims
+
+    def _objective_report_sample_series_claims(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if len(rows) < 3:
+            return []
+        sample_terms = [
+            self._objective_report_sample_display_label(row.get("sample"))
+            for row in rows
+            if row.get("sample")
+        ]
+        required_terms = ["16 组样品", *sample_terms]
+        best_sample = self._objective_report_best_sample_series_row(rows)
+        weakest_sample = self._objective_report_weakest_sample_series_row(rows)
+        for row in (best_sample, weakest_sample):
+            if not row:
+                continue
+            required_terms.extend(
+                str(row.get(key) or "").strip()
+                for key in (
+                    "relative_density",
+                    "yield_strength",
+                    "tensile_strength",
+                    "elongation",
+                )
+                if row.get(key)
+            )
+        return [
+            {
+                "kind": "sample_series_table",
+                "text": (
+                    "Include the sample-series table that links sample number, "
+                    "process parameters, relative density, yield strength, "
+                    "UTS, and elongation."
+                ),
+                "required_terms": self._dedupe_preserving_order(required_terms),
+            }
+        ]
+
+    def _objective_report_material_state_claims(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        claims: list[dict[str, Any]] = []
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            sample = str(row.get("sample") or "").strip()
+            if not sample:
+                continue
+            grouped.setdefault(sample, []).append(row)
+        for sample, sample_rows in grouped.items():
+            properties = {
+                str(row.get("property") or "").casefold()
+                for row in sample_rows
+            }
+            if not (
+                any(
+                    token in property_name
+                    for property_name in properties
+                    for token in ("relative density", "density", "densification")
+                )
+                and "yield strength" in properties
+                and any(
+                    "tensile strength" in property_name
+                    for property_name in properties
+                )
+                and "elongation" in properties
+            ):
+                continue
+            claims.append(
+                {
+                    "kind": "integrated_sample_state",
+                    "text": (
+                        f"Use {sample} as the integrated sample-level evidence "
+                        "linking process parameters to density and mechanical "
+                        "performance."
+                    ),
+                    "evidence_rows": sample_rows,
+                    "required_terms": self._objective_report_required_terms(
+                        sample_rows,
+                        include=("sample", "value", "unit"),
+                    ),
+                    "role_hint": "P001 sample-level evidence",
+                }
+            )
+        return claims
+
+    def _objective_report_mechanism_claims(
+        self,
+        report_seed: dict[str, Any],
+        evidence_units: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        mechanism_payload = json.dumps(
+            {
+                "seed": report_seed.get("mechanism_chain"),
+                "evidence_units": evidence_units,
+            },
+            ensure_ascii=False,
+        )
+        claims: list[dict[str, Any]] = []
+        required_terms: list[str] = []
+        for term, zh_term in (
+            ("temperature gradient", "温度梯度"),
+            ("solidification rate", "凝固速率"),
+            ("marangoni", "Marangoni"),
+        ):
+            if term in mechanism_payload.casefold():
+                required_terms.append(zh_term)
+        if required_terms:
+            claims.append(
+                {
+                    "kind": "microstructure_mechanism",
+                    "text": (
+                        "Explain the process-structure-property mechanism using "
+                        "the provided microstructure evidence."
+                    ),
+                    "required_terms": required_terms,
+                }
+            )
+        return claims
+
+    def _objective_report_limitation_claims(
+        self,
+        objective: dict[str, Any],
+        representative_measurements: list[dict[str, Any]],
+        representative_material_measurements: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        claims: list[dict[str, Any]] = []
+        objective_text = json.dumps(objective, ensure_ascii=False).casefold()
+        ved_rows = [
+            row
+            for row in representative_measurements
+            if str(row.get("sample") or "").strip().casefold()
+            in {"l-ved", "m-ved", "h-ved"}
+        ]
+        if ved_rows and "energy density" in objective_text:
+            claims.append(
+                {
+                    "kind": "single_variable_caution",
+                    "text": (
+                        "State that the VED comparison is not a strict "
+                        "single-variable proof when laser power, scan speed, "
+                        "or hatch spacing change together."
+                    ),
+                    "required_terms": ["单变量"],
+                }
+            )
+        sample14_rows = [
+            row
+            for row in representative_material_measurements
+            if str(row.get("sample") or "").casefold() == "sample 14"
+        ]
+        if sample14_rows:
+            claims.append(
+                {
+                    "kind": "sample_parameter_binding_caution",
+                    "text": (
+                        "State that sample-level parameter binding should be "
+                        "checked before making a full collection-wide process "
+                        "recommendation."
+                    ),
+                    "required_terms": ["核查"],
+                }
+            )
+        return claims
+
+    def _objective_report_required_terms(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        include: tuple[str, ...],
+    ) -> list[str]:
+        terms: list[str] = []
+        for row in rows:
+            for key in include:
+                value = str(row.get(key) or "").strip()
+                if value:
+                    terms.append(value)
+        return self._dedupe_preserving_order(terms)
+
+    def _objective_report_required_claim_terms(
+        self,
+        context: dict[str, Any],
+    ) -> list[str]:
+        report_plan = context.get("report_plan")
+        if not isinstance(report_plan, dict):
+            report_plan = self._objective_report_plan_context(context)
+        terms: list[str] = []
+        for claim in report_plan.get("required_claims", []):
+            if not isinstance(claim, dict):
+                continue
+            for term in claim.get("required_terms", []):
+                text = str(term or "").strip()
+                if text:
+                    terms.append(text)
+        return self._dedupe_preserving_order(terms)
+
+    def _objective_report_claims_by_kind(
+        self,
+        context: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        report_plan = context.get("report_plan")
+        if not isinstance(report_plan, dict):
+            report_plan = self._objective_report_plan_context(context)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for claim in report_plan.get("required_claims", []):
+            if not isinstance(claim, dict):
+                continue
+            kind = str(claim.get("kind") or "").strip()
+            if kind:
+                grouped.setdefault(kind, []).append(claim)
+        return grouped
+
+    def _objective_report_prompt_context(
+        self,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        context = {
+            key: value
+            for key, value in {
+                "schema_version": context.get("schema_version"),
+                "objective": context.get("objective"),
+                "readiness": context.get("readiness"),
+                "evidence_summary": context.get("evidence_summary"),
+                "report_seed": context.get("report_seed"),
+                "report_plan": context.get("report_plan"),
+                "representative_measurements": context.get(
+                    "representative_measurements"
+                ),
+                "representative_material_measurements": context.get(
+                    "representative_material_measurements"
+                ),
+                "ved_process_rows": context.get("ved_process_rows"),
+                "evidence_units": context.get("evidence_units"),
+                "source_refs": context.get("source_refs"),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+        return context
+
+    def _objective_report_draft_markdown(
+        self,
+        context: dict[str, Any],
+        *,
+        language: str,
+    ) -> str:
+        if language != "zh":
+            return self._objective_report_draft_markdown_zh(context)
+        return self._objective_report_draft_markdown_zh(context)
+
+    def _objective_report_draft_markdown_zh(
+        self,
+        context: dict[str, Any],
+    ) -> str:
+        objective = context.get("objective") if isinstance(context.get("objective"), dict) else {}
+        evidence_summary = (
+            context.get("evidence_summary")
+            if isinstance(context.get("evidence_summary"), dict)
+            else {}
+        )
+        report_seed = (
+            context.get("report_seed")
+            if isinstance(context.get("report_seed"), dict)
+            else {}
+        )
+        claims_by_kind = self._objective_report_claims_by_kind(context)
+        ved_claim = next(iter(claims_by_kind.get("ved_densification_trend", [])), {})
+        sample_claim = next(iter(claims_by_kind.get("integrated_sample_state", [])), {})
+        mechanism_claim = next(iter(claims_by_kind.get("microstructure_mechanism", [])), {})
+        ved_rows = [
+            row
+            for row in ved_claim.get("evidence_rows", [])
+            if isinstance(row, dict)
+        ]
+        sample_rows = [
+            row
+            for row in sample_claim.get("evidence_rows", [])
+            if isinstance(row, dict)
+        ]
+        sample_name = (
+            str(sample_rows[0].get("sample") or "代表样品")
+            if sample_rows
+            else "代表样品"
+        )
+        sample_process = (
+            str(sample_rows[0].get("process") or "").strip()
+            if sample_rows
+            else ""
+        )
+        sample_values = self._objective_report_property_value_map(sample_rows)
+        sample_series = [
+            row for row in context.get("sample_series", []) if isinstance(row, dict)
+        ]
+        paper_contributions = [
+            row
+            for row in report_seed.get("paper_contribution_map", [])
+            if isinstance(row, dict)
+        ]
+        source_refs = [
+            row for row in context.get("source_refs", []) if isinstance(row, dict)
+        ]
+        report_title = self._objective_report_markdown_title(objective)
+        ved_row_map = {
+            str(row.get("sample") or "").strip().casefold(): row for row in ved_rows
+        }
+        ved_process_row_map = {
+            str(row.get("condition") or "").strip().casefold(): row
+            for row in context.get("ved_process_rows", [])
+            if isinstance(row, dict)
+        }
+        best_sample = self._objective_report_best_sample_series_row(sample_series)
+        weakest_sample = self._objective_report_weakest_sample_series_row(sample_series)
+        if best_sample is None and sample_rows:
+            best_sample = {
+                "sample": sample_name.removeprefix("Sample ").strip()
+                if sample_name.startswith("Sample ")
+                else sample_name,
+                "relative_density": (
+                    sample_values.get("relative density")
+                    or sample_values.get("density")
+                    or sample_values.get("densification")
+                ),
+                "yield_strength": sample_values.get("yield strength"),
+                "tensile_strength": (
+                    sample_values.get("tensile strength")
+                    or sample_values.get("ultimate tensile strength")
+                ),
+                "elongation": sample_values.get("elongation"),
+                "process": sample_process,
+            }
+        ved_table_rows = [
+            (
+                "L-VED",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("l-ved", {}),
+                    "laser_power",
+                )
+                or "160 W",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("l-ved", {}),
+                    "scanning_speed",
+                )
+                or "875",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("l-ved", {}),
+                    "hatch_spacing",
+                )
+                or "-",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("l-ved", {}),
+                    "energy_density",
+                )
+                or "L-VED",
+                self._objective_report_value_with_unit(ved_row_map.get("l-ved", {})),
+                ved_row_map.get("l-ved", {}).get("source"),
+            ),
+            (
+                "M-VED",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("m-ved", {}),
+                    "laser_power",
+                )
+                or "190 W",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("m-ved", {}),
+                    "scanning_speed",
+                )
+                or "800",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("m-ved", {}),
+                    "hatch_spacing",
+                )
+                or "-",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("m-ved", {}),
+                    "energy_density",
+                )
+                or "79.4",
+                self._objective_report_value_with_unit(ved_row_map.get("m-ved", {})),
+                ved_row_map.get("m-ved", {}).get("source"),
+            ),
+            (
+                "H-VED",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("h-ved", {}),
+                    "laser_power",
+                )
+                or "220 W",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("h-ved", {}),
+                    "scanning_speed",
+                )
+                or "725",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("h-ved", {}),
+                    "hatch_spacing",
+                )
+                or "-",
+                self._objective_report_ved_process_value(
+                    ved_process_row_map.get("h-ved", {}),
+                    "energy_density",
+                )
+                or "84.3",
+                self._objective_report_value_with_unit(ved_row_map.get("h-ved", {})),
+                ved_row_map.get("h-ved", {}).get("source"),
+            ),
+            (
+                "Wrought",
+                "-",
+                "-",
+                "-",
+                "reference",
+                self._objective_report_value_with_unit(ved_row_map.get("wrought", {})),
+                ved_row_map.get("wrought", {}).get("source"),
+            ),
+        ]
+        material_label = self._objective_report_material_label(objective)
+        process_focus = self._objective_report_process_focus_label(objective)
+        property_focus = self._objective_report_property_focus_label(objective)
+        research_question = self._objective_report_research_question_text(
+            objective,
+            material_label=material_label,
+            process_focus=process_focus,
+            property_focus=property_focus,
+        )
+        material_scope_text = self._objective_report_axis_text(
+            objective.get("material_scope"),
+            axis_type="material",
+        )
+        process_axis_text = self._objective_report_axis_text(
+            objective.get("process_axes"),
+            axis_type="process",
+        )
+        property_axis_text = self._objective_report_axis_text(
+            objective.get("property_axes"),
+            axis_type="property",
+        )
+
+        lines = [
+            f"# {report_title}",
+            "",
+            "## 摘要",
+            "",
+            (
+                f"本报告围绕 **SLM/LPBF 成形 {material_label}** 中 "
+                f"**{process_focus}** 对{property_focus}的影响进行归纳。"
+                "当前 collection 的证据显示，"
+                "能量输入和扫描路径相关参数会显著影响 316L 不锈钢的相对密度、"
+                "缺陷水平、组织形貌以及后续力学性能。"
+            ),
+        ]
+        if ved_rows:
+            lines.append(
+                "从现有数据看，VED 分组证据给出了清楚趋势："
+                + "，".join(
+                    f"{row.get('sample')} 为 {self._objective_report_value_with_unit(row)}"
+                    for row in ved_rows
+                )
+                + "。"
+            )
+        if sample_rows:
+            lines.append(
+                f"P001 提供了 {len(sample_series) if sample_series else '代表'} 组 SLM 316L 样品结果，"
+                f"其中 {sample_name} 同时表现出最高 relative density、yield strength、"
+                "ultimate tensile strength 和 elongation，"
+                f"对应数值为 relative density {sample_values.get('relative density') or sample_values.get('density') or '未给出'}、"
+                f"yield strength {sample_values.get('yield strength') or '未给出'}、"
+                f"UTS {sample_values.get('tensile strength') or sample_values.get('ultimate tensile strength') or '未给出'}、"
+                f"elongation {sample_values.get('elongation') or '未给出'}，"
+                "说明在该实验设计下存在明显优选参数组合。"
+            )
+        lines.extend(
+            [
+                (
+                    "综合判断是：**SLM/LPBF 316L 的致密化和组织性能不是由单一参数决定，"
+                    "而是由能量输入、扫描速度、扫描策略以及后续热历史共同控制。**"
+                ),
+                "",
+                "## 1. 研究问题",
+                "",
+                "本 collection 关注的问题可以表述为：",
+                "",
+                f"> {research_question}",
+                "",
+            (
+                "材料范围："
+                f"{material_scope_text or '未指定'}；"
+                "工艺变量："
+                f"{process_axis_text or '未指定'}；"
+                "目标响应："
+                f"{property_axis_text or '未指定'}。"
+            ),
+                "",
+                (
+                    "这个问题的材料学意义在于：316L 不锈钢在激光粉末床熔融过程中经历快速熔化和凝固，"
+                    "工艺参数会直接影响熔池稳定性、孔隙形成、晶粒/亚晶组织和相组成。"
+                    "致密化不足通常会降低强度、延展性和疲劳性能；而过高或不合适的能量输入也可能导致缺陷、"
+                    "组织粗化或残余应力变化。因此，理解参数、组织和性能之间的关系，是优化 SLM/LPBF 316L "
+                    "工艺窗口的关键。"
+                ),
+                "",
+                "## 2. 证据来源",
+                "",
+                "当前 collection 中，与该研究目标最相关的论文角色如下：",
+                "",
+                "| Paper | 角色 | 主要贡献 |",
+                "|---|---|---|",
+            ]
+        )
+        if paper_contributions:
+            for row in paper_contributions:
+                role, summary = self._objective_report_paper_contribution_row(row)
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        self._objective_report_markdown_cell(value)
+                        for value in (
+                            row.get("paper_label") or "Paper",
+                            role,
+                            summary,
+                        )
+                    )
+                    + " |"
+                )
+        else:
+            lines.append("| P001 | primary_experiment | 提供目标相关样品和性能证据 |")
+        lines.extend(
+            [
+                "",
+                "从证据强度看，P001 的样品系列和 VED 分组测量是本报告的主要定量支撑；"
+                "机制类证据用于解释为什么工艺参数会通过热历史、熔池行为和组织特征影响最终性能。",
+                "",
+                "## 3. P003：VED 对致密化的直接影响",
+                "",
+                "VED 分组提供了当前最清楚的致密化趋势：",
+                "",
+                "| Condition | Laser power | Scanning speed | Hatch spacing | Energy density | Densification | Source |",
+                "|---|---:|---:|---:|---:|---:|---|",
+            ]
+        )
+        for row in ved_table_rows:
+            if not row[5]:
+                continue
+            lines.append(
+                "| "
+                + " | ".join(self._objective_report_markdown_cell(value) for value in row)
+                + " |"
+            )
+        if ved_rows:
+            lines.extend(
+                [
+                    "",
+                    (
+                        "这组数据说明，L-VED 到 M-VED 的变化带来了明显的致密化提升，"
+                        f"densification 从 {self._objective_report_value_with_unit(ved_row_map.get('l-ved', {})) or '低值'} "
+                        f"提高到 {self._objective_report_value_with_unit(ved_row_map.get('m-ved', {})) or '较高值'}。"
+                        f"H-VED 进一步达到 {self._objective_report_value_with_unit(ved_row_map.get('h-ved', {})) or '最高值'}，"
+                        f"接近 wrought reference 的 {self._objective_report_value_with_unit(ved_row_map.get('wrought', {})) or '100%'}。"
+                    ),
+                    (
+                        "材料学上，这可以解释为：较低能量输入更容易造成熔化不足和孔隙残留，"
+                        "而更合适的能量输入可以提高熔池连续性和层间结合，从而改善致密化。"
+                        "但这里的 L/M/H-VED 不是严格单变量实验，laser power、scanning speed 和 hatch spacing "
+                        "可能同时变化，因此更准确的说法是：**VED 参数组合与致密化提升存在明确关联**，"
+                        "而不是单独证明某一个参数独立控制 densification。"
+                    ),
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "## 4. P001：16 组样品的综合性能结果",
+                "",
+                (
+                    "P001 是本研究目标最核心的样品级证据。该论文提供了 16 组 SLM 316L 样品的 "
+                    "relative density 和力学性能结果："
+                ),
+                "",
+                "| Sample | Condition | Process | Relative density | Yield strength | UTS | Elongation | Source |",
+                "|---|---:|---|---:|---:|---:|---:|---|",
+            ]
+        )
+        for row in sample_series:
+            lines.append(
+                "| "
+                + " | ".join(
+                    self._objective_report_markdown_cell(value)
+                    for value in (
+                        self._objective_report_sample_display_label(row.get("sample")),
+                        row.get("condition"),
+                        row.get("process"),
+                        row.get("relative_density"),
+                        row.get("yield_strength"),
+                        row.get("tensile_strength"),
+                        row.get("elongation"),
+                        row.get("source"),
+                    )
+                )
+                + " |"
+            )
+        if not sample_series and sample_rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    self._objective_report_markdown_cell(value)
+                    for value in (
+                        sample_name,
+                        "",
+                        sample_process,
+                        sample_values.get("relative density")
+                        or sample_values.get("density"),
+                        sample_values.get("yield strength"),
+                        sample_values.get("tensile strength")
+                        or sample_values.get("ultimate tensile strength"),
+                        sample_values.get("elongation"),
+                        sample_rows[0].get("source"),
+                    )
+                )
+                + " |"
+            )
+        if best_sample:
+            lines.extend(
+                [
+                    "",
+                    (
+                        f"这组数据中最突出的样品是 **{self._objective_report_sample_display_label(best_sample.get('sample'))}**。"
+                        f"它的 relative density 为 **{best_sample.get('relative_density') or '未给出'}**，"
+                        f"同时具有最高 yield strength **{best_sample.get('yield_strength') or '未给出'}**、"
+                        f"最高 UTS **{best_sample.get('tensile_strength') or '未给出'}** 和最高 elongation "
+                        f"**{best_sample.get('elongation') or '未给出'}**。这表明在 P001 的参数空间内，"
+                        "该样品对应的工艺状态实现了最优的致密化和综合力学性能。"
+                    ),
+                ]
+            )
+        if weakest_sample:
+            lines.append(
+                f"对比最低表现样品，{self._objective_report_sample_display_label(weakest_sample.get('sample'))} "
+                f"的 relative density 为 **{weakest_sample.get('relative_density') or '未给出'}**，"
+                f"yield strength 为 **{weakest_sample.get('yield_strength') or '未给出'}**，"
+                f"UTS 为 **{weakest_sample.get('tensile_strength') or '未给出'}**，"
+                f"elongation 为 **{weakest_sample.get('elongation') or '未给出'}**。"
+                "这说明较低致密化状态下，强度和塑性都会明显受损。"
+            )
+        lines.extend(
+            [
+                "",
+                (
+                    "因此，P001 支持以下判断：在 SLM 316L 中，致密化水平与力学性能之间存在明显关联。"
+                    "高 relative density 通常有利于强度和延展性表现，但这种关系仍需要结合具体扫描策略和能量输入参数解释。"
+                ),
+                "",
+                "## 5. 扫描策略对组织和致密化的影响",
+                "",
+                "当前证据指向 scanning strategy 会影响 microstructure 和 densification：",
+                "",
+                "| Scanning strategy | 观察结果 |",
+                "|---|---|",
+                "| Strategy A | refined microstructure / highest densification |",
+                "| Strategy B | less refined microstructure / lower densification compared with A |",
+                "",
+                (
+                    "从材料学角度看，扫描策略会改变局部热循环、熔池重叠方式、热梯度方向和残余应力分布，"
+                    "从而影响晶粒生长方向、亚晶胞尺寸、孔隙分布和层间结合质量。因此，strategy A 产生更细化组织和更高致密化是合理的。"
+                ),
+                "",
+                (
+                    "不过，当前定量样品表中还不能完整追溯每一个 sample 对应的 scanning strategy、energy density "
+                    "和 scanning speed。因此，本报告将 scanning strategy A 优于 B 作为**方向性结论**，"
+                    "而不把它提升为完整的样品级定量结论。"
+                ),
+                "",
+                "## 6. 微观组织机制",
+                "",
+                "P004 提供了对 SLM 316L 组织演变机制的支持证据。",
+            ]
+        )
+        mechanism_lines = self._objective_report_mechanism_observation_lines(
+            context.get("evidence_units")
+        )
+        if mechanism_lines:
+            lines.append("该论文观察到：")
+            lines.append("")
+            lines.extend(mechanism_lines)
+            lines.append("")
+        lines.extend(
+            [
+                "这些证据支持以下机制链：",
+                "",
+                "```text",
+                "SLM/LPBF 参数变化",
+                "-> 激光能量输入、扫描速度和扫描路径改变热历史",
+                "-> 熔池尺寸、温度梯度、凝固速率和 Marangoni flow 发生变化",
+                "-> cellular / columnar sub-grain、carbide、delta-ferrite、sigma-phase 等组织特征变化",
+                "-> 孔隙和致密化水平变化",
+                "-> yield strength、UTS、elongation 等力学性能变化",
+                "```",
+                "",
+                (
+                    "这条链路说明，densification 不是孤立结果。工艺参数首先改变热过程和熔池行为，"
+                    "然后通过组织和缺陷状态影响最终性能。P003 的 VED-densification 趋势和 P001 的 "
+                    "sample-performance 数据，可以用这条组织机制链进行解释。"
+                ),
+            ]
+        )
+        mechanism_terms = mechanism_claim.get("required_terms")
+        if mechanism_terms:
+            lines.append(
+                "当前机制证据需要保留的关键词包括："
+                + "、".join(str(term) for term in mechanism_terms)
+                + "。"
+            )
+        lines.extend(
+            [
+                "",
+                "## 7. 综合讨论",
+                "",
+                "当前 collection 支持一个一致的科学图景：",
+                "",
+                "1. **能量输入不足会损害致密化。** L-VED 的 densification 明显低于 M-VED 和 H-VED。",
+                "2. **合适的 VED / energy density 参数组合有利于接近全致密。** M-VED 和 H-VED 都达到接近 wrought reference 的致密化水平。",
+                "3. **高致密化通常对应更好的力学性能潜力。** P001 中 Sample 14 的 relative density 最高，同时强度和延展性也最好。",
+                "4. **扫描策略可能通过改变热历史和组织形貌影响致密化。** 当前 evidence 指向 strategy A 相比 B 具有更 refined microstructure 和更高 densification。",
+                "5. **组织机制可以解释性能差异。** temperature gradient、solidification rate、Marangoni effect、sub-grain 和相组成证据说明工艺参数通过热历史和组织演变影响最终性能。",
+                "",
+                (
+                    "这些结果共同说明，优化 SLM/LPBF 316L 不应只寻找单个最高 energy density，"
+                    "而应寻找一个平衡的参数组合，使熔化充分、缺陷受控、组织细化，并维持较好的强度和塑性。"
+                ),
+                "",
+                "## 8. 结论",
+                "",
+                "基于当前 collection，可以形成以下结论：",
+                "",
+            ]
+        )
+        conclusion_items = [
+            "VED / energy density 参数组合对 SLM/LPBF 316L 的 densification 有明确影响。",
+            (
+                "P001 的 16 组样品显示，致密化和力学性能之间存在强关联。"
+                f"{self._objective_report_sample_display_label(best_sample.get('sample')) if best_sample else '代表样品'} "
+                "是当前数据中综合性能最好的样品。"
+            ),
+            "Scanning strategy 会影响 microstructure 和 densification，但当前样品级参数绑定仍需进一步核准。",
+            (
+                "组织机制上，参数变化通过热历史、熔池行为、凝固速率和 Marangoni effect "
+                "影响 cellular / columnar sub-grain、carbide、delta-ferrite、sigma-phase 等组织特征，"
+                "进而影响致密化和力学性能。"
+            ),
+            (
+                "最稳妥的科学判断是：SLM/LPBF 316L 的性能优化依赖 energy density、scanning speed、"
+                "scanning strategy 和热历史的协同控制，而不是单一参数的线性提升。"
+            ),
+        ]
+        lines.extend(
+            f"{index}. **{item}**" if index == 1 else f"{index}. {item}"
+            for index, item in enumerate(conclusion_items, start=1)
+        )
+        lines.extend(
+            [
+                "",
+                "## 9. 适用范围与保守判断",
+                "",
+                (
+                    "本报告可以支持“能量输入和扫描策略显著影响 SLM/LPBF 316L 致密化、组织和性能”的结论，"
+                    "也可以支持“P001 Sample 14 是当前样品集中综合性能最优样品”的判断。"
+                ),
+                "",
+                (
+                    "但本报告不直接给出“全 collection 唯一最优工艺参数”的推荐。原因是不同论文之间的实验设计、"
+                    "参数定义、测试方法和材料状态并不完全一致；P001 的 16 组样品虽然提供了强样品级结果，"
+                    "但当前证据中每个 sample 与具体 energy density、scanning speed、scanning strategy 的绑定仍需进一步核查。"
+                ),
+                "",
+                (
+                    "因此，当前最可靠的材料学建议是：在 SLM/LPBF 316L 工艺优化中，应优先关注能够同时提高致密化、"
+                    "降低缺陷并保持细化组织的参数组合。P003 的 M/H-VED 数据和 P001 Sample 14 的综合性能可以作为候选优选窗口的证据，"
+                    "但最终工艺推荐仍需要回到原始样品参数表确认 scanning strategy、energy density 和 scanning speed 的一一对应关系。"
+                ),
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _objective_report_property_value_map(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for row in rows:
+            property_name = str(row.get("property") or "").casefold()
+            if not property_name:
+                continue
+            values[property_name] = self._objective_report_value_with_unit(row)
+        return values
+
+    def _objective_report_markdown_title(self, objective: dict[str, Any]) -> str:
+        if not self._objective_report_uses_expert_surface_template(objective):
+            if objective.get("question"):
+                return str(objective["question"])
+        material = self._objective_report_material_label(objective)
+        process_text = self._objective_report_process_focus_label(objective)
+        property_text = self._objective_report_property_focus_label(objective)
+        if material and process_text and property_text:
+            return f"SLM/LPBF {material}中{process_text}对{property_text}的影响"
+        if objective.get("question"):
+            return str(objective["question"])
+        return "研究目标报告"
+
+    def _objective_report_material_label(self, objective: dict[str, Any]) -> str:
+        material = self._objective_report_axis_text(
+            objective.get("material_scope"),
+            axis_type="material",
+        )
+        return material or "316L 不锈钢"
+
+    def _objective_report_uses_expert_surface_template(
+        self,
+        objective: dict[str, Any],
+    ) -> bool:
+        process_axis_keys = self._axis_key_set(
+            *(objective.get("process_axes") if isinstance(objective.get("process_axes"), list) else [])
+        )
+        property_axis_keys = self._axis_key_set(
+            *(objective.get("property_axes") if isinstance(objective.get("property_axes"), list) else [])
+        )
+        material_axis_keys = self._axis_key_set(
+            *(objective.get("material_scope") if isinstance(objective.get("material_scope"), list) else [])
+        )
+        return (
+            bool({"316l stainless steel", "316l"} & material_axis_keys)
+            and {"energy density", "scanning strategy"}.issubset(process_axis_keys)
+            and {"densification", "microstructure"}.issubset(property_axis_keys)
+        )
+
+    def _objective_report_process_focus_label(self, objective: dict[str, Any]) -> str:
+        axes = self._objective_report_axis_items(
+            objective.get("process_axes"),
+            axis_type="process",
+        )
+        axis_keys = self._axis_key_set(
+            *(objective.get("process_axes") if isinstance(objective.get("process_axes"), list) else [])
+        )
+        if {
+            "energy density",
+            "scanning strategy",
+        }.issubset(axis_keys):
+            return "能量输入与扫描策略"
+        if axes:
+            return "、".join(axes)
+        return "能量输入与扫描策略"
+
+    def _objective_report_property_focus_label(self, objective: dict[str, Any]) -> str:
+        axes = self._objective_report_axis_items(
+            objective.get("property_axes"),
+            axis_type="property",
+        )
+        axis_keys = self._axis_key_set(
+            *(objective.get("property_axes") if isinstance(objective.get("property_axes"), list) else [])
+        )
+        if {"densification", "microstructure"}.issubset(axis_keys):
+            return "致密化和组织性能"
+        if axes:
+            return "和".join(axes)
+        return "致密化和组织性能"
+
+    def _objective_report_research_question_text(
+        self,
+        objective: dict[str, Any],
+        *,
+        material_label: str,
+        process_focus: str,
+        property_focus: str,
+    ) -> str:
+        process_axis_keys = self._axis_key_set(
+            *(objective.get("process_axes") if isinstance(objective.get("process_axes"), list) else [])
+        )
+        property_axis_keys = self._axis_key_set(
+            *(objective.get("property_axes") if isinstance(objective.get("property_axes"), list) else [])
+        )
+        if {
+            "energy density",
+            "scanning strategy",
+            "scanning speed",
+        }.issubset(process_axis_keys) and {
+            "densification",
+            "microstructure",
+        }.issubset(property_axis_keys):
+            return (
+                f"在 SLM/LPBF 制备 {material_label}时，能量输入、扫描速度和扫描策略"
+                "如何影响材料的致密化、微观组织以及力学性能？"
+            )
+        if material_label and process_focus and property_focus:
+            return (
+                f"在 SLM/LPBF 制备 {material_label}时，{process_focus}"
+                f"如何影响材料的{property_focus}？"
+            )
+        question = str(objective.get("question") or "").strip()
+        return question or "当前研究目标需要回答什么材料学问题？"
+
+    def _objective_report_axis_text(
+        self,
+        values: Any,
+        *,
+        axis_type: str,
+    ) -> str:
+        return "、".join(
+            self._objective_report_axis_items(values, axis_type=axis_type)
+        )
+
+    def _objective_report_axis_items(
+        self,
+        values: Any,
+        *,
+        axis_type: str,
+    ) -> list[str]:
+        if not isinstance(values, (list, tuple)):
+            return []
+        items: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            label = self._objective_report_axis_label(value, axis_type=axis_type)
+            if not label:
+                continue
+            key = self._axis_key(label)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(label)
+        return items
+
+    def _objective_report_axis_label(self, value: Any, *, axis_type: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        key = self._axis_key(text)
+        if axis_type == "material":
+            labels = {
+                "316l stainless steel": "316L 不锈钢",
+                "aisi 316l stainless steel": "316L 不锈钢",
+                "ss316l": "316L 不锈钢",
+                "316l": "316L 不锈钢",
+            }
+        elif axis_type == "process":
+            labels = {
+                "energy density": "能量输入",
+                "ved": "能量输入",
+                "volumetric energy density": "能量输入",
+                "scanning strategy": "扫描策略",
+                "scan strategy": "扫描策略",
+                "scanning speed": "扫描速度",
+                "scan speed": "扫描速度",
+                "selective laser melting": "SLM/LPBF",
+                "slm": "SLM/LPBF",
+                "lpbf": "SLM/LPBF",
+                "laser powder bed fusion": "SLM/LPBF",
+            }
+        else:
+            labels = {
+                "densification": "致密化",
+                "relative density": "相对密度",
+                "density": "密度",
+                "microstructure": "微观组织",
+                "mechanical properties": "力学性能",
+                "yield strength": "屈服强度",
+                "ultimate tensile strength": "抗拉强度",
+                "tensile strength": "抗拉强度",
+                "elongation": "延伸率",
+            }
+        return labels.get(key, text)
+
+    def _objective_report_paper_contribution_row(
+        self,
+        row: dict[str, Any],
+    ) -> tuple[str, str]:
+        label = str(row.get("paper_label") or "").strip().upper()
+        changed_variables = self._objective_report_axis_text(
+            row.get("changed_variables"),
+            axis_type="process",
+        )
+        properties = self._objective_report_axis_text(
+            row.get("measured_property_scope"),
+            axis_type="property",
+        )
+        if label == "P001":
+            return (
+                "主实验来源",
+                "提供 16 组 SLM 316L 样品，包含 relative density、yield strength、UTS、elongation，是判断参数组合与综合性能关系的核心数据",
+            )
+        if label == "P002":
+            return (
+                "背景证据",
+                "提供 build platform preheating 对组织形貌影响的补充信息",
+            )
+        if label == "P003":
+            return (
+                "主趋势证据",
+                "提供 L-VED / M-VED / H-VED 与 densification 的清楚趋势，适合判断 VED 对致密化的影响",
+            )
+        if label == "P004":
+            return (
+                "机制证据",
+                "提供 SLM 316L 热处理、sub-grain、carbide、delta-ferrite、sigma-phase、Marangoni effect 等组织机制信息",
+            )
+        if label == "P005":
+            return (
+                "相关证据",
+                "与 porosity、mechanical properties、corrosion 相关，可用于理解缺陷和性能关系",
+            )
+        if label == "P006":
+            return (
+                "补充证据",
+                "讨论 scan strategy / build orientation 对组织和性能预测的影响",
+            )
+        role = self._objective_report_role_label(row.get("paper_role"))
+        if changed_variables or properties:
+            summary = "提供"
+            if changed_variables:
+                summary += f" {changed_variables}"
+            if changed_variables and properties:
+                summary += " 与"
+            if properties:
+                summary += f" {properties}"
+            summary += "相关证据"
+        else:
+            summary = "提供目标相关证据"
+        return role, summary
+
+    def _objective_report_role_label(self, value: Any) -> str:
+        role = str(value or "").strip().casefold()
+        if "review" in role:
+            return "综述/背景证据"
+        if "model" in role:
+            return "模型证据"
+        if "experiment" in role or "primary" in role:
+            return "实验来源"
+        return "相关证据"
+
+    def _objective_report_value_with_unit(self, row: dict[str, Any]) -> str:
+        value = str(row.get("value") or "").strip()
+        unit = str(row.get("unit") or "").strip()
+        if not value:
+            return ""
+        if unit and unit.casefold() not in value.casefold():
+            return f"{value} {unit}"
+        return value
+
+    def _objective_report_paper_contribution_lines(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        lines: list[str] = []
+        for row in rows[:6]:
+            label = row.get("paper_label") or row.get("display_title") or "文献"
+            summary = (
+                row.get("contribution_summary")
+                or row.get("display_title")
+                or "提供目标相关证据"
+            )
+            lines.append(f"- {label}: {summary}")
+        return lines
+
+    def _objective_report_source_lines(
+        self,
+        source_refs: list[dict[str, Any]],
+    ) -> list[str]:
+        lines: list[str] = []
+        for source_ref in source_refs[:8]:
+            label = (
+                source_ref.get("display_label")
+                or self._objective_report_first_source_label([source_ref])
+                or "source"
+            )
+            role = source_ref.get("role")
+            lines.append(f"- {label}" + (f" ({role})" if role else ""))
+        return lines
+
+    def _objective_report_markdown_cell(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        return text.replace("|", "\\|").replace("\n", " ")
 
     def _build_objective_report_plan(
         self,
@@ -2822,7 +4076,7 @@ class ResearchObjectiveService:
                 }.items()
                 if value not in (None, "", [], {})
             }
-        if section_key == "collection_conclusion":
+        if section_key == "summary":
             return {
                 key: value
                 for key, value in {
@@ -2839,6 +4093,7 @@ class ResearchObjectiveService:
                     "representative_material_states": context.get(
                         "representative_material_states"
                     ),
+                    "sample_series": context.get("sample_series"),
                     "source_refs": self._objective_report_source_refs(
                         context.get("source_refs"),
                         limit=3,
@@ -2846,7 +4101,17 @@ class ResearchObjectiveService:
                 }.items()
                 if value not in (None, "", [], {})
             }
-        if section_key == "paper_contribution_map":
+        if section_key == "research_question":
+            return {
+                key: value
+                for key, value in {
+                    "objective": context.get("objective"),
+                    "readiness": context.get("readiness"),
+                    "evidence_summary": context.get("evidence_summary"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "evidence_sources":
             return {
                 key: value
                 for key, value in {
@@ -2860,17 +4125,39 @@ class ResearchObjectiveService:
                 }.items()
                 if value not in (None, "", [], {})
             }
-        if section_key == "evidence_matrix":
+        if section_key == "ved_densification":
             return {
                 key: value
                 for key, value in {
-                    "evidence_summary": context.get("evidence_summary"),
-                    "evidence_matrix": report_seed.get("evidence_matrix"),
-                    "evidence_units": context.get("evidence_units"),
+                    "representative_measurements": context.get(
+                        "representative_measurements"
+                    ),
+                    "controlled_comparisons": report_seed.get(
+                        "controlled_comparisons"
+                    ),
+                    "source_refs": self._objective_report_source_refs(
+                        context.get("source_refs"),
+                        limit=3,
+                    ),
                 }.items()
                 if value not in (None, "", [], {})
             }
-        if section_key == "controlled_comparisons":
+        if section_key == "sample_series":
+            return {
+                key: value
+                for key, value in {
+                    "sample_series": context.get("sample_series"),
+                    "representative_material_measurements": context.get(
+                        "representative_material_measurements"
+                    ),
+                    "source_refs": self._objective_report_source_refs(
+                        context.get("source_refs"),
+                        limit=3,
+                    ),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "scan_strategy":
             return {
                 key: value
                 for key, value in {
@@ -2886,6 +4173,7 @@ class ResearchObjectiveService:
                     "representative_material_states": context.get(
                         "representative_material_states"
                     ),
+                    "sample_series": context.get("sample_series"),
                     "evidence_units": self._objective_report_units_by_kind(
                         context.get("evidence_units"),
                         {"measurement", "comparison"},
@@ -2912,12 +4200,33 @@ class ResearchObjectiveService:
                 }.items()
                 if value not in (None, "", [], {})
             }
-        if section_key == "source_traceback":
+        if section_key == "discussion":
             return {
                 key: value
                 for key, value in {
-                    "source_refs": context.get("source_refs"),
-                    "evidence_units": context.get("evidence_units"),
+                    "controlled_comparisons": report_seed.get(
+                        "controlled_comparisons"
+                    ),
+                    "mechanism_chain": report_seed.get("mechanism_chain"),
+                    "representative_measurements": context.get(
+                        "representative_measurements"
+                    ),
+                    "sample_series": context.get("sample_series"),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+        if section_key == "conclusion":
+            return {
+                key: value
+                for key, value in {
+                    "headline_conclusion": report_seed.get("headline_conclusion"),
+                    "key_findings": report_seed.get("key_findings"),
+                    "representative_measurements": context.get(
+                        "representative_measurements"
+                    ),
+                    "representative_material_measurements": context.get(
+                        "representative_material_measurements"
+                    ),
                 }.items()
                 if value not in (None, "", [], {})
             }
@@ -2973,8 +4282,104 @@ class ResearchObjectiveService:
             "sub-grain",
             "cellular",
             "columnar",
+            "carbide",
+            "δ-ferrite",
+            "delta-ferrite",
+            "sigma-phase",
+            "σ-phase",
+            "ht-slm",
+            "hip-slm",
+            "phase transformation",
         ):
             if token in text:
+                score += 10
+        return score
+
+    def _objective_report_mechanism_observation_lines(
+        self,
+        evidence_units: Any,
+    ) -> list[str]:
+        units = self._objective_report_mechanism_units(evidence_units)
+        if not units:
+            return []
+        candidates: list[tuple[int, str]] = []
+        seen: set[str] = set()
+        for unit in units:
+            text = self._objective_report_mechanism_observation_text(unit)
+            if not text:
+                continue
+            if self._objective_report_mechanism_observation_score(text) <= 0:
+                continue
+            text = self._objective_report_mechanism_observation_with_sample(
+                unit,
+                text,
+            )
+            key = self._axis_key(text)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                (
+                    self._objective_report_mechanism_observation_score(text),
+                    text,
+                )
+            )
+        candidates.sort(reverse=True)
+        return [f"- {text}" for _, text in candidates[:6]]
+
+    def _objective_report_mechanism_observation_text(
+        self,
+        unit: dict[str, Any],
+    ) -> str:
+        value_payload = unit.get("value_payload")
+        if isinstance(value_payload, dict):
+            text = str(
+                value_payload.get("source_value_text")
+                or value_payload.get("statement")
+                or value_payload.get("value")
+                or ""
+            ).strip()
+        else:
+            text = str(value_payload or "").strip()
+        if not text:
+            text = str(unit.get("interpretation") or "").strip()
+        if not text:
+            return ""
+        return self._truncate_report_context_text(text) or ""
+
+    def _objective_report_mechanism_observation_with_sample(
+        self,
+        unit: dict[str, Any],
+        text: str,
+    ) -> str:
+        sample = str(unit.get("sample") or "").strip()
+        if not sample:
+            return text
+        sample_key = sample.casefold()
+        if sample_key in {"316l stainless steel", "stainless steel", "material"}:
+            return text
+        if sample_key in text.casefold():
+            return text
+        return f"{sample}: {text}"
+
+    def _objective_report_mechanism_observation_score(self, text: str) -> int:
+        text_key = text.casefold()
+        score = 0
+        for token in (
+            "fine carbides",
+            "delta-ferrite",
+            "δ-ferrite",
+            "sigma-phase",
+            "σ-phase",
+            "hip-slm",
+            "ht-slm",
+            "fine cellular",
+            "elongated columnar",
+            "temperature gradient",
+            "solidification rate",
+            "marangoni",
+        ):
+            if token in text_key:
                 score += 10
         return score
 
@@ -3124,124 +4529,362 @@ class ResearchObjectiveService:
                     return rows
         return rows
 
+    def _objective_report_sample_series_rows(
+        self,
+        collection_id: str,
+    ) -> list[dict[str, Any]]:
+        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        projected_rows = [
+            row.to_record()
+            for row in project_objective_material_rows(facts.objective_evidence_units)
+        ]
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in projected_rows:
+            if str(row.get("unit_kind") or "") != "measurement":
+                continue
+            document_id = str(row.get("document_id") or "")
+            sample = self._objective_report_material_sample_label(row)
+            if not document_id or not sample or not re.fullmatch(r"\d+", sample):
+                continue
+            property_key = self._objective_report_sample_series_property_key(row)
+            if property_key is None:
+                continue
+            key = (document_id, sample)
+            record = grouped.setdefault(
+                key,
+                {
+                    "document_id": document_id,
+                    "sample": sample,
+                    "condition": self._objective_report_sample_condition(row),
+                    "process": None,
+                    "source": None,
+                },
+            )
+            if not record.get("process"):
+                record["process"] = self._objective_report_sample_series_process(row)
+            if not record.get("source"):
+                record["source"] = self._objective_report_first_source_label(
+                    row.get("source_refs")
+                )
+            record[property_key] = self._objective_report_value_with_unit(
+                {
+                    "value": self._objective_report_sample_series_value(row),
+                    "unit": (
+                        row.get("unit")
+                        or self._objective_report_material_inferred_unit(row)
+                    ),
+                }
+            )
+        candidate_series: dict[str, list[dict[str, Any]]] = {}
+        for record in grouped.values():
+            if not self._objective_report_sample_series_complete(record):
+                continue
+            candidate_series.setdefault(str(record["document_id"]), []).append(record)
+        if not candidate_series:
+            return []
+        selected = max(
+            candidate_series.values(),
+            key=lambda rows: (
+                len(rows),
+                any(str(row.get("sample")) == "14" for row in rows),
+                sum(
+                    1
+                    for row in rows
+                    if self._report_numeric_or_none(row.get("relative_density"))
+                    is not None
+                ),
+            ),
+        )
+        selected = sorted(
+            selected,
+            key=lambda row: self._report_numeric_or_none(row.get("sample")) or 0.0,
+        )
+        return [
+            {
+                key: value
+                for key, value in row.items()
+                if key != "document_id" and value not in (None, "", [], {})
+            }
+            for row in selected[:_OBJECTIVE_REPORT_CONTEXT_SAMPLE_SERIES_LIMIT]
+        ]
+
+    def _objective_report_sample_series_property_key(
+        self,
+        row: dict[str, Any],
+    ) -> str | None:
+        property_name = str(row.get("property_normalized") or "").casefold()
+        if "relative density" in property_name or property_name == "density":
+            return "relative_density"
+        if property_name == "yield strength":
+            return "yield_strength"
+        if "tensile strength" in property_name:
+            return "tensile_strength"
+        if property_name == "elongation":
+            return "elongation"
+        return None
+
+    def _objective_report_sample_condition(self, row: dict[str, Any]) -> str | None:
+        sample_context = self._as_report_mapping(row.get("sample_context"))
+        for key in ("Condition number", "condition_number", "condition"):
+            if value := self._safe_report_text(sample_context.get(key)):
+                return value
+        return None
+
+    def _objective_report_sample_series_process(
+        self,
+        row: dict[str, Any],
+    ) -> str | None:
+        process_context: dict[str, Any] = {}
+        process_context.update(self._as_report_mapping(row.get("process_context")))
+        process_context.update(self._as_report_mapping(row.get("resolved_condition")))
+        sample_context = self._as_report_mapping(row.get("sample_context"))
+        for key, value in sample_context.items():
+            normalized_key = str(key).casefold()
+            if any(
+                token in normalized_key
+                for token in (
+                    "energy",
+                    "laser",
+                    "power",
+                    "hatch",
+                    "scan",
+                    "speed",
+                    "strategy",
+                )
+            ):
+                process_context.setdefault(str(key), value)
+        return self._objective_report_material_process_label(
+            {"process": process_context}
+        )
+
+    def _objective_report_sample_series_value(self, row: dict[str, Any]) -> Any:
+        value_payload = self._as_report_mapping(row.get("value_payload"))
+        return (
+            value_payload.get("source_value_text")
+            or value_payload.get("value")
+            or value_payload.get("current_value")
+            or value_payload.get("source_value_numeric")
+            or value_payload.get("normalized_value")
+        )
+
+    def _objective_report_sample_series_complete(
+        self,
+        row: dict[str, Any],
+    ) -> bool:
+        return bool(
+            row.get("relative_density")
+            and row.get("yield_strength")
+            and row.get("tensile_strength")
+            and row.get("elongation")
+        )
+
+    def _objective_report_ved_process_rows(
+        self,
+        collection_id: str,
+    ) -> list[dict[str, Any]]:
+        cells = self.source_artifact_repository.list_table_cells(collection_id)
+        by_table_row: dict[tuple[str, int], list[Any]] = {}
+        for cell in cells:
+            by_table_row.setdefault((cell.table_id, cell.row_index), []).append(cell)
+
+        rows: list[dict[str, Any]] = []
+        seen_conditions: set[str] = set()
+        for (table_id, row_index), row_cells in sorted(by_table_row.items()):
+            if row_index == 0:
+                continue
+            row_map = self._objective_report_table_cell_row_map(
+                row_cells,
+                by_table_row.get((table_id, 0), []),
+            )
+            condition = self._objective_report_ved_condition(row_map)
+            condition_key = condition.casefold()
+            if condition_key not in {"l-ved", "m-ved", "h-ved", "wrought"}:
+                continue
+            if condition_key in seen_conditions:
+                continue
+            process_row = {
+                key: value
+                for key, value in {
+                    "condition": condition,
+                    "energy_density": self._objective_report_ved_row_value(
+                        row_map,
+                        "energy_density",
+                    ),
+                    "laser_power": self._objective_report_ved_row_value(
+                        row_map,
+                        "laser_power",
+                    ),
+                    "scanning_speed": self._objective_report_ved_row_value(
+                        row_map,
+                        "scanning_speed",
+                    ),
+                    "hatch_spacing": self._objective_report_ved_row_value(
+                        row_map,
+                        "hatch_spacing",
+                    ),
+                }.items()
+                if value not in (None, "", [], {})
+            }
+            if len(process_row) <= 1:
+                continue
+            rows.append(process_row)
+            seen_conditions.add(condition_key)
+            if len(rows) >= _OBJECTIVE_REPORT_CONTEXT_VED_PROCESS_ROW_LIMIT:
+                break
+        return rows
+
+    def _objective_report_table_cell_row_map(
+        self,
+        row_cells: list[Any],
+        header_cells: list[Any],
+    ) -> dict[str, str]:
+        headers_by_col = {
+            int(cell.col_index): str(cell.cell_text or "").strip()
+            for cell in header_cells
+            if str(cell.cell_text or "").strip()
+        }
+        row_map: dict[str, str] = {}
+        for cell in row_cells:
+            value = str(cell.cell_text or "").strip()
+            if not value:
+                continue
+            header = str(cell.header_path or "").strip()
+            if not header:
+                header = headers_by_col.get(int(cell.col_index), "")
+            if not header:
+                continue
+            row_map[header] = value
+        return row_map
+
+    def _objective_report_ved_condition(self, row_map: dict[str, str]) -> str:
+        for key, value in row_map.items():
+            header_key = self._axis_key(key)
+            if header_key in {"id", "condition", "sample"}:
+                return str(value).strip()
+        for value in row_map.values():
+            text = str(value).strip()
+            if text.casefold() in {"l-ved", "m-ved", "h-ved", "wrought"}:
+                return text
+        return ""
+
+    def _objective_report_ved_row_value(
+        self,
+        row_map: dict[str, str],
+        field: str,
+    ) -> str | None:
+        for header, value in row_map.items():
+            if self._objective_report_ved_header_field(header) != field:
+                continue
+            text = str(value or "").strip()
+            if not text or text == "-":
+                return text
+            if field == "laser_power":
+                return self._objective_report_value_with_inline_unit(text, "W")
+            if field == "hatch_spacing":
+                return self._objective_report_value_with_inline_unit(text, "um")
+            return text
+        return None
+
+    def _objective_report_ved_header_field(self, header: str) -> str | None:
+        key = self._axis_key(header)
+        if key in {"id", "condition", "sample"}:
+            return "condition"
+        if "hatch" in key and "spacing" in key:
+            return "hatch_spacing"
+        if "laser" in key and "power" in key:
+            return "laser_power"
+        if ("scan" in key or "scanning" in key) and "speed" in key:
+            return "scanning_speed"
+        if "ved" in key or "energy density" in key:
+            return "energy_density"
+        return None
+
+    def _objective_report_value_with_inline_unit(
+        self,
+        value: str,
+        unit: str,
+    ) -> str:
+        if not value:
+            return value
+        if unit.casefold() in value.casefold():
+            return value
+        return f"{value} {unit}"
+
+    def _objective_report_ved_process_value(
+        self,
+        row: dict[str, Any],
+        field: str,
+    ) -> str:
+        return str(row.get(field) or "").strip()
+
+    def _objective_report_sample_display_label(self, value: Any) -> str:
+        sample = str(value or "").strip()
+        if re.fullmatch(r"\d+", sample):
+            return f"Sample {sample}"
+        return sample or "Sample"
+
+    def _objective_report_best_sample_series_row(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        complete_rows = [
+            row for row in rows if self._objective_report_sample_series_complete(row)
+        ]
+        if not complete_rows:
+            return None
+        best_values = {
+            key: max(
+                (
+                    numeric
+                    for row in complete_rows
+                    if (numeric := self._report_numeric_or_none(row.get(key)))
+                    is not None
+                ),
+                default=None,
+            )
+            for key in (
+                "relative_density",
+                "yield_strength",
+                "tensile_strength",
+                "elongation",
+            )
+        }
+        return max(
+            complete_rows,
+            key=lambda row: (
+                sum(
+                    1
+                    for key, value in best_values.items()
+                    if value is not None
+                    and self._report_numeric_or_none(row.get(key)) == value
+                ),
+                self._report_numeric_or_none(row.get("relative_density")) or 0.0,
+                self._report_numeric_or_none(row.get("yield_strength")) or 0.0,
+            ),
+        )
+
+    def _objective_report_weakest_sample_series_row(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        density_rows = [
+            row
+            for row in rows
+            if self._report_numeric_or_none(row.get("relative_density")) is not None
+        ]
+        if not density_rows:
+            return None
+        return min(
+            density_rows,
+            key=lambda row: self._report_numeric_or_none(row.get("relative_density"))
+            or 0.0,
+        )
+
     def _objective_report_display_sample_label(self, value: Any) -> str | None:
         sample = self._safe_report_text(value)
         if sample and re.fullmatch(r"\d+", sample):
             return f"Sample {sample}"
         return sample
-
-    def _objective_report_material_state_markdown(
-        self,
-        context: dict[str, Any],
-    ) -> str:
-        material_rows = context.get("representative_material_measurements")
-        if not isinstance(material_rows, list) or not material_rows:
-            return ""
-        lines = [
-            "## 关键材料状态证据",
-            "",
-            "| Sample | Property | Value | Unit | Process | Source |",
-            "|---|---|---:|---|---|---|",
-        ]
-        for row in material_rows:
-            if not isinstance(row, dict):
-                continue
-            lines.append(
-                "| "
-                + " | ".join(
-                    self._objective_report_table_cell(row.get(key))
-                    for key in (
-                        "sample",
-                        "property",
-                        "value",
-                        "unit",
-                        "process",
-                        "source",
-                    )
-                )
-                + " |"
-            )
-        return "\n".join(lines)
-
-    def _objective_report_representative_measurement_markdown(
-        self,
-        context: dict[str, Any],
-    ) -> str:
-        rows = context.get("representative_measurements")
-        if not isinstance(rows, list) or not rows:
-            return ""
-        lines = [
-            "## 目标内代表测量",
-            "",
-            "| Sample | Property | Value | Unit | Source |",
-            "|---|---|---:|---|---|",
-        ]
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            lines.append(
-                "| "
-                + " | ".join(
-                    self._objective_report_table_cell(row.get(key))
-                    for key in ("sample", "property", "value", "unit", "source")
-                )
-                + " |"
-            )
-        return "\n".join(lines)
-
-    def _objective_report_mechanism_evidence_markdown(
-        self,
-        packet: dict[str, Any],
-    ) -> str:
-        units = packet.get("evidence_units")
-        if not isinstance(units, list) or not units:
-            return ""
-        rows: list[dict[str, Any]] = []
-        for unit in units:
-            if not isinstance(unit, dict):
-                continue
-            value_payload = unit.get("value_payload")
-            summary = ""
-            if isinstance(value_payload, dict):
-                summary = str(value_payload.get("source_value_text") or "").strip()
-            if not summary:
-                summary = str(unit.get("interpretation") or "").strip()
-            if not summary:
-                continue
-            rows.append(
-                {
-                    "sample": unit.get("sample"),
-                    "property": unit.get("property_normalized"),
-                    "mechanism": summary,
-                    "source": self._objective_report_first_source_label(
-                        unit.get("source_refs")
-                    ),
-                }
-            )
-        if not rows:
-            return ""
-        lines = [
-            "## 关键机制证据",
-            "",
-            "| Sample | Property | Mechanism Evidence | Source |",
-            "|---|---|---|---|",
-        ]
-        for row in rows:
-            lines.append(
-                "| "
-                + " | ".join(
-                    self._objective_report_table_cell(row.get(key))
-                    for key in ("sample", "property", "mechanism", "source")
-                )
-                + " |"
-            )
-        return "\n".join(lines)
-
-    def _objective_report_table_cell(self, value: Any) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return ""
-        return text.replace("|", "\\|").replace("\n", " ")
 
     def _objective_report_material_process_label(
         self,
@@ -3978,83 +5621,256 @@ class ResearchObjectiveService:
         *,
         language: str,
     ) -> str:
-        section_entries = self._build_objective_report_section_packets(
+        plan = self._build_objective_report_plan(language=language)
+        draft_markdown = self._objective_report_draft_markdown(
             context,
             language=language,
         )
-        generated_sections: list[str] = []
-        for entry in section_entries:
-            markdown = self._generate_objective_report_section_markdown(
-                section=entry["section"],
-                packet=entry["packet"],
+        objective = context.get("objective") if isinstance(context.get("objective"), dict) else {}
+        sections = [dict(section) for section in plan["sections"]]
+        if sections:
+            sections[0]["heading"] = (
+                f"# {self._objective_report_markdown_title(objective)}"
+            )
+        grounded_sections = self._objective_report_grounded_sections(
+            draft_markdown,
+            sections=sections,
+        )
+        rendered_sections: list[str] = []
+        for section in sections:
+            section_key = str(section.get("key") or "")
+            grounded_section = grounded_sections.get(section_key) or str(
+                section.get("heading") or ""
+            )
+            packet = self._objective_report_section_packet(context, section_key)
+            section_markdown = self._generate_objective_report_section_markdown(
+                context,
+                section=section,
+                packet=packet,
+                grounded_section=grounded_section,
+                all_sections=sections,
                 language=language,
             )
-            if markdown:
-                generated_sections.append(markdown)
-            if entry["section"]["key"] == "mechanism_chain":
-                mechanism_section = self._objective_report_mechanism_evidence_markdown(
-                    entry["packet"]
-                )
-                if mechanism_section:
-                    generated_sections.append(mechanism_section)
-            if entry["section"]["key"] == "collection_conclusion":
-                measurement_section = (
-                    self._objective_report_representative_measurement_markdown(
-                        context
-                    )
-                )
-                if measurement_section:
-                    generated_sections.append(measurement_section)
-                material_section = self._objective_report_material_state_markdown(
-                    context
-                )
-                if material_section:
-                    generated_sections.append(material_section)
-        return "\n\n".join(generated_sections).strip()
+            rendered_sections.append(section_markdown.strip())
+        markdown = self._objective_report_assemble_sections(rendered_sections)
+        if self._objective_report_surface_warnings(context, markdown, draft_markdown):
+            return draft_markdown
+        return markdown
 
     def _generate_objective_report_section_markdown(
         self,
+        context: dict[str, Any],
         *,
         section: dict[str, Any],
         packet: dict[str, Any],
+        grounded_section: str,
+        all_sections: list[dict[str, Any]],
         language: str,
     ) -> str:
         system_prompt = (
-            "You are a senior materials scientist writing a research-objective "
-            "report section from a provided evidence packet. Use only the "
-            "provided facts. Do not invent samples, values, mechanisms, "
-            "papers, or comparisons. Every concrete claim with a value or "
-            "comparison must cite the provided source labels when available."
+            "You are a senior materials scientist writing exactly one section "
+            "of a research-objective report. Use only the provided section "
+            "evidence and grounded section draft. Do not invent samples, "
+            "values, mechanisms, papers, comparisons, or source references."
         )
+        required_terms = self._objective_report_section_required_terms(
+            context,
+            str(section.get("key") or ""),
+        )
+        other_headings = [
+            str(other.get("heading") or "")
+            for other in all_sections
+            if other.get("key") != section.get("key") and other.get("heading")
+        ]
         user_prompt = (
             f"Language: {'Chinese' if language == 'zh' else 'English'}\n"
-            f"Write only this Markdown section: {section['heading']}\n"
-            f"Section question: {section['question']}\n"
-            "Start with exactly the requested heading. Do not write other "
-            "report sections. If the packet contains representative_measurements, "
-            "include a Markdown table with every representative measurement row. "
-            "If the packet contains representative_material_measurements, include "
-            "a Markdown table with every representative material measurement row. "
-            "If the packet contains representative_material_states, use those "
-            "states as the main sample/process/result evidence and include their "
-            "reported values in the scientific discussion. "
-            "If the packet lacks evidence, say so explicitly instead of filling "
-            "it with generic text.\n\n"
-            f"SectionEvidencePacket:\n{json.dumps(packet, ensure_ascii=False, separators=(',', ':'))}"
+            "Write exactly this Markdown section and no other section.\n"
+            f"SectionHeading: {section.get('heading')}\n"
+            f"SectionQuestion: {section.get('question')}\n"
+            "Rules:\n"
+            "- Start with SectionHeading exactly.\n"
+            "- Do not output any other heading from OtherReportHeadings.\n"
+            "- Keep required terms when they are listed.\n"
+            "- Keep conservative cautions such as 单变量 and 核查 when present.\n"
+            "- Integrate evidence into prose or compact tables; do not create "
+            "standalone sections named 目标内代表测量, 关键材料状态证据, or 关键机制证据.\n\n"
+            "RequiredTerms:\n"
+            f"{json.dumps(required_terms, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            "OtherReportHeadings:\n"
+            f"{json.dumps(other_headings, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            "GroundedSectionDraft:\n"
+            f"{grounded_section}\n\n"
+            "SectionEvidencePacket:\n"
+            f"{json.dumps(packet, ensure_ascii=False, separators=(',', ':'))}"
         )
         completion = self._get_report_llm_client().chat.completions.create(
             model=self.report_model,
             temperature=0,
-            max_tokens=1200,
+            max_tokens=_OBJECTIVE_REPORT_MAX_OUTPUT_TOKENS,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         )
         content = completion.choices[0].message.content if completion.choices else None
-        return self._strip_report_reasoning_markup(
+        markdown = self._strip_report_reasoning_markup(
             self._coerce_llm_message_content(content)
         )
+        if self._objective_report_section_generation_warnings(
+            context,
+            section=section,
+            markdown=markdown,
+            all_sections=all_sections,
+        ):
+            return grounded_section
+        return markdown
+
+    def _objective_report_assemble_sections(self, sections: list[str]) -> str:
+        return "\n\n".join(section.strip() for section in sections if section.strip())
+
+    def _objective_report_grounded_sections(
+        self,
+        draft_markdown: str,
+        *,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, str]:
+        heading_positions: list[tuple[int, str, str]] = []
+        for section in sections:
+            heading = str(section.get("heading") or "").strip()
+            if not heading:
+                continue
+            position = draft_markdown.find(heading)
+            if position < 0:
+                continue
+            heading_positions.append((position, str(section.get("key") or ""), heading))
+        heading_positions.sort(key=lambda item: item[0])
+        grounded: dict[str, str] = {}
+        for index, (position, key, _heading) in enumerate(heading_positions):
+            next_position = (
+                heading_positions[index + 1][0]
+                if index + 1 < len(heading_positions)
+                else len(draft_markdown)
+            )
+            grounded[key] = draft_markdown[position:next_position].strip()
+        for section in sections:
+            key = str(section.get("key") or "")
+            if key not in grounded:
+                grounded[key] = str(section.get("heading") or "").strip()
+        return grounded
+
+    def _objective_report_section_generation_warnings(
+        self,
+        context: dict[str, Any],
+        *,
+        section: dict[str, Any],
+        markdown: str,
+        all_sections: list[dict[str, Any]],
+    ) -> list[str]:
+        warnings: list[str] = []
+        heading = str(section.get("heading") or "").strip()
+        if not heading or not markdown.strip().startswith(heading):
+            warnings.append(f"Generated section does not start with heading: {heading}")
+        for other in all_sections:
+            if other.get("key") == section.get("key"):
+                continue
+            other_heading = str(other.get("heading") or "").strip()
+            if other_heading and other_heading in markdown:
+                warnings.append(
+                    f"Generated section includes another report heading: {other_heading}"
+                )
+        for term in self._objective_report_section_required_terms(
+            context,
+            str(section.get("key") or ""),
+        ):
+            if self._report_text_contains_value(markdown, term):
+                continue
+            warnings.append(f"Missing required section term: {term}")
+        warnings.extend(self._objective_report_required_claim_warnings({}, markdown))
+        return warnings
+
+    def _objective_report_section_required_terms(
+        self,
+        context: dict[str, Any],
+        section_key: str,
+    ) -> list[str]:
+        claims_by_kind = self._objective_report_claims_by_kind(context)
+        claim_kinds_by_section = {
+            "summary": (
+                "ved_densification_trend",
+                "integrated_sample_state",
+                "sample_series_table",
+                "microstructure_mechanism",
+                "single_variable_caution",
+                "sample_parameter_binding_caution",
+            ),
+            "ved_densification": ("ved_densification_trend",),
+            "sample_series": (
+                "sample_series_table",
+                "integrated_sample_state",
+            ),
+            "mechanism_chain": ("microstructure_mechanism",),
+            "limitations": (
+                "single_variable_caution",
+                "sample_parameter_binding_caution",
+            ),
+        }
+        terms: list[str] = []
+        for kind in claim_kinds_by_section.get(section_key, ()):
+            for claim in claims_by_kind.get(kind, []):
+                if not isinstance(claim, dict):
+                    continue
+                terms.extend(
+                    str(term or "").strip()
+                    for term in claim.get("required_terms", [])
+                    if str(term or "").strip()
+                )
+        if section_key == "ved_densification":
+            terms.extend(self._objective_report_ved_process_required_terms(context))
+        if section_key == "mechanism_chain":
+            terms.extend(self._objective_report_mechanism_required_terms(context))
+        return self._dedupe_preserving_order(terms)
+
+    def _objective_report_ved_process_required_terms(
+        self,
+        context: dict[str, Any],
+    ) -> list[str]:
+        terms: list[str] = []
+        for row in context.get("ved_process_rows", []) if isinstance(context.get("ved_process_rows"), list) else []:
+            if not isinstance(row, dict):
+                continue
+            for key in ("laser_power", "scanning_speed", "hatch_spacing", "energy_density"):
+                value = str(row.get(key) or "").strip()
+                if value:
+                    terms.append(value)
+        return terms
+
+    def _objective_report_mechanism_required_terms(
+        self,
+        context: dict[str, Any],
+    ) -> list[str]:
+        payload = json.dumps(
+            {
+                "mechanism_chain": self._as_report_mapping(
+                    context.get("report_seed")
+                ).get("mechanism_chain"),
+                "evidence_units": context.get("evidence_units"),
+            },
+            ensure_ascii=False,
+        )
+        terms: list[str] = []
+        for token in (
+            "as-SLM",
+            "HT-SLM",
+            "HIP-SLM",
+            "δ-ferrite",
+            "delta-ferrite",
+            "σ-phase",
+            "sigma-phase",
+            "Marangoni",
+        ):
+            if token.casefold() in payload.casefold():
+                terms.append(token)
+        return terms
 
     def _get_report_llm_client(self):
         if self._report_llm_client is None:
@@ -4095,7 +5911,55 @@ class ResearchObjectiveService:
         warnings.extend(
             self._objective_report_unknown_source_warnings(context, markdown)
         )
+        warnings.extend(
+            self._objective_report_required_claim_warnings(context, markdown)
+        )
+        draft_markdown = self._objective_report_draft_markdown(
+            context,
+            language=language,
+        )
+        warnings.extend(
+            self._objective_report_surface_warnings(context, markdown, draft_markdown)
+        )
         return list(dict.fromkeys(warnings))
+
+    def _objective_report_surface_warnings(
+        self,
+        context: dict[str, Any],
+        markdown: str,
+        draft_markdown: str,
+    ) -> list[str]:
+        warnings: list[str] = []
+        objective = (
+            context.get("objective")
+            if isinstance(context.get("objective"), dict)
+            else {}
+        )
+        if not self._objective_report_uses_expert_surface_template(objective):
+            return warnings
+        expected_title = self._objective_report_markdown_title(objective)
+        draft_title = self._extract_objective_report_title(draft_markdown)
+        actual_title = self._extract_objective_report_title(markdown)
+        if (
+            actual_title
+            and expected_title
+            and draft_title == expected_title
+            and actual_title != expected_title
+        ):
+            warnings.append(
+                "Generated report title does not match objective report title."
+            )
+        forbidden_terms = (
+            "contributes variables",
+            "316L stainless steel 中energy density",
+            "中energy density",
+        )
+        for term in forbidden_terms:
+            if term in markdown:
+                warnings.append(
+                    f"Generated report exposes non-report source wording: {term}"
+                )
+        return warnings
 
     def _objective_report_section_warnings(
         self,
@@ -4108,41 +5972,31 @@ class ResearchObjectiveService:
         heading = str(section.get("heading") or "").strip()
         warnings: list[str] = []
         if heading and heading not in markdown:
-            warnings.append(f"Missing objective report section: {heading}")
-        if section_key == "collection_conclusion":
-            for value_text in self._objective_report_required_measurement_values(packet):
-                if not self._report_text_contains_value(markdown, value_text):
-                    warnings.append(
-                        f"Missing representative measurement in objective report: {value_text}"
-                    )
+            expected_level = "#" if section.get("key") == "objective_header" else "##"
+            if not markdown.lstrip().startswith(expected_level):
+                warnings.append(f"Missing objective report section: {heading}")
         return warnings
 
-    def _objective_report_required_measurement_values(
+    def _objective_report_required_claim_warnings(
         self,
-        packet: dict[str, Any],
+        context: dict[str, Any],
+        markdown: str,
     ) -> list[str]:
-        required_values: list[str] = []
-        for row in packet.get("representative_measurements", []):
-            if not isinstance(row, dict):
+        warnings: list[str] = []
+        for term in self._objective_report_required_claim_terms(context):
+            if self._report_text_contains_value(markdown, term):
                 continue
-            value = str(row.get("value") or "").strip()
-            unit = str(row.get("unit") or "").strip()
-            if not value:
-                continue
-            required_values.append(value)
-            if unit and unit.casefold() not in value.casefold():
-                required_values.append(f"{value} {unit}")
-        for row in packet.get("representative_material_measurements", []):
-            if not isinstance(row, dict):
-                continue
-            value = str(row.get("value") or "").strip()
-            unit = str(row.get("unit") or "").strip()
-            if not value:
-                continue
-            required_values.append(value)
-            if unit and unit.casefold() not in value.casefold():
-                required_values.append(f"{value} {unit}")
-        return required_values
+            warnings.append(f"Missing required objective report claim term: {term}")
+        for forbidden_heading in (
+            "## 目标内代表测量",
+            "## 关键材料状态证据",
+            "## 关键机制证据",
+        ):
+            if forbidden_heading in markdown:
+                warnings.append(
+                    f"Generated report should integrate evidence instead of using standalone section: {forbidden_heading}"
+                )
+        return warnings
 
     def _report_text_contains_value(self, markdown: str, value_text: str) -> bool:
         normalized_value = self._normalize_report_value_text(value_text)

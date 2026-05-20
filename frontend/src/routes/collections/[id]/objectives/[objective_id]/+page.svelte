@@ -835,15 +835,21 @@
 
 		<section class="objective-report-layout">
 			<section class="objective-section objective-section--report">
-				<div class="section-heading">
-					<div>
-						<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
-						<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
-					</div>
-					<span>{objectiveReport ? humanizeCode(objectiveReport.status) : boolState(false)}</span>
-				</div>
-
 				{#if objectiveReport?.markdown && (objectiveReport.status === 'ready' || objectiveReport.status === 'ready_with_warnings')}
+					<div class="objective-report-reader-header">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
+							<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
+						</div>
+						<div class="objective-report-actions objective-report-actions--compact">
+							<button type="button" on:click={refreshObjectiveReport} disabled={reportGenerating}>
+								{$t('research.objectiveWorkspace.refreshObjectiveReport')}
+							</button>
+							<button type="button" on:click={() => generateObjectiveReport(true)} disabled={reportGenerating}>
+								{$t('research.objectiveWorkspace.regenerateObjectiveReport')}
+							</button>
+						</div>
+					</div>
 					<article class="objective-report-document" aria-label={$t('research.objectiveWorkspace.objectiveReportTitle')}>
 						<div class="objective-report-document__meta">
 							<span>{humanizeCode(objectiveReport.status)}</span>
@@ -900,6 +906,13 @@
 						{/each}
 					</article>
 				{:else}
+					<div class="section-heading">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
+							<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
+						</div>
+						<span>{objectiveReport ? humanizeCode(objectiveReport.status) : boolState(false)}</span>
+					</div>
 					<article class="objective-report-empty">
 						<h4>{$t('research.objectiveWorkspace.objectiveReportNotReadyTitle')}</h4>
 						<p>
@@ -1529,8 +1542,8 @@
 
 	.objective-report-layout {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-		gap: 16px;
+		grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+		gap: 18px;
 		align-items: start;
 	}
 
@@ -1642,13 +1655,44 @@
 	.objective-report-document,
 	.objective-report-empty {
 		display: grid;
-		gap: 14px;
+		gap: 18px;
 		min-width: 0;
 	}
 
 	.objective-report-document {
-		max-width: 880px;
-		padding: 6px 0 12px;
+		max-width: 920px;
+		padding: 4px 0 16px;
+	}
+
+	.objective-report-reader-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		border-bottom: 1px solid var(--border-default);
+		padding-bottom: 16px;
+		min-width: 0;
+	}
+
+	.objective-report-reader-header div:first-child {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.objective-report-reader-header h3 {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.objective-report-reader-header p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 14px;
+		line-height: 22px;
 	}
 
 	.objective-report-document__meta,
@@ -1679,22 +1723,22 @@
 	}
 
 	.objective-report-document h1 {
-		font-size: 26px;
-		line-height: 34px;
+		font-size: 28px;
+		line-height: 36px;
 	}
 
 	.objective-report-document h2 {
-		margin-top: 10px;
+		margin-top: 12px;
 		border-top: 1px solid var(--border-default);
-		padding-top: 18px;
-		font-size: 19px;
-		line-height: 27px;
+		padding-top: 22px;
+		font-size: 21px;
+		line-height: 30px;
 	}
 
 	.objective-report-document h3,
 	.objective-report-empty h4 {
-		font-size: 16px;
-		line-height: 23px;
+		font-size: 17px;
+		line-height: 24px;
 	}
 
 	.objective-report-document p,
@@ -1703,7 +1747,7 @@
 		margin: 0;
 		color: var(--text-primary);
 		font-size: 15px;
-		line-height: 25px;
+		line-height: 26px;
 		overflow-wrap: anywhere;
 	}
 
@@ -1765,6 +1809,16 @@
 		cursor: pointer;
 		font: inherit;
 		font-weight: 650;
+	}
+
+	.objective-report-actions--compact {
+		justify-content: flex-end;
+		flex: 0 0 auto;
+	}
+
+	.objective-report-actions--compact button {
+		padding: 7px 10px;
+		font-size: 13px;
 	}
 
 	.objective-report-actions button:hover:not(:disabled) {
@@ -2317,6 +2371,7 @@
 		}
 
 		.objective-hero,
+		.objective-report-reader-header,
 		.section-heading,
 		.evidence-group__header,
 		.paper-contribution-card__header,

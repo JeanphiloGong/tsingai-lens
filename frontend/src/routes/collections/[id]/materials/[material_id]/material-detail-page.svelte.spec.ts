@@ -702,7 +702,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material questions' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText(/scan_strategy: Alternating strategy A/).first())
 			.toBeInTheDocument();
@@ -723,29 +723,29 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Traceback').first()).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Comparable groups' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting data matrix' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence locator' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S001 · Alternating strategy A').first())
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S002 · Island strategy B').first())
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Densification and porosity' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Strength, ductility, and hardness' }))
-			.toBeInTheDocument();
+			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('+2 more').first()).toBeInTheDocument();
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('+2 more').first()).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
 			.not.toBeInTheDocument();
@@ -828,6 +828,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 	it('renders top-level measured property evidence when sample rows have no value cells', async () => {
 		const payload: any = materialProfilePayload();
+		payload.report_package.document = null;
 		payload.overview.measured_properties = ['elongation', 'ultimate tensile strength'];
 		payload.sample_matrix.columns = [];
 		payload.sample_matrix.rows = payload.sample_matrix.rows.map((row: Record<string, unknown>) => ({
@@ -923,6 +924,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 	it('focuses sparse objective-derived material matrices on populated sample values', async () => {
 		const payload: any = materialProfilePayload();
+		payload.report_package.document = null;
 		payload.sample_matrix.rows = [
 			{
 				row_id: 'row_non_preheated',
@@ -1005,6 +1007,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 	it('caps large performance matrices to high-signal rows', async () => {
 		const payload: any = materialProfilePayload();
+		payload.report_package.document = null;
 		payload.sample_matrix.rows = [
 			...payload.sample_matrix.rows,
 			...Array.from({ length: 24 }, (_, index) => ({
@@ -1185,6 +1188,18 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 	});
 
 	it('opens evidence details from a performance value', async () => {
+		const payload: any = materialProfilePayload();
+		payload.report_package.document = null;
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(payload);
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
 		render(Page);
 
 		const densityValue = browserPage.getByRole('button', { name: '95.4%' }).first();

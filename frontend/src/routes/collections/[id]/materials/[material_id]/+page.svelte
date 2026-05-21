@@ -1323,6 +1323,10 @@
 		);
 	}
 
+	function reportDocumentNavItems(document: MaterialReportDocument) {
+		return document.outline.filter((item) => item.level === 2).slice(0, 12);
+	}
+
 	function openReportCitation(document: MaterialReportDocument, citationId: string) {
 		const ref = document.citations[citationId];
 		if (!ref) return;
@@ -2863,6 +2867,7 @@
 					</section>
 					{/if}
 
+					{#if !reportDocument}
 					<section id="material-problems" class="dossier-card material-problems-card">
 						<div class="dossier-section-heading">
 							<span class="section-number">3</span>
@@ -2893,7 +2898,9 @@
 							{/each}
 						</div>
 					</section>
+					{/if}
 
+					{#if !reportDocument}
 					<section id="trend-comparison" class="dossier-card">
 						<div class="dossier-section-heading">
 							<span class="section-number">4</span>
@@ -3009,7 +3016,9 @@
 							</div>
 						</div>
 					</section>
+					{/if}
 
+					{#if !reportDocument}
 					<section id="performance-results" class="dossier-card">
 						<div class="dossier-section-heading">
 							<span class="section-number">5</span>
@@ -3093,7 +3102,9 @@
 							})}
 						</p>
 					</section>
+					{/if}
 
+					{#if !reportDocument}
 					<section id="evidence-locator" class="dossier-card">
 						<div class="dossier-section-heading">
 							<span class="section-number">6</span>
@@ -3154,6 +3165,7 @@
 							{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
 						</a>
 					</section>
+					{/if}
 				</main>
 			{:else}
 				<main
@@ -3338,32 +3350,32 @@
 				<nav
 					class="aside-card quick-nav"
 					aria-label={$t('research.materialDossier.aside.quickNav')}
-				>
-					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
-					{#if activeDossierTab === 'structured'}
-						{#if reportDocument}
-							<a href="#material-report-document"
-								>1 {$t('research.materialDossier.report.documentTitle')}</a
-							>
+					>
+						<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
+						{#if activeDossierTab === 'structured'}
+							{#if reportDocument}
+								{#each reportDocumentNavItems(reportDocument) as item (item.anchor)}
+									<a href={`#${item.anchor}`}>{item.title}</a>
+								{/each}
+							{:else}
+								<a href="#material-report-overview"
+									>1 {$t('research.materialDossier.sections.overview.title')}</a
+								>
+								<a href="#representative-material-states"
+									>2 {$t('research.materialDossier.sections.chain.title')}</a
+								>
+								<a href="#material-problems"
+									>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
+								>
+								<a href="#trend-comparison">4 {$t('research.materialDossier.sections.trends.title')}</a>
+								<a href="#performance-results"
+									>5 {$t('research.materialDossier.sections.performance.title')}</a
+								>
+								<a href="#evidence-locator"
+									>6 {$t('research.materialDossier.sections.evidence.title')}</a
+								>
+							{/if}
 						{:else}
-							<a href="#material-report-overview"
-								>1 {$t('research.materialDossier.sections.overview.title')}</a
-							>
-							<a href="#representative-material-states"
-								>2 {$t('research.materialDossier.sections.chain.title')}</a
-							>
-						{/if}
-						<a href="#material-problems"
-							>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
-						>
-						<a href="#trend-comparison">4 {$t('research.materialDossier.sections.trends.title')}</a>
-						<a href="#performance-results"
-							>5 {$t('research.materialDossier.sections.performance.title')}</a
-						>
-						<a href="#evidence-locator"
-							>6 {$t('research.materialDossier.sections.evidence.title')}</a
-						>
-					{:else}
 						<a href="#narrative-overview"
 							>1 {$t('research.materialDossier.narrative.overviewTitle')}</a
 						>

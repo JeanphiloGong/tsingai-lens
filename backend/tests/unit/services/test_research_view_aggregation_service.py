@@ -607,7 +607,7 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     assert document["schema_version"] == "material_report_document.v1"
     assert document["title"] == "316L stainless steel Material Report"
     assert "# 316L stainless steel Material Report" in document["markdown"]
-    assert "## Representative Material States" in document["markdown"]
+    assert "## 3. 代表性材料状态" in document["markdown"]
     assert "as-built" in document["markdown"]
     assert "heat-treated" in document["markdown"]
     assert "[E001]" in document["markdown"]
@@ -793,6 +793,56 @@ def test_material_report_package_selects_scientific_representative_states():
             "confidence": 0.9,
         },
         {
+            "evidence_unit_id": "oeu-heat-yield",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p004",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-SLM(140/ 100)"},
+            "process_context": {"laser_power": "140 W", "scan_speed": "100 mm/s"},
+            "test_condition": {"method": "tensile test"},
+            "property_normalized": "yield strength",
+            "value_payload": {"value": 455.2, "source_value_text": "455.2"},
+            "unit": "MPa",
+            "source_refs": [{"route_id": "route-heat-yield", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-heat-tensile",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p004",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-SLM(140/ 100)"},
+            "process_context": {"laser_power": "140 W", "scan_speed": "100 mm/s"},
+            "test_condition": {"method": "tensile test"},
+            "property_normalized": "tensile strength",
+            "value_payload": {"value": 585.8, "source_value_text": "585.8"},
+            "unit": "MPa",
+            "source_refs": [{"route_id": "route-heat-tensile", "source_kind": "table"}],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
+            "evidence_unit_id": "oeu-heat-elongation",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p004",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "as-SLM(140/ 100)"},
+            "process_context": {"laser_power": "140 W", "scan_speed": "100 mm/s"},
+            "test_condition": {"method": "tensile test"},
+            "property_normalized": "elongation",
+            "value_payload": {"value": 40.8, "source_value_text": "40.8"},
+            "unit": "%",
+            "source_refs": [
+                {"route_id": "route-heat-elongation", "source_kind": "table"}
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        {
             "evidence_unit_id": "oeu-p005-density",
             "objective_id": "obj-mechanical",
             "document_id": "paper-p005",
@@ -848,6 +898,27 @@ def test_material_report_package_selects_scientific_representative_states():
             "resolution_status": "resolved",
             "confidence": 0.9,
         },
+        {
+            "evidence_unit_id": "oeu-case7-experimental",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-p006",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "sample_context": {"sample": "7"},
+            "process_context": {
+                "scan strategy rotation angle": "45",
+                "build orientation alpha": "45",
+            },
+            "test_condition": {"Case": "7"},
+            "property_normalized": "experimental yield strength",
+            "value_payload": {"value": 365.6, "source_value_text": "365.6"},
+            "unit": "MPa",
+            "source_refs": [
+                {"route_id": "route-case7-experimental", "source_kind": "table"}
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
     ]
     for index in range(8):
         objective_units.append(
@@ -899,16 +970,43 @@ def test_material_report_package_selects_scientific_representative_states():
         "7",
     ]
     markdown = report_package["document"]["markdown"]
-    assert "Sample 14" in markdown
-    assert "99.45 %" in markdown
-    assert "462.02 MPa" in markdown
-    assert "584.44 MPa" in markdown
-    assert "41.9 %" in markdown
-    assert "as-SLM(140/100)" in markdown
-    assert "255 W-1400 mm/s" in markdown
-    assert "Case 7" in markdown
-    assert "0.6584" in markdown
-    assert "347.14 MPa" in markdown
+    expected_sections = [
+        "## 摘要",
+        "## 1. 材料范围",
+        "## 2. 论文贡献",
+        "## 3. 代表性材料状态",
+        "## 4. 致密化和孔隙",
+        "## 5. 强度、塑性和硬度",
+        "## 6. 织构和模型预测",
+        "## 7. 腐蚀、疲劳和未闭合链路",
+        "## 8. 可比较性",
+        "## 9. 证据与不确定性",
+        "## 10. 结论",
+    ]
+    for section in expected_sections:
+        assert section in markdown
+    expected_claims = [
+        "不能被压缩成一个“全局最佳参数”",
+        "P001 Sample 14",
+        "99.45 %",
+        "462.02 MPa",
+        "584.44 MPa",
+        "41.9 %",
+        "as-SLM(140/100)",
+        "198.4 HV",
+        "455.2 MPa",
+        "585.8 MPa",
+        "40.8 %",
+        "255 W-1400 mm/s",
+        "99.5 %",
+        "Case 7",
+        "0.6584",
+        "365.6 MPa",
+        "347.14 MPa",
+        "不能直接做全局排名",
+    ]
+    for claim in expected_claims:
+        assert claim in markdown
 
 
 def test_collection_material_profile_uses_objective_profile_when_available():

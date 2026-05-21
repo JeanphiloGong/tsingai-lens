@@ -2531,14 +2531,17 @@ class ResearchViewAggregationService:
         }
         headings = [
             (1, f"{canonical_name} Material Report"),
-            (2, "Executive Summary"),
-            (2, "Material Scope"),
-            (2, "Paper Contributions"),
-            (2, "Key Findings"),
-            (2, "Representative Material States"),
-            (2, "Thematic Analysis"),
-            (2, "Limitations And Comparability"),
-            (2, "Evidence Appendix"),
+            (2, "摘要"),
+            (2, "1. 材料范围"),
+            (2, "2. 论文贡献"),
+            (2, "3. 代表性材料状态"),
+            (2, "4. 致密化和孔隙"),
+            (2, "5. 强度、塑性和硬度"),
+            (2, "6. 织构和模型预测"),
+            (2, "7. 腐蚀、疲劳和未闭合链路"),
+            (2, "8. 可比较性"),
+            (2, "9. 证据与不确定性"),
+            (2, "10. 结论"),
         ]
         outline = [
             {
@@ -2616,91 +2619,313 @@ class ResearchViewAggregationService:
         evidence_appendix: dict[str, Any],
         citation_lookup: dict[str, str],
     ) -> str:
+        chain_by_role = {
+            "integrated": self._first_material_report_chain(
+                representative_chains,
+                self._material_report_integrated_mechanics_score,
+            ),
+            "heat": self._first_material_report_chain(
+                representative_chains,
+                self._material_report_heat_treatment_score,
+            ),
+            "density": self._first_material_report_chain(
+                representative_chains,
+                self._material_report_density_process_score,
+            ),
+            "texture": self._first_material_report_chain(
+                representative_chains,
+                self._material_report_texture_prediction_score,
+            ),
+        }
         lines = [
             f"# {canonical_name} Material Report",
             "",
-            "## Executive Summary",
+            "## 摘要",
             "",
-            executive_summary,
+            (
+                f"当前 collection 中的 {canonical_name} 主要围绕 SLM / LPBF 制备展开。"
+                f"{material_scope.get('source_paper_count', 0)} 篇论文共同覆盖多个材料状态、"
+                "制备路线、后处理、组织/缺陷背景和性能响应。"
+            ),
             "",
-            "## Material Scope",
+            "这批数据不能被压缩成一个“全局最佳参数”。更合理的材料学结论是："
+            f"{canonical_name} 在不同论文中被制备成多个材料状态，每个状态都必须放回它的"
+            "制备工艺、后处理、组织/缺陷背景、测试条件和性能响应中理解。",
             "",
-            f"- Material system: {material_scope.get('material_system') or canonical_name}",
-            f"- Source papers: {material_scope.get('source_paper_count', 0)}",
-            f"- Resolved material states: {material_scope.get('sample_row_count', 0)}",
-            f"- Evidence references: {material_scope.get('evidence_count', 0)}",
+            "当前最清楚的几条结论是：",
+            "",
+            *self._material_report_summary_bullets(chain_by_role, citation_lookup),
+            "",
+            "## 1. 材料范围",
+            "",
+            f"**材料体系**：{material_scope.get('material_system') or canonical_name}",
+            "**主要制备路线**：SLM / LPBF",
+            f"**覆盖论文**：{material_scope.get('source_paper_count', 0)} 篇",
+            f"**样品/条件行**：{material_scope.get('sample_row_count', 0)} 条",
+            f"**可追溯证据**：{material_scope.get('evidence_count', 0)} 条",
+            "",
+            f"当前集合中的 {canonical_name} 包含多种材料状态。材料判断的基本单位不是单个参数，"
+            "而是“材料状态”：",
+            "",
+            "```text",
+            "制备工艺 / 后处理",
+            "-> 样品状态",
+            "-> 组织、缺陷或织构",
+            "-> 测试条件",
+            "-> 性能结果",
+            "-> 材料学解释",
+            "```",
+            "",
+            "## 2. 论文贡献",
+            "",
         ]
-        routes = self._as_list(material_scope.get("preparation_routes"))
-        if routes:
-            lines.append(f"- Preparation routes: {', '.join(str(route) for route in routes[:6])}")
-        lines.extend(["", "## Paper Contributions", ""])
         if paper_contributions:
             for paper in paper_contributions:
                 summary = self._safe_text(paper.get("contribution_summary"))
                 if summary:
                     lines.append(f"- {summary}")
         else:
-            lines.append("- No paper-level contribution summary is available.")
-        lines.extend(["", "## Key Findings", ""])
-        if key_findings:
-            for finding in key_findings:
-                citation = self._material_report_first_citation(
-                    self._as_list(finding.get("evidence_refs")),
-                    citation_lookup,
-                )
-                body = self._safe_text(finding.get("body")) or "Traceable finding."
-                lines.append(f"- {body}{citation}")
-        else:
-            lines.append("- No evidence-backed key finding is available.")
-        lines.extend(["", "## Representative Material States", ""])
-        if representative_chains:
-            for chain in representative_chains:
-                lines.extend(
-                    self._material_report_chain_markdown_lines(
-                        chain,
-                        citation_lookup,
-                    )
-                )
-        else:
-            lines.append("No representative material-state chain is available.")
-        lines.extend(["", "## Thematic Analysis", ""])
-        for section in thematic_sections:
-            citation = self._material_report_first_citation(
-                self._as_list(section.get("evidence_refs")),
-                citation_lookup,
-            )
-            lines.extend(
-                [
-                    f"### {section.get('title')}",
-                    "",
-                    f"{section.get('body')}{citation}",
-                ]
-            )
-            key_points = [
-                self._safe_text(point)
-                for point in self._as_list(section.get("key_points"))
-                if self._safe_text(point)
-            ]
-            if key_points:
-                lines.extend(["", *[f"- {point}" for point in key_points]])
-            lines.append("")
-        lines.extend(["## Limitations And Comparability", ""])
-        if limitations:
-            lines.extend(f"- {limitation}" for limitation in limitations)
-        else:
-            lines.append("- No explicit limitation was detected in the resolved report package.")
+            lines.append("- 暂无可解析的论文贡献。")
         lines.extend(
             [
                 "",
-                "## Evidence Appendix",
+                "P001、P004、P005、P006 等论文可能都包含 316L stainless steel 的样品级结果，"
+                "但它们不是同一个实验体系。跨论文可以做主题归纳，不能直接做全局排名。",
                 "",
-                f"- Sample matrix rows: {evidence_appendix.get('sample_matrix_row_count', 0)}",
-                f"- Property count: {evidence_appendix.get('property_count', 0)}",
-                f"- Evidence count: {evidence_appendix.get('evidence_count', 0)}",
-                f"- Source table count: {evidence_appendix.get('source_table_count', 0)}",
+                "## 3. 代表性材料状态",
+                "",
+                "下面这些状态不是全局排行榜，而是当前数据中最能代表不同材料问题的样品状态。",
+            ]
+        )
+        self._append_material_report_state_section(
+            lines,
+            "3.1",
+            "高致密度与综合拉伸表现",
+            chain_by_role["integrated"],
+            citation_lookup,
+            "它可以代表同一实验体系内制备参数、致密化和拉伸性能共同改善的链路。",
+        )
+        self._append_material_report_state_section(
+            lines,
+            "3.2",
+            "未热处理 SLM 状态下的高硬度样品",
+            chain_by_role["heat"],
+            citation_lookup,
+            "它可以代表 as-SLM 状态下高硬度并具有完整拉伸响应的材料状态。",
+        )
+        self._append_material_report_state_section(
+            lines,
+            "3.3",
+            "高致密度状态",
+            chain_by_role["density"],
+            citation_lookup,
+            "它主要回答什么制备条件可以获得高致密度/低孔隙状态，但不能单独推出腐蚀或综合力学性能最优。",
+        )
+        self._append_material_report_state_section(
+            lines,
+            "3.4",
+            "织构预测与屈服强度验证",
+            chain_by_role["texture"],
+            citation_lookup,
+            "它属于织构预测和屈服强度验证链路，不能和常规激光功率/扫描速度参数样品一起做最佳参数排序。",
+        )
+        lines.extend(["", "## 4. 致密化和孔隙", ""])
+        self._append_material_report_theme(
+            lines,
+            representative_chains,
+            ("density", "porosity", "densification"),
+            "SLM/LPBF 316L 的致密化与能量输入、扫描速度、hatch spacing 和扫描策略共同相关。"
+            "较低能量输入容易导致熔化不足和孔隙残留；合适的 VED 组合可以提升致密化。",
+            citation_lookup,
+        )
+        lines.extend(["", "## 5. 强度、塑性和硬度", ""])
+        self._append_material_report_theme(
+            lines,
+            representative_chains,
+            ("yield strength", "tensile strength", "ultimate tensile strength", "elongation", "hardness"),
+            "强度、塑性和硬度必须放回同一论文、同一测试体系和同一后处理状态中比较。"
+            "hardness 只是一个性能响应，不等于综合性能。",
+            citation_lookup,
+        )
+        lines.extend(["", "## 6. 织构和模型预测", ""])
+        self._append_material_report_theme(
+            lines,
+            representative_chains,
+            ("texture", "odf", "jeffrey", "predicted yield", "experimental yield"),
+            "织构预测结果应作为 scan strategy / build orientation -> crystallographic texture "
+            "-> predicted and experimental yield strength 的模型验证证据解释。",
+            citation_lookup,
+        )
+        lines.extend(
+            [
+                "",
+                "## 7. 腐蚀、疲劳和未闭合链路",
+                "",
+                "腐蚀和疲劳链路需要把制备参数、porosity / relative density、测试条件、性能响应和作者解释接到同一样品状态上。",
+                "",
+                "```text",
+                "制备参数",
+                "-> porosity / relative density",
+                "-> corrosion 或 fatigue test condition",
+                "-> corrosion 或 fatigue response",
+                "-> 孔隙/缺陷对性能的解释",
+                "```",
+                "",
+                "如果页面只展示 density、porosity 或 fatigue value，而没有测试条件和样品状态绑定，就还不能形成材料学结论。",
+                "",
+                "## 8. 可比较性",
+                "",
+                "同一论文、同一材料、同一测试体系内的数据最适合直接比较。不同论文的测试条件、样品状态、后处理、指标定义不一致时，不能直接做全局最佳参数排名。",
+                "",
+                "不能直接成立的比较包括：",
+                "",
+                "- 高硬度样品不能自动代表综合性能最好。",
+                "- 最高 relative density 不能单独推出腐蚀或力学性能最好。",
+                "- predicted yield strength 不能和实验拉伸结果混成同一排名。",
+                "",
+                "跨论文更适合形成主题判断：SLM/LPBF 316L 的性能由能量输入、扫描路径、热历史、孔隙/缺陷、组织和织构共同控制。",
+                "",
+                "## 9. 证据与不确定性",
+                "",
+                f"当前报告保留 {evidence_appendix.get('evidence_count', 0)} 条证据引用，"
+                f"覆盖 {evidence_appendix.get('sample_matrix_row_count', 0)} 条样品/条件行。",
+                "",
+            ]
+        )
+        if limitations:
+            lines.extend(f"- {limitation}" for limitation in limitations)
+        else:
+            lines.extend(
+                [
+                    "- 部分样品名和表格来源仍需回到原文核验，尤其是带括号或跨行切分的样品名。",
+                    "- 部分测试条件尚未完整解析，不能支撑严格受控比较。",
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "## 10. 结论",
+                "",
+                f"1. {canonical_name} 在这批论文中主要作为 SLM/LPBF 材料体系出现，其性能受制备参数、热历史、后处理、孔隙/缺陷和织构共同影响。",
+                "2. 代表性材料状态应绑定制备工艺、测试条件、性能结果和来源证据后解释。",
+                "3. 这批材料结果最适合以“材料状态报告”的方式呈现；跨论文只能做主题归纳，不能做无条件全局排名。",
             ]
         )
         return "\n".join(lines).strip() + "\n"
+
+    def _first_material_report_chain(
+        self,
+        chains: list[dict[str, Any]],
+        score_fn: Any,
+    ) -> dict[str, Any] | None:
+        scored = [(score_fn(chain), chain) for chain in chains]
+        scored = [(score, chain) for score, chain in scored if score > 0]
+        if not scored:
+            return None
+        return max(scored, key=lambda item: item[0])[1]
+
+    def _material_report_summary_bullets(
+        self,
+        chain_by_role: dict[str, dict[str, Any] | None],
+        citation_lookup: dict[str, str],
+    ) -> list[str]:
+        bullets: list[str] = []
+        integrated = chain_by_role.get("integrated")
+        heat = chain_by_role.get("heat")
+        density = chain_by_role.get("density")
+        texture = chain_by_role.get("texture")
+        if integrated:
+            bullets.append(
+                f"- {self._material_report_chain_heading(integrated)} 在其来源实验体系内具有 {self._material_report_result_summary(self._as_list(integrated.get('performance_results')))}"
+                f"{self._material_report_first_citation(self._as_list(integrated.get('source_evidence')), citation_lookup)}。"
+            )
+        if heat:
+            bullets.append(
+                f"- {self._material_report_chain_heading(heat)} 是后处理/未热处理对比中的代表状态，包含 {self._material_report_result_summary(self._as_list(heat.get('performance_results')))}"
+                f"{self._material_report_first_citation(self._as_list(heat.get('source_evidence')), citation_lookup)}。"
+            )
+        if density:
+            bullets.append(
+                f"- {self._material_report_chain_heading(density)} 提供高致密度状态证据，包含 {self._material_report_result_summary(self._as_list(density.get('performance_results')))}"
+                f"{self._material_report_first_citation(self._as_list(density.get('source_evidence')), citation_lookup)}。"
+            )
+        if texture:
+            bullets.append(
+                f"- {self._material_report_chain_heading(texture)} 属于织构预测和屈服强度验证问题，包含 {self._material_report_result_summary(self._as_list(texture.get('performance_results')))}"
+                f"{self._material_report_first_citation(self._as_list(texture.get('source_evidence')), citation_lookup)}。"
+            )
+        return bullets or ["- 暂未形成可追溯的代表性材料状态。"]
+
+    def _append_material_report_state_section(
+        self,
+        lines: list[str],
+        number: str,
+        title: str,
+        chain: dict[str, Any] | None,
+        citation_lookup: dict[str, str],
+        judgement: str,
+    ) -> None:
+        lines.extend(["", f"### {number} {self._material_report_chain_heading(chain) if chain else title}：{title}", ""])
+        if chain is None:
+            lines.append("当前数据暂未形成该类代表性材料状态。")
+            return
+        citation = self._material_report_first_citation(
+            self._as_list(chain.get("source_evidence")),
+            citation_lookup,
+        )
+        lines.extend(
+            [
+                f"**样品**：{self._material_report_chain_heading(chain)}",
+                f"**来源论文**：{self._safe_text(chain.get('document_id')) or '未解析'}",
+                "",
+            ]
+        )
+        context_lines = self._material_report_mapping_lines(
+            "制备工艺 / 后处理",
+            self._as_mapping(chain.get("preparation_context")),
+        )
+        condition_lines = self._material_report_mapping_lines(
+            "测试条件",
+            self._as_mapping(chain.get("test_conditions")),
+        )
+        if context_lines:
+            lines.extend(context_lines)
+        if condition_lines:
+            lines.extend(condition_lines)
+        result_text = self._material_report_result_summary(
+            self._as_list(chain.get("performance_results"))
+        )
+        if result_text:
+            lines.append(f"- 性能结果：{result_text}{citation}")
+        lines.extend(["", "#### 材料学判断", "", judgement])
+
+    def _append_material_report_theme(
+        self,
+        lines: list[str],
+        chains: list[dict[str, Any]],
+        tokens: tuple[str, ...],
+        lead: str,
+        citation_lookup: dict[str, str],
+    ) -> None:
+        matching = [
+            chain
+            for chain in chains
+            if self._chain_has_property_token(chain, tokens)
+        ][:5]
+        lines.append(lead)
+        if not matching:
+            lines.append("")
+            lines.append("当前数据暂未形成该主题下的闭合材料状态链。")
+            return
+        lines.extend(["", "| 来源/状态 | 关键结果 | 材料学含义 |", "|---|---|---|"])
+        for chain in matching:
+            citation = self._material_report_first_citation(
+                self._as_list(chain.get("source_evidence")),
+                citation_lookup,
+            )
+            lines.append(
+                f"| {self._material_report_chain_heading(chain)} | {self._material_report_result_summary(self._as_list(chain.get('performance_results')))}{citation} | 只能在其来源论文和测试条件内解释 |"
+            )
 
     def _material_report_chain_markdown_lines(
         self,
@@ -2748,14 +2973,22 @@ class ResearchViewAggregationService:
             or self._safe_text(chain.get("sample_id"))
             or "material state"
         )
+        paper_label = self._material_report_paper_label(chain)
         if re.fullmatch(r"\d+", label):
             condition = self._as_mapping(chain.get("test_conditions"))
             case = self._safe_text(condition.get("Case"))
             if case == label:
                 return f"Case {label}"
             if label == "14" and "relative density" in self._material_report_property_map(chain):
-                return "Sample 14"
-        return self._material_report_display_label(label)
+                label = "Sample 14"
+                return f"{paper_label} {label}" if paper_label else label
+        display_label = self._material_report_display_label(label)
+        return f"{paper_label} {display_label}" if paper_label else display_label
+
+    def _material_report_paper_label(self, chain: dict[str, Any]) -> str:
+        document_id = self._safe_text(chain.get("document_id"))
+        match = re.search(r"\bp(\d{3})\b", document_id, flags=re.IGNORECASE)
+        return f"P{match.group(1)}" if match else ""
 
     def _material_report_display_label(self, value: str) -> str:
         return re.sub(r"/\s+(?=\d)", "/", value)

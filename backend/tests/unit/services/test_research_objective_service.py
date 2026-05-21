@@ -18,6 +18,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
+    StructuredTableMatrixRepair,
 )
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
@@ -3815,7 +3816,9 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
     ]
 
 
-def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path):
+def test_research_objective_fragmented_table_cells_repair_table_matrix_before_extraction(
+    tmp_path,
+):
     service = ResearchObjectiveService(
         collection_service=CollectionService(tmp_path / "collections"),
     )
@@ -3866,11 +3869,26 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         page=1,
         caption_text="Density results",
         heading_path="Results",
-        column_headers=["Specimens", "Density (%)"],
+        column_headers=[
+            "Specimens",
+            "Type of heat treatment",
+            "Laser power (W)",
+            "Scan speed (mm/s)",
+            "Laser energy density (J/ mm 3 )",
+            "Density (%)",
+        ],
         table_matrix=[
-            ["Specimens", "Density (%)"],
-            ["as-SLM (140/", "92.19"],
-            ["S2", "99.5"],
+            [
+                "Specimens",
+                "Type of heat treatment",
+                "Laser power (W)",
+                "Scan speed (mm/s)",
+                "Laser energy density (J/ mm 3 )",
+                "Density (%)",
+            ],
+            ["as-SLM (100/", "-", "100", "100", "278", "97.83"],
+            ["100) HT-SLM (100/", "Furnace HT", "100", "100", "278", "98.70"],
+            ["100) HIP-SLM (100/", "HIP", "100", "100", "278", "98.15"],
         ],
     )
     table_cells = [
@@ -3879,62 +3897,87 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
             row_index=1,
             col_index=0,
             header_path="Specimens",
-            cell_text="as-SLM (140/",
+            cell_text="as-SLM (100/",
         ),
         SimpleNamespace(
             table_id="table-1",
             row_index=1,
             col_index=1,
-            header_path="Density (%)",
-            cell_text="92.19",
+            header_path="Type of heat treatment",
+            cell_text="-",
         ),
         SimpleNamespace(
             table_id="table-1",
             row_index=2,
             col_index=0,
             header_path="Specimens",
-            cell_text="S2",
+            cell_text="100) HT-SLM (100/",
         ),
         SimpleNamespace(
             table_id="table-1",
             row_index=2,
             col_index=1,
-            header_path="Density (%)",
-            cell_text="99.5",
+            header_path="Type of heat treatment",
+            cell_text="Furnace HT",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=3,
+            col_index=0,
+            header_path="Specimens",
+            cell_text="100) HIP-SLM (100/",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=3,
+            col_index=1,
+            header_path="Type of heat treatment",
+            cell_text="HIP",
         ),
     ]
 
-    class RepairExtractor:
+    class TableMatrixRepairExtractor:
         def __init__(self) -> None:
+            self.repair_payloads: list[dict[str, Any]] = []
             self.unit_payloads: list[dict[str, Any]] = []
+
+        def repair_table_matrix(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredTableMatrixRepair:
+            self.repair_payloads.append(payload)
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=[
+                    [
+                        "Specimens",
+                        "Type of heat treatment",
+                        "Laser power (W)",
+                        "Scan speed (mm/s)",
+                        "Laser energy density (J/ mm 3 )",
+                        "Density (%)",
+                    ],
+                    ["as-SLM (100/100)", "-", "100", "100", "278", "97.83"],
+                    [
+                        "HT-SLM (100/100)",
+                        "Furnace HT",
+                        "100",
+                        "100",
+                        "278",
+                        "98.70",
+                    ],
+                    ["HIP-SLM (100/100)", "HIP", "100", "100", "278", "98.15"],
+                ],
+                confidence=0.88,
+            )
 
         def extract_objective_evidence_units(
             self,
             payload: dict[str, Any],
         ) -> StructuredObjectiveEvidenceUnits:
             self.unit_payloads.append(payload)
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
-                        property_normalized="relative density",
-                        material_system={},
-                        sample_context={"label": "repaired row label"},
-                        process_context={},
-                        test_condition={},
-                        value_payload={
-                            "value": 92.19,
-                            "source_value_text": "92.19",
-                        },
-                        unit="%",
-                        join_keys={"sample_key": "repaired row label"},
-                        resolution_status="resolved",
-                        confidence=0.86,
-                    )
-                ]
-            )
+            return StructuredObjectiveEvidenceUnits()
 
-    extractor = RepairExtractor()
+    extractor = TableMatrixRepairExtractor()
 
     units = service._build_objective_evidence_units(
         collection_id="col-test",
@@ -3948,31 +3991,67 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         table_cells_by_document_id={"paper-1": table_cells},
     )
 
-    assert len(extractor.unit_payloads) == 1
-    assert extractor.unit_payloads[0]["source"]["table_cells"][0] == {
+    assert len(extractor.repair_payloads) == 1
+    assert extractor.repair_payloads[0]["source"]["table_cells"][0] == {
         "row_index": 1,
         "col_index": 0,
         "header_path": "Specimens",
-        "cell_text": "as-SLM (140/",
+        "cell_text": "as-SLM (100/",
     }
+    assert extractor.unit_payloads == []
     measurements = [unit for unit in units if unit.unit_kind == "measurement"]
-    assert len(measurements) == 2
-    assert {unit.value_payload.get("value") for unit in measurements} == {92.19, 99.5}
-    assert any(
-        unit.sample_context == {"label": "repaired row label"}
+    assert len(measurements) == 3
+    assert {unit.value_payload.get("value") for unit in measurements} == {
+        97.83,
+        98.70,
+        98.15,
+    }
+    sample_labels = {
+        str(unit.sample_context.get("Specimens") or "")
         for unit in measurements
-    )
-    assert any(
-        unit.sample_context.get("Specimens") == "S2"
-        for unit in measurements
-    )
+    }
+    assert sample_labels == {
+        "as-SLM (100/100)",
+        "HT-SLM (100/100)",
+        "HIP-SLM (100/100)",
+    }
     assert all(
         unit.material_system == {"family": "316L stainless steel"}
         for unit in measurements
     )
     assert all(
-        unit.sample_context.get("Specimens") != "as-SLM (140/"
+        "(100/" not in str(unit.sample_context.get("Specimens") or "")
+        or str(unit.sample_context.get("Specimens") or "").endswith("(100/100)")
         for unit in measurements
+    )
+
+
+def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+
+    assert service._objective_table_source_needs_llm_structural_repair(
+        route=route,
+        source={
+            "table_matrix": [
+                ["Specimens", "Density (%)"],
+                ["100) HIP-SLM (100/", "98.15"],
+            ],
+            "table_cells": [],
+        },
     )
 
 

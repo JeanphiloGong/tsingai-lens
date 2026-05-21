@@ -6919,6 +6919,14 @@ class ResearchObjectiveService:
                 "evidence_route": route.to_record(),
                 "source": source,
             }
+            source = self._repair_objective_table_source_if_needed(
+                collection_id=collection_id,
+                extractor=extractor,
+                route=route,
+                source=source,
+                payload=payload,
+            )
+            payload["source"] = source
             route_unit_start = len(units)
             route_records = self._objective_table_matrix_evidence_unit_records(
                 route=route,
@@ -6929,6 +6937,10 @@ class ResearchObjectiveService:
                 self._objective_table_source_needs_llm_structural_repair(
                     route=route,
                     source=source,
+                )
+                and not (
+                    source.get("table_matrix_structural_repair_applied")
+                    and route_records
                 )
             )
             if (
@@ -7084,6 +7096,116 @@ class ResearchObjectiveService:
             return True
         return has_result_like_role
 
+    def _repair_objective_table_source_if_needed(
+        self,
+        *,
+        collection_id: str,
+        extractor: CoreLLMStructuredExtractor,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._objective_table_source_needs_llm_structural_repair(
+            route=route,
+            source=source,
+        ):
+            return source
+        try:
+            parsed = extractor.repair_table_matrix(payload)
+        except Exception:
+            logger.exception(
+                "Research objective table matrix repair failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_ref=%s",
+                collection_id,
+                route.route_id,
+                route.objective_id,
+                route.document_id,
+                route.source_ref,
+            )
+            return source
+        repaired_matrix = self._validated_objective_repaired_table_matrix(
+            source=source,
+            repaired_table_matrix=getattr(parsed, "repaired_table_matrix", None),
+        )
+        if not repaired_matrix:
+            return source
+        original_matrix = self._normalized_objective_table_matrix(
+            source.get("table_matrix")
+        )
+        if repaired_matrix == original_matrix:
+            return source
+        repaired_source = dict(source)
+        repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
+        repaired_source["table_matrix"] = repaired_matrix
+        repaired_source["table_matrix_structural_repair_applied"] = (
+            not self._objective_table_matrix_has_structural_fragments(
+                repaired_matrix
+            )
+        )
+        repairs = getattr(parsed, "repairs", None)
+        if repairs:
+            repaired_source["table_matrix_repairs"] = [
+                repair_item.model_dump()
+                if hasattr(repair_item, "model_dump")
+                else repair_item
+                for repair_item in repairs
+            ]
+        warnings = getattr(parsed, "warnings", None)
+        if warnings:
+            repaired_source["table_matrix_repair_warnings"] = [
+                str(warning)
+                for warning in warnings
+                if str(warning).strip()
+            ]
+        return repaired_source
+
+    def _validated_objective_repaired_table_matrix(
+        self,
+        *,
+        source: dict[str, Any],
+        repaired_table_matrix: Any,
+    ) -> list[list[str]]:
+        if not isinstance(repaired_table_matrix, list) or not repaired_table_matrix:
+            return []
+        headers = [
+            str(header).strip()
+            for header in source.get("column_headers", ())
+            if str(header).strip()
+        ]
+        expected_width = len(headers)
+        repaired_rows: list[list[str]] = []
+        for row in repaired_table_matrix:
+            if not isinstance(row, (list, tuple)):
+                return []
+            repaired_row = [str(cell).strip() for cell in row]
+            if expected_width and len(repaired_row) != expected_width:
+                return []
+            repaired_rows.append(repaired_row)
+        if expected_width and not self._objective_row_matches_headers(
+            tuple(repaired_rows[0]),
+            tuple(headers),
+        ):
+            repaired_rows.insert(0, headers)
+        return repaired_rows
+
+    def _normalized_objective_table_matrix(self, value: Any) -> list[list[str]]:
+        if not isinstance(value, list):
+            return []
+        return [
+            [str(cell).strip() for cell in row]
+            for row in value
+            if isinstance(row, (list, tuple))
+        ]
+
+    def _objective_table_matrix_has_structural_fragments(
+        self,
+        table_matrix: list[list[str]],
+    ) -> bool:
+        return any(
+            self._objective_cell_text_looks_structurally_fragmented(cell)
+            for row in table_matrix
+            for cell in row
+        )
+
     def _objective_table_source_needs_llm_structural_repair(
         self,
         *,
@@ -7094,6 +7216,14 @@ class ResearchObjectiveService:
             return False
         if route.role not in {"current_experimental_evidence", "process_or_treatment"}:
             return False
+        matrix = source.get("table_matrix")
+        if (
+            isinstance(matrix, list)
+            and self._objective_table_matrix_has_structural_fragments(
+                self._normalized_objective_table_matrix(matrix)
+            )
+        ):
+            return True
         cells = source.get("table_cells")
         if not isinstance(cells, list):
             return False

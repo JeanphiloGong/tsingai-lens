@@ -525,11 +525,25 @@ function materialProfilePayload() {
 				markdown: [
 					'# 316L stainless steel Material Report',
 					'',
-					'## Executive Summary',
+					'## 摘要',
 					'',
 					'316L stainless steel is best read as a scoped material report rather than a global parameter ranking.',
 					'',
-					'## Representative Material States',
+					'## 1. 材料范围',
+					'',
+					'| 材料状态 | 主要来源 | 关注问题 |',
+					'|---|---|---|',
+					'| as-SLM 316L | P001, P004 | SLM 参数如何影响致密化和拉伸性能 [E001] |',
+					'| HT-SLM 316L | P004 | 热处理是否改变强度、塑性和硬度 |',
+					'',
+					'```text',
+					'制备工艺 / 后处理',
+					'-> 样品状态',
+					'-> 性能结果',
+					'-> 材料学解释',
+					'```',
+					'',
+					'## 3. 代表性材料状态',
 					'',
 					'### S001',
 					'',
@@ -538,7 +552,16 @@ function materialProfilePayload() {
 					'- Response: hardness 215.6 [E001]',
 					'- Comparability: Compare only within Paper A tensile and hardness conditions.',
 					'',
-					'## Limitations And Comparability',
+					'## 8. 可比较性',
+					'',
+					'1. 同一论文、同一材料、同一测试体系内的数据最适合直接比较。',
+					'2. 不同论文不能直接做全局最佳参数。',
+					'',
+					'> 多篇论文共同支持：SLM/LPBF 316L 的性能由能量输入和孔隙共同控制。',
+					'',
+					'---',
+					'',
+					'## 9. 证据与不确定性',
 					'',
 					'- S002 is missing test_conditions.'
 				].join('\n'),
@@ -559,8 +582,8 @@ function materialProfilePayload() {
 					},
 					{
 						level: 2,
-						title: 'Representative Material States',
-						anchor: 'representative-material-states'
+						title: '3. 代表性材料状态',
+						anchor: '3-代表性材料状态'
 					}
 				],
 				warnings: [],
@@ -647,11 +670,14 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel Material Report' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Executive Summary' }))
+			.element(browserPage.getByRole('heading', { name: '摘要' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('scoped material report rather than a global parameter ranking'))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('材料状态').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('cell', { name: 'as-SLM 316L' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('-> 样品状态')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S001 links preparation, testing, and response'))
 			.not.toBeInTheDocument();
@@ -662,12 +688,18 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Hardness and tensile values are scoped to Paper A testing conditions.'))
 			.not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Representative Material States' }))
+			.element(browserPage.getByRole('heading', { name: '3. 代表性材料状态' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText(/Response: hardness 215\.6/))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: '[E001]' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: '[E001]' }).first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('不同论文不能直接做全局最佳参数。'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/多篇论文共同支持：SLM\/LPBF 316L/))
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material questions' }))
 			.toBeInTheDocument();

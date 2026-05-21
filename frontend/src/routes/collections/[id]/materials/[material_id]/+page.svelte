@@ -36,10 +36,19 @@
 		| { type: 'text'; text: string }
 		| { type: 'citation'; id: string };
 
+	type MaterialReportMarkdownTable = {
+		headers: MaterialReportMarkdownInline[][];
+		rows: MaterialReportMarkdownInline[][][];
+	};
+
 	type MaterialReportMarkdownBlock =
 		| { type: 'heading'; level: number; key: string; text: string; anchor: string }
 		| { type: 'paragraph'; key: string; parts: MaterialReportMarkdownInline[] }
-		| { type: 'list'; key: string; items: MaterialReportMarkdownInline[][] };
+		| { type: 'list'; key: string; ordered: boolean; items: MaterialReportMarkdownInline[][] }
+		| { type: 'table'; key: string; table: MaterialReportMarkdownTable }
+		| { type: 'code'; key: string; text: string }
+		| { type: 'quote'; key: string; parts: MaterialReportMarkdownInline[] }
+		| { type: 'rule'; key: string };
 
 	type PropertyColumn = {
 		key: string;
@@ -1139,22 +1148,75 @@
 	): MaterialReportMarkdownBlock[] {
 		const blocks: MaterialReportMarkdownBlock[] = [];
 		let listItems: MaterialReportMarkdownInline[][] = [];
+		let listOrdered = false;
+		let tableLines: string[] = [];
+		let codeLines: string[] = [];
+		let inCodeBlock = false;
 		const flushList = () => {
 			if (!listItems.length) return;
 			blocks.push({
 				type: 'list',
 				key: `list:${blocks.length}`,
+				ordered: listOrdered,
 				items: listItems
 			});
 			listItems = [];
+			listOrdered = false;
+		};
+		const flushTable = () => {
+			if (tableLines.length >= 2) {
+				blocks.push({
+					type: 'table',
+					key: `table:${blocks.length}`,
+					table: parseMaterialReportTable(tableLines, document)
+				});
+			}
+			tableLines = [];
+		};
+		const flushCode = () => {
+			if (!codeLines.length) return;
+			blocks.push({
+				type: 'code',
+				key: `code:${blocks.length}`,
+				text: codeLines.join('\n')
+			});
+			codeLines = [];
 		};
 
 		for (const line of document.markdown.split('\n')) {
 			const text = line.trim();
-			if (!text) {
-				flushList();
+			if (/^```/.test(text)) {
+				if (inCodeBlock) {
+					flushCode();
+					inCodeBlock = false;
+				} else {
+					flushList();
+					flushTable();
+					inCodeBlock = true;
+				}
 				continue;
 			}
+			if (inCodeBlock) {
+				codeLines.push(line.replace(/\s+$/g, ''));
+				continue;
+			}
+			if (!text) {
+				flushList();
+				flushTable();
+				continue;
+			}
+			if (/^-{3,}$/.test(text)) {
+				flushList();
+				flushTable();
+				blocks.push({ type: 'rule', key: `rule:${blocks.length}` });
+				continue;
+			}
+			if (isMaterialReportTableLine(text)) {
+				flushList();
+				tableLines.push(text);
+				continue;
+			}
+			flushTable();
 			const heading = /^(#{1,3})\s+(.+)$/.exec(text);
 			if (heading) {
 				flushList();
@@ -1167,9 +1229,24 @@
 				});
 				continue;
 			}
-			const listItem = /^-\s+(.+)$/.exec(text);
+			const listItem = /^(-|\d+\.)\s+(.+)$/.exec(text);
 			if (listItem) {
-				listItems.push(parseMaterialReportInline(listItem[1], document));
+				const ordered = listItem[1].endsWith('.');
+				if (listItems.length && listOrdered !== ordered) {
+					flushList();
+				}
+				listOrdered = ordered;
+				listItems.push(parseMaterialReportInline(listItem[2], document));
+				continue;
+			}
+			const quote = /^>\s+(.+)$/.exec(text);
+			if (quote) {
+				flushList();
+				blocks.push({
+					type: 'quote',
+					key: `quote:${blocks.length}`,
+					parts: parseMaterialReportInline(quote[1], document)
+				});
 				continue;
 			}
 			flushList();
@@ -1179,8 +1256,41 @@
 				parts: parseMaterialReportInline(text, document)
 			});
 		}
+		if (inCodeBlock) flushCode();
+		flushTable();
 		flushList();
 		return blocks;
+	}
+
+	function isMaterialReportTableLine(text: string) {
+		return text.startsWith('|') && text.endsWith('|') && text.includes('|');
+	}
+
+	function isMaterialReportTableSeparator(text: string) {
+		return /^\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|$/.test(text);
+	}
+
+	function parseMaterialReportTableLine(text: string) {
+		return text
+			.slice(1, -1)
+			.split('|')
+			.map((cell) => cell.trim());
+	}
+
+	function parseMaterialReportTable(
+		lines: string[],
+		document: MaterialReportDocument
+	): MaterialReportMarkdownTable {
+		const headerLine = lines[0] ?? '';
+		const bodyLines = isMaterialReportTableSeparator(lines[1] ?? '') ? lines.slice(2) : lines.slice(1);
+		return {
+			headers: parseMaterialReportTableLine(headerLine).map((cell) =>
+				parseMaterialReportInline(cell, document)
+			),
+			rows: bodyLines.map((row) =>
+				parseMaterialReportTableLine(row).map((cell) => parseMaterialReportInline(cell, document))
+			)
+		};
 	}
 
 	function parseMaterialReportInline(text: string, document: MaterialReportDocument) {
@@ -1248,6 +1358,18 @@
 				href: evidenceHref(ref, collectionId)
 			}
 		});
+	}
+
+	function tableHeaderLabel(parts: MaterialReportMarkdownInline[]) {
+		const text = parts
+			.map((part) => (part.type === 'text' ? part.text : part.id))
+			.join('')
+			.trim();
+		return text || 'column';
+	}
+
+	function renderedTableHeaderLabel(table: MaterialReportMarkdownTable, index: number) {
+		return tableHeaderLabel(table.headers[index] ?? []);
 	}
 
 	function chainMetricRows(
@@ -2413,8 +2535,8 @@
 												{/if}
 											{/each}
 										</p>
-									{:else}
-										<ul>
+									{:else if block.type === 'list'}
+										<svelte:element this={block.ordered ? 'ol' : 'ul'}>
 											{#each block.items as item}
 												<li>
 													{#each item as part}
@@ -2432,7 +2554,76 @@
 													{/each}
 												</li>
 											{/each}
-										</ul>
+										</svelte:element>
+									{:else if block.type === 'table'}
+										<div class="report-table-scroll">
+											<table>
+												<thead>
+													<tr>
+														{#each block.table.headers as header}
+															<th>
+																{#each header as part}
+																	{#if part.type === 'citation'}
+																		<button
+																			type="button"
+																			class="report-citation"
+																			on:click={() => openReportCitation(reportDocument, part.id)}
+																		>
+																			[{part.id}]
+																		</button>
+																	{:else}
+																		{part.text}
+																	{/if}
+																{/each}
+															</th>
+														{/each}
+													</tr>
+												</thead>
+												<tbody>
+													{#each block.table.rows as row}
+														<tr>
+															{#each row as cell, index}
+																<td data-label={renderedTableHeaderLabel(block.table, index)}>
+																	{#each cell as part}
+																		{#if part.type === 'citation'}
+																			<button
+																				type="button"
+																				class="report-citation"
+																				on:click={() => openReportCitation(reportDocument, part.id)}
+																			>
+																				[{part.id}]
+																			</button>
+																		{:else}
+																			{part.text}
+																		{/if}
+																	{/each}
+																</td>
+															{/each}
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									{:else if block.type === 'code'}
+										<pre><code>{block.text}</code></pre>
+									{:else if block.type === 'quote'}
+										<blockquote>
+											{#each block.parts as part}
+												{#if part.type === 'citation'}
+													<button
+														type="button"
+														class="report-citation"
+														on:click={() => openReportCitation(reportDocument, part.id)}
+													>
+														[{part.id}]
+													</button>
+												{:else}
+													{part.text}
+												{/if}
+											{/each}
+										</blockquote>
+									{:else if block.type === 'rule'}
+										<hr />
 									{/if}
 								{/each}
 							</article>
@@ -3729,6 +3920,76 @@
 		padding-left: 20px;
 	}
 
+	.material-report-markdown ol {
+		display: grid;
+		gap: 7px;
+		margin: 0;
+		padding-left: 22px;
+	}
+
+	.material-report-markdown hr {
+		width: 100%;
+		margin: 6px 0;
+		border: 0;
+		border-top: 1px solid #e2e8f0;
+	}
+
+	.material-report-markdown blockquote {
+		margin: 0;
+		padding: 10px 12px;
+		border-left: 3px solid #2563eb;
+		background: #f8fbff;
+		color: #334155;
+		font-size: 14px;
+		line-height: 23px;
+	}
+
+	.material-report-markdown pre {
+		margin: 0;
+		padding: 12px;
+		overflow-x: auto;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		background: #f8fafc;
+		color: #0f172a;
+		font-size: 13px;
+		line-height: 21px;
+	}
+
+	.report-table-scroll {
+		overflow-x: auto;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		background: #ffffff;
+	}
+
+	.material-report-markdown table {
+		width: 100%;
+		border-collapse: collapse;
+		min-width: 560px;
+	}
+
+	.material-report-markdown th,
+	.material-report-markdown td {
+		padding: 9px 11px;
+		border-bottom: 1px solid #e2e8f0;
+		text-align: left;
+		vertical-align: top;
+		color: #334155;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.material-report-markdown th {
+		background: #f8fafc;
+		color: #0f172a;
+		font-weight: 800;
+	}
+
+	.material-report-markdown tr:last-child td {
+		border-bottom: 0;
+	}
+
 	.report-citation {
 		display: inline-flex;
 		align-items: center;
@@ -4757,6 +5018,48 @@
 
 		.comparison-bars {
 			grid-template-columns: 1fr;
+		}
+
+		.report-table-scroll {
+			overflow-x: visible;
+			border: 0;
+			background: transparent;
+		}
+
+		.material-report-markdown table,
+		.material-report-markdown thead,
+		.material-report-markdown tbody,
+		.material-report-markdown tr,
+		.material-report-markdown th,
+		.material-report-markdown td {
+			display: block;
+			width: 100%;
+			min-width: 0;
+		}
+
+		.material-report-markdown thead {
+			display: none;
+		}
+
+		.material-report-markdown tr {
+			margin-bottom: 10px;
+			border: 1px solid #e2e8f0;
+			border-radius: 8px;
+			background: #ffffff;
+			overflow: hidden;
+		}
+
+		.material-report-markdown td {
+			display: grid;
+			grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+			gap: 10px;
+			border-bottom: 1px solid #e2e8f0;
+		}
+
+		.material-report-markdown td::before {
+			content: attr(data-label);
+			color: #64748b;
+			font-weight: 800;
 		}
 	}
 </style>

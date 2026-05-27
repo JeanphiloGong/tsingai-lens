@@ -1,9 +1,13 @@
 <script lang="ts">
   import './layout.css';
+  import { browser } from '$app/environment';
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { authState, clearAuthState, fetchCurrentSession, logout } from './_shared/auth';
   import { API_DOCS_PATH } from './_shared/base';
   import { collections } from './_shared/collections';
+  import { errorMessage } from './_shared/api';
   import { language, t } from './_shared/i18n';
   import { themePreference } from './_shared/theme';
   import type { ThemePreference } from './_shared/theme';
@@ -13,6 +17,16 @@
   let isThemeOpen = false;
   let themeMenu: HTMLDivElement | null = null;
   let globalSearch = '';
+  let authError = '';
+
+  $: isLoginRoute = $page.url.pathname === '/login';
+  $: authenticatedUser = $authState.user;
+  $: userInitial = (authenticatedUser?.display_name || authenticatedUser?.email || 'U')
+    .slice(0, 1)
+    .toUpperCase();
+  $: if (browser && $authState.status === 'anonymous' && !isLoginRoute) {
+    void goto('/login', { replaceState: true });
+  }
 
   function decodeRoutePart(value: string) {
     try {
@@ -66,7 +80,36 @@
     }
   }
 
+  async function loadSession() {
+    authError = '';
+    try {
+      const user = await fetchCurrentSession();
+      if (!user && !isLoginRoute) {
+        await goto('/login', { replaceState: true });
+      }
+    } catch (error) {
+      authError = errorMessage(error);
+      if (!isLoginRoute) {
+        await goto('/login', { replaceState: true });
+      }
+    }
+  }
+
+  async function submitLogout() {
+    authError = '';
+    try {
+      await logout();
+    } catch (error) {
+      authError = errorMessage(error);
+      clearAuthState();
+    }
+    collections.set([]);
+    await goto('/login', { replaceState: true });
+  }
+
   onMount(() => {
+    void loadSession();
+
     const handleClick = (event: MouseEvent) => {
       const target = event.target as Node;
       if (isLangOpen && langMenu && !langMenu.contains(target)) {
@@ -200,12 +243,25 @@
         {/if}
       </div>
       <button class="avatar-placeholder" type="button" aria-label={$t('header.userMenuLabel')}>
-        <span aria-hidden="true">U</span>
+        <span aria-hidden="true">{userInitial}</span>
       </button>
+      {#if authenticatedUser}
+        <div class="session-summary" title={authenticatedUser.email}>
+          <span class="session-summary__name">
+            {authenticatedUser.display_name || authenticatedUser.email}
+          </span>
+          <button class="header-action" type="button" on:click={submitLogout}>
+            {$t('auth.logout')}
+          </button>
+        </div>
+      {/if}
     </div>
   </header>
 
   <main class="page" class:page--wide={isGraphRoute}>
+    {#if authError}
+      <div class="status status--error" role="status">{authError}</div>
+    {/if}
     <slot />
   </main>
 

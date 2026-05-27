@@ -35,6 +35,18 @@ const translations: Record<Language, Translations> = {
 			themeLight: 'Light',
 			themeDark: 'Dark'
 		},
+		auth: {
+			pageTitle: 'Sign in - Lens',
+			eyebrow: 'Private workspace',
+			title: 'Sign in to Lens',
+			lead: 'Use your workspace account before opening collections or generated research evidence.',
+			email: 'Email',
+			password: 'Password',
+			signIn: 'Sign in',
+			signingIn: 'Signing in...',
+			logout: 'Log out',
+			missingCredentials: 'Enter your email and password.'
+		},
 		footer: {
 			pdfNote: 'PDFs must contain selectable text. Scanned PDFs are not supported.'
 		},
@@ -2642,6 +2654,18 @@ const translations: Record<Language, Translations> = {
 			themeSystem: '跟随系统',
 			themeLight: '浅色',
 			themeDark: '深色'
+		},
+		auth: {
+			pageTitle: '登录 - Lens',
+			eyebrow: '私有工作区',
+			title: '登录 Lens',
+			lead: '请先使用工作区账号登录，再打开集合和生成的研究证据。',
+			email: '邮箱',
+			password: '密码',
+			signIn: '登录',
+			signingIn: '登录中...',
+			logout: '退出',
+			missingCredentials: '请输入邮箱和密码。'
 		},
 		footer: {
 			pdfNote: 'PDF 需可复制文本，扫描版暂不支持。'

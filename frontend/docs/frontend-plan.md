@@ -10,11 +10,13 @@
 - 浏览器公开业务 API 统一走 `/api/v1/*`
 - 文档与 OpenAPI 入口统一走 `/api/*`
 - API 文档地址：`/api/docs`
-- 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求
+- 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求，并用
+  same-origin cookie 传递登录会话
 
 ## 产品主流程
 
 - 首页集合列表：`GET /api/v1/collections`
+- 登录会话：`POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`

@@ -3958,14 +3958,21 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
                     ],
                     ["as-SLM (100/100)", "-", "100", "100", "278", "97.83"],
                     [
-                        "HT-SLM (100/100)",
+                        "100) HT-SLM (100/100)",
                         "Furnace HT",
                         "100",
                         "100",
                         "278",
                         "98.70",
                     ],
-                    ["HIP-SLM (100/100)", "HIP", "100", "100", "278", "98.15"],
+                    [
+                        "100) HIP-SLM (100/100)",
+                        "HIP",
+                        "100",
+                        "100",
+                        "278",
+                        "98.15",
+                    ],
                 ],
                 confidence=0.88,
             )
@@ -3992,12 +3999,21 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
     )
 
     assert len(extractor.repair_payloads) == 1
-    assert extractor.repair_payloads[0]["source"]["table_cells"][0] == {
+    repair_payload = extractor.repair_payloads[0]
+    assert set(repair_payload) == {"table_role", "repair_focus", "source"}
+    assert "objective" not in repair_payload
+    assert "paper_frame" not in repair_payload
+    assert "evidence_route" not in repair_payload
+    assert repair_payload["source"]["table_cells"][0] == {
         "row_index": 1,
         "col_index": 0,
         "header_path": "Specimens",
         "cell_text": "as-SLM (100/",
     }
+    assert all(
+        cell["col_index"] == 0
+        for cell in repair_payload["source"]["table_cells"]
+    )
     assert extractor.unit_payloads == []
     measurements = [unit for unit in units if unit.unit_kind == "measurement"]
     assert len(measurements) == 3
@@ -4015,6 +4031,10 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
         "HT-SLM (100/100)",
         "HIP-SLM (100/100)",
     }
+    assert all(
+        "100) HT-SLM" not in label and "100) HIP-SLM" not in label
+        for label in sample_labels
+    )
     assert all(
         unit.material_system == {"family": "316L stainless steel"}
         for unit in measurements

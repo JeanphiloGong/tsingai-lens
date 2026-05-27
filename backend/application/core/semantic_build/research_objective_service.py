@@ -6924,7 +6924,6 @@ class ResearchObjectiveService:
                 extractor=extractor,
                 route=route,
                 source=source,
-                payload=payload,
             )
             payload["source"] = source
             route_unit_start = len(units)
@@ -7103,15 +7102,18 @@ class ResearchObjectiveService:
         extractor: CoreLLMStructuredExtractor,
         route: ObjectiveEvidenceRoute,
         source: dict[str, Any],
-        payload: dict[str, Any],
     ) -> dict[str, Any]:
         if not self._objective_table_source_needs_llm_structural_repair(
             route=route,
             source=source,
         ):
             return source
+        repair_payload = self._build_objective_table_matrix_repair_payload(
+            route=route,
+            source=source,
+        )
         try:
-            parsed = extractor.repair_table_matrix(payload)
+            parsed = extractor.repair_table_matrix(repair_payload)
         except Exception:
             logger.exception(
                 "Research objective table matrix repair failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_ref=%s",
@@ -7131,6 +7133,13 @@ class ResearchObjectiveService:
         original_matrix = self._normalized_objective_table_matrix(
             source.get("table_matrix")
         )
+        repaired_matrix, residual_repairs = (
+            self._cleanup_objective_repaired_table_matrix_residual_fragments(
+                original_matrix=original_matrix,
+                repaired_matrix=repaired_matrix,
+                column_headers=source.get("column_headers", ()),
+            )
+        )
         if repaired_matrix == original_matrix:
             return source
         repaired_source = dict(source)
@@ -7142,13 +7151,17 @@ class ResearchObjectiveService:
             )
         )
         repairs = getattr(parsed, "repairs", None)
+        repair_records = []
         if repairs:
-            repaired_source["table_matrix_repairs"] = [
+            repair_records.extend(
                 repair_item.model_dump()
                 if hasattr(repair_item, "model_dump")
                 else repair_item
                 for repair_item in repairs
-            ]
+            )
+        repair_records.extend(residual_repairs)
+        if repair_records:
+            repaired_source["table_matrix_repairs"] = repair_records
         warnings = getattr(parsed, "warnings", None)
         if warnings:
             repaired_source["table_matrix_repair_warnings"] = [
@@ -7157,6 +7170,77 @@ class ResearchObjectiveService:
                 if str(warning).strip()
             ]
         return repaired_source
+
+    def _build_objective_table_matrix_repair_payload(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        compact_source = {
+            "source_kind": source.get("source_kind"),
+            "source_ref": source.get("source_ref"),
+            "document_id": source.get("document_id"),
+            "page": source.get("page"),
+            "caption_text": source.get("caption_text"),
+            "heading_path": source.get("heading_path"),
+            "column_headers": [
+                str(value)
+                for value in source.get("column_headers", ())
+                if str(value).strip()
+            ],
+            "table_matrix": self._normalized_objective_table_matrix(
+                source.get("table_matrix")
+            ),
+            "table_cells": self._compact_objective_table_cells_for_repair(source),
+        }
+        return {
+            "table_role": route.role,
+            "repair_focus": [
+                "repair parser-split cells",
+                "preserve table width",
+                "preserve numeric result cells exactly",
+            ],
+            "source": {
+                key: value
+                for key, value in compact_source.items()
+                if value not in (None, "", [], {})
+            },
+        }
+
+    def _compact_objective_table_cells_for_repair(
+        self,
+        source: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        cells = source.get("table_cells")
+        if not isinstance(cells, list):
+            return []
+        fragmented_columns = {
+            cell.get("col_index")
+            for cell in cells
+            if isinstance(cell, dict)
+            and self._objective_cell_text_looks_structurally_fragmented(
+                str(cell.get("cell_text") or "")
+            )
+        }
+        if not fragmented_columns:
+            return []
+        compact_cells: list[dict[str, Any]] = []
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+            col_index = cell.get("col_index")
+            if col_index not in fragmented_columns and col_index != 0:
+                continue
+            compact_cells.append(
+                {
+                    "row_index": cell.get("row_index"),
+                    "col_index": col_index,
+                    "header_path": cell.get("header_path"),
+                    "cell_text": str(cell.get("cell_text") or ""),
+                }
+            )
+        return compact_cells
 
     def _validated_objective_repaired_table_matrix(
         self,
@@ -7195,6 +7279,86 @@ class ResearchObjectiveService:
             for row in value
             if isinstance(row, (list, tuple))
         ]
+
+    def _cleanup_objective_repaired_table_matrix_residual_fragments(
+        self,
+        *,
+        original_matrix: list[list[str]],
+        repaired_matrix: list[list[str]],
+        column_headers: Any,
+    ) -> tuple[list[list[str]], list[dict[str, Any]]]:
+        if not original_matrix or not repaired_matrix:
+            return repaired_matrix, []
+        headers = [str(value).strip() for value in column_headers or ()]
+        cleaned_matrix: list[list[str]] = []
+        repairs: list[dict[str, Any]] = []
+        for row_index, repaired_row in enumerate(repaired_matrix):
+            original_row = (
+                original_matrix[row_index]
+                if row_index < len(original_matrix)
+                else []
+            )
+            cleaned_row: list[str] = []
+            for col_index, repaired_cell in enumerate(repaired_row):
+                original_cell = (
+                    original_row[col_index]
+                    if col_index < len(original_row)
+                    else ""
+                )
+                cleaned_cell = self._cleanup_objective_repaired_cell_residual_prefix(
+                    original_cell=original_cell,
+                    repaired_cell=repaired_cell,
+                )
+                cleaned_row.append(cleaned_cell)
+                if cleaned_cell != repaired_cell:
+                    repairs.append(
+                        {
+                            "row_index": row_index,
+                            "column": (
+                                headers[col_index]
+                                if col_index < len(headers)
+                                else str(col_index)
+                            ),
+                            "before": repaired_cell,
+                            "after": cleaned_cell,
+                            "reason": (
+                                "Removed a leading closing-fragment prefix that "
+                                "belonged to the previous parser-split row label."
+                            ),
+                        }
+                    )
+            cleaned_matrix.append(cleaned_row)
+        return cleaned_matrix, repairs
+
+    def _cleanup_objective_repaired_cell_residual_prefix(
+        self,
+        *,
+        original_cell: str,
+        repaired_cell: str,
+    ) -> str:
+        original = " ".join(str(original_cell or "").split())
+        repaired = " ".join(str(repaired_cell or "").split())
+        if not original or not repaired:
+            return repaired_cell
+        if not self._objective_cell_text_looks_structurally_fragmented(original):
+            return repaired_cell
+        match = re.match(r"^([^\s()[\]{}|]{1,32}\))\s+(.+)$", original)
+        if match is None:
+            return repaired_cell
+        prefix = f"{match.group(1)} "
+        original_remainder = match.group(2).strip()
+        if not self._objective_cell_text_looks_structurally_fragmented(
+            original_remainder
+        ):
+            return repaired_cell
+        if not repaired.startswith(prefix):
+            return repaired_cell
+        candidate = repaired[len(prefix):].strip()
+        if not candidate:
+            return repaired_cell
+        if self._objective_cell_text_looks_structurally_fragmented(candidate):
+            return repaired_cell
+        return candidate
 
     def _objective_table_matrix_has_structural_fragments(
         self,

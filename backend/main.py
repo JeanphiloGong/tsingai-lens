@@ -2,6 +2,8 @@ import os
 from time import perf_counter
 
 from config import DATA_DIR
+from application.auth import AuthSessionService, SessionNotFoundError
+from controllers import auth
 from controllers.core import (
     comparable_results,
     comparisons,
@@ -17,8 +19,8 @@ from controllers.goal import intake as goals
 from controllers.goal import sessions as goal_sessions
 from controllers.source import collections, references, tasks
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from utils.logger import (
     REQUEST_ID_HEADER,
@@ -32,6 +34,10 @@ logger = setup_logger("lens")
 
 PUBLIC_API_PREFIX = "/api"
 PUBLIC_API_V1_PREFIX = f"{PUBLIC_API_PREFIX}/v1"
+_AUTH_EXEMPT_PATHS = {
+    f"{PUBLIC_API_V1_PREFIX}/auth/login",
+    f"{PUBLIC_API_V1_PREFIX}/auth/logout",
+}
 
 
 def _parse_cors_allowed_origins() -> list[str]:
@@ -49,6 +55,8 @@ def create_app() -> FastAPI:
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
     )
+    app.state.auth_session_service = AuthSessionService()
+    app.state.auth_session_service.ensure_bootstrap_user()
     cors_allowed_origins = _parse_cors_allowed_origins()
     app.add_middleware(
         CORSMiddleware,
@@ -103,8 +111,43 @@ def create_app() -> FastAPI:
         finally:
             clear_request_id(token)
 
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        if not _requires_auth(request):
+            return await call_next(request)
+
+        try:
+            user = request.app.state.auth_session_service.resolve_session(
+                request.cookies.get("lens_session")
+            )
+        except SessionNotFoundError:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": {
+                        "code": "authentication_required",
+                        "message": "Authentication is required.",
+                    }
+                },
+            )
+
+        request.state.current_user = user
+        collection_id = _extract_collection_id(request.url.path)
+        if collection_id and not _user_owns_collection(collection_id, user["user_id"]):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": {
+                        "code": "collection_not_found",
+                        "message": f"collection not found: {collection_id}",
+                        "collection_id": collection_id,
+                    }
+                },
+            )
+        return await call_next(request)
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    app.mount(f"{PUBLIC_API_PREFIX}/static", StaticFiles(directory=DATA_DIR), name="static")
+    app.include_router(auth.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(material_review_reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
@@ -122,6 +165,30 @@ def create_app() -> FastAPI:
     app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparable_results.router, prefix=PUBLIC_API_V1_PREFIX)
     return app
+
+
+def _requires_auth(request: Request) -> bool:
+    path = request.url.path
+    if not path.startswith(f"{PUBLIC_API_V1_PREFIX}/"):
+        return False
+    return path not in _AUTH_EXEMPT_PATHS
+
+
+def _extract_collection_id(path: str) -> str | None:
+    prefix = f"{PUBLIC_API_V1_PREFIX}/collections/"
+    if not path.startswith(prefix):
+        return None
+    remainder = path[len(prefix) :]
+    collection_id = remainder.split("/", 1)[0].strip()
+    return collection_id or None
+
+
+def _user_owns_collection(collection_id: str, user_id: str) -> bool:
+    try:
+        collections.collection_service.get_collection_for_user(collection_id, user_id)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 app = create_app()

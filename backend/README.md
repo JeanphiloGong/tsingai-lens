@@ -34,11 +34,10 @@ next to code.
 ## Public HTTP Contract
 
 - Business APIs: `/api/v1/*`
-- Docs/OpenAPI/Static: `/api/*`
+- Docs/OpenAPI: `/api/*`
   - `/api/docs`
   - `/api/redoc`
   - `/api/openapi.json`
-  - `/api/static/*`
 
 ## Formal Backend Docs
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
+from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.collection import (
     CollectionCreateRequest,
     CollectionDeleteResponse,
@@ -17,24 +18,34 @@ collection_service = CollectionService()
 
 
 @router.post("", response_model=CollectionResponse, summary="创建论文集合")
-async def create_collection(payload: CollectionCreateRequest) -> CollectionResponse:
+async def create_collection(
+    payload: CollectionCreateRequest,
+    request: Request,
+) -> CollectionResponse:
     record = collection_service.create_collection(
         name=payload.name,
         description=payload.description,
+        owner_user_id=current_user_id(request),
     )
     return CollectionResponse(**record)
 
 
 @router.get("", response_model=CollectionListResponse, summary="列出论文集合")
-async def list_collections() -> CollectionListResponse:
-    items = [CollectionResponse(**record) for record in collection_service.list_collections()]
+async def list_collections(request: Request) -> CollectionListResponse:
+    items = [
+        CollectionResponse(**record)
+        for record in collection_service.list_collections(current_user_id(request))
+    ]
     return CollectionListResponse(items=items)
 
 
 @router.get("/{collection_id}", response_model=CollectionResponse, summary="获取集合详情")
-async def get_collection(collection_id: str) -> CollectionResponse:
+async def get_collection(collection_id: str, request: Request) -> CollectionResponse:
     try:
-        record = collection_service.get_collection(collection_id)
+        record = collection_service.get_collection_for_user(
+            collection_id,
+            current_user_id(request),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return CollectionResponse(**record)
@@ -45,9 +56,12 @@ async def get_collection(collection_id: str) -> CollectionResponse:
     response_model=CollectionDeleteResponse,
     summary="删除论文集合",
 )
-async def delete_collection(collection_id: str) -> CollectionDeleteResponse:
+async def delete_collection(collection_id: str, request: Request) -> CollectionDeleteResponse:
     try:
-        result = collection_service.delete_collection(collection_id)
+        result = collection_service.delete_collection_for_user(
+            collection_id,
+            current_user_id(request),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -62,9 +76,11 @@ async def delete_collection(collection_id: str) -> CollectionDeleteResponse:
 )
 async def upload_collection_file(
     collection_id: str,
+    request: Request,
     file: UploadFile = File(...),
 ) -> CollectionFileResponse:
     try:
+        collection_service.get_collection_for_user(collection_id, current_user_id(request))
         content = await file.read()
         record = collection_service.add_file(
             collection_id=collection_id,
@@ -84,8 +100,12 @@ async def upload_collection_file(
     response_model=CollectionFileListResponse,
     summary="列出集合文件",
 )
-async def list_collection_files(collection_id: str) -> CollectionFileListResponse:
+async def list_collection_files(
+    collection_id: str,
+    request: Request,
+) -> CollectionFileListResponse:
     try:
+        collection_service.get_collection_for_user(collection_id, current_user_id(request))
         items = [
             CollectionFileResponse(**record)
             for record in collection_service.list_files(collection_id)

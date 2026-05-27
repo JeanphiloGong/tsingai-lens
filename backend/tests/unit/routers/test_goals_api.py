@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,10 @@ from application.source.collection_service import CollectionService
 from application.goal.brief_service import GoalService
 from controllers.goal import intake as goals_controller
 from controllers.schemas.goal.intake import GoalIntakeRequest
+
+
+def _request(user_id: str = "local-user"):
+    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
 
 @pytest.fixture()
@@ -35,7 +40,8 @@ def test_goals_route_returns_goal_contract(goal_services):
                 target_property="adhesion strength",
                 intent="compare",
                 constraints={"substrate": "Al"},
-            )
+            ),
+            _request(),
         )
     )
 
@@ -61,7 +67,8 @@ def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
                     intent="explore",
                     constraints={},
                     context=None,
-                )
+                ),
+                _request(),
             )
         )
 

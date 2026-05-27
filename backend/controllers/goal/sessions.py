@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from application.goal.session_service import (
     GoalSessionNotFoundError,
     GoalSessionService,
 )
+from controllers.dependencies.auth import current_user_id
 from controllers.schemas.goal.session import (
     GoalSessionCreateRequest,
     GoalSessionMessageListResponse,
@@ -32,10 +33,14 @@ def _not_found_detail(exc: GoalSessionNotFoundError) -> dict[str, str]:
     response_model=GoalSessionResponse,
     summary="Create a collection-bound goal session",
 )
-async def create_goal_session(payload: GoalSessionCreateRequest) -> GoalSessionResponse:
+async def create_goal_session(
+    payload: GoalSessionCreateRequest,
+    request: Request,
+) -> GoalSessionResponse:
     try:
         session = goal_session_service.create_session(
             collection_id=payload.collection_id,
+            user_id=current_user_id(request),
             focused_material_id=payload.focused_material_id,
             focused_paper_id=payload.focused_paper_id,
             focused_objective_id=payload.focused_objective_id,
@@ -55,9 +60,15 @@ async def create_goal_session(payload: GoalSessionCreateRequest) -> GoalSessionR
     response_model=GoalSessionResponse,
     summary="Read a collection-bound goal session",
 )
-async def get_goal_session(session_id: str) -> GoalSessionResponse:
+async def get_goal_session(
+    session_id: str,
+    request: Request,
+) -> GoalSessionResponse:
     try:
-        session = goal_session_service.get_session(session_id)
+        session = goal_session_service.get_session_for_user(
+            session_id,
+            current_user_id(request),
+        )
     except GoalSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_not_found_detail(exc)) from exc
     except FileNotFoundError as exc:
@@ -73,10 +84,12 @@ async def get_goal_session(session_id: str) -> GoalSessionResponse:
 async def update_goal_session(
     session_id: str,
     payload: GoalSessionUpdateRequest,
+    request: Request,
 ) -> GoalSessionResponse:
     try:
-        session = goal_session_service.update_session(
+        session = goal_session_service.update_session_for_user(
             session_id,
+            current_user_id(request),
             **payload.model_dump(exclude_unset=True),
         )
     except GoalSessionNotFoundError as exc:
@@ -96,10 +109,12 @@ async def update_goal_session(
 async def post_goal_session_message(
     session_id: str,
     payload: GoalSessionMessageRequest,
+    request: Request,
 ) -> GoalSessionMessageResponse:
     try:
-        response = goal_session_service.post_message(
+        response = goal_session_service.post_message_for_user(
             session_id,
+            current_user_id(request),
             message=payload.message,
             page_context=payload.page_context,
         )
@@ -117,9 +132,15 @@ async def post_goal_session_message(
     response_model=GoalSessionMessageListResponse,
     summary="List goal session messages",
 )
-async def list_goal_session_messages(session_id: str) -> GoalSessionMessageListResponse:
+async def list_goal_session_messages(
+    session_id: str,
+    request: Request,
+) -> GoalSessionMessageListResponse:
     try:
-        response = goal_session_service.list_messages(session_id)
+        response = goal_session_service.list_messages_for_user(
+            session_id,
+            current_user_id(request),
+        )
     except GoalSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_not_found_detail(exc)) from exc
     return GoalSessionMessageListResponse(**response)

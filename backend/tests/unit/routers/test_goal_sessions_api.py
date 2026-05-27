@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,10 @@ from controllers.schemas.goal.session import (
     GoalSessionMessageRequest,
 )
 from infra.persistence.factory import build_goal_session_repository
+
+
+def _request(user_id: str = "local-user"):
+    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
 
 class _FakeMessage:
@@ -76,7 +81,8 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
             GoalSessionCreateRequest(
                 collection_id=collection["collection_id"],
                 focused_objective_id="obj_lpbf_strength",
-            )
+            ),
+            _request(),
         )
     )
     response = asyncio.run(
@@ -86,10 +92,11 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
                 message="What does the collection say?",
                 page_context={},
             ),
+            _request(),
         )
     )
     messages = asyncio.run(
-        sessions_controller.list_goal_session_messages(session.session_id)
+        sessions_controller.list_goal_session_messages(session.session_id, _request())
     )
 
     assert session.collection_id == collection["collection_id"]
@@ -105,7 +112,25 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
 
 def test_goal_sessions_route_returns_404_for_missing_session(goal_session_services):
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(sessions_controller.get_goal_session("gs_missing"))
+        asyncio.run(sessions_controller.get_goal_session("gs_missing", _request()))
+
+    exc = exc_info.value
+    assert exc.status_code == 404
+    assert exc.detail["code"] == "goal_session_not_found"
+
+
+def test_goal_sessions_route_hides_other_user_session(goal_session_services):
+    collection_service, _service = goal_session_services
+    collection = collection_service.create_collection("Copilot Collection")
+    session = asyncio.run(
+        sessions_controller.create_goal_session(
+            GoalSessionCreateRequest(collection_id=collection["collection_id"]),
+            _request("user-a"),
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(sessions_controller.get_goal_session(session.session_id, _request("user-b")))
 
     exc = exc_info.value
     assert exc.status_code == 404

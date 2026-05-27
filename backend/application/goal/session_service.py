@@ -130,6 +130,7 @@ class GoalSessionService:
         self,
         *,
         collection_id: str,
+        user_id: str = "local-user",
         focused_material_id: str | None = None,
         focused_paper_id: str | None = None,
         focused_objective_id: str | None = None,
@@ -141,7 +142,7 @@ class GoalSessionService:
         now = _now_iso()
         session = GoalSessionRecord.create(
             session_id=f"gs_{uuid4().hex[:12]}",
-            user_id="local-user",
+            user_id=user_id,
             collection_id=collection["collection_id"],
             focused_material_id=focused_material_id,
             focused_paper_id=focused_paper_id,
@@ -166,6 +167,12 @@ class GoalSessionService:
             collection_data_version=collection_data_version,
             updated_at=session.updated_at,
         ).to_record()
+
+    def get_session_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        if session["user_id"] != user_id:
+            raise GoalSessionNotFoundError(session_id)
+        return session
 
     def update_session(
         self,
@@ -221,12 +228,28 @@ class GoalSessionService:
         self._write_session(session_record)
         return session_record
 
+    def update_session_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        self.get_session_for_user(session_id, user_id)
+        session = self.update_session(session_id, **fields)
+        if session["user_id"] != user_id:
+            raise GoalSessionNotFoundError(session_id)
+        return session
+
     def list_messages(self, session_id: str) -> dict[str, Any]:
         session = GoalSessionRecord.from_mapping(self._read_session(session_id))
         return {
             "session_id": session.session_id,
             "items": self._read_messages(session.session_id),
         }
+
+    def list_messages_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
+        self.get_session_for_user(session_id, user_id)
+        return self.list_messages(session_id)
 
     def post_message(
         self,
@@ -262,6 +285,21 @@ class GoalSessionService:
         self._write_session(session_record)
         self._write_messages(session_record, messages)
         return response
+
+    def post_message_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        message: str,
+        page_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.get_session_for_user(session_id, user_id)
+        return self.post_message(
+            session_id,
+            message=message,
+            page_context=page_context,
+        )
 
     def _answer_message(
         self, session: GoalSessionRecord, message: str

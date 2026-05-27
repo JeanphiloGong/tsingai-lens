@@ -23,6 +23,7 @@ def test_collection_record_normalizes_legacy_meta_shape() -> None:
     assert record.updated_at == "2026-01-15T12:03:14.032160+00:00"
     assert record.to_record() == {
         "collection_id": "default",
+        "owner_user_id": "local-user",
         "name": "default",
         "description": None,
         "status": "idle",

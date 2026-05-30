@@ -13,11 +13,14 @@
 		type MaterialReviewReport
 	} from '../../../../_shared/materialReviewReport';
 	import {
+		createMaterialReport,
+		fetchMaterialReport,
 		fetchMaterialResearchView,
 		formatEvidenceBackedValue,
 		formatShortIdentifier,
 		type EvidenceBackedValue,
 		type EvidenceReference,
+		type MaterialReportArtifact,
 		type MaterialReportDocument,
 		type MaterialReportPerformanceResult,
 		type MaterialReportStateChain,
@@ -268,6 +271,9 @@
 	let pdfReportLoading = false;
 	let pdfReportError = '';
 	let pdfReportPollTimer: number | null = null;
+	let materialReport: MaterialReportArtifact | null = null;
+	let materialReportLoading = false;
+	let materialReportError = '';
 	let loading = false;
 	let error = '';
 	let loadedKey = '';
@@ -278,7 +284,13 @@
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
 	$: reportPackage = materialProfile?.report_package ?? null;
-	$: reportDocument = reportPackage?.document ?? null;
+	$: materialReportReady =
+		materialReport?.markdown &&
+		(materialReport.status === 'ready' || materialReport.status === 'ready_with_warnings');
+	$: reportDocument =
+		materialReportReady && materialReport
+			? materialReportDocumentFromArtifact(materialReport)
+			: (reportPackage?.document ?? null);
 	$: reportDocumentBlocks = reportDocument ? parseMaterialReportMarkdown(reportDocument) : [];
 	$: reportChains = reportPackage?.representative_states?.length
 		? reportPackage.representative_states
@@ -355,6 +367,7 @@
 	$: if (collectionId && materialId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		resetPdfReportState();
+		resetMaterialReportState();
 		void loadMaterialPage();
 	}
 	$: pdfReportReady = pdfReport?.status === 'ready' || pdfReport?.status === 'ready_with_warnings';
@@ -365,6 +378,7 @@
 
 	async function loadMaterialPage() {
 		await loadMaterialProfile();
+		await loadMaterialReportStatus();
 	}
 
 	async function loadMaterialProfile() {
@@ -380,6 +394,59 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function loadMaterialReportStatus() {
+		if (!collectionId || !materialId) return;
+		const requestedCollection = collectionId;
+		const requestedMaterial = materialId;
+		materialReportLoading = true;
+		materialReportError = '';
+		try {
+			const report = await fetchMaterialReport(requestedCollection, requestedMaterial);
+			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
+			materialReport = report;
+		} catch (err) {
+			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
+			if (isHttpStatusError(err, 404)) {
+				materialReport = null;
+			} else {
+				materialReportError = errorMessage(err);
+			}
+		} finally {
+			if (requestedCollection === collectionId && requestedMaterial === materialId) {
+				materialReportLoading = false;
+			}
+		}
+	}
+
+	async function generateMaterialReport(forceRegenerate = false) {
+		if (!collectionId || !materialId || materialReportLoading) return;
+		const requestedCollection = collectionId;
+		const requestedMaterial = materialId;
+		materialReportLoading = true;
+		materialReportError = '';
+		try {
+			const report = await createMaterialReport(requestedCollection, requestedMaterial, {
+				language: 'zh',
+				force_regenerate: forceRegenerate
+			});
+			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
+			materialReport = report;
+		} catch (err) {
+			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
+			materialReportError = errorMessage(err);
+		} finally {
+			if (requestedCollection === collectionId && requestedMaterial === materialId) {
+				materialReportLoading = false;
+			}
+		}
+	}
+
+	function resetMaterialReportState() {
+		materialReport = null;
+		materialReportLoading = false;
+		materialReportError = '';
 	}
 
 	async function loadPdfReportStatus() {
@@ -611,12 +678,17 @@
 	function processLabel(key: string, translate: Translate) {
 		const cleanedKey = cleanDisplayLabel(key);
 		const alias = processAlias(cleanedKey);
-		if (alias === 'energy_density') return translate('research.materialDossier.process.energy_density_j_mm3');
-		if (alias === 'scan_speed') return translate('research.materialDossier.process.scan_speed_mm_s');
+		if (alias === 'energy_density')
+			return translate('research.materialDossier.process.energy_density_j_mm3');
+		if (alias === 'scan_speed')
+			return translate('research.materialDossier.process.scan_speed_mm_s');
 		if (alias === 'laser_power') return translate('research.materialDossier.process.laser_power_w');
-		if (alias === 'heat_treatment') return translate('research.materialDossier.process.post_treatment_summary');
-		if (alias === 'preheat') return translate('research.materialDossier.process.preheat_temperature_c');
-		if (alias === 'scan_strategy') return translate('research.materialDossier.process.scan_strategy');
+		if (alias === 'heat_treatment')
+			return translate('research.materialDossier.process.post_treatment_summary');
+		if (alias === 'preheat')
+			return translate('research.materialDossier.process.preheat_temperature_c');
+		if (alias === 'scan_strategy')
+			return translate('research.materialDossier.process.scan_strategy');
 		const label = translate(`research.materialDossier.process.${key}`);
 		return label.startsWith('research.') ? cleanedKey.replace(/_/g, ' ') : label;
 	}
@@ -1084,7 +1156,10 @@
 		return locations.slice(0, 3).join(', ') || '--';
 	}
 
-	function reportContextEntries(context: Record<string, string>, translate: Translate): ChainEntry[] {
+	function reportContextEntries(
+		context: Record<string, string>,
+		translate: Translate
+	): ChainEntry[] {
 		return Object.entries(context)
 			.filter(([, value]) => hasDisplayValue(value))
 			.map(([key, value]) => ({
@@ -1103,11 +1178,10 @@
 		return '--';
 	}
 
-	function reportEvidenceCodes(
-		refs: EvidenceReference[],
-		codeMap: Map<string, string>
-	): string[] {
-		return uniqueList(refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--'));
+	function reportEvidenceCodes(refs: EvidenceReference[], codeMap: Map<string, string>): string[] {
+		return uniqueList(
+			refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--')
+		);
 	}
 
 	function reportChainEvidenceCodes(
@@ -1133,6 +1207,47 @@
 				.filter(Boolean)
 		);
 		return locations.slice(0, 3).join(', ') || '--';
+	}
+
+	function materialReportDocumentFromArtifact(
+		report: MaterialReportArtifact
+	): MaterialReportDocument {
+		return {
+			schema_version: 'material_report_document.v1',
+			status: report.status === 'ready_with_warnings' ? 'partial' : 'ready',
+			title: report.title,
+			markdown: report.markdown ?? '',
+			citations: reportPackage?.document?.citations ?? {},
+			outline: materialReportOutline(report.markdown ?? ''),
+			warnings: [],
+			evidence_appendix: reportPackage?.document?.evidence_appendix ??
+				reportPackage?.evidence_appendix ?? {
+					sample_matrix_row_count: 0,
+					property_count: 0,
+					evidence_count: 0,
+					source_table_count: 0
+				}
+		};
+	}
+
+	function materialReportOutline(markdown: string) {
+		return markdown
+			.split(/\r?\n/)
+			.map((line) => /^(#{1,3})\s+(.+)$/.exec(line.trim()))
+			.filter((match): match is RegExpExecArray => Boolean(match))
+			.map((match) => ({
+				level: match[1].length,
+				title: match[2].trim(),
+				anchor: match[2]
+					.trim()
+					.toLowerCase()
+					.replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
+					.replace(/^-|-$/g, '')
+			}));
+	}
+
+	function humanizeStatus(value: string) {
+		return value.replace(/_/g, ' ');
 	}
 
 	function reportReferenceCodes(
@@ -1282,7 +1397,9 @@
 		document: MaterialReportDocument
 	): MaterialReportMarkdownTable {
 		const headerLine = lines[0] ?? '';
-		const bodyLines = isMaterialReportTableSeparator(lines[1] ?? '') ? lines.slice(2) : lines.slice(1);
+		const bodyLines = isMaterialReportTableSeparator(lines[1] ?? '')
+			? lines.slice(2)
+			: lines.slice(1);
 		return {
 			headers: parseMaterialReportTableLine(headerLine).map((cell) =>
 				parseMaterialReportInline(cell, document)
@@ -1319,7 +1436,10 @@
 	function reportHeadingAnchor(document: MaterialReportDocument, title: string) {
 		return (
 			document.outline.find((item) => item.title === title)?.anchor ||
-			title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+			title
+				.toLowerCase()
+				.replace(/[^a-z0-9]+/g, '-')
+				.replace(/^-|-$/g, '')
 		);
 	}
 
@@ -1950,10 +2070,11 @@
 		source_filename?: string | null;
 		document_id: string;
 	}) {
-		return (paper.title || paper.source_filename || formatShortIdentifier(paper.document_id)).replace(
-			/\.pdf$/i,
-			''
-		);
+		return (
+			paper.title ||
+			paper.source_filename ||
+			formatShortIdentifier(paper.document_id)
+		).replace(/\.pdf$/i, '');
 	}
 
 	function paperForRow(row: SampleMatrixRow) {
@@ -1978,7 +2099,8 @@
 		if (text.includes('odf') || text.includes('jeffrey') || text.includes('texture')) {
 			return translate('research.materialDossier.state.roles.texture');
 		}
-		if (text.includes('hardness')) return translate('research.materialDossier.state.roles.hardness');
+		if (text.includes('hardness'))
+			return translate('research.materialDossier.state.roles.hardness');
 		if (text.includes('density') || text.includes('porosity')) {
 			return translate('research.materialDossier.state.roles.densification');
 		}
@@ -2467,6 +2589,16 @@
 			<button class="btn btn--primary-light btn--small" type="button" on:click={openPdfDrawer}>
 				{$t('research.materialDossier.actions.generatePdf')}
 			</button>
+			<button
+				class="btn btn--primary-light btn--small"
+				type="button"
+				disabled={materialReportLoading}
+				on:click={() => generateMaterialReport(Boolean(materialReport))}
+			>
+				{materialReport
+					? $t('research.materialDossier.report.regenerate')
+					: $t('research.materialDossier.report.generate')}
+			</button>
 			<button class="btn btn--ghost btn--small" type="button" on:click={loadMaterialPage}>
 				{$t('research.materialDossier.actions.refresh')}
 			</button>
@@ -2512,7 +2644,56 @@
 			{#if activeDossierTab === 'structured'}
 				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
 					{#if reportDocument}
-						<section id="material-report-document" class="dossier-card material-report-document-card">
+						<section
+							id="material-report-document"
+							class="dossier-card material-report-document-card"
+						>
+							<div class="material-report-reader-header">
+								<div>
+									<h3>{$t('research.materialDossier.report.documentTitle')}</h3>
+									<p>
+										{materialReportReady
+											? $t('research.materialDossier.report.llmBody')
+											: $t('research.materialDossier.report.draftBody')}
+									</p>
+								</div>
+								<div class="material-report-actions">
+									{#if materialReport}
+										<span class="material-report-status"
+											>{humanizeStatus(materialReport.status)}</span
+										>
+										{#if materialReport.model}
+											<span class="material-report-status">{materialReport.model}</span>
+										{/if}
+									{:else}
+										<span class="material-report-status">
+											{$t('research.materialDossier.report.draftStatus')}
+										</span>
+									{/if}
+									<button
+										type="button"
+										on:click={loadMaterialReportStatus}
+										disabled={materialReportLoading}
+									>
+										{$t('research.materialDossier.report.refresh')}
+									</button>
+									<button
+										type="button"
+										on:click={() => generateMaterialReport(Boolean(materialReport))}
+										disabled={materialReportLoading}
+									>
+										{materialReport
+											? $t('research.materialDossier.report.regenerate')
+											: $t('research.materialDossier.report.generate')}
+									</button>
+								</div>
+							</div>
+							{#if materialReport?.message}
+								<p class="material-report-message">{materialReport.message}</p>
+							{/if}
+							{#if materialReportError}
+								<p class="material-report-error" role="alert">{materialReportError}</p>
+							{/if}
 							<article class="material-report-markdown" aria-label={reportDocument.title}>
 								{#each reportDocumentBlocks as block (block.key)}
 									{#if block.type === 'heading'}
@@ -2634,214 +2815,49 @@
 						</section>
 					{:else}
 						<section id="material-report-overview" class="dossier-card report-overview-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">1</span>
-							<h3>{$t('research.materialDossier.sections.overview.title')}</h3>
-							<p>
-								{reportPackage?.executive_summary ||
-									$t('research.materialDossier.sections.overview.body', {
-										material: materialProfile.canonical_name,
-										processes: joinedList(
-											materialProfile.overview.process_families,
-											$t('research.materialDossier.narrative.unspecifiedProcess')
-										)
-									})}
-							</p>
-						</div>
-						<div class="report-stat-grid">
-							<div>
-								<strong>{reportPackage?.material_scope.source_paper_count || paperCount}</strong>
-								<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
-							</div>
-							<div>
-								<strong>{reportPackage?.material_scope.sample_row_count || sampleCount}</strong>
-								<span>{$t('research.overview.samples')}</span>
-							</div>
-							<div>
-								<strong>{reportPackage?.evidence_appendix.property_count || measuredPropertyCount}</strong>
-								<span>{$t('research.overview.properties')}</span>
-							</div>
-							<div>
-								<strong>{reportPackage?.material_scope.evidence_count || evidenceCount}</strong>
-								<span>{$t('research.overview.evidence')}</span>
-							</div>
-						</div>
-						{#if reportPackage?.key_findings.length}
-							<div class="report-finding-list">
-								{#each reportPackage.key_findings as finding (finding.finding_id)}
-									<article class="report-finding">
-										<h4>{finding.title}</h4>
-										<p>{finding.body}</p>
-										<div class="evidence-chip-row">
-											{#each reportReferenceCodes(finding.evidence_refs, evidenceCodeMap) as code}
-												<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
-													{code}
-												</button>
-											{/each}
-										</div>
-									</article>
-								{/each}
-							</div>
-						{/if}
-						<div class="paper-contribution-grid">
-							{#each (reportPackage?.paper_contributions?.length ? reportPackage.paper_contributions : materialPapers()).slice(0, 6) as paper (paper.document_id)}
-								<a
-									class="paper-contribution-card"
-									href={resolve('/collections/[id]/documents/[document_id]', {
-										id: collectionId,
-										document_id: paper.document_id
-									})}
-								>
-									<strong>{reportPaperTitle(paper)}</strong>
-									<span>
-										{paper.sample_count}
-										{$t('research.overview.samples')} ·
-										{joinedList(
-											paper.measured_properties.slice(0, 3),
-											$t('research.materialDossier.narrative.unspecifiedProperties')
-										)}
-									</span>
-								</a>
-							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.aside.noLiterature')}</p>
-							{/each}
-						</div>
-					</section>
-
-					{#if reportPackage?.thematic_sections.length}
-						<section id="material-report-sections" class="dossier-card report-section-card">
 							<div class="dossier-section-heading">
-								<span class="section-number">2</span>
-								<h3>{$t('research.materialDossier.report.sectionsTitle')}</h3>
-								<p>{$t('research.materialDossier.report.sectionsBody')}</p>
+								<span class="section-number">1</span>
+								<h3>{$t('research.materialDossier.sections.overview.title')}</h3>
+								<p>
+									{reportPackage?.executive_summary ||
+										$t('research.materialDossier.sections.overview.body', {
+											material: materialProfile.canonical_name,
+											processes: joinedList(
+												materialProfile.overview.process_families,
+												$t('research.materialDossier.narrative.unspecifiedProcess')
+											)
+										})}
+								</p>
 							</div>
-							<div class="report-section-list">
-								{#each reportPackage.thematic_sections as section (section.section_id)}
-									<article class="report-section">
-										<strong class="report-section__title">
-											{$t('research.materialDossier.report.sectionLabel', { title: section.title })}
-										</strong>
-										<p>{section.body}</p>
-										{#if section.key_points.length}
-											<ul>
-												{#each section.key_points as point}
-													<li>{point}</li>
-												{/each}
-											</ul>
-										{/if}
-										<div class="evidence-chip-row">
-											{#each reportReferenceCodes(section.evidence_refs, evidenceCodeMap) as code}
-												<button type="button" class="evidence-chip" on:click={() => openEvidenceCode(code)}>
-													{code}
-												</button>
-											{/each}
-										</div>
-									</article>
-								{/each}
-							</div>
-						</section>
-					{/if}
-
-					<section id="representative-material-states" class="dossier-card chain-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">{reportPackage?.thematic_sections.length ? 3 : 2}</span>
-							<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
-							<p>{$t('research.materialDossier.sections.chain.body')}</p>
-						</div>
-
-						<div class="chain-list">
-							{#each reportChains as chain, index (chain.chain_id)}
-								<article class="parameter-chain">
-									<div class="parameter-chain__header">
-										<div>
-											<span class="chain-rank"
-												>{$t('research.materialDossier.state.cardLabel', {
-													index: index + 1
-												})}</span
-											>
-											<h4>{chain.material_state || chain.sample_label || chain.sample_id}</h4>
-											<p>{chain.material || materialProfile.canonical_name}</p>
-										</div>
-										<span class="chain-score">{confidenceLabel(chain.confidence, $t)}</span>
-									</div>
-
-									<div
-										class="chain-steps"
-										aria-label={$t('research.materialDossier.chain.stepsLabel')}
+							<div class="report-stat-grid">
+								<div>
+									<strong>{reportPackage?.material_scope.source_paper_count || paperCount}</strong>
+									<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
+								</div>
+								<div>
+									<strong>{reportPackage?.material_scope.sample_row_count || sampleCount}</strong>
+									<span>{$t('research.overview.samples')}</span>
+								</div>
+								<div>
+									<strong
+										>{reportPackage?.evidence_appendix.property_count ||
+											measuredPropertyCount}</strong
 									>
-										<div class="chain-step">
-											<span>1</span>
-											<strong>{$t('research.materialDossier.chain.processContext')}</strong>
-											{#if reportContextEntries(chain.preparation_context, $t).length}
-												<dl>
-													{#each reportContextEntries(chain.preparation_context, $t) as entry (entry.key)}
-														<div>
-															<dt>{entry.label}</dt>
-															<dd>{entry.value}</dd>
-														</div>
-													{/each}
-												</dl>
-											{:else}
-												<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
-											{/if}
-										</div>
-
-										<div class="chain-step">
-											<span>2</span>
-											<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
-											{#if reportContextEntries(chain.test_conditions, $t).length}
-												<dl>
-													{#each reportContextEntries(chain.test_conditions, $t) as entry (entry.key)}
-														<div>
-															<dt>{entry.label}</dt>
-															<dd>{entry.value}</dd>
-														</div>
-													{/each}
-												</dl>
-											{:else}
-												<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
-											{/if}
-										</div>
-
-										<div class="chain-step chain-step--wide">
-											<span>3</span>
-											<strong>{$t('research.materialDossier.chain.results')}</strong>
-											<div class="chain-metrics">
-												{#each chain.performance_results as result (result.property)}
-													<div class="chain-metric">
-														<span>{result.property}</span>
-														<strong>{reportResultLabel(result)}</strong>
-														<small>
-															{$t('research.materialDossier.chain.observed')}
-															{#if result.condition}
-																· {result.condition}
-															{/if}
-														</small>
-													</div>
-												{/each}
-											</div>
-										</div>
-									</div>
-
-									<div class="chain-judgement">
-										<div>
-											<strong>{$t('research.materialDossier.chain.boundary')}</strong>
-											{#if chain.comparability_boundary.length || chain.unresolved_fields.length}
-												<p>
-													{[
-														...chain.comparability_boundary,
-														...chain.unresolved_fields.map((field) => `${field} unresolved`)
-													].join(' ')}
-												</p>
-											{:else}
-												<p>{$t('research.materialDossier.chain.boundaryReady')}</p>
-											{/if}
-										</div>
-										<div>
-											<strong>{$t('research.materialDossier.chain.traceback')}</strong>
-											<p>{reportChainSourceLocation(chain)}</p>
+									<span>{$t('research.overview.properties')}</span>
+								</div>
+								<div>
+									<strong>{reportPackage?.material_scope.evidence_count || evidenceCount}</strong>
+									<span>{$t('research.overview.evidence')}</span>
+								</div>
+							</div>
+							{#if reportPackage?.key_findings.length}
+								<div class="report-finding-list">
+									{#each reportPackage.key_findings as finding (finding.finding_id)}
+										<article class="report-finding">
+											<h4>{finding.title}</h4>
+											<p>{finding.body}</p>
 											<div class="evidence-chip-row">
-												{#each reportChainEvidenceCodes(chain, evidenceCodeMap) as code}
+												{#each reportReferenceCodes(finding.evidence_refs, evidenceCodeMap) as code}
 													<button
 														type="button"
 														class="evidence-chip"
@@ -2849,322 +2865,501 @@
 													>
 														{code}
 													</button>
-												{:else}
-													<span class="evidence-chip evidence-chip--muted">--</span>
 												{/each}
 											</div>
-										</div>
-									</div>
-								</article>
-							{:else}
-								<p class="empty-copy">
-									{reportPackage
-										? $t('research.materialDossier.chain.empty')
-										: $t('research.materialDossier.chain.packageUnavailable')}
-								</p>
-							{/each}
-						</div>
-					</section>
-					{/if}
-
-					{#if !reportDocument}
-					<section id="material-problems" class="dossier-card material-problems-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">3</span>
-							<h3>{$t('research.materialDossier.sections.materialProblems.title')}</h3>
-							<p>{$t('research.materialDossier.sections.materialProblems.body')}</p>
-						</div>
-
-						<div class="problem-grid">
-							{#each materialProblemCards as problem (problem.key)}
-								<article class="problem-card">
-									<div class="problem-card__header">
-										<h4>{problem.title}</h4>
-										<span>{problem.status}</span>
-									</div>
-									<p>{problem.body}</p>
-									{#if problem.values.length}
-										<div class="finding-values">
-											{#each problem.values as value (value.key)}
-												<button type="button" on:click={() => openSupportedValue(value)}>
-													<strong>{value.sample}</strong>
-													<span>{value.property} = {value.displayValue}</span>
-													<small>{value.evidenceCode}</small>
-												</button>
-											{/each}
-										</div>
-									{/if}
-								</article>
-							{/each}
-						</div>
-					</section>
-					{/if}
-
-					{#if !reportDocument}
-					<section id="trend-comparison" class="dossier-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">4</span>
-							<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
-							<p>{$t('research.materialDossier.sections.trends.body')}</p>
-						</div>
-
-						<div class="trend-grid">
-							<div class="comparison-panel">
-								<h4>{$t('research.materialDossier.comparison.topic')}</h4>
-								<p>
-									{$t('research.materialDossier.comparison.controls', {
-										controlled: processSummary.controlledLabels.join(', ') || '--'
-									})}
-								</p>
-								<div class="dossier-table-wrapper">
-									<table class="dossier-table dossier-table--compact">
-										<thead>
-											<tr>
-												<th>{$t('research.materialDossier.comparison.variable')}</th>
-												<th>{$t('research.materialDossier.comparison.property')}</th>
-												<th>{$t('research.materialDossier.comparison.observation')}</th>
-												<th>{$t('research.materialDossier.comparison.conclusion')}</th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each comparisonRows as row (row.key)}
-												<tr>
-													<td>{row.variable}</td>
-													<td>{row.property}</td>
-													<td>
-														<div class="comparison-bars">
-															<span>{row.firstValue ?? '--'}</span>
-															<div class="bar-track">
-																<span
-																	class="bar-fill bar-fill--primary"
-																	style={`width: ${((row.firstValue ?? 0) / row.maxValue) * 100}%`}
-																></span>
-																<span
-																	class="bar-fill bar-fill--secondary"
-																	style={`width: ${((row.secondValue ?? 0) / row.maxValue) * 100}%`}
-																></span>
-															</div>
-															<span>{row.secondValue ?? '--'}</span>
-														</div>
-													</td>
-													<td>{row.conclusion}</td>
-												</tr>
-											{:else}
-												<tr>
-													<td colspan="4" class="empty-cell">
-														{#if summaryTrendValues.length}
-															{$t('research.materialDossier.comparison.summaryOnly', {
-																values: summaryTrendText(summaryTrendValues)
-															})}
-														{:else}
-															{$t('research.materialDossier.comparison.empty')}
-														{/if}
-													</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
+										</article>
+									{/each}
 								</div>
-							</div>
-
-							<div class="chart-panel">
-								<h4>{$t('research.materialDossier.chart.title')}</h4>
-								{#if trendRows.length}
-									{@const trend = trendRows[0]}
-									<div class="mini-chart" aria-label={trend.property}>
-										<div class="chart-scale">
-											<span>{Math.ceil(trend.maxValue)}</span>
-											<span>{Math.round(trend.maxValue * 0.75)}</span>
-											<span>{Math.round(trend.maxValue * 0.5)}</span>
-											<span>0</span>
-										</div>
-										<div class="chart-bars">
-											<div class="chart-bar">
-												<span
-													class="chart-bar__fill chart-bar__fill--primary"
-													style={`height: ${((trend.firstValue ?? 0) / trend.maxValue) * 100}%`}
-												></span>
-												<strong>{trend.firstValue ?? '--'}</strong>
-											</div>
-											<div class="chart-bar">
-												<span
-													class="chart-bar__fill chart-bar__fill--secondary"
-													style={`height: ${((trend.secondValue ?? 0) / trend.maxValue) * 100}%`}
-												></span>
-												<strong>{trend.secondValue ?? '--'}</strong>
-											</div>
-										</div>
-										<div class="chart-labels">
-											<span>{trend.firstLabel}</span>
-											<span>{trend.secondLabel}</span>
-										</div>
-									</div>
-									<p class="chart-caption">
-										{$t('research.materialDossier.chart.caption')}
-									</p>
+							{/if}
+							<div class="paper-contribution-grid">
+								{#each (reportPackage?.paper_contributions?.length ? reportPackage.paper_contributions : materialPapers()).slice(0, 6) as paper (paper.document_id)}
+									<a
+										class="paper-contribution-card"
+										href={resolve('/collections/[id]/documents/[document_id]', {
+											id: collectionId,
+											document_id: paper.document_id
+										})}
+									>
+										<strong>{reportPaperTitle(paper)}</strong>
+										<span>
+											{paper.sample_count}
+											{$t('research.overview.samples')} ·
+											{joinedList(
+												paper.measured_properties.slice(0, 3),
+												$t('research.materialDossier.narrative.unspecifiedProperties')
+											)}
+										</span>
+									</a>
 								{:else}
-									<p class="empty-copy">
-										{#if summaryTrendValues.length}
-											{$t('research.materialDossier.chart.summaryOnly', {
-												values: summaryTrendText(summaryTrendValues)
-											})}
-										{:else}
-											{$t('research.materialDossier.chart.empty')}
-										{/if}
-									</p>
-								{/if}
+									<p class="empty-copy">{$t('research.materialDossier.aside.noLiterature')}</p>
+								{/each}
 							</div>
-						</div>
-					</section>
-					{/if}
+						</section>
 
-					{#if !reportDocument}
-					<section id="performance-results" class="dossier-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">5</span>
-							<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
-							<p>{$t('research.materialDossier.sections.performance.body')}</p>
-						</div>
+						{#if reportPackage?.thematic_sections.length}
+							<section id="material-report-sections" class="dossier-card report-section-card">
+								<div class="dossier-section-heading">
+									<span class="section-number">2</span>
+									<h3>{$t('research.materialDossier.report.sectionsTitle')}</h3>
+									<p>{$t('research.materialDossier.report.sectionsBody')}</p>
+								</div>
+								<div class="report-section-list">
+									{#each reportPackage.thematic_sections as section (section.section_id)}
+										<article class="report-section">
+											<strong class="report-section__title">
+												{$t('research.materialDossier.report.sectionLabel', {
+													title: section.title
+												})}
+											</strong>
+											<p>{section.body}</p>
+											{#if section.key_points.length}
+												<ul>
+													{#each section.key_points as point}
+														<li>{point}</li>
+													{/each}
+												</ul>
+											{/if}
+											<div class="evidence-chip-row">
+												{#each reportReferenceCodes(section.evidence_refs, evidenceCodeMap) as code}
+													<button
+														type="button"
+														class="evidence-chip"
+														on:click={() => openEvidenceCode(code)}
+													>
+														{code}
+													</button>
+												{/each}
+											</div>
+										</article>
+									{/each}
+								</div>
+							</section>
+						{/if}
 
-						<div class="dossier-table-wrapper">
-							<table class="dossier-table dossier-table--wide">
-								<thead>
-									<tr>
-										<th>{$t('research.materialDossier.table.sampleCondition')}</th>
-										<th>{$t('research.materialDossier.table.primaryVariable')}</th>
-										<th>{$t('research.materialDossier.table.processSummary')}</th>
-										{#each propertyColumns as column (column.key)}
-											<th>{column.label}</th>
-										{/each}
-										<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each performanceRows as row, rowIndex (row.row_id)}
-										<tr>
-											<td>
-												<div class="sample-condition">
-													<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
-													<small>{materialProfile.canonical_name}</small>
+						<section id="representative-material-states" class="dossier-card chain-card">
+							<div class="dossier-section-heading">
+								<span class="section-number">{reportPackage?.thematic_sections.length ? 3 : 2}</span
+								>
+								<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
+								<p>{$t('research.materialDossier.sections.chain.body')}</p>
+							</div>
+
+							<div class="chain-list">
+								{#each reportChains as chain, index (chain.chain_id)}
+									<article class="parameter-chain">
+										<div class="parameter-chain__header">
+											<div>
+												<span class="chain-rank"
+													>{$t('research.materialDossier.state.cardLabel', {
+														index: index + 1
+													})}</span
+												>
+												<h4>{chain.material_state || chain.sample_label || chain.sample_id}</h4>
+												<p>{chain.material || materialProfile.canonical_name}</p>
+											</div>
+											<span class="chain-score">{confidenceLabel(chain.confidence, $t)}</span>
+										</div>
+
+										<div
+											class="chain-steps"
+											aria-label={$t('research.materialDossier.chain.stepsLabel')}
+										>
+											<div class="chain-step">
+												<span>1</span>
+												<strong>{$t('research.materialDossier.chain.processContext')}</strong>
+												{#if reportContextEntries(chain.preparation_context, $t).length}
+													<dl>
+														{#each reportContextEntries(chain.preparation_context, $t) as entry (entry.key)}
+															<div>
+																<dt>{entry.label}</dt>
+																<dd>{entry.value}</dd>
+															</div>
+														{/each}
+													</dl>
+												{:else}
+													<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
+												{/if}
+											</div>
+
+											<div class="chain-step">
+												<span>2</span>
+												<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
+												{#if reportContextEntries(chain.test_conditions, $t).length}
+													<dl>
+														{#each reportContextEntries(chain.test_conditions, $t) as entry (entry.key)}
+															<div>
+																<dt>{entry.label}</dt>
+																<dd>{entry.value}</dd>
+															</div>
+														{/each}
+													</dl>
+												{:else}
+													<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
+												{/if}
+											</div>
+
+											<div class="chain-step chain-step--wide">
+												<span>3</span>
+												<strong>{$t('research.materialDossier.chain.results')}</strong>
+												<div class="chain-metrics">
+													{#each chain.performance_results as result (result.property)}
+														<div class="chain-metric">
+															<span>{result.property}</span>
+															<strong>{reportResultLabel(result)}</strong>
+															<small>
+																{$t('research.materialDossier.chain.observed')}
+																{#if result.condition}
+																	· {result.condition}
+																{/if}
+															</small>
+														</div>
+													{/each}
 												</div>
-											</td>
-											<td>{variableSummary(row, processSummary, $t)}</td>
-											<td>{processBrief(row)}</td>
-											{#each propertyColumns as column (column.key)}
-												{@const value = row.values[column.key]}
-												<td>
-													{#if value}
+											</div>
+										</div>
+
+										<div class="chain-judgement">
+											<div>
+												<strong>{$t('research.materialDossier.chain.boundary')}</strong>
+												{#if chain.comparability_boundary.length || chain.unresolved_fields.length}
+													<p>
+														{[
+															...chain.comparability_boundary,
+															...chain.unresolved_fields.map((field) => `${field} unresolved`)
+														].join(' ')}
+													</p>
+												{:else}
+													<p>{$t('research.materialDossier.chain.boundaryReady')}</p>
+												{/if}
+											</div>
+											<div>
+												<strong>{$t('research.materialDossier.chain.traceback')}</strong>
+												<p>{reportChainSourceLocation(chain)}</p>
+												<div class="evidence-chip-row">
+													{#each reportChainEvidenceCodes(chain, evidenceCodeMap) as code}
 														<button
 															type="button"
-															class="value-button"
-															on:click={() => openValueEvidence(row, column, value)}
+															class="evidence-chip"
+															on:click={() => openEvidenceCode(code)}
 														>
-															{formatEvidenceBackedValue(value)}
+															{code}
 														</button>
 													{:else}
-														<span class="empty-value">--</span>
-													{/if}
-												</td>
-											{/each}
-											<td>
-												{#each [rowEvidenceSummary(row, propertyColumns, evidenceCodeMap)] as evidenceSummary}
-													{#if evidenceSummary.visibleLabels.length}
-														<div class="matrix-evidence-chips" title={evidenceSummary.title}>
-															{#each evidenceSummary.visibleLabels as code}
-																<button
-																	type="button"
-																	class="evidence-chip"
-																	on:click={() => openEvidenceCode(code)}
-																>
-																	{code}
-																</button>
-															{/each}
-															{#if evidenceSummary.hiddenCount}
-																<span class="evidence-chip evidence-chip--muted">
-																	+{evidenceSummary.hiddenCount} more
-																</span>
-															{/if}
-														</div>
-													{:else}
-														<span class="empty-value">--</span>
-													{/if}
-												{/each}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-						<p class="dossier-table-note">
-							{$t('research.materialDossier.performance.summary', {
-								samples: performanceRows.length,
-								properties: propertyColumns.length
-							})}
-						</p>
-					</section>
+														<span class="evidence-chip evidence-chip--muted">--</span>
+													{/each}
+												</div>
+											</div>
+										</div>
+									</article>
+								{:else}
+									<p class="empty-copy">
+										{reportPackage
+											? $t('research.materialDossier.chain.empty')
+											: $t('research.materialDossier.chain.packageUnavailable')}
+									</p>
+								{/each}
+							</div>
+						</section>
 					{/if}
 
 					{#if !reportDocument}
-					<section id="evidence-locator" class="dossier-card">
-						<div class="dossier-section-heading">
-							<span class="section-number">6</span>
-							<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
-							<p>{$t('research.materialDossier.sections.evidence.body')}</p>
-						</div>
+						<section id="material-problems" class="dossier-card material-problems-card">
+							<div class="dossier-section-heading">
+								<span class="section-number">3</span>
+								<h3>{$t('research.materialDossier.sections.materialProblems.title')}</h3>
+								<p>{$t('research.materialDossier.sections.materialProblems.body')}</p>
+							</div>
 
-						<div class="dossier-table-wrapper">
-							<table class="dossier-table">
-								<thead>
-									<tr>
-										<th>{$t('research.materialDossier.evidence.code')}</th>
-										<th>{$t('research.materialDossier.evidence.claim')}</th>
-										<th>{$t('research.materialDossier.evidence.type')}</th>
-										<th>{$t('research.materialDossier.evidence.location')}</th>
-										<th>{$t('research.materialDossier.evidence.anchor')}</th>
-										<th>{$t('research.materialDossier.evidence.confidence')}</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each evidenceRows as row (row.key)}
-										<tr>
-											<td>{row.code}</td>
-											<td>
-												<button
-													type="button"
-													class="evidence-row-button"
-													on:click={() => openEvidenceRow(row)}
-												>
-													{row.claim}
-												</button>
-											</td>
-											<td>{row.type}</td>
-											<td>
-												{#if row.href}
-													<a class="dossier-link" href={row.href}>{row.location}</a>
+							<div class="problem-grid">
+								{#each materialProblemCards as problem (problem.key)}
+									<article class="problem-card">
+										<div class="problem-card__header">
+											<h4>{problem.title}</h4>
+											<span>{problem.status}</span>
+										</div>
+										<p>{problem.body}</p>
+										{#if problem.values.length}
+											<div class="finding-values">
+												{#each problem.values as value (value.key)}
+													<button type="button" on:click={() => openSupportedValue(value)}>
+														<strong>{value.sample}</strong>
+														<span>{value.property} = {value.displayValue}</span>
+														<small>{value.evidenceCode}</small>
+													</button>
+												{/each}
+											</div>
+										{/if}
+									</article>
+								{/each}
+							</div>
+						</section>
+					{/if}
+
+					{#if !reportDocument}
+						<section id="trend-comparison" class="dossier-card">
+							<div class="dossier-section-heading">
+								<span class="section-number">4</span>
+								<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
+								<p>{$t('research.materialDossier.sections.trends.body')}</p>
+							</div>
+
+							<div class="trend-grid">
+								<div class="comparison-panel">
+									<h4>{$t('research.materialDossier.comparison.topic')}</h4>
+									<p>
+										{$t('research.materialDossier.comparison.controls', {
+											controlled: processSummary.controlledLabels.join(', ') || '--'
+										})}
+									</p>
+									<div class="dossier-table-wrapper">
+										<table class="dossier-table dossier-table--compact">
+											<thead>
+												<tr>
+													<th>{$t('research.materialDossier.comparison.variable')}</th>
+													<th>{$t('research.materialDossier.comparison.property')}</th>
+													<th>{$t('research.materialDossier.comparison.observation')}</th>
+													<th>{$t('research.materialDossier.comparison.conclusion')}</th>
+												</tr>
+											</thead>
+											<tbody>
+												{#each comparisonRows as row (row.key)}
+													<tr>
+														<td>{row.variable}</td>
+														<td>{row.property}</td>
+														<td>
+															<div class="comparison-bars">
+																<span>{row.firstValue ?? '--'}</span>
+																<div class="bar-track">
+																	<span
+																		class="bar-fill bar-fill--primary"
+																		style={`width: ${((row.firstValue ?? 0) / row.maxValue) * 100}%`}
+																	></span>
+																	<span
+																		class="bar-fill bar-fill--secondary"
+																		style={`width: ${((row.secondValue ?? 0) / row.maxValue) * 100}%`}
+																	></span>
+																</div>
+																<span>{row.secondValue ?? '--'}</span>
+															</div>
+														</td>
+														<td>{row.conclusion}</td>
+													</tr>
 												{:else}
-													{row.location}
-												{/if}
-											</td>
-											<td>{row.code}</td>
-											<td>{row.confidence}</td>
-										</tr>
+													<tr>
+														<td colspan="4" class="empty-cell">
+															{#if summaryTrendValues.length}
+																{$t('research.materialDossier.comparison.summaryOnly', {
+																	values: summaryTrendText(summaryTrendValues)
+																})}
+															{:else}
+																{$t('research.materialDossier.comparison.empty')}
+															{/if}
+														</td>
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+									</div>
+								</div>
+
+								<div class="chart-panel">
+									<h4>{$t('research.materialDossier.chart.title')}</h4>
+									{#if trendRows.length}
+										{@const trend = trendRows[0]}
+										<div class="mini-chart" aria-label={trend.property}>
+											<div class="chart-scale">
+												<span>{Math.ceil(trend.maxValue)}</span>
+												<span>{Math.round(trend.maxValue * 0.75)}</span>
+												<span>{Math.round(trend.maxValue * 0.5)}</span>
+												<span>0</span>
+											</div>
+											<div class="chart-bars">
+												<div class="chart-bar">
+													<span
+														class="chart-bar__fill chart-bar__fill--primary"
+														style={`height: ${((trend.firstValue ?? 0) / trend.maxValue) * 100}%`}
+													></span>
+													<strong>{trend.firstValue ?? '--'}</strong>
+												</div>
+												<div class="chart-bar">
+													<span
+														class="chart-bar__fill chart-bar__fill--secondary"
+														style={`height: ${((trend.secondValue ?? 0) / trend.maxValue) * 100}%`}
+													></span>
+													<strong>{trend.secondValue ?? '--'}</strong>
+												</div>
+											</div>
+											<div class="chart-labels">
+												<span>{trend.firstLabel}</span>
+												<span>{trend.secondLabel}</span>
+											</div>
+										</div>
+										<p class="chart-caption">
+											{$t('research.materialDossier.chart.caption')}
+										</p>
 									{:else}
+										<p class="empty-copy">
+											{#if summaryTrendValues.length}
+												{$t('research.materialDossier.chart.summaryOnly', {
+													values: summaryTrendText(summaryTrendValues)
+												})}
+											{:else}
+												{$t('research.materialDossier.chart.empty')}
+											{/if}
+										</p>
+									{/if}
+								</div>
+							</div>
+						</section>
+					{/if}
+
+					{#if !reportDocument}
+						<section id="performance-results" class="dossier-card">
+							<div class="dossier-section-heading">
+								<span class="section-number">5</span>
+								<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
+								<p>{$t('research.materialDossier.sections.performance.body')}</p>
+							</div>
+
+							<div class="dossier-table-wrapper">
+								<table class="dossier-table dossier-table--wide">
+									<thead>
 										<tr>
-											<td colspan="6" class="empty-cell">
-												{$t('research.materialDossier.evidence.empty')}
-											</td>
+											<th>{$t('research.materialDossier.table.sampleCondition')}</th>
+											<th>{$t('research.materialDossier.table.primaryVariable')}</th>
+											<th>{$t('research.materialDossier.table.processSummary')}</th>
+											{#each propertyColumns as column (column.key)}
+												<th>{column.label}</th>
+											{/each}
+											<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
 										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-						<a
-							class="footer-link"
-							href={resolve('/collections/[id]/evidence', { id: collectionId })}
-						>
-							{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
-						</a>
-					</section>
+									</thead>
+									<tbody>
+										{#each performanceRows as row, rowIndex (row.row_id)}
+											<tr>
+												<td>
+													<div class="sample-condition">
+														<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
+														<small>{materialProfile.canonical_name}</small>
+													</div>
+												</td>
+												<td>{variableSummary(row, processSummary, $t)}</td>
+												<td>{processBrief(row)}</td>
+												{#each propertyColumns as column (column.key)}
+													{@const value = row.values[column.key]}
+													<td>
+														{#if value}
+															<button
+																type="button"
+																class="value-button"
+																on:click={() => openValueEvidence(row, column, value)}
+															>
+																{formatEvidenceBackedValue(value)}
+															</button>
+														{:else}
+															<span class="empty-value">--</span>
+														{/if}
+													</td>
+												{/each}
+												<td>
+													{#each [rowEvidenceSummary(row, propertyColumns, evidenceCodeMap)] as evidenceSummary}
+														{#if evidenceSummary.visibleLabels.length}
+															<div class="matrix-evidence-chips" title={evidenceSummary.title}>
+																{#each evidenceSummary.visibleLabels as code}
+																	<button
+																		type="button"
+																		class="evidence-chip"
+																		on:click={() => openEvidenceCode(code)}
+																	>
+																		{code}
+																	</button>
+																{/each}
+																{#if evidenceSummary.hiddenCount}
+																	<span class="evidence-chip evidence-chip--muted">
+																		+{evidenceSummary.hiddenCount} more
+																	</span>
+																{/if}
+															</div>
+														{:else}
+															<span class="empty-value">--</span>
+														{/if}
+													{/each}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+							<p class="dossier-table-note">
+								{$t('research.materialDossier.performance.summary', {
+									samples: performanceRows.length,
+									properties: propertyColumns.length
+								})}
+							</p>
+						</section>
+					{/if}
+
+					{#if !reportDocument}
+						<section id="evidence-locator" class="dossier-card">
+							<div class="dossier-section-heading">
+								<span class="section-number">6</span>
+								<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
+								<p>{$t('research.materialDossier.sections.evidence.body')}</p>
+							</div>
+
+							<div class="dossier-table-wrapper">
+								<table class="dossier-table">
+									<thead>
+										<tr>
+											<th>{$t('research.materialDossier.evidence.code')}</th>
+											<th>{$t('research.materialDossier.evidence.claim')}</th>
+											<th>{$t('research.materialDossier.evidence.type')}</th>
+											<th>{$t('research.materialDossier.evidence.location')}</th>
+											<th>{$t('research.materialDossier.evidence.anchor')}</th>
+											<th>{$t('research.materialDossier.evidence.confidence')}</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each evidenceRows as row (row.key)}
+											<tr>
+												<td>{row.code}</td>
+												<td>
+													<button
+														type="button"
+														class="evidence-row-button"
+														on:click={() => openEvidenceRow(row)}
+													>
+														{row.claim}
+													</button>
+												</td>
+												<td>{row.type}</td>
+												<td>
+													{#if row.href}
+														<a class="dossier-link" href={row.href}>{row.location}</a>
+													{:else}
+														{row.location}
+													{/if}
+												</td>
+												<td>{row.code}</td>
+												<td>{row.confidence}</td>
+											</tr>
+										{:else}
+											<tr>
+												<td colspan="6" class="empty-cell">
+													{$t('research.materialDossier.evidence.empty')}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+							<a
+								class="footer-link"
+								href={resolve('/collections/[id]/evidence', { id: collectionId })}
+							>
+								{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
+							</a>
+						</section>
 					{/if}
 				</main>
 			{:else}
@@ -3350,32 +3545,34 @@
 				<nav
 					class="aside-card quick-nav"
 					aria-label={$t('research.materialDossier.aside.quickNav')}
-					>
-						<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
-						{#if activeDossierTab === 'structured'}
-							{#if reportDocument}
-								{#each reportDocumentNavItems(reportDocument) as item (item.anchor)}
-									<a href={`#${item.anchor}`}>{item.title}</a>
-								{/each}
-							{:else}
-								<a href="#material-report-overview"
-									>1 {$t('research.materialDossier.sections.overview.title')}</a
-								>
-								<a href="#representative-material-states"
-									>2 {$t('research.materialDossier.sections.chain.title')}</a
-								>
-								<a href="#material-problems"
-									>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
-								>
-								<a href="#trend-comparison">4 {$t('research.materialDossier.sections.trends.title')}</a>
-								<a href="#performance-results"
-									>5 {$t('research.materialDossier.sections.performance.title')}</a
-								>
-								<a href="#evidence-locator"
-									>6 {$t('research.materialDossier.sections.evidence.title')}</a
-								>
-							{/if}
+				>
+					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
+					{#if activeDossierTab === 'structured'}
+						{#if reportDocument}
+							{#each reportDocumentNavItems(reportDocument) as item (item.anchor)}
+								<a href={`#${item.anchor}`}>{item.title}</a>
+							{/each}
 						{:else}
+							<a href="#material-report-overview"
+								>1 {$t('research.materialDossier.sections.overview.title')}</a
+							>
+							<a href="#representative-material-states"
+								>2 {$t('research.materialDossier.sections.chain.title')}</a
+							>
+							<a href="#material-problems"
+								>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
+							>
+							<a href="#trend-comparison"
+								>4 {$t('research.materialDossier.sections.trends.title')}</a
+							>
+							<a href="#performance-results"
+								>5 {$t('research.materialDossier.sections.performance.title')}</a
+							>
+							<a href="#evidence-locator"
+								>6 {$t('research.materialDossier.sections.evidence.title')}</a
+							>
+						{/if}
+					{:else}
 						<a href="#narrative-overview"
 							>1 {$t('research.materialDossier.narrative.overviewTitle')}</a
 						>
@@ -3733,6 +3930,11 @@
 		color: #1d4ed8;
 	}
 
+	.btn:disabled {
+		cursor: wait;
+		opacity: 0.65;
+	}
+
 	.dossier-state-card,
 	.dossier-card,
 	.aside-card,
@@ -3878,6 +4080,90 @@
 
 	.material-report-document-card {
 		padding: 0;
+	}
+
+	.material-report-reader-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 18px 24px;
+		border-bottom: 1px solid #e2e8f0;
+	}
+
+	.material-report-reader-header > div:first-child {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.material-report-reader-header h3 {
+		margin: 0;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.material-report-reader-header p {
+		margin: 0;
+		color: #64748b;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.material-report-actions {
+		display: flex;
+		flex: 0 0 auto;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+
+	.material-report-actions button {
+		min-height: 32px;
+		border: 1px solid #dbe3ef;
+		border-radius: 8px;
+		padding: 6px 10px;
+		background: #ffffff;
+		color: #0f172a;
+		cursor: pointer;
+		font: inherit;
+		font-size: 13px;
+		font-weight: 750;
+	}
+
+	.material-report-actions button:disabled {
+		cursor: wait;
+		opacity: 0.65;
+	}
+
+	.material-report-status {
+		display: inline-flex;
+		align-items: center;
+		min-height: 32px;
+		border: 1px solid #dbe3ef;
+		border-radius: 999px;
+		padding: 0 9px;
+		background: #f8fafc;
+		color: #64748b;
+		font-size: 12px;
+		line-height: 16px;
+	}
+
+	.material-report-error {
+		margin: 14px 24px 0;
+		color: #b42318;
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.material-report-message {
+		margin: 14px 24px 0;
+		color: #64748b;
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.material-report-markdown {

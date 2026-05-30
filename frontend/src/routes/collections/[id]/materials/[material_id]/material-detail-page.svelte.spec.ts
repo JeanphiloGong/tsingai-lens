@@ -58,7 +58,7 @@ function requestPath(input: string | URL | Request) {
 }
 
 function requestMethod(input: string | URL | Request, init?: RequestInit) {
-	return input instanceof Request ? input.method : init?.method ?? 'GET';
+	return input instanceof Request ? input.method : (init?.method ?? 'GET');
 }
 
 function materialProfilePayload() {
@@ -455,9 +455,7 @@ function materialProfilePayload() {
 							confidence: 0.95
 						}
 					],
-					comparability_boundary: [
-						'Compare only within Paper A tensile and hardness conditions.'
-					],
+					comparability_boundary: ['Compare only within Paper A tensile and hardness conditions.'],
 					confidence: 0.95,
 					unresolved_fields: []
 				}
@@ -504,9 +502,7 @@ function materialProfilePayload() {
 							confidence: 0.95
 						}
 					],
-					comparability_boundary: [
-						'Compare only within Paper A tensile and hardness conditions.'
-					],
+					comparability_boundary: ['Compare only within Paper A tensile and hardness conditions.'],
 					confidence: 0.95,
 					unresolved_fields: []
 				}
@@ -631,6 +627,44 @@ function materialReviewReportPayload(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function materialReportPayload(overrides: Record<string, unknown> = {}) {
+	return {
+		report_id: 'mr_mat_316l',
+		collection_id: 'col_123',
+		material_id: 'mat_316l',
+		status: 'ready',
+		stage: 'ready',
+		message: 'Material report generated.',
+		title: '316L stainless steel 材料报告',
+		language: 'zh',
+		model: 'test-model',
+		data_version: 'material_report_v1',
+		markdown: [
+			'# 316L stainless steel 材料报告',
+			'',
+			'## 摘要',
+			'',
+			'LLM conclusion: 316L stainless steel should be read through evidence-backed material states.',
+			'',
+			'## 10. 结论',
+			'',
+			'- LLM keeps S001, 215.6 and source citation [E001] tied together.'
+		].join('\n'),
+		warnings: [],
+		source_refs: [],
+		evidence_appendix: {
+			sample_matrix_row_count: 2,
+			property_count: 3,
+			evidence_count: 1,
+			source_table_count: 1
+		},
+		created_at: '2026-05-20T00:00:00+00:00',
+		updated_at: '2026-05-20T00:00:01+00:00',
+		generated_at: '2026-05-20T00:00:01+00:00',
+		...overrides
+	};
+}
+
 describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -644,6 +678,10 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(materialProfilePayload());
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			if (
@@ -669,14 +707,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel Material Report' }))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('heading', { name: '摘要' })).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: '摘要' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('scoped material report rather than a global parameter ranking'))
+			.element(
+				browserPage.getByText('scoped material report rather than a global parameter ranking')
+			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('材料状态').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('cell', { name: 'as-SLM 316L' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('cell', { name: 'as-SLM 316L' }))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('-> 样品状态')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S001 links preparation, testing, and response'))
@@ -685,15 +725,19 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Thematic analysis' }))
 			.not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Hardness and tensile values are scoped to Paper A testing conditions.'))
+			.element(
+				browserPage.getByText(
+					'Hardness and tensile values are scoped to Paper A testing conditions.'
+				)
+			)
 			.not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: '3. 代表性材料状态' }))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/Response: hardness 215\.6/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText(/Response: hardness 215\.6/))
+			.element(browserPage.getByRole('button', { name: '[E001]' }).first())
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: '[E001]' }).first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('不同论文不能直接做全局最佳参数。'))
 			.toBeInTheDocument();
@@ -709,16 +753,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText(/studied through LPBF\/SLM/).first())
 			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('ASTM E8').first())
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('ASTM E8').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('This long method paragraph should stay out'))
 			.not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('hardness').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('215.6').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Compare only within Paper A tensile and hardness conditions.'))
+			.element(
+				browserPage.getByText('Compare only within Paper A tensile and hardness conditions.')
+			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Traceback').first()).not.toBeInTheDocument();
 		await expect
@@ -747,20 +791,104 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('+2 more').first()).not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'))
+			.element(
+				browserPage.getByText(
+					'Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'
+				)
+			)
 			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('215.6').first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Research chain map'))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Best parameter chain'))
-			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('215.6').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Research chain map')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Best parameter chain')).not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-			).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
+		).toEqual([
+			'/api/v1/collections/col_123/materials/mat_316l/research-view',
+			'/api/v1/collections/col_123/materials/mat_316l/report'
+		]);
+	});
+
+	it('renders a persisted LLM material report before the deterministic draft', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(materialProfilePayload());
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse(materialReportPayload());
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '316L stainless steel 材料报告' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('LLM conclusion: 316L stainless steel should be read'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('test-model')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('scoped material report rather than a global parameter ranking')
+			)
+			.not.toBeInTheDocument();
+	});
+
+	it('requests LLM material report generation when no persisted report exists', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
+				return jsonResponse(materialProfilePayload());
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'POST') {
+				return jsonResponse({
+					...materialReportPayload({
+						status: 'generating',
+						stage: 'requested',
+						message: 'Material report generation started.',
+						markdown: null,
+						generated_at: null
+					})
+				});
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		const reportGenerateButton = browserPage
+			.getByRole('button', { name: 'Generate report' })
+			.last();
+		await expect.element(reportGenerateButton).toBeInTheDocument();
+		await reportGenerateButton.click();
+
+		const postCall = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input as string | URL | Request) ===
+					'/api/v1/collections/col_123/materials/mat_316l/report' &&
+				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+		);
+		expect(JSON.parse(String((postCall?.[1] as RequestInit | undefined)?.body))).toEqual({
+			language: 'zh',
+			force_regenerate: false
+		});
+		await expect
+			.element(browserPage.getByText('Material report generation started.'))
+			.toBeInTheDocument();
 	});
 
 	it('cleans table-origin labels in the representative material state report', async () => {
@@ -798,11 +926,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				evidence_refs: []
 			}
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -869,11 +1002,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				]
 			}
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -889,13 +1027,9 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Strength, ductility, and hardness' }))
 			.toBeInTheDocument();
 		await expect
-			.element(
-				browserPage.getByText(/Collection summary: Tensile strength 610 MPa/)
-			)
+			.element(browserPage.getByText(/Collection summary: Tensile strength 610 MPa/))
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Collection summary').first())
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Collection summary').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Collection summary Elongation' }))
 			.toBeInTheDocument();
@@ -919,7 +1053,10 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-		).toEqual(['/api/v1/collections/col_123/materials/mat_316l/research-view']);
+		).toEqual([
+			'/api/v1/collections/col_123/materials/mat_316l/research-view',
+			'/api/v1/collections/col_123/materials/mat_316l/report'
+		]);
 	});
 
 	it('focuses sparse objective-derived material matrices on populated sample values', async () => {
@@ -982,11 +1119,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				evidence_refs: []
 			}))
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -1026,11 +1168,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				evidence_refs: []
 			}))
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -1041,7 +1188,9 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('S001 · Alternating strategy A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('S001 · Alternating strategy A').first())
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Low signal 0')).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('2 sample(s), 5 measured property column(s).'))
@@ -1050,9 +1199,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 	it('does not promote narrative observations with embedded numbers into representative material states', async () => {
 		const payload: any = materialProfilePayload();
-		payload.sample_matrix.columns = [
-			{ value_key: 'elongation', label: 'Elongation', unit: '%' }
-		];
+		payload.sample_matrix.columns = [{ value_key: 'elongation', label: 'Elongation', unit: '%' }];
 		payload.sample_matrix.rows = [
 			{
 				row_id: 'row_text_observation',
@@ -1074,11 +1221,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		];
 		payload.measured_properties = [];
 		payload.report_package = null;
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -1091,9 +1243,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(
-				browserPage.getByText(
-					'Material report package has not been generated for this material.'
-				)
+				browserPage.getByText('Material report package has not been generated for this material.')
 			)
 			.toBeInTheDocument();
 		await expect
@@ -1108,6 +1258,10 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(materialProfilePayload());
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			if (
@@ -1140,16 +1294,10 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Preview Markdown' }))
-			.toHaveAttribute(
-				'href',
-				'/api/v1/collections/col_123/materials/mat_316l/review-report.md'
-			);
+			.toHaveAttribute('href', '/api/v1/collections/col_123/materials/mat_316l/review-report.md');
 		await expect
 			.element(browserPage.getByRole('link', { name: 'View PDF' }))
-			.toHaveAttribute(
-				'href',
-				'/api/v1/collections/col_123/materials/mat_316l/review-report.pdf'
-			);
+			.toHaveAttribute('href', '/api/v1/collections/col_123/materials/mat_316l/review-report.pdf');
 
 		const postCall = fetchMock.mock.calls.find(
 			([input, init]) =>
@@ -1179,7 +1327,9 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'How are the samples designed?' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'What are the main performance findings?' }))
+			.element(
+				browserPage.getByRole('heading', { name: 'What are the main performance findings?' })
+			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText(/mainly through LPBF\/SLM/)).toBeInTheDocument();
 		await expect
@@ -1190,11 +1340,16 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 	it('opens evidence details from a performance value', async () => {
 		const payload: any = materialProfilePayload();
 		payload.report_package.document = null;
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
+			}
+
+			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
+				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');

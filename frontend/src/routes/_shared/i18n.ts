@@ -700,11 +700,18 @@ const translations: Record<Language, Translations> = {
 						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
 					empty:
 						'No representative material state can be built from the current material report package yet.',
-					packageUnavailable:
-						'Material report package has not been generated for this material.'
+					packageUnavailable: 'Material report package has not been generated for this material.'
 				},
 				report: {
 					documentTitle: 'Material report',
+					llmBody:
+						'LLM-generated Markdown conclusion report persisted by the backend from material evidence.',
+					draftBody:
+						'Deterministic grounded draft from the material report package. Generate a report to let the LLM summarize conclusions.',
+					draftStatus: 'deterministic draft',
+					generate: 'Generate report',
+					refresh: 'Refresh report',
+					regenerate: 'Regenerate report',
 					sectionsTitle: 'Thematic analysis',
 					sectionsBody:
 						'Read the material evidence as scoped scientific themes; the complete sample matrix stays in the supporting appendix.',
@@ -2438,8 +2445,7 @@ const translations: Record<Language, Translations> = {
 			},
 			detail: {
 				title: 'Chain step detail',
-				empty:
-					'Click an objective or logic-chain step to inspect its supporting evidence rows.',
+				empty: 'Click an objective or logic-chain step to inspect its supporting evidence rows.',
 				clear: 'Clear',
 				loading: 'Loading detail...',
 				evidenceRows: 'Rows',
@@ -2984,8 +2990,7 @@ const translations: Record<Language, Translations> = {
 				objectiveReportTitle: '研究目标报告',
 				objectiveReportBody: '由后端基于该目标证据持久化生成的 Markdown 报告。',
 				objectiveReportNotReadyTitle: '报告尚未生成',
-				objectiveReportNotReadyBody:
-					'目标证据单元就绪后可生成报告。页面加载时不会调用 LLM。',
+				objectiveReportNotReadyBody: '目标证据单元就绪后可生成报告。页面加载时不会调用 LLM。',
 				generateObjectiveReport: '生成报告',
 				refreshObjectiveReport: '刷新报告',
 				regenerateObjectiveReport: '重新生成报告',
@@ -3295,6 +3300,12 @@ const translations: Record<Language, Translations> = {
 				},
 				report: {
 					documentTitle: '材料报告',
+					llmBody: '由后端基于材料证据持久化生成的 LLM Markdown 结论报告。',
+					draftBody: '当前展示的是材料报告包的确定性草稿。生成报告后，由 LLM 总结科研结论。',
+					draftStatus: '确定性草稿',
+					generate: '生成报告',
+					refresh: '刷新报告',
+					regenerate: '重新生成报告',
 					sectionsTitle: '主题分析',
 					sectionsBody: '按材料科学问题阅读证据；完整样品矩阵保留在支撑附录中。',
 					sectionLabel: '报告主题：{title}'

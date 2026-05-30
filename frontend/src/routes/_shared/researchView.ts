@@ -488,6 +488,7 @@ export type ObjectiveExpertReport = {
 };
 
 export type ObjectiveReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
+export type MaterialReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
 
 export type ObjectiveReportArtifact = {
 	collection_id: string;
@@ -503,6 +504,26 @@ export type ObjectiveReportArtifact = {
 	markdown: string | null;
 	warnings: string[];
 	source_refs: Record<string, unknown>[];
+	created_at: string;
+	updated_at: string;
+	generated_at: string | null;
+};
+
+export type MaterialReportArtifact = {
+	collection_id: string;
+	report_id: string;
+	material_id: string;
+	status: MaterialReportStatus;
+	stage: string;
+	message: string | null;
+	title: string;
+	language: string;
+	model: string | null;
+	data_version: string;
+	markdown: string | null;
+	warnings: string[];
+	source_refs: Record<string, unknown>[];
+	evidence_appendix: Record<string, unknown>;
 	created_at: string;
 	updated_at: string;
 	generated_at: string | null;
@@ -942,10 +963,7 @@ function normalizeMaterialReportChain(value: unknown): MaterialReportStateChain 
 			record.test_conditions ?? record.test_condition,
 			'condition'
 		),
-		performance_results: normalizeObjectList(
-			record.performance_results ?? record.results,
-			'items'
-		)
+		performance_results: normalizeObjectList(record.performance_results ?? record.results, 'items')
 			.map((item) => normalizeMaterialReportResult(item))
 			.filter((item): item is MaterialReportPerformanceResult => item !== null),
 		source_evidence: normalizeEvidenceReferences(record.source_evidence ?? record.evidence_refs),
@@ -955,7 +973,9 @@ function normalizeMaterialReportChain(value: unknown): MaterialReportStateChain 
 	};
 }
 
-function normalizeMaterialReportContribution(value: unknown): MaterialReportPaperContribution | null {
+function normalizeMaterialReportContribution(
+	value: unknown
+): MaterialReportPaperContribution | null {
 	const record = asRecord(value);
 	if (!record) return null;
 	const documentId = toText(record.document_id ?? record.id);
@@ -1605,9 +1625,7 @@ function normalizeConclusionEvidenceTable(value: unknown): ObjectiveConclusionEv
 	};
 }
 
-function normalizeConclusionContribution(
-	value: unknown
-): ObjectiveConclusionContribution | null {
+function normalizeConclusionContribution(value: unknown): ObjectiveConclusionContribution | null {
 	const record = asRecord(value);
 	if (!record) return null;
 
@@ -1739,9 +1757,7 @@ function normalizeObjectiveExpertFinding(value: unknown): ObjectiveExpertFinding
 	};
 }
 
-function normalizeObjectiveExpertEvidenceMatrix(
-	value: unknown
-): ObjectiveExpertEvidenceMatrix {
+function normalizeObjectiveExpertEvidenceMatrix(value: unknown): ObjectiveExpertEvidenceMatrix {
 	const record = asRecord(value);
 	return {
 		relevant_paper_count: toNumber(record?.relevant_paper_count),
@@ -2525,6 +2541,45 @@ export function normalizeObjectiveResearchView(
 	};
 }
 
+function normalizeMaterialReportArtifact(value: unknown): MaterialReportArtifact | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const reportId = toText(record.report_id);
+	const materialId = toText(record.material_id);
+	if (!reportId || !materialId) return null;
+
+	const status = toText(record.status, 'generating') as MaterialReportStatus;
+	const normalizedStatus: MaterialReportStatus = [
+		'generating',
+		'ready',
+		'ready_with_warnings',
+		'failed'
+	].includes(status)
+		? status
+		: 'generating';
+
+	return {
+		collection_id: toText(record.collection_id),
+		report_id: reportId,
+		material_id: materialId,
+		status: normalizedStatus,
+		stage: toText(record.stage, normalizedStatus),
+		message: nonEmptyText(record.message),
+		title: toText(record.title, 'Material report'),
+		language: toText(record.language, 'zh'),
+		model: nonEmptyText(record.model),
+		data_version: toText(record.data_version),
+		markdown: nonEmptyText(record.markdown),
+		warnings: toStringList(record.warnings),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		evidence_appendix: asRecord(record.evidence_appendix) ?? {},
+		created_at: toText(record.created_at),
+		updated_at: toText(record.updated_at),
+		generated_at: nonEmptyText(record.generated_at)
+	};
+}
+
 export async function fetchCollectionResearchView(
 	collectionId: string
 ): Promise<CollectionAggregation> {
@@ -2619,6 +2674,46 @@ export async function createObjectiveReport(
 	const report = normalizeObjectiveReportArtifact(data);
 	if (!report) {
 		throw new Error('Invalid objective report response');
+	}
+	return report;
+}
+
+export async function fetchMaterialReport(
+	collectionId: string,
+	materialId: string
+): Promise<MaterialReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedMaterial = encodeURIComponent(materialId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/materials/${encodedMaterial}/report`
+	);
+	const report = normalizeMaterialReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid material report response');
+	}
+	return report;
+}
+
+export async function createMaterialReport(
+	collectionId: string,
+	materialId: string,
+	options: { language?: 'zh' | 'en'; force_regenerate?: boolean } = {}
+): Promise<MaterialReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedMaterial = encodeURIComponent(materialId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/materials/${encodedMaterial}/report`,
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				language: options.language ?? 'zh',
+				force_regenerate: options.force_regenerate ?? false
+			})
+		}
+	);
+	const report = normalizeMaterialReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid material report response');
 	}
 	return report;
 }

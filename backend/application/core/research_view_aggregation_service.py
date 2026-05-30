@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from hashlib import sha256
+import json
 import math
+import os
 import re
 from collections import defaultdict
 from typing import Any
+from uuid import uuid4
+
+from openai import OpenAI
 
 from application.core.comparison_service import (
     ComparisonService,
@@ -19,9 +26,13 @@ from domain.core.objective_material_projection import (
     project_objective_material_rows,
 )
 from domain.core.fact_store import CoreFactSet
+from domain.core.research_objective import MaterialReportArtifact
 from domain.ports import CoreFactRepository
 from infra.persistence.factory import build_core_fact_repository
 
+
+_DEFAULT_MATERIAL_REPORT_LANGUAGE = "zh"
+_MATERIAL_REPORT_MAX_OUTPUT_TOKENS = 3500
 
 _PROCESS_COLUMN_ORDER = (
     "laser_power_w",
@@ -140,6 +151,15 @@ class ResearchViewMaterialNotFoundError(FileNotFoundError):
         super().__init__(f"research view material not found: {scope}/{material_id}")
 
 
+class MaterialReportNotFoundError(FileNotFoundError):
+    """Raised when a material report has not been requested yet."""
+
+    def __init__(self, collection_id: str, material_id: str) -> None:
+        self.collection_id = collection_id
+        self.material_id = material_id
+        super().__init__(f"material report not found: {collection_id}/{material_id}")
+
+
 class ResearchViewAggregationService:
     """Build research-facing aggregate views from Core semantic artifacts."""
 
@@ -152,6 +172,8 @@ class ResearchViewAggregationService:
         comparison_service: ComparisonService | None = None,
         workspace_service: WorkspaceService | None = None,
         core_fact_repository: CoreFactRepository | None = None,
+        llm_client: Any | None = None,
+        report_model: str | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
@@ -181,6 +203,13 @@ class ResearchViewAggregationService:
             task_service=self.task_service,
             document_profile_service=self.document_profile_service,
         )
+        self.report_model = (
+            report_model
+            or os.getenv("MATERIAL_REPORT_LLM_MODEL")
+            or os.getenv("LLM_MODEL")
+            or "gpt-4o-mini"
+        ).strip()
+        self._report_llm_client = llm_client
 
     def get_collection_research_view(self, collection_id: str) -> dict[str, Any]:
         collection = self.collection_service.get_collection(collection_id)
@@ -368,6 +397,144 @@ class ResearchViewAggregationService:
             return self._clean_value(profile)
 
         raise ResearchViewNotReadyError(collection_id)
+
+    def request_material_report(
+        self,
+        collection_id: str,
+        material_id: str,
+        *,
+        language: str = _DEFAULT_MATERIAL_REPORT_LANGUAGE,
+        force_regenerate: bool = False,
+    ) -> dict[str, Any]:
+        existing = self.core_fact_repository.read_material_report_artifact(
+            collection_id,
+            material_id,
+        )
+        if existing is not None and not force_regenerate:
+            return self._material_report_response(collection_id, existing)
+
+        context = self._build_material_report_context(collection_id, material_id)
+        now = self._now_iso()
+        artifact = MaterialReportArtifact.from_mapping(
+            {
+                "report_id": f"mr_{uuid4().hex[:12]}",
+                "material_id": material_id,
+                "status": "generating",
+                "stage": "requested",
+                "message": "Material report generation started.",
+                "title": context["title"],
+                "language": language,
+                "model": self.report_model,
+                "data_version": self._material_report_data_version(context),
+                "markdown": None,
+                "warnings": [],
+                "source_refs": context["source_refs"],
+                "evidence_appendix": context["evidence_appendix"],
+                "created_at": now,
+                "updated_at": now,
+                "generated_at": None,
+            }
+        )
+        self.core_fact_repository.upsert_material_report_artifact(
+            collection_id,
+            artifact,
+        )
+        return self._material_report_response(collection_id, artifact)
+
+    def generate_material_report(
+        self,
+        collection_id: str,
+        material_id: str,
+        *,
+        language: str = _DEFAULT_MATERIAL_REPORT_LANGUAGE,
+        force_regenerate: bool = False,
+    ) -> dict[str, Any]:
+        requested = self.request_material_report(
+            collection_id,
+            material_id,
+            language=language,
+            force_regenerate=force_regenerate,
+        )
+        if requested["status"] in {"ready", "ready_with_warnings"} and not force_regenerate:
+            return requested
+        if requested["status"] == "failed" and not force_regenerate:
+            return requested
+
+        context = self._build_material_report_context(collection_id, material_id)
+        existing = self.core_fact_repository.read_material_report_artifact(
+            collection_id,
+            material_id,
+        )
+        if existing is None:
+            raise MaterialReportNotFoundError(collection_id, material_id)
+
+        try:
+            markdown = self._generate_material_report_markdown(
+                context,
+                language=language,
+            )
+            if not markdown:
+                raise RuntimeError("material report generation returned empty markdown")
+            warnings = self._material_report_generation_warnings(context, markdown)
+            status = "ready_with_warnings" if warnings else "ready"
+            now = self._now_iso()
+            artifact = MaterialReportArtifact.from_mapping(
+                {
+                    **existing.to_record(),
+                    "status": status,
+                    "stage": status,
+                    "message": (
+                        "Material report generated with evidence warnings."
+                        if warnings
+                        else "Material report generated."
+                    ),
+                    "title": self._extract_material_report_title(markdown)
+                    or existing.title,
+                    "language": language,
+                    "model": self.report_model,
+                    "data_version": self._material_report_data_version(context),
+                    "markdown": markdown,
+                    "warnings": warnings,
+                    "source_refs": context["source_refs"],
+                    "evidence_appendix": context["evidence_appendix"],
+                    "updated_at": now,
+                    "generated_at": now,
+                }
+            )
+            self.core_fact_repository.upsert_material_report_artifact(
+                collection_id,
+                artifact,
+            )
+            return self._material_report_response(collection_id, artifact)
+        except Exception as exc:
+            now = self._now_iso()
+            failed = MaterialReportArtifact.from_mapping(
+                {
+                    **existing.to_record(),
+                    "status": "failed",
+                    "stage": "failed",
+                    "message": str(exc),
+                    "updated_at": now,
+                }
+            )
+            self.core_fact_repository.upsert_material_report_artifact(
+                collection_id,
+                failed,
+            )
+            raise
+
+    def get_material_report_status(
+        self,
+        collection_id: str,
+        material_id: str,
+    ) -> dict[str, Any]:
+        artifact = self.core_fact_repository.read_material_report_artifact(
+            collection_id,
+            material_id,
+        )
+        if artifact is None:
+            raise MaterialReportNotFoundError(collection_id, material_id)
+        return self._material_report_response(collection_id, artifact)
 
     def get_document_research_view(
         self,
@@ -2574,6 +2741,552 @@ class ResearchViewAggregationService:
             "evidence_appendix": evidence_appendix,
         }
 
+    def _build_material_report_context(
+        self,
+        collection_id: str,
+        material_id: str,
+    ) -> dict[str, Any]:
+        profile = self.get_collection_material_research_view(collection_id, material_id)
+        report_package = self._as_mapping(profile.get("report_package"))
+        document = self._as_mapping(report_package.get("document"))
+        markdown = self._safe_text(document.get("markdown")) or ""
+        source_refs = self._as_list(report_package.get("source_refs"))
+        evidence_appendix = self._as_mapping(report_package.get("evidence_appendix"))
+        return {
+            "collection_id": collection_id,
+            "material_id": material_id,
+            "canonical_name": self._safe_text(profile.get("canonical_name")) or material_id,
+            "title": f"{self._safe_text(profile.get('canonical_name')) or material_id} 材料报告",
+            "profile_overview": self._as_mapping(profile.get("overview")),
+            "papers": self._as_list(profile.get("papers"))[:12],
+            "material_scope": self._as_mapping(report_package.get("material_scope")),
+            "paper_contributions": self._as_list(
+                report_package.get("paper_contributions")
+            )[:12],
+            "key_findings": self._as_list(report_package.get("key_findings"))[:12],
+            "representative_states": self._as_list(
+                report_package.get("representative_states")
+            )[:8],
+            "thematic_sections": self._as_list(
+                report_package.get("thematic_sections")
+            )[:8],
+            "limitations": self._as_list(report_package.get("limitations"))[:20],
+            "evidence_appendix": evidence_appendix,
+            "source_refs": source_refs,
+            "draft_markdown": markdown,
+            "document": document,
+        }
+
+    def _generate_material_report_markdown(
+        self,
+        context: dict[str, Any],
+        *,
+        language: str,
+    ) -> str:
+        sections = self._build_material_report_plan(
+            context,
+            language=language,
+        )
+        draft_markdown = self._safe_text(context.get("draft_markdown")) or (
+            f"# {context.get('title')}\n\n当前材料报告缺少可改写的 grounded draft。"
+        )
+        grounded_sections = self._material_report_grounded_sections(
+            draft_markdown,
+            sections=sections,
+        )
+        rendered_sections: list[str] = []
+        for section in sections:
+            section_key = str(section.get("key") or "")
+            grounded_section = grounded_sections.get(section_key) or str(
+                section.get("heading") or ""
+            )
+            packet = self._material_report_section_packet(context, section_key)
+            section_markdown = self._generate_material_report_section_markdown(
+                context,
+                section=section,
+                packet=packet,
+                grounded_section=grounded_section,
+                all_sections=sections,
+                language=language,
+            )
+            rendered_sections.append(section_markdown.strip())
+        return "\n\n".join(section for section in rendered_sections if section).strip() + "\n"
+
+    def _generate_material_report_section_markdown(
+        self,
+        context: dict[str, Any],
+        *,
+        section: dict[str, Any],
+        packet: dict[str, Any],
+        grounded_section: str,
+        all_sections: list[dict[str, Any]],
+        language: str,
+    ) -> str:
+        system_prompt = (
+            "You are a senior materials scientist writing exactly one section "
+            "of a material-state report. Use only the provided section evidence "
+            "and grounded section draft. Do not invent samples, values, papers, "
+            "mechanisms, comparisons, or source references."
+        )
+        required_terms = self._material_report_section_required_terms(
+            context,
+            str(section.get("key") or ""),
+        )
+        other_headings = [
+            str(other.get("heading") or "")
+            for other in all_sections
+            if other.get("key") != section.get("key") and other.get("heading")
+        ]
+        user_prompt = (
+            f"Language: {'Chinese' if language == 'zh' else 'English'}\n"
+            "Write exactly this Markdown section and no other section.\n"
+            f"SectionHeading: {section.get('heading')}\n"
+            f"SectionQuestion: {section.get('question')}\n"
+            "Rules:\n"
+            "- Start with SectionHeading exactly.\n"
+            "- Do not output any other heading from OtherReportHeadings.\n"
+            "- Keep required terms when they are listed.\n"
+            "- Write conclusion-oriented materials science prose, not a raw data dump.\n"
+            "- Preserve sample labels, paper labels, numeric values, and citation tokens.\n"
+            "- If the evidence chain is not closed, say it is not closed instead of filling the gap.\n"
+            "- Do not expose raw hash-like ids unless they are already citation tokens such as [E001].\n\n"
+            "RequiredTerms:\n"
+            f"{json.dumps(required_terms, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            "OtherReportHeadings:\n"
+            f"{json.dumps(other_headings, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            "GroundedSectionDraft:\n"
+            f"{grounded_section}\n\n"
+            "SectionEvidencePacket:\n"
+            f"{json.dumps(packet, ensure_ascii=False, separators=(',', ':'))}"
+        )
+        completion = self._get_report_llm_client().chat.completions.create(
+            model=self.report_model,
+            temperature=0,
+            max_tokens=_MATERIAL_REPORT_MAX_OUTPUT_TOKENS,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        content = completion.choices[0].message.content if completion.choices else None
+        markdown = self._strip_report_reasoning_markup(
+            self._coerce_llm_message_content(content)
+        )
+        if self._material_report_section_generation_warnings(
+            context,
+            section=section,
+            markdown=markdown,
+            all_sections=all_sections,
+        ):
+            return grounded_section
+        return markdown
+
+    def _build_material_report_plan(
+        self,
+        context: dict[str, Any],
+        *,
+        language: str,
+    ) -> list[dict[str, Any]]:
+        title = self._safe_text(context.get("title")) or "Material report"
+        if language == "zh":
+            return [
+                {
+                    "key": "title",
+                    "heading": f"# {title}",
+                    "question": "这批文献围绕该材料可以形成什么总判断？",
+                },
+                {
+                    "key": "scope",
+                    "heading": "## 1. 材料范围",
+                    "question": "材料体系、文献范围、样品范围和可追溯证据是什么？",
+                },
+                {
+                    "key": "paper_contributions",
+                    "heading": "## 2. 论文贡献",
+                    "question": "每篇论文对该材料结论贡献了什么？",
+                },
+                {
+                    "key": "representative_states",
+                    "heading": "## 3. 代表性材料状态",
+                    "question": "哪些样品状态最能支撑材料学结论？",
+                },
+                {
+                    "key": "densification",
+                    "heading": "## 4. 致密化和孔隙",
+                    "question": "制备参数和孔隙/致密化之间有什么证据链？",
+                },
+                {
+                    "key": "mechanical",
+                    "heading": "## 5. 强度、塑性和硬度",
+                    "question": "力学性能应该如何在样品状态内解释？",
+                },
+                {
+                    "key": "texture",
+                    "heading": "## 6. 织构和模型预测",
+                    "question": "织构和模型预测证据能支持什么、不能支持什么？",
+                },
+                {
+                    "key": "open_chains",
+                    "heading": "## 7. 腐蚀、疲劳和未闭合链路",
+                    "question": "哪些链路还缺测试条件、组织解释或可比性闭合？",
+                },
+                {
+                    "key": "comparability",
+                    "heading": "## 8. 可比较性",
+                    "question": "哪些比较可以成立，哪些不能直接比较？",
+                },
+                {
+                    "key": "uncertainty",
+                    "heading": "## 9. 证据与不确定性",
+                    "question": "证据覆盖、来源和不确定性是什么？",
+                },
+                {
+                    "key": "conclusion",
+                    "heading": "## 10. 结论",
+                    "question": "面向材料研究者的最终结论是什么？",
+                },
+            ]
+        return [
+            {"key": "title", "heading": f"# {title}", "question": "What does this literature set support?"},
+            {"key": "scope", "heading": "## 1. Material Scope", "question": "What is the material and evidence scope?"},
+            {"key": "paper_contributions", "heading": "## 2. Paper Contributions", "question": "What does each paper contribute?"},
+            {"key": "representative_states", "heading": "## 3. Representative Material States", "question": "Which states support the conclusion?"},
+            {"key": "densification", "heading": "## 4. Densification and Porosity", "question": "What is the densification evidence chain?"},
+            {"key": "mechanical", "heading": "## 5. Strength, Ductility, and Hardness", "question": "How should mechanics be interpreted?"},
+            {"key": "texture", "heading": "## 6. Texture and Model Prediction", "question": "What texture/model claims are supported?"},
+            {"key": "open_chains", "heading": "## 7. Corrosion, Fatigue, and Open Chains", "question": "Which chains are not closed?"},
+            {"key": "comparability", "heading": "## 8. Comparability", "question": "What can and cannot be compared?"},
+            {"key": "uncertainty", "heading": "## 9. Evidence and Uncertainty", "question": "What are evidence limits?"},
+            {"key": "conclusion", "heading": "## 10. Conclusion", "question": "What is the final conclusion?"},
+        ]
+
+    def _material_report_grounded_sections(
+        self,
+        draft_markdown: str,
+        *,
+        sections: list[dict[str, Any]],
+    ) -> dict[str, str]:
+        heading_positions: list[tuple[int, str, str]] = []
+        for section in sections:
+            heading = str(section.get("heading") or "").strip()
+            if not heading:
+                continue
+            position = draft_markdown.find(heading)
+            if position < 0 and heading.startswith("# "):
+                title = re.sub(r"^#\s+", "", heading)
+                title_match = re.search(
+                    r"^\s*#\s+.+?\s*$",
+                    draft_markdown,
+                    flags=re.MULTILINE,
+                )
+                if title_match:
+                    position = title_match.start()
+                    heading = title_match.group(0).strip()
+                elif title and draft_markdown.strip():
+                    position = 0
+            if position < 0:
+                continue
+            heading_positions.append((position, str(section.get("key") or ""), heading))
+        heading_positions.sort(key=lambda item: item[0])
+        grounded: dict[str, str] = {}
+        for index, (position, key, _heading) in enumerate(heading_positions):
+            next_position = (
+                heading_positions[index + 1][0]
+                if index + 1 < len(heading_positions)
+                else len(draft_markdown)
+            )
+            grounded[key] = draft_markdown[position:next_position].strip()
+        for section in sections:
+            key = str(section.get("key") or "")
+            if key not in grounded:
+                grounded[key] = str(section.get("heading") or "").strip()
+        return grounded
+
+    def _material_report_section_packet(
+        self,
+        context: dict[str, Any],
+        section_key: str,
+    ) -> dict[str, Any]:
+        shared = {
+            "material": context.get("canonical_name"),
+            "profile_overview": context.get("profile_overview"),
+            "evidence_appendix": context.get("evidence_appendix"),
+            "source_refs": self._as_list(context.get("source_refs"))[:8],
+        }
+        if section_key == "title":
+            return {
+                **shared,
+                "key_findings": context.get("key_findings"),
+                "representative_states": context.get("representative_states"),
+                "limitations": context.get("limitations"),
+            }
+        if section_key == "scope":
+            return {
+                **shared,
+                "material_scope": context.get("material_scope"),
+                "papers": context.get("papers"),
+            }
+        if section_key == "paper_contributions":
+            return {**shared, "paper_contributions": context.get("paper_contributions")}
+        if section_key == "representative_states":
+            return {**shared, "representative_states": context.get("representative_states")}
+        if section_key in {"densification", "mechanical", "texture", "open_chains"}:
+            return {
+                **shared,
+                "representative_states": self._material_report_states_for_section(
+                    context,
+                    section_key,
+                ),
+                "thematic_sections": self._material_report_theme_for_section(
+                    context,
+                    section_key,
+                ),
+            }
+        if section_key == "comparability":
+            return {
+                **shared,
+                "representative_states": context.get("representative_states"),
+                "limitations": context.get("limitations"),
+            }
+        if section_key == "uncertainty":
+            return {**shared, "limitations": context.get("limitations")}
+        if section_key == "conclusion":
+            return {
+                **shared,
+                "key_findings": context.get("key_findings"),
+                "representative_states": context.get("representative_states"),
+                "limitations": context.get("limitations"),
+            }
+        return shared
+
+    def _material_report_states_for_section(
+        self,
+        context: dict[str, Any],
+        section_key: str,
+    ) -> list[Any]:
+        token_map = {
+            "densification": ("density", "porosity", "densification"),
+            "mechanical": (
+                "yield strength",
+                "tensile strength",
+                "ultimate tensile strength",
+                "elongation",
+                "hardness",
+            ),
+            "texture": ("texture", "odf", "jeffrey", "predicted yield"),
+            "open_chains": ("corrosion", "fatigue"),
+        }
+        tokens = token_map.get(section_key)
+        states = self._as_list(context.get("representative_states"))
+        if tokens is None:
+            return states
+        matching = [
+            state
+            for state in states
+            if self._chain_has_property_token(self._as_mapping(state), tokens)
+        ]
+        return matching or states[:3]
+
+    def _material_report_theme_for_section(
+        self,
+        context: dict[str, Any],
+        section_key: str,
+    ) -> list[Any]:
+        token_map = {
+            "densification": ("density", "porosity", "densification"),
+            "mechanical": ("strength", "elongation", "hardness"),
+            "texture": ("texture", "model"),
+            "open_chains": ("corrosion", "fatigue"),
+        }
+        tokens = token_map.get(section_key, ())
+        sections = self._as_list(context.get("thematic_sections"))
+        return [
+            section
+            for section in sections
+            if any(
+                token in json.dumps(section, ensure_ascii=False).lower()
+                for token in tokens
+            )
+        ][:4]
+
+    def _material_report_section_generation_warnings(
+        self,
+        context: dict[str, Any],
+        *,
+        section: dict[str, Any],
+        markdown: str,
+        all_sections: list[dict[str, Any]],
+    ) -> list[str]:
+        warnings: list[str] = []
+        heading = str(section.get("heading") or "").strip()
+        if not heading or not markdown.strip().startswith(heading):
+            warnings.append(f"Generated section does not start with heading: {heading}")
+        for other in all_sections:
+            if other.get("key") == section.get("key"):
+                continue
+            other_heading = str(other.get("heading") or "").strip()
+            if other_heading and other_heading in markdown:
+                warnings.append(
+                    f"Generated section includes another report heading: {other_heading}"
+                )
+        for term in self._material_report_section_required_terms(
+            context,
+            str(section.get("key") or ""),
+        ):
+            if self._report_text_contains_value(markdown, term):
+                continue
+            warnings.append(f"Missing required section term: {term}")
+        return warnings
+
+    def _material_report_section_required_terms(
+        self,
+        context: dict[str, Any],
+        section_key: str,
+    ) -> list[str]:
+        terms: list[str] = []
+        if section_key in {"title", "scope", "conclusion"}:
+            if material := self._safe_text(context.get("canonical_name")):
+                terms.append(material)
+        if section_key in {"title", "representative_states", "conclusion"}:
+            for state in self._as_list(context.get("representative_states"))[:4]:
+                label = self._material_report_chain_heading(self._as_mapping(state))
+                if label:
+                    terms.append(label)
+                for result in self._as_list(
+                    self._as_mapping(state).get("performance_results")
+                )[:4]:
+                    display_value = self._safe_text(
+                        self._as_mapping(result).get("display_value")
+                    )
+                    if display_value:
+                        terms.append(display_value)
+        if section_key == "paper_contributions":
+            for contribution in self._as_list(context.get("paper_contributions"))[:6]:
+                document_id = self._safe_text(self._as_mapping(contribution).get("document_id"))
+                if document_id:
+                    terms.append(document_id)
+        if section_key == "uncertainty":
+            for value in self._as_mapping(context.get("evidence_appendix")).values():
+                text = self._safe_text(value)
+                if text:
+                    terms.append(text)
+        return self._dedupe_strings(terms)[:12]
+
+    def _material_report_generation_warnings(
+        self,
+        context: dict[str, Any],
+        markdown: str,
+    ) -> list[str]:
+        warnings: list[str] = []
+        if markdown.count("## ") < 8:
+            warnings.append("Generated material report is missing one or more expected sections.")
+        for term in self._material_report_section_required_terms(context, "conclusion"):
+            if self._report_text_contains_value(markdown, term):
+                continue
+            warnings.append(f"Missing required material report term: {term}")
+        allowed_numbers = {
+            self._normalize_report_number_token(token)
+            for token in self._report_number_tokens(
+                json.dumps(context, ensure_ascii=False)
+            )
+        }
+        seen: set[str] = set()
+        for token in self._report_number_tokens(markdown):
+            normalized = self._normalize_report_number_token(token)
+            if normalized in allowed_numbers or normalized in seen:
+                continue
+            seen.add(normalized)
+            warnings.append(f"Unsupported numeric value in material report: {token}")
+            if len(seen) >= 5:
+                break
+        return list(dict.fromkeys(warnings))
+
+    def _report_text_contains_value(self, markdown: str, value_text: str) -> bool:
+        normalized_value = self._normalize_report_value_text(value_text)
+        normalized_markdown = self._normalize_report_value_text(markdown)
+        if normalized_value in normalized_markdown:
+            return True
+        match = re.fullmatch(
+            r"(.+?)(%|MPa|GPa|Pa|HV|C/s|°C/s|mm/s|J/mm(?:3|³))",
+            value_text.strip(),
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return False
+        return (
+            self._normalize_report_value_text(match.group(1)) in normalized_markdown
+            and self._normalize_report_value_text(match.group(2)) in normalized_markdown
+        )
+
+    def _normalize_report_value_text(self, value: str) -> str:
+        return re.sub(r"\s+", "", value).casefold()
+
+    def _report_number_tokens(self, text: str) -> list[str]:
+        return re.findall(
+            r"(?<![A-Za-z0-9])[-+]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\s*"
+            r"(?:MPa|GPa|Pa|%|J/mm(?:3|³)|°C/s|C/s|mm/s|µm|um|HV|"
+            r"mA/cm(?:2|²)|A/cm(?:2|²)|g/cm(?:3|³))",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    def _normalize_report_number_token(self, token: str) -> str:
+        return re.sub(
+            r"\s+",
+            "",
+            token.replace("³", "3").replace("²", "2").replace("µ", "u"),
+        ).casefold()
+
+    def _material_report_response(
+        self,
+        collection_id: str,
+        artifact: MaterialReportArtifact,
+    ) -> dict[str, Any]:
+        return {
+            "collection_id": collection_id,
+            **artifact.to_record(),
+        }
+
+    def _material_report_data_version(self, context: dict[str, Any]) -> str:
+        payload = json.dumps(context, ensure_ascii=False, sort_keys=True)
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+    def _extract_material_report_title(self, markdown: str) -> str | None:
+        match = re.search(r"^\s*#\s+(.+?)\s*$", markdown, flags=re.MULTILINE)
+        if not match:
+            return None
+        return match.group(1).strip() or None
+
+    def _strip_report_reasoning_markup(self, markdown: str) -> str:
+        return re.sub(
+            r"^\s*<think>.*?</think>\s*",
+            "",
+            markdown,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+
+    def _coerce_llm_message_content(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return str(content or "").strip()
+        parts: list[str] = []
+        for item in content:
+            text = item if isinstance(item, str) else getattr(item, "text", None)
+            if text is None and isinstance(item, dict):
+                text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        return "\n".join(parts).strip()
+
+    def _get_report_llm_client(self):
+        if self._report_llm_client is None:
+            self._report_llm_client = OpenAI(
+                api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
+                base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
+            )
+        return self._report_llm_client
+
     def _material_report_citations(
         self,
         *,
@@ -2729,6 +3442,20 @@ class ResearchViewAggregationService:
             citation_lookup,
             "它属于织构预测和屈服强度验证链路，不能和常规激光功率/扫描速度参数样品一起做最佳参数排序。",
         )
+        if not any(chain_by_role.values()) and representative_chains:
+            lines.extend(["", "### 3.5 当前可用的材料状态链", ""])
+            for chain in representative_chains[:4]:
+                citation = self._material_report_first_citation(
+                    self._as_list(chain.get("source_evidence")),
+                    citation_lookup,
+                )
+                result_text = self._material_report_result_summary(
+                    self._as_list(chain.get("performance_results"))
+                )
+                lines.append(
+                    f"- {self._material_report_chain_heading(chain)}: "
+                    f"{result_text or '已解析材料状态'}{citation}。"
+                )
         lines.extend(["", "## 4. 致密化和孔隙", ""])
         self._append_material_report_theme(
             lines,
@@ -5594,6 +6321,9 @@ class ResearchViewAggregationService:
     def _slug(self, value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", value.strip().lower()).strip("-")
         return slug or "unspecified"
+
+    def _now_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
 
     def _sort_key(self, value: Any) -> tuple[int, Any]:
         numeric = self._numeric_or_none(value)

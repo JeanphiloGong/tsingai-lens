@@ -417,6 +417,8 @@ Objective research-view 最小返回结构：
 - `GET /api/v1/collections/{collection_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/materials`
 - `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
+- `POST /api/v1/collections/{collection_id}/materials/{material_id}/report`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/report`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
@@ -560,8 +562,19 @@ empty | processing | partial | ready | failed
   token 标注可追溯结论；`document.citations` 是 citation ID 到
   `EvidenceReference` 的映射，前端用它打开 source traceback
 - 当前 `document.markdown` 可以由后端确定性 composer 从已有
-  `report_package` evidence 生成；后续如果引入 LLM writer，也必须由显式构建或
-  生成动作产出持久化/可读取 artifact，`GET .../research-view` 不得触发 LLM 调用
+  `report_package` evidence 生成；LLM writer 必须由显式
+  `POST .../materials/{material_id}/report` 生成动作产出持久化/可读取 artifact，
+  `GET .../research-view` 不得触发 LLM 调用
+- Material report 是材料详情页的 LLM 结论报告 artifact：
+  - `POST .../report` 只负责请求/排队生成，并返回当前 artifact 状态
+  - `GET .../report` 只读取已持久化 artifact 状态和 markdown
+  - 状态和 objective report 一致，使用
+    `generating | ready | ready_with_warnings | failed`
+  - 尚未显式生成时报 `404 material_report_not_found`
+  - 报告上下文来自当前 material `report_package`、representative states、
+    paper contributions、evidence appendix 和 source refs
+  - 生成器按章节写作，LLM 只改写 grounded section，不允许凭空新增样品、
+    数值、论文、机制、比较或 source reference
 - `material_state_chains` / `representative_states`
   是按材料状态组织的精选科研链路，不是完整 `sample_matrix.rows` 的逐行镜像；
   完整样品/条件行必须继续由 `sample_matrix` 和 `evidence_appendix` 承载

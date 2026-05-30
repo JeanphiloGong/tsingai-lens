@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field
 
 
 ResearchViewState = Literal["empty", "processing", "partial", "ready", "failed"]
+MaterialReportStatus = Literal[
+    "generating",
+    "ready",
+    "ready_with_warnings",
+    "failed",
+]
 ResearchViewSeverity = Literal["info", "warning", "error"]
 EvidenceBackedValueStatus = Literal[
     "observed",
@@ -542,6 +548,41 @@ class MaterialReportPackageResponse(BaseModel):
         default_factory=list,
         description="包级证据引用",
     )
+
+
+class MaterialReportRequest(BaseModel):
+    """Request body for generating a material detail report."""
+
+    language: Literal["zh", "en"] = Field(default="zh", description="报告语言")
+    force_regenerate: bool = Field(default=False, description="是否强制重新生成")
+
+
+class MaterialReportResponse(BaseModel):
+    """Persisted LLM-generated material report artifact."""
+
+    collection_id: str = Field(..., description="Collection ID")
+    report_id: str = Field(..., description="Report ID")
+    material_id: str = Field(..., description="Material ID")
+    status: MaterialReportStatus = Field(..., description="Report generation status")
+    stage: str = Field(..., description="Report generation stage")
+    message: str | None = Field(default=None, description="Status message")
+    title: str = Field(..., description="Report title")
+    language: str = Field(default="zh", description="Report language")
+    model: str | None = Field(default=None, description="LLM model")
+    data_version: str = Field(..., description="Material report context version")
+    markdown: str | None = Field(default=None, description="Persisted Markdown report")
+    warnings: list[str] = Field(default_factory=list, description="Report warnings")
+    source_refs: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Source references used by the report",
+    )
+    evidence_appendix: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Evidence appendix summary used by the report",
+    )
+    created_at: str = Field(..., description="Created timestamp")
+    updated_at: str = Field(..., description="Updated timestamp")
+    generated_at: str | None = Field(default=None, description="Generated timestamp")
 
 
 class DocumentMaterialProfileResponse(BaseModel):

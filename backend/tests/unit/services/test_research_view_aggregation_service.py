@@ -113,9 +113,16 @@ class FakeCoreFactRepository:
                 ObjectiveEvidenceUnit,
             ),
         )
+        self.material_report_artifacts: dict[str, object] = {}
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet:  # noqa: ARG002
         return self.facts
+
+    def upsert_material_report_artifact(self, collection_id: str, artifact) -> None:  # noqa: ANN001, ARG002
+        self.material_report_artifacts[artifact.material_id] = artifact
+
+    def read_material_report_artifact(self, collection_id: str, material_id: str):  # noqa: ANN001, ARG002
+        return self.material_report_artifacts.get(material_id)
 
     def _records(
         self,
@@ -125,6 +132,22 @@ class FakeCoreFactRepository:
         if not records:
             return ()
         return tuple(record_cls.from_mapping(record) for record in records)
+
+
+class FakeMaterialReportLLMClient:
+    def __init__(self, markdown: str | list[str]) -> None:
+        self.markdown_responses = list(markdown) if isinstance(markdown, list) else [markdown]
+        self.calls: list[dict] = []
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create_completion)
+        )
+
+    def _create_completion(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(kwargs)
+        index = min(len(self.calls) - 1, len(self.markdown_responses) - 1)
+        message = SimpleNamespace(content=self.markdown_responses[index])
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
 
 
 def _frames(collection_id: str = "col-1") -> tuple[list[dict], dict[str, list[dict]]]:
@@ -415,6 +438,7 @@ def _service_from_frames(
     comparison_rows: list[dict] | None = None,
     objective_units: list[dict] | None = None,
     research_objectives: list[dict] | None = None,
+    llm_client: object | None = None,
 ) -> ResearchViewAggregationService:
     core_fact_repository = FakeCoreFactRepository(
         profiles,
@@ -429,6 +453,8 @@ def _service_from_frames(
         paper_facts_service=FakePaperFactsService(core_fact_repository),
         workspace_service=SimpleNamespace(),
         core_fact_repository=core_fact_repository,
+        llm_client=llm_client,
+        report_model="test-model",
     )
 
 
@@ -1007,6 +1033,157 @@ def test_material_report_package_selects_scientific_representative_states():
     ]
     for claim in expected_claims:
         assert claim in markdown
+
+
+def test_material_report_generation_writes_llm_sections_from_grounded_package():
+    profiles, frames = _frames()
+    llm_client = FakeMaterialReportLLMClient(
+        [
+            "# 316L stainless steel 材料报告\nLLM 摘要包含 316L stainless steel、P001 Sample 14、99.45 %、462.02 MPa、584.44 MPa、41.9 %。",
+            "## 1. 材料范围\nLLM 范围覆盖 316L stainless steel。",
+            "## 2. 论文贡献\npaper-1 贡献样品和性能证据。",
+            "## 3. 代表性材料状态\nP001 Sample 14 保留 99.45 %、462.02 MPa、584.44 MPa、41.9 %。",
+            "## 4. 致密化和孔隙\nLLM 致密化解释。",
+            "## 5. 强度、塑性和硬度\nLLM 力学解释。",
+            "## 6. 织构和模型预测\nLLM 织构解释。",
+            "## 7. 腐蚀、疲劳和未闭合链路\nLLM 未闭合链路。",
+            "## 8. 可比较性\nLLM 可比性。",
+            "## 9. 证据与不确定性\n8 和 8 作为证据摘要数字保留。",
+            "## 10. 结论\n316L stainless steel 的结论引用 P001 Sample 14、99.45 %、462.02 MPa、584.44 MPa、41.9 %。",
+        ]
+    )
+    service = _service_from_frames(
+        profiles,
+        {
+            "evidence_anchors": [],
+            "method_facts": [],
+            "sample_variants": [],
+            "test_conditions": [],
+            "baseline_references": [],
+            "measurement_results": [],
+            "characterization_observations": [],
+            "structure_features": [],
+        },
+        objective_units=[
+            {
+                "evidence_unit_id": "oeu-sample-14-density",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-p001",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": "14"},
+                "process_context": {"process": "SLM", "energy density": "100 J/mm3"},
+                "property_normalized": "relative density",
+                "value_payload": {"value": 99.45, "source_value_text": "99.45"},
+                "unit": "%",
+                "source_refs": [{"route_id": "route-density", "source_kind": "table"}],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            },
+            {
+                "evidence_unit_id": "oeu-sample-14-yield",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-p001",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": "14"},
+                "process_context": {"process": "SLM", "energy density": "100 J/mm3"},
+                "property_normalized": "yield strength",
+                "value_payload": {"value": 462.02, "source_value_text": "462.02"},
+                "unit": "MPa",
+                "source_refs": [{"route_id": "route-yield", "source_kind": "table"}],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            },
+            {
+                "evidence_unit_id": "oeu-sample-14-uts",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-p001",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": "14"},
+                "process_context": {"process": "SLM", "energy density": "100 J/mm3"},
+                "property_normalized": "ultimate tensile strength",
+                "value_payload": {"value": 584.44, "source_value_text": "584.44"},
+                "unit": "MPa",
+                "source_refs": [{"route_id": "route-uts", "source_kind": "table"}],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            },
+            {
+                "evidence_unit_id": "oeu-sample-14-el",
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-p001",
+                "unit_kind": "measurement",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample": "14"},
+                "process_context": {"process": "SLM", "energy density": "100 J/mm3"},
+                "property_normalized": "elongation",
+                "value_payload": {"value": 41.9, "source_value_text": "41.9"},
+                "unit": "%",
+                "source_refs": [{"route_id": "route-el", "source_kind": "table"}],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            },
+        ],
+        llm_client=llm_client,
+    )
+
+    requested = service.request_material_report(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+    generated = service.generate_material_report(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    assert requested["status"] == "generating"
+    assert requested["markdown"] is None
+    assert generated["status"] == "ready"
+    assert generated["model"] == "test-model"
+    assert "LLM 摘要" in generated["markdown"]
+    assert "P001 Sample 14" in generated["markdown"]
+    assert "462.02 MPa" in generated["markdown"]
+    assert len(llm_client.calls) == 11
+    first_prompt = llm_client.calls[0]["messages"][1]["content"]
+    assert "SectionEvidencePacket" in first_prompt
+    assert "GroundedSectionDraft" in first_prompt
+
+
+def test_material_report_generation_falls_back_for_bad_section():
+    profiles, frames = _frames()
+    service = _service_from_frames(
+        profiles,
+        frames,
+        objective_units=_objective_units(),
+        llm_client=FakeMaterialReportLLMClient(
+            [
+                "# 316L stainless steel 材料报告\nLLM 摘要缺少关键样品。",
+                "## 1. 材料范围\nLLM 范围覆盖 316L stainless steel。",
+                "## 2. 论文贡献\npaper-1 贡献样品和性能证据。",
+                "## 3. 代表性材料状态\nBad section missing required values.",
+                "## 4. 致密化和孔隙\nLLM 致密化解释。",
+                "## 5. 强度、塑性和硬度\nLLM 力学解释。",
+                "## 6. 织构和模型预测\nLLM 织构解释。",
+                "## 7. 腐蚀、疲劳和未闭合链路\nLLM 未闭合链路。",
+                "## 8. 可比较性\nLLM 可比性。",
+                "## 9. 证据与不确定性\n3 和 3 作为证据摘要数字保留。",
+                "## 10. 结论\n316L stainless steel 的结论保留 as-built 和 heat-treated。",
+            ]
+        ),
+    )
+    context = service._build_material_report_context(
+        "col-1",
+        "mat-316l-stainless-steel",
+    )
+
+    markdown = service._generate_material_report_markdown(context, language="zh")
+
+    assert "Bad section missing required values" not in markdown
+    assert "## 3. 代表性材料状态" in markdown
+    assert "as-built" in markdown
+    assert "heat-treated" in markdown
 
 
 def test_collection_material_profile_uses_objective_profile_when_available():

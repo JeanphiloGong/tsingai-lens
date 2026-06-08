@@ -465,6 +465,23 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Source preview unavailable')).not.toBeInTheDocument();
 	});
 
+	it('lets the user view parsed source text while the PDF is available', async () => {
+		render(Page);
+
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('parsed-source-fallback')).not.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'View source text' }).click();
+
+		await expect.element(browserPage.getByTestId('parsed-source-fallback')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('The sample was annealed at 700 C.')).toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'View PDF' }).click();
+
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('parsed-source-fallback')).not.toBeInTheDocument();
+	});
+
 	it('renders paper research sample matrix when research view is ready', async () => {
 		render(Page);
 

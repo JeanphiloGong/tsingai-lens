@@ -21,11 +21,13 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    MaterialReportArtifact,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
+    ObjectiveReportArtifact,
     PaperSkim,
     PairwiseComparisonRelation,
     SampleVariant,
@@ -668,6 +670,57 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
 _FACT_REPLACE_TABLES = (*_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
 _ALL_TABLES = (*_OBJECTIVE_TABLES, *_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
 _STATUS_TABLE = "core_fact_collection_status"
+_OBJECTIVE_REPORT_TABLE = _TableSpec(
+    table_name="core_objective_report_artifacts",
+    attr_name="objective_report_artifacts",
+    record_cls=ObjectiveReportArtifact,
+    id_column="objective_id",
+    columns=(
+        "report_id",
+        "objective_id",
+        "status",
+        "stage",
+        "message",
+        "title",
+        "language",
+        "model",
+        "data_version",
+        "markdown",
+        "warnings",
+        "source_refs",
+        "created_at",
+        "updated_at",
+        "generated_at",
+    ),
+    json_columns=frozenset({"warnings", "source_refs"}),
+    index_columns=("objective_id", "status"),
+)
+_MATERIAL_REPORT_TABLE = _TableSpec(
+    table_name="core_material_report_artifacts",
+    attr_name="material_report_artifacts",
+    record_cls=MaterialReportArtifact,
+    id_column="material_id",
+    columns=(
+        "report_id",
+        "material_id",
+        "status",
+        "stage",
+        "message",
+        "title",
+        "language",
+        "model",
+        "data_version",
+        "markdown",
+        "warnings",
+        "source_refs",
+        "evidence_appendix",
+        "created_at",
+        "updated_at",
+        "generated_at",
+    ),
+    json_columns=frozenset({"warnings", "source_refs", "evidence_appendix"}),
+    index_columns=("material_id", "status"),
+)
 
 
 class SqliteCoreFactRepository:
@@ -805,6 +858,90 @@ class SqliteCoreFactRepository:
             status = self._read_status(connection, collection_id, records_by_attr)
         return CoreFactSet(**status, **records_by_attr)
 
+    def upsert_objective_report_artifact(
+        self,
+        collection_id: str,
+        artifact: ObjectiveReportArtifact,
+    ) -> None:
+        self._upsert_report_artifact(collection_id, _OBJECTIVE_REPORT_TABLE, artifact)
+
+    def read_objective_report_artifact(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ObjectiveReportArtifact | None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
+                SELECT {", ".join(_OBJECTIVE_REPORT_TABLE.columns)}
+                FROM {_OBJECTIVE_REPORT_TABLE.table_name}
+                WHERE collection_id = ? AND objective_id = ?
+                """,
+                (collection_id, objective_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return ObjectiveReportArtifact.from_mapping(
+            self._payload_from_row(_OBJECTIVE_REPORT_TABLE, row)
+        )
+
+    def upsert_material_report_artifact(
+        self,
+        collection_id: str,
+        artifact: MaterialReportArtifact,
+    ) -> None:
+        self._upsert_report_artifact(collection_id, _MATERIAL_REPORT_TABLE, artifact)
+
+    def read_material_report_artifact(
+        self,
+        collection_id: str,
+        material_id: str,
+    ) -> MaterialReportArtifact | None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
+                SELECT {", ".join(_MATERIAL_REPORT_TABLE.columns)}
+                FROM {_MATERIAL_REPORT_TABLE.table_name}
+                WHERE collection_id = ? AND material_id = ?
+                """,
+                (collection_id, material_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return MaterialReportArtifact.from_mapping(
+            self._payload_from_row(_MATERIAL_REPORT_TABLE, row)
+        )
+
+    def _upsert_report_artifact(
+        self,
+        collection_id: str,
+        spec: _TableSpec,
+        artifact: Any,
+    ) -> None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            columns = self._storage_columns(spec)
+            placeholders = ", ".join("?" for _ in columns)
+            update_columns = [
+                column
+                for column in columns
+                if column not in {"collection_id", spec.id_column}
+            ]
+            updates = ", ".join(
+                f"{column} = excluded.{column}" for column in update_columns
+            )
+            connection.execute(
+                f"""
+                INSERT INTO {spec.table_name} ({", ".join(columns)})
+                VALUES ({placeholders})
+                ON CONFLICT(collection_id, {spec.id_column})
+                DO UPDATE SET {updates}
+                """,
+                self._record_values(spec, collection_id, artifact),
+            )
+
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.db_path)
@@ -825,6 +962,10 @@ class SqliteCoreFactRepository:
             for spec in _ALL_TABLES:
                 self._create_table(connection, spec)
                 self._create_indexes(connection, spec)
+            self._create_table(connection, _OBJECTIVE_REPORT_TABLE)
+            self._create_indexes(connection, _OBJECTIVE_REPORT_TABLE)
+            self._create_table(connection, _MATERIAL_REPORT_TABLE)
+            self._create_indexes(connection, _MATERIAL_REPORT_TABLE)
 
     def _create_status_table(self, connection: sqlite3.Connection) -> None:
         connection.execute(

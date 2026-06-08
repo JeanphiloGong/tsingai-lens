@@ -11,11 +11,13 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    MaterialReportArtifact,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
+    ObjectiveReportArtifact,
     PaperSkim,
     PairwiseComparisonRelation,
     ResearchObjective,
@@ -464,6 +466,118 @@ def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacin
     assert restored.research_objectives[0].material_scope == ("316L stainless steel",)
     assert restored.objective_contexts[0].objective_id == objective.objective_id
     assert restored.document_profiles[0].document_id == "doc-1"
+
+
+def test_sqlite_core_fact_repository_upserts_objective_report_artifact(tmp_path):
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does energy density affect LPBF 316L mechanical properties?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density"],
+            "property_axes": ["yield strength"],
+        }
+    )
+    repository.replace_collection_research_objectives(
+        "col_test",
+        (),
+        (objective,),
+        (),
+        (),
+        (),
+        (),
+        (),
+    )
+    artifact = ObjectiveReportArtifact.from_mapping(
+        {
+            "report_id": "orp_1",
+            "objective_id": objective.objective_id,
+            "status": "ready",
+            "stage": "ready",
+            "message": "Objective report generated.",
+            "title": objective.question,
+            "language": "zh",
+            "model": "gpt-4o-mini",
+            "data_version": "v1",
+            "markdown": "# 研究目标\n\n结论。",
+            "warnings": ["limited evidence"],
+            "source_refs": [{"document_id": "paper-1", "source_ref": "table-1"}],
+            "created_at": "2026-05-19T00:00:00+00:00",
+            "updated_at": "2026-05-19T00:00:01+00:00",
+            "generated_at": "2026-05-19T00:00:01+00:00",
+        }
+    )
+
+    repository.upsert_objective_report_artifact("col_test", artifact)
+    restored = repository.read_objective_report_artifact(
+        "col_test",
+        objective.objective_id,
+    )
+
+    assert restored is not None
+    assert restored.report_id == "orp_1"
+    assert restored.status == "ready"
+    assert restored.markdown == "# 研究目标\n\n结论。"
+    assert restored.warnings == ("limited evidence",)
+    assert restored.source_refs == (
+        {"document_id": "paper-1", "source_ref": "table-1"},
+    )
+
+    repository.replace_collection_research_objectives(
+        "col_test",
+        (),
+        (objective,),
+        (),
+        (),
+        (),
+        (),
+        (),
+    )
+
+    assert (
+        repository.read_objective_report_artifact("col_test", objective.objective_id)
+        is not None
+    )
+
+
+def test_sqlite_core_fact_repository_upserts_material_report_artifact(tmp_path):
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    artifact = MaterialReportArtifact.from_mapping(
+        {
+            "report_id": "mr_1",
+            "material_id": "mat-316l-stainless-steel",
+            "status": "ready",
+            "stage": "ready",
+            "message": "Material report generated.",
+            "title": "316L Stainless Steel 材料报告",
+            "language": "zh",
+            "model": "gpt-4o-mini",
+            "data_version": "v1",
+            "markdown": "# 316L Stainless Steel 材料报告\n\n结论。",
+            "warnings": ["limited evidence"],
+            "source_refs": [{"document_id": "paper-1", "source_ref": "table-1"}],
+            "evidence_appendix": {"sample_matrix_row_count": 2},
+            "created_at": "2026-05-19T00:00:00+00:00",
+            "updated_at": "2026-05-19T00:00:01+00:00",
+            "generated_at": "2026-05-19T00:00:01+00:00",
+        }
+    )
+
+    repository.upsert_material_report_artifact("col_test", artifact)
+    restored = repository.read_material_report_artifact(
+        "col_test",
+        "mat-316l-stainless-steel",
+    )
+
+    assert restored is not None
+    assert restored.report_id == "mr_1"
+    assert restored.status == "ready"
+    assert restored.markdown == "# 316L Stainless Steel 材料报告\n\n结论。"
+    assert restored.warnings == ("limited evidence",)
+    assert restored.source_refs == (
+        {"document_id": "paper-1", "source_ref": "table-1"},
+    )
+    assert restored.evidence_appendix == {"sample_matrix_row_count": 2}
 
 
 def _comparable_result(value: int = 620) -> ComparableResult:

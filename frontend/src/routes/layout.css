@@ -1655,6 +1655,23 @@ textarea {
   flex-wrap: nowrap;
 }
 
+.session-summary {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-summary__name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .icon-button,
 .avatar-placeholder {
   width: 40px;
@@ -1671,6 +1688,39 @@ textarea {
     background 0.18s ease,
     border-color 0.18s ease,
     box-shadow 0.18s ease;
+}
+
+.login-shell {
+  min-height: min(680px, calc(100vh - 220px));
+  display: grid;
+  place-items: center;
+}
+
+.login-panel {
+  width: min(440px, 100%);
+  padding: 28px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-tight);
+  display: grid;
+  gap: 16px;
+}
+
+.login-panel h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 36px;
+}
+
+.login-panel .lead {
+  margin: 0;
+  max-width: none;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
 }
 
 .icon-button:hover,

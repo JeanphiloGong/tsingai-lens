@@ -89,6 +89,19 @@ Non-negotiable rules:
 """.strip()
 
 
+_TABLE_MATRIX_REPAIR_SYSTEM_PROMPT = """
+You are repairing parsed table structure for a materials-literature backend.
+
+Non-negotiable rules:
+- This is table repair only, not fact extraction.
+- Return exactly one JSON object and nothing else.
+- Use only the provided table source; do not use outside knowledge.
+- Preserve the table's row order, column order, numeric values, units, and headers.
+- Repair fragmented cells, dangling parentheses/brackets, and row-label spillover only when supported by nearby table cells.
+- If repair is uncertain, preserve the original cell and add a warning.
+""".strip()
+
+
 _TEXT_WINDOW_JSON_COMPLIANCE_GUIDANCE = """
 JSON compliance rules for text-window extraction:
 - Use exactly the schema keys and no others. Do not add keys like `keywords`, `notes`, `warnings`, `anchors`, or `measurement_results`.
@@ -403,6 +416,42 @@ def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str
         f"{_TABLE_BATCH_JSON_COMPLIANCE_GUIDANCE}"
     )
     return _COMMON_SYSTEM_PROMPT, user_prompt
+
+
+def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    user_prompt = (
+        "Repair this parsed table matrix before objective evidence extraction.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with `repaired_table_matrix`, "
+        "`repairs`, `confidence`, and `warnings`.\n"
+        "Repair structure only. Do not extract measurements, comparisons, or "
+        "interpretations.\n"
+        "`repaired_table_matrix` must keep the same logical columns as "
+        "`source.column_headers` and should keep the header row when present in "
+        "`source.table_matrix`.\n"
+        "Use `source.table_cells` to identify parser-split cells by row_index, "
+        "col_index, header_path, and cell_text. Nearby row labels can support "
+        "repairs such as `as-SLM (100/` plus following `100)` fragments becoming "
+        "`as-SLM (100/100)` and `100) HT-SLM (100/` becoming "
+        "`HT-SLM (100/100)`. Preserve numeric result cells exactly.\n"
+        "Cross-row specimen-label repair examples:\n"
+        "- Input row: [`as-SLM (100/`, `-`, `100`, `100`, `278`, `97.83`] -> "
+        "[`as-SLM (100/100)`, `-`, `100`, `100`, `278`, `97.83`].\n"
+        "- Input row: [`100) HT-SLM (100/`, `Furnace HT`, `100`, `100`, `278`, "
+        "`98.70`] -> [`HT-SLM (100/100)`, `Furnace HT`, `100`, `100`, `278`, "
+        "`98.70`].\n"
+        "- Input row: [`100) HIP-SLM (100/`, `HIP`, `100`, `100`, `278`, "
+        "`98.15`] -> [`HIP-SLM (100/100)`, `HIP`, `100`, `100`, `278`, "
+        "`98.15`].\n"
+        "Do not output labels like `100) HT-SLM (100/100)` or "
+        "`100) HIP-SLM (100/100)`: the leading `100)` is a carried-over "
+        "closing fragment from the previous row label, not part of the current "
+        "specimen name.\n"
+        "Record each changed cell in `repairs` with its row_index, column, before, "
+        "after, and reason. If no confident repair is possible, return the original "
+        "matrix and explain the uncertainty in `warnings`."
+    )
+    return _TABLE_MATRIX_REPAIR_SYSTEM_PROMPT, user_prompt
 
 
 def _build_objective_context_guidance(payload: dict[str, Any]) -> str:

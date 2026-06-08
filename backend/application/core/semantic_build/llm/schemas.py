@@ -626,6 +626,31 @@ class StructuredTableBatchMentions(_StrictModel):
         return _normalize_list_container(value)
 
 
+class StructuredTableMatrixRepairItem(_StrictModel):
+    row_index: int | None = None
+    column: str | None = None
+    before: str | None = None
+    after: str | None = None
+    reason: str | None = None
+
+
+class StructuredTableMatrixRepair(_StrictModel):
+    repaired_table_matrix: list[list[str]] = Field(default_factory=list)
+    repairs: list[StructuredTableMatrixRepairItem] = Field(default_factory=list)
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("repaired_table_matrix", mode="before")
+    @classmethod
+    def _normalize_repaired_table_matrix(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+    @field_validator("repairs", "warnings", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
 class StructuredPaperSkim(_StrictModel):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"

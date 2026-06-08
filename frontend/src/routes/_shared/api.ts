@@ -133,7 +133,7 @@ export async function requestJson(path: string, init: RequestInit = {}) {
 		headers.set('Content-Type', 'application/json');
 	}
 
-	const response = await fetch(url, { ...init, headers });
+	const response = await fetch(url, { ...init, credentials: 'same-origin', headers });
 	const data = await readResponseData(response);
 
 	if (!response.ok) {
@@ -145,7 +145,7 @@ export async function requestJson(path: string, init: RequestInit = {}) {
 
 export async function requestText(path: string, init: RequestInit = {}) {
 	const url = buildUrl(path);
-	const response = await fetch(url, init);
+	const response = await fetch(url, { ...init, credentials: 'same-origin' });
 	const text = await response.text();
 
 	if (!response.ok) {
@@ -157,7 +157,7 @@ export async function requestText(path: string, init: RequestInit = {}) {
 
 export async function requestBlob(path: string, init: RequestInit = {}) {
 	const url = buildUrl(path);
-	const response = await fetch(url, init);
+	const response = await fetch(url, { ...init, credentials: 'same-origin' });
 
 	if (!response.ok) {
 		await throwApiError(response);

@@ -5,14 +5,11 @@
 	import { errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
 	import {
+		createObjectiveReport,
+		fetchObjectiveReport,
 		fetchObjectiveResearchView,
 		formatShortIdentifier,
 		getResearchViewStateTone,
-		type ObjectiveConclusionComparison,
-		type ObjectiveConclusionContribution,
-		type ObjectiveConclusionMeasurementRow,
-		type ObjectiveConclusionPackage,
-		type ObjectiveConclusionStatement,
 		type ObjectiveEvidenceRoute,
 		type ObjectiveEvidenceUnit,
 		type ObjectivePaperFrame,
@@ -29,16 +26,6 @@
 		frame: ObjectivePaperFrame;
 		units: ObjectiveEvidenceUnit[];
 		routeCount: number;
-	};
-
-	type LogicStep = {
-		step_id: string;
-		titleKey: string;
-		count: number;
-		ready: boolean;
-		items: string[];
-		emptyKey: string;
-		evidenceKind: string | null;
 	};
 
 	type EvidenceReadinessItem = {
@@ -72,6 +59,11 @@
 		count: number;
 	};
 
+	type MarkdownReportBlock =
+		| { kind: 'h1' | 'h2' | 'h3' | 'p'; text: string }
+		| { kind: 'ul' | 'ol'; items: string[] }
+		| { kind: 'table'; headers: string[]; rows: string[][] };
+
 	const evidenceKindOrder = [
 		'measurement',
 		'test_condition',
@@ -93,11 +85,14 @@
 
 	let objectiveView: ObjectiveResearchView | null = null;
 	let loading = false;
+	let reportGenerating = false;
 	let error = '';
+	let reportError = '';
 	let loadedKey = '';
 	let selectedEvidenceUnitId = '';
 	let selectedEvidenceKind = 'all';
 	let selectedEvidenceDocumentId = 'all';
+	let auditShellOpen = false;
 	let evidenceAuditOpen = false;
 	let evidenceSection: HTMLElement | null = null;
 
@@ -107,21 +102,8 @@
 	$: frames = objectiveView?.paper_frames ?? [];
 	$: evidenceUnits = objectiveView?.evidence_units ?? [];
 	$: evidenceRoutes = objectiveView?.evidence_routes ?? [];
-	$: conclusionPackage = objectiveView?.conclusion_package ?? null;
-	$: conclusionMeasurementTables = conclusionPackage?.primary_evidence_tables ?? [];
-	$: conclusionMeasurementRows = conclusionMeasurementTables
-		.flatMap((table) => table.rows)
-		.slice(0, 8);
-	$: conclusionMeasurementRowCount = conclusionMeasurementTables.reduce(
-		(count, table) => count + table.rows.length,
-		0
-	);
-	$: conclusionMeasurementRanges = conclusionMeasurementTables.flatMap(
-		(table) => table.measurement_value_ranges
-	);
-	$: conclusionContributions = conclusionPackage?.paper_contributions ?? [];
-	$: conclusionComparisons = conclusionPackage?.controlled_comparisons ?? [];
-	$: conclusionLimitations = conclusionPackage?.limitations ?? [];
+	$: objectiveReport = objectiveView?.objective_report ?? null;
+	$: objectiveReportBlocks = parseMarkdownReport(objectiveReport?.markdown ?? '');
 	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
 	$: evidenceKindOptions = buildEvidenceKindOptions(evidenceUnits);
 	$: evidenceDocumentOptions = buildEvidenceDocumentOptions(frames, evidenceUnits);
@@ -144,7 +126,6 @@
 	);
 	$: evidenceGroups = buildEvidenceGroups(filteredEvidenceUnits);
 	$: paperCoverage = buildPaperCoverage(frames, evidenceUnits, evidenceRoutes);
-	$: logicSteps = objectiveView ? buildLogicSteps(objectiveView) : [];
 	$: researchFocusGroups = objectiveView ? buildResearchFocusGroups(objectiveView) : [];
 	$: evidenceReadinessItems = objectiveView ? buildEvidenceReadinessItems(objectiveView) : [];
 	$: comparisonReadiness = objectiveView ? buildComparisonReadiness(objectiveView) : null;
@@ -165,6 +146,7 @@
 		error = '';
 		try {
 			objectiveView = await fetchObjectiveResearchView(collectionId, objectiveId);
+			reportError = '';
 		} catch (err) {
 			objectiveView = null;
 			error = errorMessage(err);
@@ -173,82 +155,154 @@
 		}
 	}
 
+	async function generateObjectiveReport(forceRegenerate = false) {
+		if (!collectionId || !objectiveId || reportGenerating) return;
+		reportGenerating = true;
+		reportError = '';
+		try {
+			const report = await createObjectiveReport(collectionId, objectiveId, {
+				language: 'zh',
+				force_regenerate: forceRegenerate
+			});
+			if (objectiveView) {
+				objectiveView = {
+					...objectiveView,
+					objective_report: report
+				};
+			}
+		} catch (err) {
+			reportError = errorMessage(err);
+		} finally {
+			reportGenerating = false;
+		}
+	}
+
+	async function refreshObjectiveReport() {
+		if (!collectionId || !objectiveId || reportGenerating) return;
+		reportGenerating = true;
+		reportError = '';
+		try {
+			const report = await fetchObjectiveReport(collectionId, objectiveId);
+			if (objectiveView) {
+				objectiveView = {
+					...objectiveView,
+					objective_report: report
+				};
+			}
+		} catch (err) {
+			reportError = errorMessage(err);
+		} finally {
+			reportGenerating = false;
+		}
+	}
+
 	function listLabel(items: string[]) {
 		return items.length ? items.join(', ') : $t('research.emptyValue');
 	}
 
+	function parseMarkdownReport(markdown: string): MarkdownReportBlock[] {
+		const blocks: MarkdownReportBlock[] = [];
+		let paragraph: string[] = [];
+		let listKind: 'ul' | 'ol' | null = null;
+		let listItems: string[] = [];
+		let tableLines: string[] = [];
+		const flushParagraph = () => {
+			const text = paragraph.join(' ').trim();
+			if (text) blocks.push({ kind: 'p', text });
+			paragraph = [];
+		};
+		const flushList = () => {
+			if (listKind && listItems.length) {
+				blocks.push({ kind: listKind, items: listItems });
+			}
+			listKind = null;
+			listItems = [];
+		};
+		const flushTable = () => {
+			const table = parseMarkdownTable(tableLines);
+			if (table) {
+				blocks.push(table);
+			} else if (tableLines.length) {
+				paragraph.push(...tableLines);
+				flushParagraph();
+			}
+			tableLines = [];
+		};
+		const flushOpenBlocks = () => {
+			flushTable();
+			flushList();
+			flushParagraph();
+		};
+		for (const rawLine of markdown.split(/\r?\n/)) {
+			const line = rawLine.trim();
+			if (!line) {
+				flushOpenBlocks();
+				continue;
+			}
+			const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+			if (heading) {
+				flushOpenBlocks();
+				blocks.push({
+					kind: heading[1].length === 1 ? 'h1' : heading[1].length === 2 ? 'h2' : 'h3',
+					text: heading[2].trim()
+				});
+				continue;
+			}
+			if (line.startsWith('|') && line.endsWith('|')) {
+				flushParagraph();
+				flushList();
+				tableLines.push(line);
+				continue;
+			}
+			const listItem = /^[-*]\s+(.+)$/.exec(line);
+			if (listItem) {
+				flushParagraph();
+				flushTable();
+				if (listKind && listKind !== 'ul') flushList();
+				listKind = 'ul';
+				listItems.push(listItem[1].trim());
+				continue;
+			}
+			const orderedListItem = /^\d+[.)]\s+(.+)$/.exec(line);
+			if (orderedListItem) {
+				flushParagraph();
+				flushTable();
+				if (listKind && listKind !== 'ol') flushList();
+				listKind = 'ol';
+				listItems.push(orderedListItem[1].trim());
+				continue;
+			}
+			flushTable();
+			flushList();
+			paragraph.push(line);
+		}
+		flushOpenBlocks();
+		return blocks;
+	}
+
+	function parseMarkdownTable(lines: string[]): MarkdownReportBlock | null {
+		if (lines.length < 2 || !isMarkdownSeparatorRow(lines[1])) return null;
+		const headers = splitMarkdownTableRow(lines[0]);
+		const rows = lines.slice(2).map(splitMarkdownTableRow).filter((row) => row.length);
+		if (!headers.length || !rows.length) return null;
+		return { kind: 'table', headers, rows };
+	}
+
+	function isMarkdownSeparatorRow(line: string) {
+		const cells = splitMarkdownTableRow(line);
+		return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+	}
+
+	function splitMarkdownTableRow(line: string) {
+		return line
+			.replace(/^\|/, '')
+			.replace(/\|$/, '')
+			.split('|')
+			.map((cell) => cell.trim());
+	}
+
 	function frameTitle(frame: ObjectivePaperFrame) {
 		return frame.title || frame.source_filename || frame.document_id;
-	}
-
-	function collectionConclusionText(view: ObjectiveResearchView) {
-		const packageClaim = view.conclusion_package?.conclusions[0]?.claim;
-		if (packageClaim) return packageClaim;
-		const summary = view.logic_chain?.summary || view.objective.comparison_intent || '';
-		const prefix = `${view.objective.question}:`;
-		const normalizedSummary = summary.trim();
-		if (normalizedSummary.startsWith(prefix)) {
-			return normalizedSummary.slice(prefix.length).trim();
-		}
-		return normalizedSummary || $t('research.objectiveWorkspace.noLogicChain');
-	}
-
-	function conclusionStatusLabel(pkg: ObjectiveConclusionPackage | null) {
-		if (!pkg) return $t('research.objectiveWorkspace.noLogicChain');
-		return humanizeCode(pkg.status);
-	}
-
-	function contributionTitle(contribution: ObjectiveConclusionContribution) {
-		return contribution.title || contribution.source_filename || contribution.document_id;
-	}
-
-	function conclusionStatementMeta(statement: ObjectiveConclusionStatement) {
-		return uniqueMeta([
-			statement.strength,
-			statement.evidence_unit_ids.length
-				? $t('research.objectiveWorkspace.unitCount', {
-						count: statement.evidence_unit_ids.length
-					})
-				: ''
-		]).join(' · ');
-	}
-
-	function conclusionMeasurementValue(row: ObjectiveConclusionMeasurementRow) {
-		return row.source_value_text || valueWithUnit(row.value, row.unit) || $t('research.emptyValue');
-	}
-
-	function conclusionMeasurementContext(row: ObjectiveConclusionMeasurementRow) {
-		return uniqueMeta(
-			[
-				compactRecordValue(row.sample_context, 2),
-				compactRecordValue(row.process_context, 3),
-				compactRecordValue(row.test_condition, 2)
-			].filter(Boolean)
-		).join(' · ');
-	}
-
-	function conclusionComparisonTitle(comparison: ObjectiveConclusionComparison) {
-		return (
-			comparison.property ||
-			comparison.comparison_axis ||
-			$t('research.objectiveWorkspace.comparisonEvidence')
-		);
-	}
-
-	function conclusionComparisonMeta(comparison: ObjectiveConclusionComparison) {
-		return uniqueMeta(
-			[
-				comparison.validity ? humanizeCode(comparison.validity) : '',
-				comparison.direction ? comparisonDirectionLabel(comparison.direction) : '',
-				compactRecordValue(comparison.sample_context, 2),
-				compactRecordValue(comparison.baseline_context, 2)
-			].filter(Boolean)
-		).join(' · ');
-	}
-
-	function focusEvidenceUnitId(evidenceUnitId: string) {
-		const unit = evidenceUnits.find((item) => item.evidence_unit_id === evidenceUnitId);
-		if (unit) focusEvidenceUnit(unit);
 	}
 
 	function paperContributionSummary(paper: PaperCoverage) {
@@ -369,27 +423,9 @@
 			.slice(0, 4);
 	}
 
-	function compactRecordValue(value: unknown, limit = 5) {
-		if (!value || typeof value !== 'object') return '';
-		const record = value as Record<string, unknown>;
-		const entries = recordEntries(record, limit);
-		if (!entries.length) return '';
-		return entries.map((entry) => `${entry.key}: ${entry.value}`).join('; ');
-	}
-
-	function uniqueMeta(items: string[]) {
-		const seen = new Set<string>();
-		const result: string[] = [];
-		for (const item of items) {
-			const normalized = item.trim().replace(/\s+/g, ' ').toLowerCase();
-			if (!normalized || seen.has(normalized) || normalized.includes('oeu_')) continue;
-			seen.add(normalized);
-			result.push(item);
-		}
-		return result;
-	}
-
 	function sourceRefLabel(sourceRef: Record<string, unknown>) {
+		const displayLabel = displayValue(sourceRef.display_label);
+		if (displayLabel) return displayLabel;
 		const sourceKind =
 			displayValue(sourceRef.source_kind) || $t('research.objectiveWorkspace.source');
 		const sourceRefId =
@@ -626,34 +662,10 @@
 		};
 	}
 
-	function comparisonDirectionLabel(value: unknown) {
-		const direction = displayValue(value).toLowerCase();
-		if (direction === 'increase') return $t('research.objectiveWorkspace.directionIncrease');
-		if (direction === 'decrease') return $t('research.objectiveWorkspace.directionDecrease');
-		if (direction === 'no_change') return $t('research.objectiveWorkspace.directionNoChange');
-		return direction || $t('research.objectiveWorkspace.directionObserved');
-	}
-
-	function valueWithUnit(value: unknown, unit: string | null) {
-		const text = displayValue(value);
-		if (!text) return '';
-		if (!unit || text.includes(unit)) return text;
-		return `${text} ${unit}`;
-	}
-
 	function humanizeCode(value: string) {
 		const normalized = value.trim();
 		if (!normalized) return '';
 		return normalized.replace(/_/g, ' ');
-	}
-
-	function humanizeGapCode(value: string) {
-		const normalized = value.trim();
-		if (!normalized) return '';
-		const labelKey = `research.objectiveWorkspace.gapLabels.${normalized}`;
-		const translated = $t(labelKey);
-		if (translated !== labelKey) return translated;
-		return humanizeCode(normalized);
 	}
 
 	function buildRepresentativeEvidenceUnits(units: ObjectiveEvidenceUnit[]) {
@@ -678,116 +690,11 @@
 		return selected;
 	}
 
-	function textList(value: unknown): string[] {
-		if (typeof value === 'string' || typeof value === 'number') {
-			const text = displayValue(value);
-			return text ? [text] : [];
-		}
-		if (Array.isArray(value)) {
-			return value.map((item) => displayValue(item)).filter(Boolean);
-		}
-		if (value && typeof value === 'object') {
-			return Object.values(value as Record<string, unknown>)
-				.map((item) => displayValue(item))
-				.filter(Boolean);
-		}
-		return [];
-	}
-
-	function chainGaps(view: ObjectiveResearchView) {
-		const payload = view.logic_chain?.chain_payload ?? {};
-		const crossPaper = payload.cross_paper;
-		const crossPaperRecord =
-			crossPaper && typeof crossPaper === 'object' && !Array.isArray(crossPaper)
-				? (crossPaper as Record<string, unknown>)
-				: {};
-		return [...textList(payload.gaps), ...textList(crossPaperRecord.gaps)];
-	}
-
-	function buildLogicSteps(view: ObjectiveResearchView): LogicStep[] {
-		const measurements = unitsByKind(view.evidence_units, 'measurement');
-		const conditions = unitsByKind(view.evidence_units, 'test_condition');
-		const observations = unitsByKind(view.evidence_units, 'characterization');
-		const comparisons = unitsByKind(view.evidence_units, 'comparison');
-		const gaps = chainGaps(view);
-		const scopeItems = [
-			...view.objective.material_scope,
-			...view.objective.process_axes,
-			...view.objective.property_axes
-		];
-
-		return [
-			{
-				step_id: 'scope',
-				titleKey: 'research.objectiveWorkspace.scopeStep',
-				count: scopeItems.length,
-				ready: view.readiness.objectives_ready,
-				items: scopeItems.slice(0, 5),
-				emptyKey: 'research.objectiveWorkspace.noScope',
-				evidenceKind: null
-			},
-			{
-				step_id: 'coverage',
-				titleKey: 'research.objectiveWorkspace.coverageStep',
-				count: relevantFrameCount,
-				ready: view.readiness.frames_ready,
-				items: frames
-					.filter((frame) => frame.relevance !== 'irrelevant')
-					.slice(0, 4)
-					.map((frame) => frameTitle(frame)),
-				emptyKey: 'research.objectiveWorkspace.noCoverage',
-				evidenceKind: null
-			},
-			{
-				step_id: 'conditions',
-				titleKey: 'research.objectiveWorkspace.conditionsStep',
-				count: conditions.length,
-				ready: view.readiness.evidence_units_ready,
-				items: conditions.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
-				emptyKey: 'research.objectiveWorkspace.noConditions',
-				evidenceKind: 'test_condition'
-			},
-			{
-				step_id: 'measurements',
-				titleKey: 'research.objectiveWorkspace.measurementsStep',
-				count: measurements.length,
-				ready: view.readiness.evidence_units_ready,
-				items: measurements.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
-				emptyKey: 'research.objectiveWorkspace.noMeasurements',
-				evidenceKind: 'measurement'
-			},
-			{
-				step_id: 'observations',
-				titleKey: 'research.objectiveWorkspace.observationsStep',
-				count: observations.length,
-				ready: view.readiness.evidence_units_ready,
-				items: observations.slice(0, 4).map((unit) => evidenceUnitValue(unit)),
-				emptyKey: 'research.objectiveWorkspace.noObservations',
-				evidenceKind: 'characterization'
-			},
-			{
-				step_id: 'gaps',
-				titleKey: 'research.objectiveWorkspace.gapsStep',
-				count: gaps.length || comparisons.length,
-				ready: view.readiness.logic_chain_ready,
-				items: (gaps.length
-					? gaps.map((gap) => humanizeGapCode(gap))
-					: comparisons.map((unit) => evidenceUnitValue(unit))
-				).slice(0, 4),
-				emptyKey: 'research.objectiveWorkspace.noGaps',
-				evidenceKind: 'comparison'
-			}
-		];
-	}
-
-	function focusLogicStepEvidence(step: LogicStep) {
-		focusEvidenceKind(step.evidenceKind);
-	}
-
 	function focusEvidenceKind(kind: string | null) {
 		selectedEvidenceKind = kind ?? 'all';
 		selectedEvidenceDocumentId = 'all';
 		selectedEvidenceUnitId = '';
+		auditShellOpen = true;
 		evidenceAuditOpen = true;
 		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
@@ -796,6 +703,7 @@
 		selectedEvidenceKind = unit.unit_kind;
 		selectedEvidenceDocumentId = unit.document_id || 'all';
 		selectedEvidenceUnitId = unit.evidence_unit_id;
+		auditShellOpen = true;
 		evidenceAuditOpen = true;
 		evidenceSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
@@ -837,6 +745,27 @@
 
 		return refs.map((sourceRef) => sourceEntry(unit, sourceRef));
 	}
+
+	function sourceEntryFromRef(sourceRef: Record<string, unknown>): SourceEntry | null {
+		const documentId = displayValue(sourceRef.document_id);
+		if (!documentId) return null;
+		const pageNumber = displayValue(sourceRef.page);
+		const evidenceId =
+			displayValue(sourceRef.evidence_id) || displayValue(sourceRef.evidence_ref_id);
+		const anchorId = displayValue(sourceRef.anchor_id);
+		const params: [string, string][] = [];
+		if (pageNumber) params.push(['page', pageNumber]);
+		if (evidenceId) params.push(['evidence_id', evidenceId]);
+		if (anchorId) params.push(['anchor_id', anchorId]);
+		params.push(['return_to', objectiveHref()]);
+		return {
+			label: sourceRefLabel(sourceRef),
+			documentId,
+			query: queryString(params)
+		};
+	}
+
+
 </script>
 
 <svelte:head>
@@ -904,218 +833,134 @@
 			</div>
 		</header>
 
-		<section class="objective-primary-grid">
-			<section class="objective-section objective-section--conclusion">
-				<div class="section-heading">
-					<div>
-						<h3>{$t('research.objectiveWorkspace.conclusionPackageTitle')}</h3>
-						<p>{$t('research.objectiveWorkspace.conclusionPackageBody')}</p>
-					</div>
-					<span>{boolState(objectiveView.readiness.logic_chain_ready)}</span>
-				</div>
-
-				<article class="report-lead">
-					<span>{$t('research.objectiveWorkspace.collectionConclusion')}</span>
-					<h4>{collectionConclusionText(objectiveView)}</h4>
-					{#if conclusionPackage}
-						<p>
-							{$t('research.objectiveWorkspace.reportStatus', {
-								status: conclusionStatusLabel(conclusionPackage)
-							})}
-						</p>
-					{/if}
-				</article>
-
-				{#if conclusionPackage}
-					<div class="report-metrics" aria-label={$t('research.objectiveWorkspace.reportEvidenceMatrix')}>
-						<article>
-							<strong>{conclusionContributions.length}</strong>
-							<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
-						</article>
-						<article>
-							<strong>{conclusionMeasurementRowCount}</strong>
-							<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
-						</article>
-						<article>
-							<strong>{conclusionComparisons.length}</strong>
-							<span>{$t('research.objectiveWorkspace.controlledComparisons')}</span>
-						</article>
-						<article>
-							<strong>{conclusionPackage.mechanism_chain.evidence.length}</strong>
-							<span>{$t('research.objectiveWorkspace.mechanismInterpretations')}</span>
-						</article>
-					</div>
-
-					{#if conclusionPackage.conclusions.length}
-						<section class="report-section">
-							<div class="report-section__heading">
-								<h4>{$t('research.objectiveWorkspace.reportConclusionTitle')}</h4>
-								<span>{conclusionPackage.conclusions.length}</span>
-							</div>
-							<div class="report-statement-list">
-								{#each conclusionPackage.conclusions as statement, index (`statement-${index}`)}
-									<article>
-										<p>{statement.claim}</p>
-										{#if conclusionStatementMeta(statement)}
-											<small>{conclusionStatementMeta(statement)}</small>
-										{/if}
-									</article>
-								{/each}
-							</div>
-						</section>
-					{/if}
-
-					{#if conclusionContributions.length}
-						<section class="report-section">
-							<div class="report-section__heading">
-								<h4>{$t('research.objectiveWorkspace.paperContributionTitle')}</h4>
-								<span>{conclusionContributions.length}</span>
-							</div>
-							<div class="report-paper-list">
-								{#each conclusionContributions.slice(0, 4) as contribution (contribution.document_id)}
-									<article>
-										<div>
-											<strong>{contributionTitle(contribution)}</strong>
-											<span>{contribution.paper_role} · {contribution.relevance}</span>
-										</div>
-										<p>{contribution.background || $t('research.objectiveWorkspace.noBackground')}</p>
-										<small>
-											{$t('research.objectiveWorkspace.changedVariables')}:
-											{listLabel(contribution.changed_variables)}
-										</small>
-									</article>
-								{/each}
-							</div>
-						</section>
-					{/if}
-
-					<section class="report-section">
-						<div class="report-section__heading">
-							<h4>{$t('research.objectiveWorkspace.primaryEvidenceTitle')}</h4>
-							<span>{conclusionMeasurementRowCount}</span>
+		<section class="objective-report-layout">
+			<section class="objective-section objective-section--report">
+				{#if objectiveReport?.markdown && (objectiveReport.status === 'ready' || objectiveReport.status === 'ready_with_warnings')}
+					<div class="objective-report-reader-header">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
+							<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
 						</div>
-						{#if conclusionMeasurementRanges.length}
-							<div class="report-range-list">
-								{#each conclusionMeasurementRanges as valueRange (valueRange.property_normalized)}
-									<article>
-										<strong>{valueRange.property_normalized}</strong>
-										<p>
-											{valueWithUnit(valueRange.min?.value, valueRange.unit)} -
-											{valueWithUnit(valueRange.max?.value, valueRange.unit)}
-										</p>
-										<small>
-											{$t('research.objectiveWorkspace.unitCount', { count: valueRange.count })}
-										</small>
-									</article>
-								{/each}
-							</div>
-						{/if}
-						{#if conclusionMeasurementRows.length}
-							<div class="report-table-wrap">
-								<table class="report-table">
-									<thead>
-										<tr>
-											<th>{$t('research.objectiveWorkspace.property')}</th>
-											<th>{$t('research.objectiveWorkspace.value')}</th>
-											<th>{$t('research.objectiveWorkspace.sampleAndProcess')}</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each conclusionMeasurementRows as row (row.evidence_unit_id)}
+						<div class="objective-report-actions objective-report-actions--compact">
+							<button type="button" on:click={refreshObjectiveReport} disabled={reportGenerating}>
+								{$t('research.objectiveWorkspace.refreshObjectiveReport')}
+							</button>
+							<button type="button" on:click={() => generateObjectiveReport(true)} disabled={reportGenerating}>
+								{$t('research.objectiveWorkspace.regenerateObjectiveReport')}
+							</button>
+						</div>
+					</div>
+					<article class="objective-report-document" aria-label={$t('research.objectiveWorkspace.objectiveReportTitle')}>
+						<div class="objective-report-document__meta">
+							<span>{humanizeCode(objectiveReport.status)}</span>
+							{#if objectiveReport.model}
+								<span>{objectiveReport.model}</span>
+							{/if}
+							{#if objectiveReport.generated_at}
+								<span>{objectiveReport.generated_at}</span>
+							{/if}
+						</div>
+						{#each objectiveReportBlocks as block, index (`report-${block.kind}-${index}`)}
+							{#if block.kind === 'h1'}
+								<h1>{block.text}</h1>
+							{:else if block.kind === 'h2'}
+								<h2>{block.text}</h2>
+							{:else if block.kind === 'h3'}
+								<h3>{block.text}</h3>
+							{:else if block.kind === 'ul'}
+								<ul class="objective-report-document__list">
+									{#each block.items as item, itemIndex (`report-ul-${index}-${itemIndex}`)}
+										<li>{item}</li>
+									{/each}
+								</ul>
+							{:else if block.kind === 'ol'}
+								<ol class="objective-report-document__list">
+									{#each block.items as item, itemIndex (`report-ol-${index}-${itemIndex}`)}
+										<li>{item}</li>
+									{/each}
+								</ol>
+							{:else if block.kind === 'table'}
+								<div class="objective-report-table-wrap">
+									<table class="objective-report-table">
+										<thead>
 											<tr>
-												<td>{row.property || $t('research.emptyValue')}</td>
-												<td>
-													{#if evidenceUnits.some((unit) => unit.evidence_unit_id === row.evidence_unit_id)}
-														<button
-															class="report-row-action"
-															type="button"
-															on:click={() => focusEvidenceUnitId(row.evidence_unit_id)}
-														>
-															{conclusionMeasurementValue(row)}
-														</button>
-													{:else}
-														{conclusionMeasurementValue(row)}
-													{/if}
-												</td>
-												<td>{conclusionMeasurementContext(row) || $t('research.emptyValue')}</td>
+												{#each block.headers as header, headerIndex (`report-table-${index}-header-${headerIndex}`)}
+													<th>{header}</th>
+												{/each}
 											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{:else}
-							<div class="empty-panel">{$t('research.objectiveWorkspace.noMeasurements')}</div>
-						{/if}
-					</section>
-
-					<section class="report-section">
-						<div class="report-section__heading">
-							<h4>{$t('research.objectiveWorkspace.controlledComparisons')}</h4>
-							<span>{conclusionComparisons.length}</span>
-						</div>
-						{#if conclusionComparisons.length}
-							<div class="report-card-list">
-								{#each conclusionComparisons.slice(0, 4) as comparison (comparison.evidence_unit_id)}
-									<button type="button" on:click={() => focusEvidenceUnitId(comparison.evidence_unit_id)}>
-										<strong>{conclusionComparisonTitle(comparison)}</strong>
-										<p>{comparison.summary || $t('research.objectiveWorkspace.noValue')}</p>
-										{#if conclusionComparisonMeta(comparison)}
-											<small>{conclusionComparisonMeta(comparison)}</small>
-										{/if}
-									</button>
-								{/each}
-							</div>
-						{:else}
-							<div class="empty-panel">{$t('research.objectiveWorkspace.noControlledComparisons')}</div>
-						{/if}
-					</section>
-
-					<section class="report-section">
-						<div class="report-section__heading">
-							<h4>{$t('research.objectiveWorkspace.mechanismChainTitle')}</h4>
-							<span>{conclusionPackage.mechanism_chain.evidence.length}</span>
-						</div>
-						{#if conclusionPackage.mechanism_chain.steps.length}
-							<ol class="report-mechanism-steps">
-								{#each conclusionPackage.mechanism_chain.steps as step (step.step_role)}
-									<li>{step.label}</li>
-								{/each}
-							</ol>
-						{/if}
-						{#if conclusionPackage.mechanism_chain.evidence.length}
-							<div class="report-card-list">
-								{#each conclusionPackage.mechanism_chain.evidence.slice(0, 4) as item (item.evidence_unit_id)}
-									<button type="button" on:click={() => focusEvidenceUnitId(item.evidence_unit_id)}>
-										<strong>{item.property || $t('research.objectiveWorkspace.authorInterpretations')}</strong>
-										<p>{item.summary || $t('research.objectiveWorkspace.noValue')}</p>
-										<small>{item.unit_kind}</small>
-									</button>
-								{/each}
-							</div>
-						{/if}
-					</section>
-
-					<section class="report-section">
-						<div class="report-section__heading">
-							<h4>{$t('research.objectiveWorkspace.limitations')}</h4>
-							<span>{conclusionLimitations.length}</span>
-						</div>
-						{#if conclusionLimitations.length}
-							<div class="report-statement-list">
-								{#each conclusionLimitations as limitation (limitation.code)}
-									<article>
-										<p>{limitation.message}</p>
-										<small>{humanizeCode(limitation.code)}</small>
-									</article>
-								{/each}
-							</div>
-						{:else}
-							<div class="empty-panel">{$t('research.objectiveWorkspace.noLimitations')}</div>
-						{/if}
-					</section>
+										</thead>
+										<tbody>
+											{#each block.rows as row, rowIndex (`report-table-${index}-row-${rowIndex}`)}
+												<tr>
+													{#each block.headers as _header, cellIndex (`report-table-${index}-cell-${rowIndex}-${cellIndex}`)}
+														<td>{row[cellIndex] ?? ''}</td>
+													{/each}
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{:else if block.kind === 'p'}
+								<p>{block.text}</p>
+							{/if}
+						{/each}
+					</article>
 				{:else}
-					<div class="empty-panel">{$t('research.objectiveWorkspace.noConclusionPackage')}</div>
+					<div class="section-heading">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
+							<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
+						</div>
+						<span>{objectiveReport ? humanizeCode(objectiveReport.status) : boolState(false)}</span>
+					</div>
+					<article class="objective-report-empty">
+						<h4>{$t('research.objectiveWorkspace.objectiveReportNotReadyTitle')}</h4>
+						<p>
+							{objectiveReport?.message || $t('research.objectiveWorkspace.objectiveReportNotReadyBody')}
+						</p>
+						<div class="objective-report-actions">
+							<button type="button" on:click={() => generateObjectiveReport(false)} disabled={reportGenerating}>
+								{$t('research.objectiveWorkspace.generateObjectiveReport')}
+							</button>
+							{#if objectiveReport}
+								<button type="button" on:click={refreshObjectiveReport} disabled={reportGenerating}>
+									{$t('research.objectiveWorkspace.refreshObjectiveReport')}
+								</button>
+								<button type="button" on:click={() => generateObjectiveReport(true)} disabled={reportGenerating}>
+									{$t('research.objectiveWorkspace.regenerateObjectiveReport')}
+								</button>
+							{/if}
+						</div>
+						{#if reportError}
+							<p class="objective-report-error" role="alert">{reportError}</p>
+						{/if}
+					</article>
 				{/if}
+			</section>
+
+			<aside class="objective-report-aside" aria-label={$t('research.objectiveWorkspace.summary')}>
+				<div class="objective-summary-panel__heading">
+					<span>{$t('research.objectiveWorkspace.summary')}</span>
+					<strong>{boolState(objectiveView.readiness.evidence_units_ready)}</strong>
+				</div>
+				<div class="objective-summary-list">
+					<article>
+						<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
+						<strong>{relevantFrameCount}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.testConditions')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
+					</article>
+					<article>
+						<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
+						<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
+					</article>
+				</div>
 
 				{#if researchFocusGroups.length}
 					<div class="research-focus">
@@ -1153,91 +998,15 @@
 						<p>{$t(comparisonReadiness.bodyKey)}</p>
 					</div>
 				{/if}
-
-				{#if representativeEvidenceUnits.length}
-					<div class="representative-evidence">
-						<div class="representative-evidence__heading">
-							<h4>{$t('research.objectiveWorkspace.representativeEvidence')}</h4>
-							<span>{confidenceLabel(objectiveView.logic_chain?.confidence ?? 0)}</span>
-						</div>
-						<div class="representative-evidence__list">
-							{#each representativeEvidenceUnits as unit (unit.evidence_unit_id)}
-								<button type="button" on:click={() => focusEvidenceUnit(unit)}>
-									<span>{$t(evidenceKindLabelKey(unit.unit_kind))}</span>
-									<strong>{evidenceUnitValue(unit)}</strong>
-									<small>{evidenceUnitTitle(unit)} · {confidenceLabel(unit.confidence)}</small>
-								</button>
-							{/each}
-						</div>
-					</div>
-				{/if}
-			</section>
-
-			<aside class="objective-summary-panel" aria-label={$t('research.objectiveWorkspace.summary')}>
-				<div class="objective-summary-panel__heading">
-					<span>{$t('research.objectiveWorkspace.summary')}</span>
-					<strong>{boolState(objectiveView.readiness.evidence_units_ready)}</strong>
-				</div>
-				<div class="objective-summary-list">
-					<article>
-						<span>{$t('research.objectiveWorkspace.relevantPapers')}</span>
-						<strong>{relevantFrameCount}</strong>
-					</article>
-					<article>
-						<span>{$t('research.objectiveWorkspace.measurementResults')}</span>
-						<strong>{unitsByKind(evidenceUnits, 'measurement').length}</strong>
-					</article>
-					<article>
-						<span>{$t('research.objectiveWorkspace.testConditions')}</span>
-						<strong>{unitsByKind(evidenceUnits, 'test_condition').length}</strong>
-					</article>
-					<article>
-						<span>{$t('research.objectiveWorkspace.characterizationObservations')}</span>
-						<strong>{unitsByKind(evidenceUnits, 'characterization').length}</strong>
-					</article>
-				</div>
 			</aside>
-
-			<section class="objective-section objective-section--path">
-				<div class="section-heading">
-					<div>
-						<h3>{$t('research.objectiveWorkspace.logicChainTitle')}</h3>
-						<p>{$t('research.objectiveWorkspace.logicChainBody')}</p>
-					</div>
-				</div>
-				<div class="logic-chain" aria-label={$t('research.objectiveWorkspace.logicChainTitle')}>
-					{#each logicSteps as step (step.step_id)}
-						<button
-							class:logic-step--pending={!step.ready}
-							class:selected={step.evidenceKind !== null &&
-								selectedEvidenceKind === step.evidenceKind}
-							class="logic-step"
-							type="button"
-							on:click={() => focusLogicStepEvidence(step)}
-						>
-							<div class="logic-step__marker">{step.count}</div>
-							<div class="logic-step__body">
-								<div class="logic-step__header">
-									<h4>{$t(step.titleKey)}</h4>
-									<span>{boolState(step.ready)}</span>
-								</div>
-								{#if step.items.length}
-									<ul>
-										{#each step.items as item, index (`${item}-${index}`)}
-											<li>{item}</li>
-										{/each}
-									</ul>
-								{:else}
-									<p>{$t(step.emptyKey)}</p>
-								{/if}
-							</div>
-						</button>
-					{/each}
-				</div>
-			</section>
 		</section>
 
-		<section class="objective-workspace-grid">
+		<details class="objective-audit-shell" bind:open={auditShellOpen}>
+			<summary>
+				{$t('research.objectiveWorkspace.evidenceAuditTitle')}
+				<span>{evidenceUnits.length}</span>
+			</summary>
+			<section class="objective-workspace-grid">
 			<div class="objective-main-column">
 				<section class="objective-section" aria-labelledby="paper-contribution-title">
 					<div class="section-heading">
@@ -1544,7 +1313,8 @@
 					<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
 				{/if}
 			</aside>
-		</section>
+			</section>
+		</details>
 
 		<section class="objective-section objective-diagnostics">
 			<div class="section-heading">
@@ -1639,9 +1409,10 @@
 
 	.objective-hero,
 	.objective-state-card,
-	.objective-summary-panel,
+	.objective-report-aside,
 	.objective-section,
-	.objective-side-panel {
+	.objective-side-panel,
+	.objective-audit-shell {
 		box-sizing: border-box;
 		min-width: 0;
 		max-width: 100%;
@@ -1693,7 +1464,6 @@
 
 	.objective-hero p,
 	.section-heading p,
-	.logic-step p,
 	.comparison-readiness p,
 	.paper-contribution-card p,
 	.evidence-detail p,
@@ -1744,8 +1514,8 @@
 
 	.objective-chip-row span,
 	.evidence-detail__header span,
-	.logic-step__header span,
 	.evidence-group__header span,
+	.objective-audit-shell summary span,
 	.diagnostics-grid summary span {
 		border: 1px solid var(--border-default);
 		border-radius: 999px;
@@ -1770,48 +1540,39 @@
 		color: var(--danger-text);
 	}
 
-	.objective-primary-grid {
+	.objective-report-layout {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
-		gap: 16px;
+		gap: 18px;
 		align-items: start;
 	}
 
-	.objective-section--path {
-		grid-column: 1 / -1;
-	}
-
 	.objective-section,
-	.objective-summary-panel,
+	.objective-report-aside,
 	.objective-side-panel {
 		padding: 20px;
 	}
 
-		.objective-section,
-		.objective-summary-panel,
-		.objective-side-panel,
+	.objective-section,
+	.objective-report-aside,
+	.objective-side-panel,
+	.objective-audit-shell,
 		.objective-main-column,
 		.objective-summary-list,
-		.report-lead,
-		.report-section,
-		.report-statement-list,
-		.report-paper-list,
-		.report-range-list,
-		.report-card-list,
 		.research-focus,
 		.representative-evidence,
-	.evidence-group-list,
-	.evidence-group,
-	.paper-contribution-list,
-	.evidence-detail,
-	.evidence-chain-section,
-	.evidence-context-list,
-	.evidence-source-list,
-	.evidence-audit,
-	.evidence-audit__body,
-	.supporting-evidence-list,
-	.evidence-unit-list,
-	.evidence-toolbar {
+		.evidence-group-list,
+		.evidence-group,
+		.paper-contribution-list,
+		.evidence-detail,
+		.evidence-chain-section,
+		.evidence-context-list,
+		.evidence-source-list,
+		.evidence-audit,
+		.evidence-audit__body,
+		.supporting-evidence-list,
+		.evidence-unit-list,
+		.evidence-toolbar {
 		display: grid;
 		gap: 14px;
 		min-width: 0;
@@ -1884,202 +1645,198 @@
 		min-width: 0;
 	}
 
-	.research-focus span,
-	.representative-evidence__heading span,
-	.representative-evidence button span,
-	.representative-evidence button small {
+	.research-focus span {
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
 		text-transform: uppercase;
 	}
 
-		.report-lead {
-			border-left: 3px solid var(--color-accent);
-			padding: 2px 0 2px 14px;
-		}
+	.objective-report-document,
+	.objective-report-empty {
+		display: grid;
+		gap: 18px;
+		min-width: 0;
+	}
 
-		.report-lead span,
-		.report-lead p,
-		.report-section__heading span,
-		.report-statement-list small,
-		.report-paper-list span,
-		.report-paper-list small,
-		.report-range-list small,
-		.report-card-list small {
-			margin: 0;
-			color: var(--text-secondary);
-			font-size: 12px;
-			line-height: 18px;
-			text-transform: uppercase;
-		}
+	.objective-report-document {
+		max-width: 920px;
+		padding: 4px 0 16px;
+	}
 
-		.report-lead h4 {
-			color: var(--text-primary);
-			font-size: 20px;
-			line-height: 30px;
-			font-weight: 650;
-			overflow-wrap: anywhere;
-		}
+	.objective-report-reader-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		border-bottom: 1px solid var(--border-default);
+		padding-bottom: 16px;
+		min-width: 0;
+	}
 
-		.report-metrics,
-		.report-range-list {
-			display: grid;
-			grid-template-columns: repeat(4, minmax(0, 1fr));
-			gap: 10px;
-		}
+	.objective-report-reader-header div:first-child {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
 
-		.report-metrics article,
-		.report-range-list article,
-		.report-statement-list article,
-		.report-paper-list article,
-		.report-card-list button {
-			display: grid;
-			gap: 6px;
-			min-width: 0;
-			border: 1px solid var(--border-default);
-			border-radius: var(--radius-md);
-			padding: 12px;
-			background: var(--bg-subtle);
-			box-sizing: border-box;
-		}
+	.objective-report-reader-header h3 {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
 
-		.report-metrics strong {
-			color: var(--text-primary);
-			font-size: 24px;
-			line-height: 28px;
-		}
+	.objective-report-reader-header p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 14px;
+		line-height: 22px;
+	}
 
-		.report-metrics span {
-			color: var(--text-secondary);
-			font-size: 12px;
-			line-height: 17px;
-		}
+	.objective-report-document__meta,
+	.objective-report-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		min-width: 0;
+	}
 
-		.report-section {
-			border-top: 1px solid var(--border-default);
-			padding-top: 16px;
-		}
+	.objective-report-document__meta span {
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 16px;
+		background: var(--bg-subtle);
+	}
 
-		.report-section__heading {
-			display: flex;
-			align-items: baseline;
-			justify-content: space-between;
-			gap: 12px;
-		}
+	.objective-report-document h1,
+	.objective-report-document h2,
+	.objective-report-document h3,
+	.objective-report-empty h4 {
+		margin: 0;
+		color: var(--text-primary);
+		overflow-wrap: anywhere;
+	}
 
-		.report-statement-list article,
-		.report-paper-list article,
-		.report-range-list article {
-			background: var(--surface-card);
-		}
+	.objective-report-document h1 {
+		font-size: 28px;
+		line-height: 36px;
+	}
 
-		.report-statement-list p,
-		.report-paper-list p,
-		.report-card-list p,
-		.report-mechanism-steps {
-			margin: 0;
-			color: var(--text-secondary);
-			font-size: 14px;
-			line-height: 22px;
-			overflow-wrap: anywhere;
-		}
+	.objective-report-document h2 {
+		margin-top: 12px;
+		border-top: 1px solid var(--border-default);
+		padding-top: 22px;
+		font-size: 21px;
+		line-height: 30px;
+	}
 
-		.report-paper-list strong,
-		.report-range-list strong,
-		.report-card-list strong {
-			color: var(--text-primary);
-			font-size: 14px;
-			line-height: 20px;
-			overflow-wrap: anywhere;
-		}
+	.objective-report-document h3,
+	.objective-report-empty h4 {
+		font-size: 17px;
+		line-height: 24px;
+	}
 
-		.report-paper-list article > div {
-			display: flex;
-			align-items: baseline;
-			justify-content: space-between;
-			gap: 12px;
-			min-width: 0;
-		}
+	.objective-report-document p,
+	.objective-report-document li,
+	.objective-report-empty p {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 15px;
+		line-height: 26px;
+		overflow-wrap: anywhere;
+	}
 
-		.report-card-list {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: 10px;
-		}
+	.objective-report-document__list {
+		display: grid;
+		gap: 7px;
+		margin: 0;
+		padding-left: 22px;
+	}
 
-		.report-card-list button {
-			width: 100%;
-			text-align: left;
-			cursor: pointer;
-			font: inherit;
-			background: var(--surface-card);
-		}
+	.objective-report-table-wrap {
+		overflow-x: auto;
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+	}
 
-		.report-card-list button:hover,
-		.report-row-action:hover {
-			border-color: var(--color-accent);
-			background: var(--bg-subtle);
-		}
+	.objective-report-table {
+		width: 100%;
+		min-width: 640px;
+		border-collapse: collapse;
+		background: var(--surface-card);
+	}
 
-		.report-table-wrap {
-			overflow-x: auto;
-			max-width: 100%;
-			border: 1px solid var(--border-default);
-			border-radius: var(--radius-md);
-		}
+	.objective-report-table th,
+	.objective-report-table td {
+		border-bottom: 1px solid var(--border-default);
+		padding: 10px 12px;
+		text-align: left;
+		vertical-align: top;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
 
-		.report-table {
-			width: 100%;
-			border-collapse: collapse;
-			table-layout: fixed;
-		}
+	.objective-report-table th {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+		background: var(--bg-subtle);
+	}
 
-		.report-table th,
-		.report-table td {
-			border-bottom: 1px solid var(--border-default);
-			padding: 10px 12px;
-			text-align: left;
-			vertical-align: top;
-			overflow-wrap: anywhere;
-		}
+	.objective-report-table td {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 22px;
+	}
 
-		.report-table th {
-			color: var(--text-secondary);
-			font-size: 12px;
-			line-height: 18px;
-			text-transform: uppercase;
-			background: var(--bg-subtle);
-		}
+	.objective-report-table tr:last-child td {
+		border-bottom: 0;
+	}
 
-		.report-table td {
-			color: var(--text-primary);
-			font-size: 13px;
-			line-height: 20px;
-		}
+	.objective-report-actions button {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 9px 12px;
+		color: var(--text-primary);
+		background: var(--surface-card);
+		cursor: pointer;
+		font: inherit;
+		font-weight: 650;
+	}
 
-		.report-row-action {
-			width: fit-content;
-			max-width: 100%;
-			border: 1px solid transparent;
-			border-radius: var(--radius-sm);
-			padding: 2px 4px;
-			color: var(--color-accent);
-			text-align: left;
-			background: transparent;
-			cursor: pointer;
-			font: inherit;
-			overflow-wrap: anywhere;
-		}
+	.objective-report-actions--compact {
+		justify-content: flex-end;
+		flex: 0 0 auto;
+	}
 
-		.report-mechanism-steps {
-			display: grid;
-			gap: 8px;
-			padding-left: 22px;
-		}
+	.objective-report-actions--compact button {
+		padding: 7px 10px;
+		font-size: 13px;
+	}
 
-		.research-focus h4,
-		.representative-evidence h4,
-		.comparison-readiness h4 {
+	.objective-report-actions button:hover:not(:disabled) {
+		border-color: var(--color-accent);
+	}
+
+	.objective-report-actions button:disabled {
+		cursor: wait;
+		opacity: 0.65;
+	}
+
+	.objective-report-error {
+		color: var(--danger-text);
+	}
+
+	.research-focus h4,
+	.representative-evidence h4,
+	.comparison-readiness h4 {
 		margin: 0;
 		color: var(--text-primary);
 		font-size: 15px;
@@ -2090,6 +1847,10 @@
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 10px;
+	}
+
+	.objective-report-aside .research-focus__grid {
+		grid-template-columns: 1fr;
 	}
 
 		.research-focus__grid div,
@@ -2112,6 +1873,10 @@
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 8px;
+	}
+
+	.objective-report-aside .evidence-readiness {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
 	.evidence-readiness button {
@@ -2173,80 +1938,6 @@
 		gap: 10px;
 	}
 
-	.representative-evidence button {
-		display: grid;
-		gap: 5px;
-		width: 100%;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-		padding: 12px;
-		text-align: left;
-		background: var(--surface-card);
-		cursor: pointer;
-		font: inherit;
-	}
-
-	.representative-evidence button:hover {
-		border-color: var(--color-accent);
-	}
-
-	.representative-evidence button strong {
-		color: var(--text-primary);
-		font-size: 14px;
-		line-height: 21px;
-		font-weight: 600;
-		overflow-wrap: anywhere;
-		text-transform: none;
-	}
-
-	.logic-chain {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 12px;
-	}
-
-	.logic-step {
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
-		gap: 12px;
-		width: 100%;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-		padding: 14px;
-		text-align: left;
-		background: var(--bg-subtle);
-		cursor: pointer;
-		font: inherit;
-	}
-
-	.logic-step:hover,
-	.logic-step.selected {
-		border-color: var(--color-accent);
-		background: var(--surface-card);
-	}
-
-	.logic-step--pending {
-		opacity: 0.72;
-	}
-
-	.logic-step__marker {
-		width: 32px;
-		height: 32px;
-		border-radius: 999px;
-		display: grid;
-		place-items: center;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		font-weight: 700;
-	}
-
-	.logic-step__body {
-		display: grid;
-		gap: 8px;
-		min-width: 0;
-	}
-
-	.logic-step__header,
 	.evidence-group__header,
 	.evidence-detail__header {
 		display: flex;
@@ -2255,7 +1946,6 @@
 		gap: 10px;
 	}
 
-	.logic-step h4,
 	.evidence-group h4,
 	.evidence-detail h4 {
 		font-size: 15px;
@@ -2268,15 +1958,6 @@
 		text-transform: uppercase;
 	}
 
-	.logic-step ul {
-		margin: 0;
-		padding-left: 18px;
-		color: var(--text-secondary);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.logic-step li,
 	.paper-contribution-card dd,
 	.evidence-detail dd,
 	.evidence-context-list span,
@@ -2565,6 +2246,26 @@
 		line-height: 20px;
 	}
 
+	.objective-audit-shell {
+		padding: 0;
+		overflow: hidden;
+	}
+
+	.objective-audit-shell > summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 16px 20px;
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+
+	.objective-audit-shell > .objective-workspace-grid {
+		border-top: 1px solid var(--border-default);
+		padding: 16px;
+	}
+
 	.diagnostics-grid {
 		display: grid;
 		gap: 12px;
@@ -2652,8 +2353,7 @@
 	}
 
 	@media (max-width: 1040px) {
-		.logic-chain,
-		.objective-primary-grid,
+		.objective-report-layout,
 		.objective-workspace-grid {
 			grid-template-columns: 1fr;
 		}
@@ -2671,8 +2371,8 @@
 		}
 
 		.objective-hero,
+		.objective-report-reader-header,
 		.section-heading,
-		.logic-step__header,
 		.evidence-group__header,
 		.paper-contribution-card__header,
 		.representative-evidence__heading,
@@ -2704,9 +2404,6 @@
 			.supporting-evidence-list,
 			.evidence-unit-list,
 			.evidence-readiness,
-			.report-metrics,
-			.report-range-list,
-			.report-card-list,
 			.research-focus__grid,
 			.representative-evidence__list,
 		.paper-contribution-card__metrics,

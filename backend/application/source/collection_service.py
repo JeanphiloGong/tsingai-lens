@@ -68,11 +68,13 @@ class CollectionService:
         self,
         name: str,
         description: str | None = None,
+        owner_user_id: str = "local-user",
     ) -> dict:
         collection_id = f"col_{uuid4().hex[:12]}"
         now = _now_iso()
         record = CollectionRecord.create(
             collection_id=collection_id,
+            owner_user_id=owner_user_id,
             name=name,
             description=description,
             now_iso=now,
@@ -90,7 +92,7 @@ class CollectionService:
         )
         return record
 
-    def list_collections(self) -> list[dict]:
+    def list_collections(self, owner_user_id: str | None = None) -> list[dict]:
         items: list[dict] = []
         for collection_id, record in self.repository.list_collection_records():
             record = CollectionRecord.from_mapping(
@@ -98,6 +100,8 @@ class CollectionService:
                 collection_id,
                 now_iso=_now_iso(),
             ).to_record()
+            if owner_user_id is not None and record["owner_user_id"] != owner_user_id:
+                continue
             items.append(record)
         return items
 
@@ -113,6 +117,12 @@ class CollectionService:
         if normalized != record:
             self.repository.write_collection(collection_id, normalized)
         return normalized
+
+    def get_collection_for_user(self, collection_id: str, owner_user_id: str) -> dict:
+        record = self.get_collection(collection_id)
+        if record["owner_user_id"] != owner_user_id:
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        return record
 
     def update_collection(self, collection_id: str, **fields) -> dict:
         record = dict(self.get_collection(collection_id))
@@ -146,6 +156,10 @@ class CollectionService:
             "collection_id": collection_id,
             "deleted_at": _now_iso(),
         }
+
+    def delete_collection_for_user(self, collection_id: str, owner_user_id: str) -> dict:
+        self.get_collection_for_user(collection_id, owner_user_id)
+        return self.delete_collection(collection_id)
 
     def list_files(self, collection_id: str) -> list[dict]:
         files = self.repository.read_files(collection_id)

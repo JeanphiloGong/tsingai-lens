@@ -114,6 +114,7 @@ class GoalService:
         constraints: dict | None = None,
         context: str | None = None,
         max_seed_documents: int = 30,
+        owner_user_id: str = "local-user",
     ) -> dict:
         normalized_material_system = str(material_system or "").strip() or None
         normalized_target_property = str(target_property or "").strip() or None
@@ -156,6 +157,7 @@ class GoalService:
                 intent,
             ),
             description=objective,
+            owner_user_id=owner_user_id,
         )
         collection_id = collection["collection_id"]
         handoff = self.collection_service.register_goal_brief_handoff(

@@ -35,6 +35,18 @@ const translations: Record<Language, Translations> = {
 			themeLight: 'Light',
 			themeDark: 'Dark'
 		},
+		auth: {
+			pageTitle: 'Sign in - Lens',
+			eyebrow: 'Private workspace',
+			title: 'Sign in to Lens',
+			lead: 'Use your workspace account before opening collections or generated research evidence.',
+			email: 'Email',
+			password: 'Password',
+			signIn: 'Sign in',
+			signingIn: 'Signing in...',
+			logout: 'Log out',
+			missingCredentials: 'Enter your email and password.'
+		},
 		footer: {
 			pdfNote: 'PDFs must contain selectable text. Scanned PDFs are not supported.'
 		},
@@ -357,6 +369,15 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: 'Other evidence',
 				contextTitle: 'Objective context',
 				variableAxes: 'Variable axes',
+				objectiveReportTitle: 'Research objective report',
+				objectiveReportBody:
+					'LLM-generated Markdown report persisted by the backend from objective-scoped evidence.',
+				objectiveReportNotReadyTitle: 'Report has not been generated',
+				objectiveReportNotReadyBody:
+					'Generate a report after the objective evidence units are ready. The page does not call the LLM while loading.',
+				generateObjectiveReport: 'Generate report',
+				refreshObjectiveReport: 'Refresh report',
+				regenerateObjectiveReport: 'Regenerate report',
 				conclusionPackageTitle: 'Research conclusion package',
 				conclusionPackageBody:
 					'Objective-scoped report package with conclusions, paper contributions, evidence, mechanism, and uncertainty.',
@@ -368,6 +389,10 @@ const translations: Record<Language, Translations> = {
 				mechanismChainTitle: 'Mechanism chain',
 				noConclusionPackage:
 					'No structured conclusion package is available yet; use the evidence audit below for source review.',
+				noExpertReport:
+					'The conclusion package is available, but the expert report view has not been assembled yet.',
+				scientificContext: 'Scientific context',
+				keyFindings: 'Key findings',
 				researchFocus: 'Research focus',
 				evidenceReadiness: 'Evidence readiness',
 				representativeEvidence: 'Representative evidence',
@@ -453,6 +478,7 @@ const translations: Record<Language, Translations> = {
 				evidenceUnitsTitle: 'Supporting evidence',
 				evidenceUnitsBody:
 					'Representative evidence is shown first; open the full review to inspect all extracted units.',
+				evidenceAuditTitle: 'Evidence audit and diagnostics',
 				allEvidenceReview: 'All extracted evidence',
 				evidenceFilters: 'Evidence filters',
 				evidenceKindFilter: 'Evidence kind',
@@ -655,6 +681,9 @@ const translations: Record<Language, Translations> = {
 					testConditions: 'Test conditions',
 					results: 'Performance response',
 					whyBest: 'Materials interpretation',
+					boundary: 'Comparability boundary',
+					boundaryReady:
+						'Preparation, test condition, result, and source evidence are resolved for this chain.',
 					traceback: 'Traceback',
 					collectionScope: 'collection-level evidence',
 					backgroundText:
@@ -670,7 +699,23 @@ const translations: Record<Language, Translations> = {
 					noTestConditions:
 						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
 					empty:
-						'No representative material state can be built from the current material matrix yet.'
+						'No representative material state can be built from the current material report package yet.',
+					packageUnavailable: 'Material report package has not been generated for this material.'
+				},
+				report: {
+					documentTitle: 'Material report',
+					llmBody:
+						'LLM-generated Markdown conclusion report persisted by the backend from material evidence.',
+					draftBody:
+						'Deterministic grounded draft from the material report package. Generate a report to let the LLM summarize conclusions.',
+					draftStatus: 'deterministic draft',
+					generate: 'Generate report',
+					refresh: 'Refresh report',
+					regenerate: 'Regenerate report',
+					sectionsTitle: 'Thematic analysis',
+					sectionsBody:
+						'Read the material evidence as scoped scientific themes; the complete sample matrix stays in the supporting appendix.',
+					sectionLabel: 'Report theme: {title}'
 				},
 				state: {
 					cardLabel: 'State {index}',
@@ -2400,8 +2445,7 @@ const translations: Record<Language, Translations> = {
 			},
 			detail: {
 				title: 'Chain step detail',
-				empty:
-					'Click an objective or logic-chain step to inspect its supporting evidence rows.',
+				empty: 'Click an objective or logic-chain step to inspect its supporting evidence rows.',
 				clear: 'Clear',
 				loading: 'Loading detail...',
 				evidenceRows: 'Rows',
@@ -2616,6 +2660,18 @@ const translations: Record<Language, Translations> = {
 			themeSystem: '跟随系统',
 			themeLight: '浅色',
 			themeDark: '深色'
+		},
+		auth: {
+			pageTitle: '登录 - Lens',
+			eyebrow: '私有工作区',
+			title: '登录 Lens',
+			lead: '请先使用工作区账号登录，再打开集合和生成的研究证据。',
+			email: '邮箱',
+			password: '密码',
+			signIn: '登录',
+			signingIn: '登录中...',
+			logout: '退出',
+			missingCredentials: '请输入邮箱和密码。'
 		},
 		footer: {
 			pdfNote: 'PDF 需可复制文本，扫描版暂不支持。'
@@ -2931,6 +2987,13 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: '其他证据',
 				contextTitle: '目标上下文',
 				variableAxes: '变化轴',
+				objectiveReportTitle: '研究目标报告',
+				objectiveReportBody: '由后端基于该目标证据持久化生成的 Markdown 报告。',
+				objectiveReportNotReadyTitle: '报告尚未生成',
+				objectiveReportNotReadyBody: '目标证据单元就绪后可生成报告。页面加载时不会调用 LLM。',
+				generateObjectiveReport: '生成报告',
+				refreshObjectiveReport: '刷新报告',
+				regenerateObjectiveReport: '重新生成报告',
 				conclusionPackageTitle: '科研结论包',
 				conclusionPackageBody: '按该研究目标组织结论、文献贡献、支撑证据、机制链和不确定性。',
 				collectionConclusion: '集合级结论',
@@ -2940,6 +3003,9 @@ const translations: Record<Language, Translations> = {
 				primaryEvidenceTitle: '主要支撑数据表',
 				mechanismChainTitle: '机制链',
 				noConclusionPackage: '暂未生成结构化结论包；可先使用下方证据审查核对来源。',
+				noExpertReport: '结论包已返回，但专家报告视图尚未组装。',
+				scientificContext: '科研背景',
+				keyFindings: '关键发现',
 				researchFocus: '研究范围',
 				evidenceReadiness: '证据成熟度',
 				representativeEvidence: '代表性证据',
@@ -3016,6 +3082,7 @@ const translations: Record<Language, Translations> = {
 				noRoutes: '暂未生成证据路由。',
 				evidenceUnitsTitle: '支撑证据',
 				evidenceUnitsBody: '先展示代表性证据；展开完整审查可查看全部已抽取证据单元。',
+				evidenceAuditTitle: '证据审计与诊断',
 				allEvidenceReview: '全部抽取证据',
 				evidenceFilters: '证据筛选',
 				evidenceKindFilter: '证据类型',
@@ -3213,6 +3280,8 @@ const translations: Record<Language, Translations> = {
 					testConditions: '测试条件',
 					results: '性能响应',
 					whyBest: '材料学解释',
+					boundary: '可比较边界',
+					boundaryReady: '该链路的制备、测试条件、结果和来源证据已经解析。',
 					traceback: '证据回溯',
 					collectionScope: '集合级证据',
 					backgroundText:
@@ -3226,7 +3295,20 @@ const translations: Record<Language, Translations> = {
 					observed: '已观测',
 					noProcessContext: '该样品行暂未绑定工艺参数。',
 					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
-					empty: '当前材料矩阵还不足以构建代表性材料状态。'
+					empty: '当前材料报告包还不足以构建代表性材料状态。',
+					packageUnavailable: '该材料尚未生成材料报告包。'
+				},
+				report: {
+					documentTitle: '材料报告',
+					llmBody: '由后端基于材料证据持久化生成的 LLM Markdown 结论报告。',
+					draftBody: '当前展示的是材料报告包的确定性草稿。生成报告后，由 LLM 总结科研结论。',
+					draftStatus: '确定性草稿',
+					generate: '生成报告',
+					refresh: '刷新报告',
+					regenerate: '重新生成报告',
+					sectionsTitle: '主题分析',
+					sectionsBody: '按材料科学问题阅读证据；完整样品矩阵保留在支撑附录中。',
+					sectionLabel: '报告主题：{title}'
 				},
 				state: {
 					cardLabel: '状态 {index}',

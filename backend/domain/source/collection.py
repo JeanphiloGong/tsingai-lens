@@ -8,6 +8,7 @@ from typing import Any, Mapping
 @dataclass(frozen=True)
 class CollectionRecord:
     collection_id: str
+    owner_user_id: str
     name: str
     description: str | None
     status: str
@@ -20,12 +21,14 @@ class CollectionRecord:
         cls,
         *,
         collection_id: str,
+        owner_user_id: str = "local-user",
         name: str,
         description: str | None,
         now_iso: str,
     ) -> "CollectionRecord":
         return cls(
             collection_id=str(collection_id),
+            owner_user_id=_normalize_optional_text(owner_user_id) or "local-user",
             name=str(name),
             description=_normalize_optional_text(description),
             status="idle",
@@ -49,11 +52,13 @@ class CollectionRecord:
         created_at = _normalize_optional_text(source.get("created_at")) or str(now_iso)
         updated_at = _normalize_optional_text(source.get("updated_at")) or created_at
         name = _normalize_optional_text(source.get("name")) or resolved_collection_id
+        owner_user_id = _normalize_optional_text(source.get("owner_user_id")) or "local-user"
         description = _normalize_optional_text(source.get("description"))
         status = _normalize_optional_text(source.get("status")) or "idle"
         paper_count = _normalize_non_negative_int(source.get("paper_count"))
         return cls(
             collection_id=resolved_collection_id,
+            owner_user_id=owner_user_id,
             name=name,
             description=description,
             status=status,
@@ -65,6 +70,7 @@ class CollectionRecord:
     def to_record(self) -> dict[str, Any]:
         return {
             "collection_id": self.collection_id,
+            "owner_user_id": self.owner_user_id,
             "name": self.name,
             "description": self.description,
             "status": self.status,

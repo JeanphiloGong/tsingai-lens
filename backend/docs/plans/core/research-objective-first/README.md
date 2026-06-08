@@ -18,6 +18,8 @@ The family keeps multiple live pages because this local subject now needs:
   `ObjectiveEvidenceUnit` and `ObjectiveLogicChain` the authoritative Core
   semantic fact path instead of retaining old paper-fact families as the
   primary downstream contract
+- an objective report generation slice that turns resolved objective evidence
+  and logic chains into a sectioned, verified report projection
 - a hard cutover direction that retires collection-wide comparison rows as a
   semantic source for graph, material, research-view, workspace, and report
   projections
@@ -48,6 +50,10 @@ ownership by itself.
   evidence units and logic chains, including material and comparison
   projections, without keeping a long-term compatibility surface over the old
   paper-fact families
+- [`objective-report-sectioned-generation-plan.md`](objective-report-sectioned-generation-plan.md)
+  Implementation plan for replacing one-shot objective report generation with
+  section-specific evidence packets, per-section generation, deterministic
+  claim verification, and assembled persisted report artifacts
 
 ## Related Docs
 

@@ -10,11 +10,13 @@
 - 浏览器公开业务 API 统一走 `/api/v1/*`
 - 文档与 OpenAPI 入口统一走 `/api/*`
 - API 文档地址：`/api/docs`
-- 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求
+- 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求，并用
+  same-origin cookie 传递登录会话
 
 ## 产品主流程
 
 - 首页集合列表：`GET /api/v1/collections`
+- 登录会话：`POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
@@ -52,7 +54,8 @@
   `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的
   `material_id` 作为显式 focus context
 - 报告结果不再是当前浏览器主流程；workspace 只保留降级说明，不再维护前端 reports API 客户端
-- 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已退役为说明页，不再发旧浏览器请求
+- 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
+  产品入口统一收敛到 collection workspace 和 `/api/docs`
 
 ## 验收重点
 

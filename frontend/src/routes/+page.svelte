@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import { onDestroy, onMount } from 'svelte';
   import { errorMessage } from './_shared/api';
+  import { authState } from './_shared/auth';
   import {
     createCollection,
     collections,
@@ -71,8 +72,23 @@
     openCreate();
   }
 
-  onMount(async () => {
-    await loadCollections();
+  let hasLoadedCollections = false;
+
+  $: if ($authState.status === 'authenticated' && !hasLoadedCollections) {
+    hasLoadedCollections = true;
+    void loadCollections();
+  }
+
+  $: if ($authState.status === 'anonymous') {
+    clearCollectionPoll();
+    loading = false;
+  }
+
+  onMount(() => {
+    if ($authState.status === 'authenticated' && !hasLoadedCollections) {
+      hasLoadedCollections = true;
+      void loadCollections();
+    }
   });
 
   onDestroy(() => {

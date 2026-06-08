@@ -338,9 +338,17 @@ message 返回必须包含：
 
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/report`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/report`
 
 这是 objective-first 工作区的主读取合同。接口只读取已经落库的 Core
 research-objective records，不在 GET 请求中触发 LLM 构建。
+
+Objective report 是显式生成的持久化 Markdown artifact：
+
+- `POST .../report` 只负责请求/排队生成，并返回 artifact 当前状态
+- `GET .../report` 只读取已持久化 artifact 状态和 markdown
+- `GET .../research-view` 可附带 `objective_report`，但不触发 LLM 调用
 
 Objective list 最小返回结构：
 
@@ -361,6 +369,8 @@ Objective research-view 最小返回结构：
 - `evidence_routes`
 - `evidence_units`
 - `logic_chain`
+- `conclusion_package`
+- `objective_report`
 - `existing_comparison_rows`
 - `warnings`
 
@@ -391,6 +401,8 @@ Objective research-view 最小返回结构：
 - `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
 - `evidence_routes`、`evidence_units`、`logic_chain`
   在下游 builder 未完成时可以为空，但字段必须保留
+- `objective_report` 在尚未显式生成时报 `null`；生成中可返回
+  `status=generating` 且 `markdown=null`；生成完成后返回持久化 Markdown
 - `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
   research-view 的事实来源
 
@@ -405,15 +417,24 @@ Objective research-view 最小返回结构：
 - `GET /api/v1/collections/{collection_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/materials`
 - `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
+- `POST /api/v1/collections/{collection_id}/materials/{material_id}/report`
+- `GET /api/v1/collections/{collection_id}/materials/{material_id}/report`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
 
-这是 research-facing 聚合合同，用来把 raw paper facts 组织成样品矩阵、
+这是 research-facing 聚合合同，用来把 Core 研究证据组织成样品矩阵、
 条件序列、文献覆盖、材料档案和 collection 比较组。
 
 它不是 raw `measurement_results` 或 result-card list 的兼容包装；前端不应在
 主界面重新从一条条 fact 自行拼矩阵。
+
+Collection-scoped materials 是 objective-first 输出：`/materials` 与
+`/materials/{material_id}/research-view` 只能由 objective evidence units 和
+objective material rows 驱动。旧 paper facts 路径可以继续服务 document-scoped
+research-view、debug 或 source 核验，但不得作为 collection material 主页面的
+fallback。collection 已有文件但尚未生成 objective material evidence 时，这两个
+collection material 接口应返回 `409 research_view_not_ready`。
 
 Collection research-view 最小返回结构：
 
@@ -465,6 +486,7 @@ Collection material profile 最小返回结构：
 - `comparison_groups`
 - `condition_series`
 - `evidence_refs`
+- `report_package`
 - `debug_links`
 - `warnings`
 
@@ -507,8 +529,74 @@ empty | processing | partial | ready | failed
   condition 数、evidence 数和主要 warning
 - `materials` 是 collection 的主材料入口；`comparison_groups` 是材料档案内
   的分析模块和高级调试入口，不是顶级主导航对象
-- collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要
-  和比较组
+- collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要、
+  比较组和 `report_package`
+- `report_package` 是材料详情页的主报告数据包，最小包含：
+  - `schema_version`
+  - `status`
+  - `title`
+  - `material_id`
+  - `canonical_name`
+  - `summary`
+  - `executive_summary`
+  - `material_scope`
+  - `paper_contributions`
+  - `key_findings`
+  - `representative_states`
+  - `thematic_sections`
+  - `material_state_chains`
+  - `limitations`
+  - `evidence_appendix`
+  - `document`
+  - `source_refs`
+- `report_package.document` 是材料详情页优先消费的 Markdown 报告文档，最小包含：
+  - `schema_version`，当前为 `material_report_document.v1`
+  - `status`
+  - `title`
+  - `markdown`
+  - `citations`
+  - `outline`
+  - `warnings`
+  - `evidence_appendix`
+- `document.markdown` 是 reader-facing 报告正文，必须用类似 `[E001]` 的 citation
+  token 标注可追溯结论；`document.citations` 是 citation ID 到
+  `EvidenceReference` 的映射，前端用它打开 source traceback
+- 当前 `document.markdown` 可以由后端确定性 composer 从已有
+  `report_package` evidence 生成；LLM writer 必须由显式
+  `POST .../materials/{material_id}/report` 生成动作产出持久化/可读取 artifact，
+  `GET .../research-view` 不得触发 LLM 调用
+- Material report 是材料详情页的 LLM 结论报告 artifact：
+  - `POST .../report` 只负责请求/排队生成，并返回当前 artifact 状态
+  - `GET .../report` 只读取已持久化 artifact 状态和 markdown
+  - 状态和 objective report 一致，使用
+    `generating | ready | ready_with_warnings | failed`
+  - 尚未显式生成时报 `404 material_report_not_found`
+  - 报告上下文来自当前 material `report_package`、representative states、
+    paper contributions、evidence appendix 和 source refs
+  - 生成器按章节写作，LLM 只改写 grounded section，不允许凭空新增样品、
+    数值、论文、机制、比较或 source reference
+- `material_state_chains` / `representative_states`
+  是按材料状态组织的精选科研链路，不是完整 `sample_matrix.rows` 的逐行镜像；
+  完整样品/条件行必须继续由 `sample_matrix` 和 `evidence_appendix` 承载
+- 每条代表性材料状态链路至少表达：
+  - `sample_id` / `sample_label`
+  - `material` / `material_state`
+  - `preparation_context`
+  - `test_conditions`
+  - `performance_results`
+  - `source_evidence`
+  - `comparability_boundary`
+  - `confidence`
+  - `unresolved_fields`
+- `key_findings` 是报告级关键发现，每条 finding 必须保留支撑
+  `evidence_refs`
+- `thematic_sections` 是报告级主题章节，例如致密化/孔隙、强度/塑性/硬度、
+  织构/模型预测、腐蚀/疲劳未闭合链路；章节可以引用多个代表状态和证据
+- `evidence_appendix` 至少表达完整 `sample_matrix` 行数、property 数、
+  evidence 数和 source table 数；前端应把它作为核验入口，而不是把所有行渲染成
+  主报告卡片
+- `report_package.status` 为 `partial` 时表示仍可展示已解析链路，但前端必须同时
+  展示 `limitations`、`comparability_boundary` 或 `unresolved_fields`
 - document material profile 只表达单篇文献内一个材料的事实，不做跨文献合并
 - `sample_matrix.rows` 应优先是一行一个真实 sample / variant
 - generic material/process mention 不应成为主矩阵样品行

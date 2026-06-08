@@ -281,9 +281,25 @@ export type ObjectiveLogicChain = {
 	confidence: number;
 };
 
+export type ObjectiveConclusionNarrativeClaim = {
+	claim: string;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+	strength: string;
+};
+
+export type ObjectiveConclusionNarrativeSection = {
+	section_id: string;
+	title: string;
+	body: string;
+	claims: ObjectiveConclusionNarrativeClaim[];
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
 export type ObjectiveConclusionNarrative = {
 	status: string;
-	sections: Record<string, unknown>[];
+	sections: ObjectiveConclusionNarrativeSection[];
 };
 
 export type ObjectiveConclusionContribution = {
@@ -384,6 +400,135 @@ export type ObjectiveConclusionLimitation = {
 	evidence_unit_ids: string[];
 };
 
+export type ObjectiveExpertFinding = {
+	finding_id: string;
+	statement: string;
+	strength: string;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertEvidenceMatrix = {
+	relevant_paper_count: number;
+	measurement_result_count: number;
+	measurement_property_count: number;
+	controlled_comparison_count: number;
+	mechanism_evidence_count: number;
+	limitation_count: number;
+	source_ref_count: number;
+	measurement_value_ranges: ObjectiveConclusionMeasurementRange[];
+};
+
+export type ObjectiveExpertPaperContribution = {
+	document_id: string;
+	paper_label: string | null;
+	display_title: string | null;
+	paper_role: string;
+	relevance: string;
+	contribution_summary: string | null;
+	changed_variables: string[];
+	measured_property_scope: string[];
+	evidence_unit_count: number;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertComparison = {
+	comparison_id: string;
+	evidence_unit_id: string;
+	document_id: string | null;
+	property: string | null;
+	comparison_axis: string | null;
+	direction: string | null;
+	validity: string;
+	summary: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	baseline_context: Record<string, unknown>;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertMechanismEvidence = {
+	evidence_unit_id: string;
+	document_id: string | null;
+	unit_kind: string;
+	property: string | null;
+	summary: string | null;
+	sample_context: Record<string, unknown>;
+	process_context: Record<string, unknown>;
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertMechanismChain = {
+	steps: ObjectiveConclusionMechanismStep[];
+	evidence: ObjectiveExpertMechanismEvidence[];
+	evidence_unit_ids: string[];
+};
+
+export type ObjectiveExpertLimitation = {
+	code: string;
+	message: string;
+	evidence_unit_ids: string[];
+	source_refs: Record<string, unknown>[];
+};
+
+export type ObjectiveExpertReport = {
+	schema_version: string;
+	status: string;
+	headline_conclusion: string;
+	scientific_context: string;
+	key_findings: ObjectiveExpertFinding[];
+	evidence_matrix: ObjectiveExpertEvidenceMatrix;
+	paper_contribution_map: ObjectiveExpertPaperContribution[];
+	controlled_comparisons: ObjectiveExpertComparison[];
+	mechanism_chain: ObjectiveExpertMechanismChain;
+	limitations: ObjectiveExpertLimitation[];
+	source_traceback: Record<string, unknown>[];
+	traceability: Record<string, unknown>;
+};
+
+export type ObjectiveReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
+export type MaterialReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
+
+export type ObjectiveReportArtifact = {
+	collection_id: string;
+	report_id: string;
+	objective_id: string;
+	status: ObjectiveReportStatus;
+	stage: string;
+	message: string | null;
+	title: string;
+	language: string;
+	model: string | null;
+	data_version: string;
+	markdown: string | null;
+	warnings: string[];
+	source_refs: Record<string, unknown>[];
+	created_at: string;
+	updated_at: string;
+	generated_at: string | null;
+};
+
+export type MaterialReportArtifact = {
+	collection_id: string;
+	report_id: string;
+	material_id: string;
+	status: MaterialReportStatus;
+	stage: string;
+	message: string | null;
+	title: string;
+	language: string;
+	model: string | null;
+	data_version: string;
+	markdown: string | null;
+	warnings: string[];
+	source_refs: Record<string, unknown>[];
+	evidence_appendix: Record<string, unknown>;
+	created_at: string;
+	updated_at: string;
+	generated_at: string | null;
+};
+
 export type ObjectiveConclusionPackage = {
 	schema_version: string;
 	title: string;
@@ -403,6 +548,7 @@ export type ObjectiveConclusionPackage = {
 	conclusions: ObjectiveConclusionStatement[];
 	limitations: ObjectiveConclusionLimitation[];
 	source_refs: Record<string, unknown>[];
+	expert_report: ObjectiveExpertReport | null;
 };
 
 export type ObjectiveList = {
@@ -424,6 +570,7 @@ export type ObjectiveResearchView = {
 	evidence_units: ObjectiveEvidenceUnit[];
 	logic_chain: ObjectiveLogicChain | null;
 	conclusion_package: ObjectiveConclusionPackage | null;
+	objective_report: ObjectiveReportArtifact | null;
 	existing_comparison_rows: Record<string, unknown>[];
 	warnings: ResearchViewWarning[];
 };
@@ -477,6 +624,109 @@ export type MaterialProfileOverview = {
 	variable_axes: string[];
 };
 
+export type MaterialReportPerformanceResult = {
+	property: string;
+	display_value: string;
+	value: string | number | null;
+	unit: string | null;
+	condition: string | null;
+	status: EvidenceBackedValueStatus;
+	evidence_refs: EvidenceReference[];
+	warnings: ResearchViewWarning[];
+};
+
+export type MaterialReportStateChain = {
+	chain_id: string;
+	document_id: string | null;
+	sample_id: string;
+	sample_label: string;
+	material: string;
+	material_state: string;
+	preparation_context: Record<string, string>;
+	test_conditions: Record<string, string>;
+	performance_results: MaterialReportPerformanceResult[];
+	source_evidence: EvidenceReference[];
+	comparability_boundary: string[];
+	confidence: number | null;
+	unresolved_fields: string[];
+};
+
+export type MaterialReportPaperContribution = {
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	sample_count: number;
+	measured_properties: string[];
+	contribution_summary: string;
+};
+
+export type MaterialReportScope = {
+	material_system: string;
+	preparation_routes: string[];
+	source_paper_count: number;
+	sample_row_count: number;
+	evidence_count: number;
+};
+
+export type MaterialReportFinding = {
+	finding_id: string;
+	title: string;
+	body: string;
+	evidence_refs: EvidenceReference[];
+};
+
+export type MaterialReportSection = {
+	section_id: string;
+	title: string;
+	body: string;
+	key_points: string[];
+	evidence_refs: EvidenceReference[];
+};
+
+export type MaterialReportAppendix = {
+	sample_matrix_row_count: number;
+	property_count: number;
+	evidence_count: number;
+	source_table_count: number;
+};
+
+export type MaterialReportOutlineItem = {
+	level: number;
+	title: string;
+	anchor: string;
+};
+
+export type MaterialReportDocument = {
+	schema_version: string;
+	status: ResearchViewState;
+	title: string;
+	markdown: string;
+	citations: Record<string, EvidenceReference>;
+	outline: MaterialReportOutlineItem[];
+	warnings: ResearchViewWarning[];
+	evidence_appendix: MaterialReportAppendix;
+};
+
+export type MaterialReportPackage = {
+	schema_version: string;
+	status: ResearchViewState;
+	title: string;
+	material_id: string;
+	canonical_name: string;
+	summary: string;
+	executive_summary: string;
+	material_scope: MaterialReportScope;
+	paper_contributions: MaterialReportPaperContribution[];
+	key_findings: MaterialReportFinding[];
+	representative_states: MaterialReportStateChain[];
+	thematic_sections: MaterialReportSection[];
+	material_state_chains: MaterialReportStateChain[];
+	limitations: string[];
+	evidence_appendix: MaterialReportAppendix;
+	document: MaterialReportDocument | null;
+	source_refs: EvidenceReference[];
+};
+
 export type MaterialProfile = {
 	collection_id: string;
 	material_id: string;
@@ -491,6 +741,7 @@ export type MaterialProfile = {
 	comparison_groups: ComparableGroup[];
 	condition_series: ConditionSeries[];
 	evidence_refs: EvidenceReference[];
+	report_package: MaterialReportPackage | null;
 	debug_links: Record<string, string>;
 	warnings: ResearchViewWarning[];
 };
@@ -670,6 +921,202 @@ function normalizeContextRecord(value: unknown, fallbackKey: string): Record<str
 		return text ? { [fallbackKey]: text } : {};
 	}
 	return normalizeStringRecord(value);
+}
+
+function normalizeMaterialReportResult(value: unknown): MaterialReportPerformanceResult | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const property = toText(record.property ?? record.property_normalized ?? record.name);
+	if (!property) return null;
+
+	return {
+		property,
+		display_value: toText(record.display_value ?? record.display ?? record.value),
+		value: toScalar(record.value),
+		unit: nonEmptyText(record.unit),
+		condition: nonEmptyText(record.condition ?? record.test_condition),
+		status: normalizeEvidenceStatus(record.status),
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence),
+		warnings: normalizeWarnings(record.warnings)
+	};
+}
+
+function normalizeMaterialReportChain(value: unknown): MaterialReportStateChain | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const chainId = toText(record.chain_id ?? record.id);
+	const sampleId = toText(record.sample_id ?? record.variant_id ?? chainId);
+	if (!chainId && !sampleId) return null;
+
+	return {
+		chain_id: chainId || sampleId,
+		document_id: nonEmptyText(record.document_id),
+		sample_id: sampleId || chainId,
+		sample_label: toText(record.sample_label ?? record.label ?? record.material_state, sampleId),
+		material: toText(record.material ?? record.material_system, '--'),
+		material_state: toText(record.material_state ?? record.sample_label ?? record.label, sampleId),
+		preparation_context: normalizeContextRecord(
+			record.preparation_context ?? record.process_context,
+			'process'
+		),
+		test_conditions: normalizeContextRecord(
+			record.test_conditions ?? record.test_condition,
+			'condition'
+		),
+		performance_results: normalizeObjectList(record.performance_results ?? record.results, 'items')
+			.map((item) => normalizeMaterialReportResult(item))
+			.filter((item): item is MaterialReportPerformanceResult => item !== null),
+		source_evidence: normalizeEvidenceReferences(record.source_evidence ?? record.evidence_refs),
+		comparability_boundary: toStringList(record.comparability_boundary ?? record.boundaries),
+		confidence: toOptionalNumber(record.confidence),
+		unresolved_fields: toStringList(record.unresolved_fields)
+	};
+}
+
+function normalizeMaterialReportContribution(
+	value: unknown
+): MaterialReportPaperContribution | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const documentId = toText(record.document_id ?? record.id);
+	if (!documentId) return null;
+
+	return {
+		document_id: documentId,
+		title: nonEmptyText(record.title),
+		source_filename: nonEmptyText(record.source_filename),
+		sample_count: toNumber(record.sample_count),
+		measured_properties: toStringList(record.measured_properties ?? record.properties),
+		contribution_summary: toText(record.contribution_summary ?? record.summary, documentId)
+	};
+}
+
+function normalizeMaterialReportScope(value: unknown): MaterialReportScope {
+	const record = asRecord(value);
+	return {
+		material_system: toText(record?.material_system),
+		preparation_routes: toStringList(record?.preparation_routes ?? record?.routes),
+		source_paper_count: toNumber(record?.source_paper_count ?? record?.paper_count),
+		sample_row_count: toNumber(record?.sample_row_count ?? record?.sample_count),
+		evidence_count: toNumber(record?.evidence_count)
+	};
+}
+
+function normalizeMaterialReportFinding(value: unknown): MaterialReportFinding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const title = toText(record.title);
+	const body = toText(record.body ?? record.summary);
+	if (!title && !body) return null;
+	return {
+		finding_id: toText(record.finding_id ?? record.id, title || body),
+		title: title || body,
+		body,
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence)
+	};
+}
+
+function normalizeMaterialReportSection(value: unknown): MaterialReportSection | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const title = toText(record.title);
+	const body = toText(record.body ?? record.summary);
+	if (!title && !body) return null;
+	return {
+		section_id: toText(record.section_id ?? record.id, title || body),
+		title: title || body,
+		body,
+		key_points: toStringList(record.key_points ?? record.points),
+		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence)
+	};
+}
+
+function normalizeMaterialReportAppendix(value: unknown): MaterialReportAppendix {
+	const record = asRecord(value);
+	return {
+		sample_matrix_row_count: toNumber(record?.sample_matrix_row_count),
+		property_count: toNumber(record?.property_count),
+		evidence_count: toNumber(record?.evidence_count),
+		source_table_count: toNumber(record?.source_table_count)
+	};
+}
+
+function normalizeMaterialReportOutlineItem(value: unknown): MaterialReportOutlineItem | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const title = toText(record.title);
+	if (!title) return null;
+	return {
+		level: toNumber(record.level, 2),
+		title,
+		anchor: toText(record.anchor, title.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+	};
+}
+
+function normalizeMaterialReportCitations(value: unknown): Record<string, EvidenceReference> {
+	const record = asRecord(value);
+	if (!record) return {};
+	return Object.fromEntries(
+		Object.entries(record)
+			.map(([citationId, ref]) => [citationId, normalizeEvidenceReference(ref)] as const)
+			.filter((item): item is [string, EvidenceReference] => item[1] !== null)
+	);
+}
+
+function normalizeMaterialReportDocument(value: unknown): MaterialReportDocument | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const markdown = toText(record.markdown);
+	if (!markdown) return null;
+	return {
+		schema_version: toText(record.schema_version, 'material_report_document.v1'),
+		status: normalizeResearchState(record.status, 'partial'),
+		title: toText(record.title, 'Material report'),
+		markdown,
+		citations: normalizeMaterialReportCitations(record.citations),
+		outline: normalizeObjectList(record.outline, 'items')
+			.map((item) => normalizeMaterialReportOutlineItem(item))
+			.filter((item): item is MaterialReportOutlineItem => item !== null),
+		warnings: normalizeWarnings(record.warnings),
+		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix)
+	};
+}
+
+function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const chains = normalizeObjectList(record.material_state_chains ?? record.chains, 'items')
+		.map((item) => normalizeMaterialReportChain(item))
+		.filter((item): item is MaterialReportStateChain => item !== null);
+	const representativeStates = normalizeObjectList(record.representative_states, 'items')
+		.map((item) => normalizeMaterialReportChain(item))
+		.filter((item): item is MaterialReportStateChain => item !== null);
+
+	return {
+		schema_version: toText(record.schema_version, 'material_report_package.v1'),
+		status: normalizeResearchState(record.status, chains.length ? 'partial' : 'empty'),
+		title: toText(record.title, 'Material report package'),
+		material_id: toText(record.material_id),
+		canonical_name: toText(record.canonical_name),
+		summary: toText(record.summary),
+		executive_summary: toText(record.executive_summary ?? record.summary),
+		material_scope: normalizeMaterialReportScope(record.material_scope),
+		paper_contributions: normalizeObjectList(record.paper_contributions, 'items')
+			.map((item) => normalizeMaterialReportContribution(item))
+			.filter((item): item is MaterialReportPaperContribution => item !== null),
+		key_findings: normalizeObjectList(record.key_findings, 'items')
+			.map((item) => normalizeMaterialReportFinding(item))
+			.filter((item): item is MaterialReportFinding => item !== null),
+		representative_states: representativeStates.length ? representativeStates : chains,
+		thematic_sections: normalizeObjectList(record.thematic_sections, 'items')
+			.map((item) => normalizeMaterialReportSection(item))
+			.filter((item): item is MaterialReportSection => item !== null),
+		material_state_chains: chains,
+		limitations: toStringList(record.limitations),
+		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix),
+		document: normalizeMaterialReportDocument(record.document),
+		source_refs: normalizeEvidenceReferences(record.source_refs ?? record.evidence_refs)
+	};
 }
 
 function normalizeLinkRecord(value: unknown): Record<string, string> {
@@ -1178,9 +1625,7 @@ function normalizeConclusionEvidenceTable(value: unknown): ObjectiveConclusionEv
 	};
 }
 
-function normalizeConclusionContribution(
-	value: unknown
-): ObjectiveConclusionContribution | null {
+function normalizeConclusionContribution(value: unknown): ObjectiveConclusionContribution | null {
 	const record = asRecord(value);
 	if (!record) return null;
 
@@ -1296,6 +1741,207 @@ function normalizeConclusionLimitation(value: unknown): ObjectiveConclusionLimit
 	};
 }
 
+function normalizeObjectiveExpertFinding(value: unknown): ObjectiveExpertFinding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const statement = toText(record.statement ?? record.claim ?? record.summary);
+	if (!statement) return null;
+
+	return {
+		finding_id: toText(record.finding_id ?? record.id, statement),
+		statement,
+		strength: toText(record.strength, 'evidence'),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertEvidenceMatrix(value: unknown): ObjectiveExpertEvidenceMatrix {
+	const record = asRecord(value);
+	return {
+		relevant_paper_count: toNumber(record?.relevant_paper_count),
+		measurement_result_count: toNumber(record?.measurement_result_count),
+		measurement_property_count: toNumber(record?.measurement_property_count),
+		controlled_comparison_count: toNumber(record?.controlled_comparison_count),
+		mechanism_evidence_count: toNumber(record?.mechanism_evidence_count),
+		limitation_count: toNumber(record?.limitation_count),
+		source_ref_count: toNumber(record?.source_ref_count),
+		measurement_value_ranges: asArray(record?.measurement_value_ranges)
+			.map((item) => normalizeConclusionMeasurementRange(item))
+			.filter((item): item is ObjectiveConclusionMeasurementRange => item !== null)
+	};
+}
+
+function normalizeObjectiveExpertPaperContribution(
+	value: unknown
+): ObjectiveExpertPaperContribution | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const documentId = toText(record.document_id ?? record.paper_id);
+	if (!documentId) return null;
+
+	return {
+		document_id: documentId,
+		paper_label: nonEmptyText(record.paper_label),
+		display_title: nonEmptyText(record.display_title ?? record.title),
+		paper_role: toText(record.paper_role, 'uncertain'),
+		relevance: toText(record.relevance, 'uncertain'),
+		contribution_summary: nonEmptyText(record.contribution_summary ?? record.summary),
+		changed_variables: toStringList(record.changed_variables),
+		measured_property_scope: toStringList(record.measured_property_scope),
+		evidence_unit_count: toNumber(record.evidence_unit_count),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertComparison(value: unknown): ObjectiveExpertComparison | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	const comparisonId = toText(record.comparison_id ?? record.id, evidenceUnitId);
+	if (!evidenceUnitId && !comparisonId) return null;
+
+	return {
+		comparison_id: comparisonId || evidenceUnitId,
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		comparison_axis: nonEmptyText(record.comparison_axis),
+		direction: nonEmptyText(record.direction),
+		validity: toText(record.validity, 'directional'),
+		summary: nonEmptyText(record.summary ?? record.statement),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		baseline_context: normalizeUnknownRecord(record.baseline_context),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertMechanismEvidence(
+	value: unknown
+): ObjectiveExpertMechanismEvidence | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
+	if (!evidenceUnitId) return null;
+
+	return {
+		evidence_unit_id: evidenceUnitId,
+		document_id: nonEmptyText(record.document_id),
+		unit_kind: toText(record.unit_kind, 'interpretation'),
+		property: nonEmptyText(record.property ?? record.property_normalized),
+		summary: nonEmptyText(record.summary ?? record.statement ?? record.interpretation),
+		sample_context: normalizeUnknownRecord(record.sample_context),
+		process_context: normalizeUnknownRecord(record.process_context),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertMechanismChain(value: unknown): ObjectiveExpertMechanismChain {
+	const record = asRecord(value);
+	return {
+		steps: asArray(record?.steps)
+			.map((item) => normalizeConclusionMechanismStep(item))
+			.filter((item): item is ObjectiveConclusionMechanismStep => item !== null),
+		evidence: asArray(record?.evidence)
+			.map((item) => normalizeObjectiveExpertMechanismEvidence(item))
+			.filter((item): item is ObjectiveExpertMechanismEvidence => item !== null),
+		evidence_unit_ids: toStringList(record?.evidence_unit_ids)
+	};
+}
+
+function normalizeObjectiveExpertLimitation(value: unknown): ObjectiveExpertLimitation | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const message = toText(record.message ?? record.detail ?? record.code);
+	if (!message) return null;
+
+	return {
+		code: toText(record.code, 'limitation'),
+		message,
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
+function normalizeObjectiveExpertReport(value: unknown): ObjectiveExpertReport | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const headlineConclusion = toText(record.headline_conclusion ?? record.answer);
+	const scientificContext = toText(record.scientific_context ?? record.context);
+	if (!headlineConclusion && !scientificContext) return null;
+
+	return {
+		schema_version: toText(record.schema_version, 'objective_expert_report.v1'),
+		status: toText(record.status, 'empty'),
+		headline_conclusion: headlineConclusion,
+		scientific_context: scientificContext,
+		key_findings: asArray(record.key_findings)
+			.map((item) => normalizeObjectiveExpertFinding(item))
+			.filter((item): item is ObjectiveExpertFinding => item !== null),
+		evidence_matrix: normalizeObjectiveExpertEvidenceMatrix(record.evidence_matrix),
+		paper_contribution_map: asArray(record.paper_contribution_map)
+			.map((item) => normalizeObjectiveExpertPaperContribution(item))
+			.filter((item): item is ObjectiveExpertPaperContribution => item !== null),
+		controlled_comparisons: asArray(record.controlled_comparisons)
+			.map((item) => normalizeObjectiveExpertComparison(item))
+			.filter((item): item is ObjectiveExpertComparison => item !== null),
+		mechanism_chain: normalizeObjectiveExpertMechanismChain(record.mechanism_chain),
+		limitations: asArray(record.limitations)
+			.map((item) => normalizeObjectiveExpertLimitation(item))
+			.filter((item): item is ObjectiveExpertLimitation => item !== null),
+		source_traceback: normalizeUnknownRecordList(record.source_traceback),
+		traceability: normalizeUnknownRecord(record.traceability)
+	};
+}
+
+function normalizeConclusionNarrativeClaim(
+	value: unknown
+): ObjectiveConclusionNarrativeClaim | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const claim = toText(record.claim ?? record.message ?? record.summary);
+	if (!claim) return null;
+
+	return {
+		claim,
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		strength: toText(record.strength, 'statement')
+	};
+}
+
+function normalizeConclusionNarrativeSection(
+	value: unknown
+): ObjectiveConclusionNarrativeSection | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const sectionId = toText(record.section_id ?? record.id);
+	const title = toText(record.title ?? record.heading, sectionId);
+	const body = toText(record.body ?? record.summary ?? record.text);
+	if (!sectionId || (!title && !body)) return null;
+
+	return {
+		section_id: sectionId,
+		title,
+		body,
+		claims: asArray(record.claims)
+			.map((item) => normalizeConclusionNarrativeClaim(item))
+			.filter((item): item is ObjectiveConclusionNarrativeClaim => item !== null),
+		evidence_unit_ids: toStringList(record.evidence_unit_ids),
+		source_refs: normalizeUnknownRecordList(record.source_refs)
+	};
+}
+
 function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusionPackage | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -1318,7 +1964,9 @@ function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusio
 		status: toText(record.status, 'empty'),
 		narrative: {
 			status: toText(narrativeRecord?.status, 'not_generated'),
-			sections: normalizeUnknownRecordList(narrativeRecord?.sections)
+			sections: asArray(narrativeRecord?.sections)
+				.map((item) => normalizeConclusionNarrativeSection(item))
+				.filter((item): item is ObjectiveConclusionNarrativeSection => item !== null)
 		},
 		paper_contributions: asArray(record.paper_contributions)
 			.map((item) => normalizeConclusionContribution(item))
@@ -1336,7 +1984,46 @@ function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusio
 		limitations: asArray(record.limitations)
 			.map((item) => normalizeConclusionLimitation(item))
 			.filter((item): item is ObjectiveConclusionLimitation => item !== null),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		expert_report: normalizeObjectiveExpertReport(record.expert_report)
+	};
+}
+
+function normalizeObjectiveReportArtifact(value: unknown): ObjectiveReportArtifact | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const reportId = toText(record.report_id);
+	const objectiveId = toText(record.objective_id);
+	if (!reportId || !objectiveId) return null;
+
+	const status = toText(record.status, 'generating') as ObjectiveReportStatus;
+	const normalizedStatus: ObjectiveReportStatus = [
+		'generating',
+		'ready',
+		'ready_with_warnings',
+		'failed'
+	].includes(status)
+		? status
+		: 'generating';
+
+	return {
+		collection_id: toText(record.collection_id),
+		report_id: reportId,
+		objective_id: objectiveId,
+		status: normalizedStatus,
+		stage: toText(record.stage, normalizedStatus),
+		message: nonEmptyText(record.message),
+		title: toText(record.title, 'Research objective report'),
+		language: toText(record.language, 'zh'),
+		model: nonEmptyText(record.model),
+		data_version: toText(record.data_version),
+		markdown: nonEmptyText(record.markdown),
+		warnings: toStringList(record.warnings),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		created_at: toText(record.created_at),
+		updated_at: toText(record.updated_at),
+		generated_at: nonEmptyText(record.generated_at)
 	};
 }
 
@@ -1678,6 +2365,7 @@ export function normalizeMaterialProfile(
 			.map((item) => normalizeConditionSeries(item))
 			.filter((item): item is ConditionSeries => item !== null),
 		evidence_refs: normalizeEvidenceReferences(record?.evidence_refs ?? record?.evidence),
+		report_package: normalizeMaterialReportPackage(record?.report_package),
 		debug_links: normalizeLinkRecord(record?.debug_links),
 		warnings: normalizeWarnings(record?.warnings)
 	};
@@ -1847,8 +2535,48 @@ export function normalizeObjectiveResearchView(
 		evidence_units: evidenceUnits,
 		logic_chain: normalizeObjectiveLogicChain(record?.logic_chain),
 		conclusion_package: normalizeObjectiveConclusionPackage(record?.conclusion_package),
+		objective_report: normalizeObjectiveReportArtifact(record?.objective_report),
 		existing_comparison_rows: normalizeUnknownRecordList(record?.existing_comparison_rows),
 		warnings: normalizeWarnings(record?.warnings)
+	};
+}
+
+function normalizeMaterialReportArtifact(value: unknown): MaterialReportArtifact | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const reportId = toText(record.report_id);
+	const materialId = toText(record.material_id);
+	if (!reportId || !materialId) return null;
+
+	const status = toText(record.status, 'generating') as MaterialReportStatus;
+	const normalizedStatus: MaterialReportStatus = [
+		'generating',
+		'ready',
+		'ready_with_warnings',
+		'failed'
+	].includes(status)
+		? status
+		: 'generating';
+
+	return {
+		collection_id: toText(record.collection_id),
+		report_id: reportId,
+		material_id: materialId,
+		status: normalizedStatus,
+		stage: toText(record.stage, normalizedStatus),
+		message: nonEmptyText(record.message),
+		title: toText(record.title, 'Material report'),
+		language: toText(record.language, 'zh'),
+		model: nonEmptyText(record.model),
+		data_version: toText(record.data_version),
+		markdown: nonEmptyText(record.markdown),
+		warnings: toStringList(record.warnings),
+		source_refs: normalizeUnknownRecordList(record.source_refs),
+		evidence_appendix: asRecord(record.evidence_appendix) ?? {},
+		created_at: toText(record.created_at),
+		updated_at: toText(record.updated_at),
+		generated_at: nonEmptyText(record.generated_at)
 	};
 }
 
@@ -1908,6 +2636,86 @@ export async function fetchObjectiveResearchView(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/research-view`
 	);
 	return normalizeObjectiveResearchView(data, collectionId, objectiveId);
+}
+
+export async function fetchObjectiveReport(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/report`
+	);
+	const report = normalizeObjectiveReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid objective report response');
+	}
+	return report;
+}
+
+export async function createObjectiveReport(
+	collectionId: string,
+	objectiveId: string,
+	options: { language?: 'zh' | 'en'; force_regenerate?: boolean } = {}
+): Promise<ObjectiveReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/report`,
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				language: options.language ?? 'zh',
+				force_regenerate: options.force_regenerate ?? false
+			})
+		}
+	);
+	const report = normalizeObjectiveReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid objective report response');
+	}
+	return report;
+}
+
+export async function fetchMaterialReport(
+	collectionId: string,
+	materialId: string
+): Promise<MaterialReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedMaterial = encodeURIComponent(materialId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/materials/${encodedMaterial}/report`
+	);
+	const report = normalizeMaterialReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid material report response');
+	}
+	return report;
+}
+
+export async function createMaterialReport(
+	collectionId: string,
+	materialId: string,
+	options: { language?: 'zh' | 'en'; force_regenerate?: boolean } = {}
+): Promise<MaterialReportArtifact> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedMaterial = encodeURIComponent(materialId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/materials/${encodedMaterial}/report`,
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				language: options.language ?? 'zh',
+				force_regenerate: options.force_regenerate ?? false
+			})
+		}
+	);
+	const report = normalizeMaterialReportArtifact(data);
+	if (!report) {
+		throw new Error('Invalid material report response');
+	}
+	return report;
 }
 
 export async function fetchDocumentMaterials(

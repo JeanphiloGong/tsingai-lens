@@ -18,6 +18,8 @@ from domain.core.research_objective import (
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
+    ObjectiveReportArtifact,
+    MaterialReportArtifact,
     PaperSkim,
     ResearchObjective,
 )
@@ -206,3 +208,27 @@ class CoreFactRepository(Protocol):
     ) -> None: ...
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...
+
+    def upsert_objective_report_artifact(
+        self,
+        collection_id: str,
+        artifact: ObjectiveReportArtifact,
+    ) -> None: ...
+
+    def read_objective_report_artifact(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ObjectiveReportArtifact | None: ...
+
+    def upsert_material_report_artifact(
+        self,
+        collection_id: str,
+        artifact: MaterialReportArtifact,
+    ) -> None: ...
+
+    def read_material_report_artifact(
+        self,
+        collection_id: str,
+        material_id: str,
+    ) -> MaterialReportArtifact | None: ...

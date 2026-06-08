@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from application.core.semantic_build.research_objective_service import (
@@ -368,9 +370,37 @@ def test_objective_workspace_detail_returns_conclusion_package(tmp_path):
     conclusion_package = payload["conclusion_package"]
     assert conclusion_package["schema_version"] == "objective_conclusion_package.v1"
     assert conclusion_package["status"] == "ready"
-    assert conclusion_package["narrative"]["status"] == "not_generated"
+    assert conclusion_package["narrative"]["status"] == "ready"
+    assert [
+        section["section_id"]
+        for section in conclusion_package["narrative"]["sections"]
+    ] == [
+        "answer",
+        "research_context",
+        "key_evidence",
+        "paper_contributions",
+        "controlled_comparisons",
+        "mechanism_chain",
+        "limitations",
+        "source_traceback",
+    ]
+    answer_section = conclusion_package["narrative"]["sections"][0]
+    assert "evaluates how" in answer_section["body"]
+    assert "The strongest contribution is P001 - Profile Title" in answer_section["body"]
+    evidence_section = conclusion_package["narrative"]["sections"][2]
+    assert "key evidence table contains 1 measurement row" in evidence_section["body"]
+    assert evidence_section["claims"][0]["evidence_unit_ids"] == [
+        "oeu-corrosion"
+    ]
+    assert evidence_section["claims"][0]["source_refs"][0]["source_ref"] == "table-1"
+    assert "has traceable measurement results" not in evidence_section["claims"][0]["claim"]
+    assert conclusion_package["traceability"]["unsupported_claim_count"] == 0
     assert conclusion_package["paper_contributions"][0]["paper_role"] == (
         "primary_experiment"
+    )
+    assert conclusion_package["paper_contributions"][0]["paper_label"] == "P001"
+    assert conclusion_package["paper_contributions"][0]["display_title"] == (
+        "P001 - Profile Title"
     )
     evidence_table = conclusion_package["primary_evidence_tables"][0]
     assert evidence_table["rows"][0]["evidence_unit_id"] == "oeu-corrosion"
@@ -383,6 +413,119 @@ def test_objective_workspace_detail_returns_conclusion_package(tmp_path):
     ]
     assert conclusion_package["limitations"] == []
     assert conclusion_package["source_refs"][0]["source_ref"] == "table-1"
+    assert conclusion_package["source_refs"][0]["display_label"] == "P001 · Table 1"
+    expert_report = conclusion_package["expert_report"]
+    assert expert_report["schema_version"] == "objective_expert_report.v1"
+    assert expert_report["status"] == "ready"
+    assert "The strongest contribution is P001 - Profile Title" in (
+        expert_report["headline_conclusion"]
+    )
+    assert expert_report["scientific_context"].startswith("Objective:")
+    assert expert_report["key_findings"][0]["finding_id"] == "finding-001"
+    assert expert_report["key_findings"][0]["evidence_unit_ids"] == [
+        "oeu-corrosion"
+    ]
+    assert expert_report["key_findings"][0]["source_refs"][0]["display_label"] == (
+        "P001 · Table 1"
+    )
+    assert expert_report["evidence_matrix"]["relevant_paper_count"] == 1
+    assert expert_report["evidence_matrix"]["measurement_result_count"] == 1
+    assert expert_report["evidence_matrix"]["controlled_comparison_count"] == 1
+    assert expert_report["evidence_matrix"]["mechanism_evidence_count"] == 1
+    assert expert_report["paper_contribution_map"][0]["paper_label"] == "P001"
+    assert expert_report["paper_contribution_map"][0]["display_title"] == (
+        "P001 - Profile Title"
+    )
+    assert "source_filename" not in expert_report["paper_contribution_map"][0]
+    assert expert_report["controlled_comparisons"][0]["validity"] == "controlled"
+    assert expert_report["controlled_comparisons"][0]["source_refs"][0][
+        "display_label"
+    ] == "P001 · Table 1"
+    assert expert_report["mechanism_chain"]["evidence"][0]["summary"].startswith(
+        "heat treatment changed the passive film"
+    )
+    assert expert_report["limitations"] == []
+    assert expert_report["source_traceback"][0]["display_label"] == "P001 · Table 1"
+
+
+def test_objective_conclusion_uses_readable_paper_labels_for_hashed_pdf_titles(
+    tmp_path,
+):
+    collection_id, objective_id, service = _seed_objective_collection(tmp_path)
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    hashed_title = (
+        "2eb73dc558fc4b16ba1fa23d917ad671_"
+        "P001-Effect of energy density and scanning strategy on densification.pdf"
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-density",
+            "objective_id": objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "densification",
+            "sample_context": {"sample": "S1"},
+            "value_payload": {"source_value_text": "99.6 %", "value": 99.6},
+            "unit": "%",
+            "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "title": hashed_title,
+                    "source_filename": hashed_title,
+                    "doc_role": "experimental",
+                    "candidate_materials": ["316L stainless steel"],
+                }
+            ),
+        ),
+        facts.research_objectives,
+        facts.objective_contexts,
+        facts.objective_paper_frames,
+        facts.objective_evidence_routes,
+        (measurement,),
+        facts.objective_logic_chains,
+    )
+    service.core_fact_repository.replace_collection_facts(
+        collection_id,
+        CoreFactSet(
+            document_profiles=(
+                DocumentProfile(
+                    document_id="paper-1",
+                    collection_id=collection_id,
+                    title=hashed_title,
+                    source_filename=hashed_title,
+                    doc_type="experimental",
+                    parsing_warnings=(),
+                    confidence=0.9,
+                ),
+            ),
+        ),
+    )
+
+    payload = service.get_objective_research_view(collection_id, objective_id)
+
+    contribution = payload["conclusion_package"]["paper_contributions"][0]
+    answer_section = payload["conclusion_package"]["narrative"]["sections"][0]
+    assert contribution["display_title"] == (
+        "P001 - Effect of energy density and scanning strategy on densification"
+    )
+    assert "2eb73dc558fc4b16ba1fa23d917ad671" not in answer_section["body"]
+    assert "P001 - P001" not in answer_section["body"]
+    assert ".pdf" not in contribution["display_title"]
+    expert_report_text = json.dumps(
+        payload["conclusion_package"]["expert_report"],
+        ensure_ascii=False,
+    )
+    assert "2eb73dc558fc4b16ba1fa23d917ad671" not in expert_report_text
+    assert "P001 - P001" not in expert_report_text
+    assert ".pdf" not in expert_report_text
 
 
 def test_objective_workspace_detail_filters_textual_measurement_without_numeric_value(

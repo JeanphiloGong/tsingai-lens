@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
+    StructuredTableMatrixRepair,
 )
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
@@ -26,10 +28,13 @@ from domain.core import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveLogicChain,
     ObjectivePaperFrame,
+    PaperSkim,
     ResearchObjective,
 )
 from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
 class _ObjectiveExtractor:
@@ -373,6 +378,26 @@ class _ObjectiveExtractor:
                 ]
             )
         return StructuredObjectiveEvidenceUnits()
+
+
+class _FakeObjectiveReportLLMClient:
+    def __init__(self, markdown: str | list[str]) -> None:
+        self.markdown_responses = (
+            list(markdown)
+            if isinstance(markdown, list)
+            else [markdown]
+        )
+        self.calls: list[dict[str, Any]] = []
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create_completion)
+        )
+
+    def _create_completion(self, **kwargs):
+        self.calls.append(kwargs)
+        index = min(len(self.calls) - 1, len(self.markdown_responses) - 1)
+        message = SimpleNamespace(content=self.markdown_responses[index])
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -1106,6 +1131,2474 @@ def _merge_candidate_values(
     return merged
 
 
+def _objective_report_generation_context(
+    service: ResearchObjectiveService,
+) -> dict[str, Any]:
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How do energy density and scan strategy affect LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scan strategy"],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 4,
+            "measurement_count": 4,
+            "comparison_count": 1,
+            "characterization_count": 2,
+            "interpretation_count": 0,
+        },
+        "report_seed": {
+            "mechanism_chain": {
+                "evidence": [
+                    {
+                        "summary": (
+                            "temperature gradient, solidification rate and "
+                            "Marangoni effect explain sub-grain changes"
+                        )
+                    }
+                ]
+            }
+        },
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "L-VED",
+                "value": "91.90",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "M-VED",
+                "value": "98.92",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+                "source": "table p.5",
+            },
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "Sample 14",
+                "property": "relative density",
+                "value": "99.45",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.2",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "yield strength",
+                "value": "462.02",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "tensile strength",
+                "value": "584.44",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "elongation",
+                "value": "41.9",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+        ],
+        "sample_series": [
+            {
+                "sample": "14",
+                "condition": "6",
+                "relative_density": "99.45 %",
+                "yield_strength": "462.02 MPa",
+                "tensile_strength": "584.44 MPa",
+                "elongation": "41.9 %",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "16",
+                "condition": "7",
+                "relative_density": "98.6 %",
+                "yield_strength": "414.07 MPa",
+                "tensile_strength": "530.37 MPa",
+                "elongation": "1.17 %",
+                "process": "Energy density=70; Scan strategy=B",
+                "source": "table p.3",
+            },
+            {
+                "sample": "1",
+                "condition": "1",
+                "relative_density": "95.4 %",
+                "yield_strength": "236.65 MPa",
+                "tensile_strength": "375.13 MPa",
+                "elongation": "7.21 %",
+                "process": "Energy density=100; Scan strategy=C",
+                "source": "table p.3",
+            },
+        ],
+        "evidence_units": [
+            {
+                "unit_kind": "characterization",
+                "value_payload": {
+                    "source_value_text": (
+                        "temperature gradient, solidification rate and "
+                        "Marangoni effect explain sub-grain changes"
+                    )
+                },
+            }
+        ],
+        "source_refs": [{"display_label": "P001 · Table 3 · p.3"}],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+    return context
+
+
+def test_research_objective_service_persists_generated_objective_report(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Report")
+    collection_id = collection["collection_id"]
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does heat treatment affect LPBF 316L yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+        }
+    )
+    evidence_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "material_system": {"family": "316L stainless steel"},
+            "sample_context": {"sample": "HT-SLM"},
+            "process_context": {"process": "LPBF", "heat_treatment": "HT"},
+            "test_condition": {"method": "tensile test"},
+            "value_payload": {
+                "value": 560,
+                "source_value_text": "560 MPa",
+            },
+            "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-2",
+                    "page": 5,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+    logic_chain = ObjectiveLogicChain.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "chain_scope": "objective",
+            "question": objective.question,
+            "evidence_unit_ids": [evidence_unit.evidence_unit_id],
+            "chain_payload": {"claim": "HT-SLM reaches 560 MPa."},
+            "summary": "Heat treatment is linked to yield strength.",
+            "confidence": 0.8,
+        }
+    )
+    repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "title": "LPBF 316L heat treatment",
+                    "source_filename": "paper-1.pdf",
+                    "doc_role": "experimental",
+                }
+            ),
+        ),
+        (objective,),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "question": objective.question,
+                    "material_scope": ["316L stainless steel"],
+                    "target_property_axes": ["yield strength"],
+                }
+            ),
+        ),
+        (
+            ObjectivePaperFrame.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "background": "Reports HT-SLM tensile testing.",
+                    "measured_property_scope": ["yield strength"],
+                }
+            ),
+        ),
+        (),
+        (evidence_unit,),
+        (logic_chain,),
+    )
+    llm_client = _FakeObjectiveReportLLMClient(
+        "\n\n".join(
+            [
+                "# How does heat treatment affect LPBF 316L yield strength?",
+                "## 摘要\nHT-SLM reaches 560 MPa [P001 · Table 2 · p.5].",
+                "## 1. 研究问题\nHeat treatment and yield strength.",
+                "## 2. 证据来源\nP001 reports tensile testing.",
+                "## 3. P003：VED 对致密化的直接影响\n当前证据不足。",
+                "## 4. P001：16 组样品的综合性能结果\n当前证据不足。",
+                "## 5. 扫描策略对组织和致密化的影响\n当前证据不足。",
+                "## 6. 微观组织机制\n当前证据不足。",
+                "## 7. 综合讨论\n当前证据不足。",
+                "## 8. 结论\nHT-SLM reaches 560 MPa.",
+                "## 9. 适用范围与保守判断\n单篇文献。",
+            ]
+        )
+    )
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        core_fact_repository=repository,
+        llm_client=llm_client,
+        report_model="test-model",
+    )
+
+    requested = service.request_objective_report(collection_id, objective.objective_id)
+    generated = service.generate_objective_report(collection_id, objective.objective_id)
+    detail = service.get_objective_research_view(collection_id, objective.objective_id)
+
+    assert requested["status"] == "generating"
+    assert requested["markdown"] is None
+    assert generated["status"] == "ready"
+    assert generated["markdown"].startswith(
+        "# How does heat treatment affect LPBF 316L yield strength?"
+    )
+    assert generated["model"] == "test-model"
+    assert detail["objective_report"]["report_id"] == generated["report_id"]
+    assert detail["objective_report"]["markdown"] == generated["markdown"]
+    section_count = len(service._build_objective_report_plan(language="zh")["sections"])
+    assert len(llm_client.calls) == section_count
+    user_prompt = llm_client.calls[0]["messages"][1]["content"]
+    assert any("560 MPa" in call["messages"][1]["content"] for call in llm_client.calls)
+    assert "SectionEvidencePacket" in user_prompt
+    assert "GroundedSectionDraft" in user_prompt
+    assert "ReportEvidencePacket" not in user_prompt
+    assert "Write one complete Markdown report" not in user_prompt
+    assert '"logic_chain"' not in user_prompt
+    assert all(call["max_tokens"] == 3500 for call in llm_client.calls)
+    assert generated["markdown"].count("# How does heat treatment") == 1
+    assert generated["markdown"].index("# How does heat treatment") < generated[
+        "markdown"
+    ].index(
+        "## 摘要"
+    )
+    assert "## 目标内代表测量" not in generated["markdown"]
+    assert "## 关键材料状态证据" not in generated["markdown"]
+
+
+def test_research_objective_report_generation_writes_sections_individually(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+        llm_client=_FakeObjectiveReportLLMClient(
+            [
+                "# Test objective\nLLM header.",
+                "## 摘要\nLLM summary with L-VED 91.90 %, M-VED 98.92 %, H-VED 99.60 %, Sample 14, 99.45 %, 462.02 MPa, 584.44 MPa, 41.9 %, 温度梯度, 凝固速率, Marangoni, 单变量, 核查.",
+                "## 1. 研究问题\nLLM question.",
+                "## 2. 证据来源\nLLM sources.",
+                "## 3. P003：VED 对致密化的直接影响\nLLM VED: L-VED 91.90 %, M-VED 98.92 %, H-VED 99.60 %.",
+                "## 4. P001：16 组样品的综合性能结果\nLLM samples: 16 组样品, Sample 1, Sample 14, Sample 16, 95.4 %, 236.65 MPa, 375.13 MPa, 7.21 %, 99.45 %, 462.02 MPa, 584.44 MPa, 41.9 %.",
+                "## 5. 扫描策略对组织和致密化的影响\nLLM scan strategy.",
+                "## 6. 微观组织机制\nLLM mechanism: 温度梯度, 凝固速率, Marangoni.",
+                "## 7. 综合讨论\nLLM discussion.",
+                "## 8. 结论\nLLM conclusion.",
+                "## 9. 适用范围与保守判断\nLLM limitations: 单变量, 核查.",
+            ]
+        ),
+        report_model="test-model",
+    )
+    context = _objective_report_generation_context(service)
+
+    markdown = service._generate_objective_report_markdown(context, language="zh")
+
+    plan = service._build_objective_report_plan(language="zh")
+    assert len(service._report_llm_client.calls) == len(plan["sections"])
+    expected_sections = [dict(section) for section in plan["sections"]]
+    expected_sections[0]["heading"] = (
+        "# How do energy density and scan strategy affect LPBF 316L?"
+    )
+    for call, section in zip(service._report_llm_client.calls, expected_sections):
+        user_prompt = call["messages"][1]["content"]
+        assert section["heading"] in user_prompt
+        assert "SectionEvidencePacket" in user_prompt
+        assert "GroundedSectionDraft" in user_prompt
+        assert "ReportEvidencePacket" not in user_prompt
+        assert "Write one complete Markdown report" not in user_prompt
+    assert "LLM VED" in markdown
+    assert "LLM samples" in markdown
+    assert "LLM limitations" in markdown
+
+
+def test_research_objective_report_generation_falls_back_per_bad_section(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+        llm_client=_FakeObjectiveReportLLMClient(
+            [
+                "# Test objective\nLLM header.",
+                "## 摘要\nLLM summary with L-VED 91.90 %, M-VED 98.92 %, H-VED 99.60 %, Sample 14, 99.45 %, 462.02 MPa, 584.44 MPa, 41.9 %, 温度梯度, 凝固速率, Marangoni, 单变量, 核查.",
+                "## 1. 研究问题\nLLM question.",
+                "## 2. 证据来源\nLLM sources.",
+                "## 3. P003：VED 对致密化的直接影响\nLLM VED: L-VED 91.90 %, M-VED 98.92 %, H-VED 99.60 %.",
+                "## 4. P001：16 组样品的综合性能结果\nBad sample section missing required terms.",
+                "## 5. 扫描策略对组织和致密化的影响\nLLM scan strategy.",
+                "## 6. 微观组织机制\nLLM mechanism: 温度梯度, 凝固速率, Marangoni.",
+                "## 7. 综合讨论\nLLM discussion.",
+                "## 8. 结论\nLLM conclusion.",
+                "## 9. 适用范围与保守判断\nLLM limitations: 单变量, 核查.",
+            ]
+        ),
+        report_model="test-model",
+    )
+    context = _objective_report_generation_context(service)
+
+    markdown = service._generate_objective_report_markdown(context, language="zh")
+
+    assert "LLM VED" in markdown
+    assert "Bad sample section missing required terms" not in markdown
+    assert "| Sample 14 |" in markdown
+    assert "462.02 MPa" in markdown
+
+
+def test_research_objective_report_context_is_llm_sized(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Report Context")
+    collection_id = collection["collection_id"]
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does energy density affect LPBF 316L density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density"],
+            "property_axes": ["density"],
+        }
+    )
+    evidence_units = [
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": f"paper-{index}",
+                "unit_kind": "measurement",
+                "property_normalized": "density",
+                "material_system": {"family": "316L stainless steel"},
+                "sample_context": {"sample": f"S{index:03d}"},
+                "process_context": {
+                    "process": "LPBF",
+                    "energy_density": f"{70 + index} J/mm3",
+                },
+                "value_payload": {
+                    "value": 95 + index / 100,
+                    "source_value_text": f"{95 + index / 100:.2f} %",
+                    "long_note": "not report-critical " * 200,
+                },
+                "unit": "%",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": f"table-{index}",
+                        "page": index,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+        for index in range(60)
+    ]
+    repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "title": "LPBF 316L density",
+                    "source_filename": "paper-1.pdf",
+                    "doc_role": "experimental",
+                }
+            ),
+        ),
+        (objective,),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "question": objective.question,
+                    "material_scope": ["316L stainless steel"],
+                    "target_property_axes": ["density"],
+                }
+            ),
+        ),
+        (
+            ObjectivePaperFrame.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "changed_variables": ["energy density"],
+                    "measured_property_scope": ["density"],
+                }
+            ),
+        ),
+        (),
+        tuple(evidence_units),
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "chain_scope": "objective",
+                    "question": objective.question,
+                    "evidence_unit_ids": [
+                        unit.evidence_unit_id for unit in evidence_units
+                    ],
+                    "chain_payload": {"huge": "logic-chain-detail " * 1000},
+                    "summary": "Density increases across selected evidence.",
+                    "confidence": 0.8,
+                }
+            ),
+        ),
+    )
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        core_fact_repository=repository,
+    )
+
+    context = service._build_objective_report_context(
+        collection_id,
+        objective.objective_id,
+    )
+    payload = json.dumps(context, ensure_ascii=False)
+
+    assert context["schema_version"] == "objective_report_context.v2"
+    assert "logic_chain" not in context
+    assert "conclusion_package" not in context
+    assert "not report-critical" not in payload
+    assert "table-0" not in payload
+    assert "source_kind" in payload
+    assert len(context["evidence_units"]) <= 2
+    assert len(context["representative_measurements"]) <= 6
+    assert len(context["source_refs"]) <= 6
+    assert len(payload) < 9000
+
+
+def test_research_objective_report_context_uses_cross_objective_material_states(
+    tmp_path,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Objective Report States")
+    collection_id = collection["collection_id"]
+    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    target_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How do energy density and scan strategy affect LPBF 316L properties?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scan strategy"],
+            "property_axes": ["density", "mechanical properties"],
+        }
+    )
+    mechanics_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How do process conditions affect LPBF 316L mechanical properties?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "scan speed"],
+            "property_axes": ["yield strength", "tensile strength", "elongation"],
+        }
+    )
+    heat_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does heat treatment affect SLM 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["hardness", "tensile strength"],
+        }
+    )
+    density_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How does porosity affect SLM 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "scan speed"],
+            "property_axes": ["relative density"],
+        }
+    )
+    texture_objective = ResearchObjective.from_mapping(
+        {
+            "question": "How do scan strategy and build orientation affect texture?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan strategy", "build orientation"],
+            "property_axes": ["ODF correlation coefficient", "yield strength"],
+        }
+    )
+
+    def unit(
+        *,
+        objective: ResearchObjective,
+        document_id: str,
+        property_name: str,
+        sample_context: dict[str, Any],
+        process_context: dict[str, Any] | None,
+        value: float,
+        source_value_text: str,
+        unit_label: str | None = None,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": document_id,
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "material_system": {"family": "316L stainless steel"},
+                "sample_context": sample_context,
+                "process_context": process_context or {},
+                "value_payload": {
+                    "value": value,
+                    "source_value_text": source_value_text,
+                },
+                "unit": unit_label,
+                "source_refs": [
+                    {
+                        "display_label": f"{document_id} Table",
+                        "source_kind": "table",
+                        "page": 5,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    sample_14 = {"Condition number": "6", "Sample number": "14"}
+    p001_process = {
+        "Energy density (J/mm 3 )": "150",
+        "Scan strategy": "A",
+        "Scanning speed (mm/s)": "0.111",
+    }
+    p004_sample = {"Specimens": "as-SLM(140/ 100)", "sample_number": "20"}
+    p004_process = {
+        "Laser power (W)": "140",
+        "Scan speed (mm/s)": "100",
+        "Type of heat treatment": "-",
+    }
+    p005_sample = {"sample_id": "255 W-1400 mm·s -1", "sample_number": "2"}
+    p005_process = {
+        "Laser power (W)": "255",
+        "Scan speed (mm·s -1)": "1400",
+    }
+    p006_sample = {"Case": "7", "sample_number": "7"}
+    p006_process = {
+        "scan strategy rotation angle": "45",
+        "build orientation alpha": "45",
+        "build orientation beta": "22.5",
+    }
+    evidence_units = (
+        unit(
+            objective=target_objective,
+            document_id="P001",
+            property_name="relative density",
+            sample_context={**sample_14, **p001_process},
+            process_context={},
+            value=99.45,
+            source_value_text="99.45",
+            unit_label="%",
+        ),
+        unit(
+            objective=mechanics_objective,
+            document_id="P001",
+            property_name="yield strength",
+            sample_context=sample_14,
+            process_context={},
+            value=462.02,
+            source_value_text="462.02",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=mechanics_objective,
+            document_id="P001",
+            property_name="tensile strength",
+            sample_context=sample_14,
+            process_context={},
+            value=584.44,
+            source_value_text="584.44",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=mechanics_objective,
+            document_id="P001",
+            property_name="elongation",
+            sample_context=sample_14,
+            process_context={},
+            value=41.9,
+            source_value_text="41.9",
+            unit_label="%",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="hardness",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=198.4,
+            source_value_text="198.4 (±3.7)",
+            unit_label="HV",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="yield strength",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=455.2,
+            source_value_text="455.2",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="tensile strength",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=585.8,
+            source_value_text="585.8",
+            unit_label="MPa",
+        ),
+        unit(
+            objective=heat_objective,
+            document_id="P004",
+            property_name="elongation",
+            sample_context=p004_sample,
+            process_context=p004_process,
+            value=40.8,
+            source_value_text="40.8",
+            unit_label="%",
+        ),
+        unit(
+            objective=density_objective,
+            document_id="P005",
+            property_name="relative density",
+            sample_context=p005_sample,
+            process_context=p005_process,
+            value=99.5,
+            source_value_text="99.5",
+            unit_label="%",
+        ),
+        unit(
+            objective=texture_objective,
+            document_id="P006",
+            property_name="odf correlation coefficient",
+            sample_context=p006_sample,
+            process_context=p006_process,
+            value=0.6584,
+            source_value_text="0.6584",
+            unit_label="Experiment vs. Prediction",
+        ),
+        unit(
+            objective=texture_objective,
+            document_id="P006",
+            property_name="predicted yield strength",
+            sample_context=p006_sample,
+            process_context=p006_process,
+            value=347.14,
+            source_value_text="347.14",
+            unit_label="MPa",
+        ),
+    )
+    repository.replace_collection_research_objectives(
+        collection_id,
+        (
+            PaperSkim.from_mapping({"document_id": "P001", "title": "P001"}),
+            PaperSkim.from_mapping({"document_id": "P004", "title": "P004"}),
+            PaperSkim.from_mapping({"document_id": "P005", "title": "P005"}),
+            PaperSkim.from_mapping({"document_id": "P006", "title": "P006"}),
+        ),
+        (
+            target_objective,
+            mechanics_objective,
+            heat_objective,
+            density_objective,
+            texture_objective,
+        ),
+        (
+            ObjectiveContext.from_mapping(
+                {
+                    "objective_id": target_objective.objective_id,
+                    "question": target_objective.question,
+                    "material_scope": ["316L stainless steel"],
+                    "target_property_axes": ["density", "mechanical properties"],
+                }
+            ),
+        ),
+        (
+            ObjectivePaperFrame.from_mapping(
+                {
+                    "objective_id": target_objective.objective_id,
+                    "document_id": "P001",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                }
+            ),
+        ),
+        (),
+        evidence_units,
+        (
+            ObjectiveLogicChain.from_mapping(
+                {
+                    "objective_id": target_objective.objective_id,
+                    "chain_scope": "objective",
+                    "question": target_objective.question,
+                    "evidence_unit_ids": [evidence_units[0].evidence_unit_id],
+                    "chain_payload": {},
+                    "summary": "Energy density affects density and mechanics.",
+                    "confidence": 0.8,
+                }
+            ),
+        ),
+    )
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        core_fact_repository=repository,
+    )
+
+    context = service._build_objective_report_context(
+        collection_id,
+        target_objective.objective_id,
+    )
+    states = context["representative_material_states"]
+    material_measurements = context["representative_material_measurements"]
+    payload = json.dumps(states, ensure_ascii=False)
+    measurement_payload = json.dumps(material_measurements, ensure_ascii=False)
+
+    assert [state["sample"] for state in states] == [
+        "14",
+        "as-SLM(140/ 100)",
+        "255 W-1400 mm·s -1",
+        "7",
+    ]
+    for expected in (
+        "99.45",
+        "462.02",
+        "584.44",
+        "41.9",
+        "198.4",
+        "455.2",
+        "585.8",
+        "40.8",
+        "99.5",
+        "0.6584",
+        "347.14",
+    ):
+        assert expected in payload
+        assert expected in measurement_payload
+    assert material_measurements[0]["sample"] == "Sample 14"
+    assert material_measurements[0]["process"]
+    report_plan = context["report_plan"]
+    plan_payload = json.dumps(report_plan, ensure_ascii=False)
+    for expected in (
+        "Sample 14",
+        "99.45",
+        "462.02",
+        "584.44",
+        "41.9",
+    ):
+        assert expected in plan_payload
+    assert "P001 sample-level evidence" in plan_payload
+
+
+def test_research_objective_report_plan_requires_core_claims(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": (
+                "How do energy density, scanning strategy, scanning speed, and "
+                "Selective Laser Melting affect densification and microstructure "
+                "of 316L stainless steel?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+                "Selective Laser Melting",
+            ],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 33,
+            "measurement_count": 9,
+            "comparison_count": 7,
+            "characterization_count": 16,
+            "interpretation_count": 1,
+        },
+        "report_seed": {
+            "controlled_comparisons": [
+                {
+                    "property": "densification",
+                    "comparison_axis": "energy density",
+                    "summary": "99.60",
+                    "sample_context": {"sample_id": "H-VED"},
+                    "baseline_context": {
+                        "sample_context": {"sample_id": "L-VED"},
+                        "source_value_text": "91.90",
+                    },
+                }
+            ],
+            "mechanism_chain": {
+                "steps": [
+                    {
+                        "step_role": "process_to_microstructure",
+                        "label": (
+                            "Process parameters change thermal history and "
+                            "melt-pool behavior."
+                        ),
+                    }
+                ],
+                "evidence": [
+                    {
+                        "summary": (
+                            "the different sub-grain shapes were attributed to "
+                            "the temperature gradient and solidification rate"
+                        )
+                    },
+                    {
+                        "summary": (
+                            "a cellular microstructure developed owing to rapid "
+                            "solidification and Marangoni effect"
+                        )
+                    },
+                ],
+            },
+        },
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "L-VED",
+                "value": "91.90",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "M-VED",
+                "value": "98.92",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+                "source": "table p.5",
+            },
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "Sample 14",
+                "property": "relative density",
+                "value": "99.45",
+                "unit": "%",
+                "process": (
+                    "Energy density (J/mm 3 )=150; Scan strategy=A; "
+                    "Scanning speed (mm/s)=0.111"
+                ),
+                "source": "table p.2",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "yield strength",
+                "value": "462.02",
+                "unit": "MPa",
+                "process": (
+                    "Energy density (J/mm 3 )=150; Scan strategy=A; "
+                    "Scanning speed (mm/s)=0.111"
+                ),
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "tensile strength",
+                "value": "584.44",
+                "unit": "MPa",
+                "process": (
+                    "Energy density (J/mm 3 )=150; Scan strategy=A; "
+                    "Scanning speed (mm/s)=0.111"
+                ),
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "elongation",
+                "value": "41.9",
+                "unit": "%",
+                "process": (
+                    "Energy density (J/mm 3 )=150; Scan strategy=A; "
+                    "Scanning speed (mm/s)=0.111"
+                ),
+                "source": "table p.3",
+            },
+        ],
+        "evidence_units": [
+            {
+                "evidence_unit_id": "eu-gradient",
+                "unit_kind": "characterization",
+                "property_normalized": "microstructure",
+                "sample": "as-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "the different sub-grain shapes were attributed to "
+                        "the temperature gradient and solidification rate"
+                    )
+                },
+            },
+            {
+                "evidence_unit_id": "eu-marangoni",
+                "unit_kind": "characterization",
+                "property_normalized": "microstructure",
+                "sample": "as-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "a cellular microstructure developed owing to rapid "
+                        "solidification and Marangoni effect"
+                    )
+                },
+            },
+        ],
+        "source_refs": [
+            {
+                "display_label": "P001 · Table 3 · p.3",
+                "source_kind": "table",
+                "page": 3,
+            }
+        ],
+    }
+
+    plan = service._objective_report_plan_context(context)
+    claims = plan["required_claims"]
+    claim_payload = json.dumps(claims, ensure_ascii=False)
+
+    assert [section["heading"] for section in plan["outline"]] == [
+        "# 研究目标报告",
+        "## 摘要",
+        "## 1. 研究问题",
+        "## 2. 证据来源",
+        "## 3. P003：VED 对致密化的直接影响",
+        "## 4. P001：16 组样品的综合性能结果",
+        "## 5. 扫描策略对组织和致密化的影响",
+        "## 6. 微观组织机制",
+        "## 7. 综合讨论",
+        "## 8. 结论",
+        "## 9. 适用范围与保守判断",
+    ]
+    for expected in (
+        "Sample 14",
+        "99.45",
+        "462.02",
+        "584.44",
+        "41.9",
+        "L-VED",
+        "91.90",
+        "M-VED",
+        "98.92",
+        "H-VED",
+        "99.60",
+        "温度梯度",
+        "凝固速率",
+        "Marangoni",
+        "单变量",
+        "核查",
+    ):
+        assert expected in claim_payload
+
+
+def test_research_objective_report_plan_requires_sample_series_claim(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How do energy density and scan strategy affect LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scan strategy"],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {"evidence_unit_count": 4},
+        "report_seed": {},
+        "representative_measurements": [],
+        "representative_material_measurements": [],
+        "sample_series": [
+            {
+                "sample": "1",
+                "relative_density": "95.4 %",
+                "yield_strength": "236.65 MPa",
+                "tensile_strength": "375.13 MPa",
+                "elongation": "7.21 %",
+            },
+            {
+                "sample": "14",
+                "relative_density": "99.45 %",
+                "yield_strength": "462.02 MPa",
+                "tensile_strength": "584.44 MPa",
+                "elongation": "41.9 %",
+            },
+            {
+                "sample": "16",
+                "relative_density": "98.6 %",
+                "yield_strength": "414.07 MPa",
+                "tensile_strength": "530.37 MPa",
+                "elongation": "1.17 %",
+            },
+        ],
+        "evidence_units": [],
+        "source_refs": [],
+    }
+
+    plan = service._objective_report_plan_context(context)
+    claim_payload = json.dumps(plan["required_claims"], ensure_ascii=False)
+
+    for expected in (
+        "sample_series_table",
+        "16 组样品",
+        "Sample 1",
+        "Sample 14",
+        "Sample 16",
+        "99.45 %",
+        "462.02 MPa",
+        "584.44 MPa",
+        "41.9 %",
+    ):
+        assert expected in claim_payload
+
+
+def test_research_objective_report_generation_falls_back_to_grounded_draft(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+        llm_client=_FakeObjectiveReportLLMClient(
+            "\n\n".join(
+                [
+                    "# 研究目标\n概括性目标。",
+                    "## 集合级结论\n能量密度会提高致密化。",
+                    "## 文献贡献图\n文献提供证据。",
+                    "## 证据矩阵\n证据充足。",
+                    "## 受控比较\n低能量到高能量提高。",
+                    "## 机制链路\n工艺影响组织。",
+                    "## 证据来源\n若干来源。",
+                    "## 局限性与不确定性\n需要核查。",
+                ]
+            )
+        ),
+        report_model="test-model",
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How do energy density and scan strategy affect LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scan strategy"],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 4,
+            "measurement_count": 4,
+            "comparison_count": 1,
+            "characterization_count": 2,
+            "interpretation_count": 0,
+        },
+        "report_seed": {
+            "mechanism_chain": {
+                "evidence": [
+                    {
+                        "summary": (
+                            "temperature gradient, solidification rate and "
+                            "Marangoni effect explain sub-grain changes"
+                        )
+                    }
+                ]
+            }
+        },
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "L-VED",
+                "value": "91.90",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "M-VED",
+                "value": "98.92",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+                "source": "table p.5",
+            },
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "Sample 14",
+                "property": "relative density",
+                "value": "99.45",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.2",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "yield strength",
+                "value": "462.02",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "tensile strength",
+                "value": "584.44",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "elongation",
+                "value": "41.9",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+        ],
+        "evidence_units": [],
+        "source_refs": [{"display_label": "P001 · Table 3 · p.3"}],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+
+    markdown = service._generate_objective_report_markdown(context, language="zh")
+
+    for expected in (
+        "Sample 14",
+        "99.45",
+        "462.02",
+        "584.44",
+        "41.9",
+        "L-VED",
+        "91.90",
+        "M-VED",
+        "98.92",
+        "H-VED",
+        "99.60",
+        "温度梯度",
+        "凝固速率",
+        "Marangoni",
+        "单变量",
+        "核查",
+    ):
+        assert expected in markdown
+    assert "## 目标内代表测量" not in markdown
+    assert "## 关键材料状态证据" not in markdown
+
+
+def test_research_objective_report_generation_rejects_non_report_surface(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+        llm_client=_FakeObjectiveReportLLMClient(
+            "\n\n".join(
+                [
+                    "# SLM/LPBF 316L stainless steel 中energy density对densification的影响",
+                    "## 摘要",
+                    (
+                        "P001 contributes variables: energy density and scanning "
+                        "strategy. Sample 14 99.45 % 462.02 MPa 584.44 MPa 41.9 %."
+                    ),
+                    "L-VED 91.90 % M-VED 98.92 % H-VED 99.60 % Wrought 100 %.",
+                    "温度梯度 凝固速率 Marangoni 单变量 核查",
+                    "## 1. 研究问题\nplaceholder",
+                    "## 2. 证据来源\nplaceholder",
+                    "## 3. P003：VED 对致密化的直接影响\nplaceholder",
+                    "## 4. P001：16 组样品的综合性能结果\nplaceholder",
+                    "## 5. 扫描策略对组织和致密化的影响\nplaceholder",
+                    "## 6. 微观组织机制\nplaceholder",
+                    "## 7. 综合讨论\nplaceholder",
+                    "## 8. 结论\nplaceholder",
+                    "## 9. 适用范围与保守判断\nplaceholder",
+                ]
+            )
+        ),
+        report_model="test-model",
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": (
+                "How do energy density, scanning strategy, scanning speed, and "
+                "Selective Laser Melting affect densification and microstructure "
+                "of 316L stainless steel?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+                "Selective Laser Melting",
+            ],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 4,
+            "measurement_count": 4,
+            "comparison_count": 1,
+            "characterization_count": 2,
+            "interpretation_count": 0,
+        },
+        "report_seed": {
+            "mechanism_chain": {
+                "evidence": [
+                    {
+                        "summary": (
+                            "temperature gradient, solidification rate and "
+                            "Marangoni effect explain sub-grain changes"
+                        )
+                    }
+                ]
+            }
+        },
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "L-VED",
+                "value": "91.90",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "M-VED",
+                "value": "98.92",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "Wrought",
+                "value": "100",
+                "unit": "%",
+                "source": "table p.5",
+            },
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "Sample 14",
+                "property": "relative density",
+                "value": "99.45",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.2",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "yield strength",
+                "value": "462.02",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "tensile strength",
+                "value": "584.44",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "elongation",
+                "value": "41.9",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+        ],
+        "sample_series": [
+            {
+                "sample": "14",
+                "condition": "6",
+                "relative_density": "99.45 %",
+                "yield_strength": "462.02 MPa",
+                "tensile_strength": "584.44 MPa",
+                "elongation": "41.9 %",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            }
+        ],
+        "evidence_units": [
+            {
+                "unit_kind": "characterization",
+                "value_payload": {
+                    "source_value_text": (
+                        "temperature gradient, solidification rate and "
+                        "Marangoni effect explain sub-grain changes"
+                    )
+                },
+            }
+        ],
+        "source_refs": [{"display_label": "P001 · Table 3 · p.3"}],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+
+    markdown = service._generate_objective_report_markdown(context, language="zh")
+
+    assert markdown.startswith(
+        "# SLM/LPBF 316L 不锈钢中能量输入与扫描策略对致密化和组织性能的影响"
+    )
+    assert "contributes variables" not in markdown
+
+
+def test_research_objective_report_draft_includes_sample_series_table(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    sample_series = [
+        {
+            "sample": "1",
+            "condition": "1",
+            "relative_density": "95.4 %",
+            "yield_strength": "236.65 MPa",
+            "tensile_strength": "375.13 MPa",
+            "elongation": "7.21 %",
+            "process": "Energy density=70; Scan strategy=A; Scanning speed=0.25",
+            "source": "table p.3",
+        },
+        {
+            "sample": "14",
+            "condition": "6",
+            "relative_density": "99.45 %",
+            "yield_strength": "462.02 MPa",
+            "tensile_strength": "584.44 MPa",
+            "elongation": "41.9 %",
+            "process": "Energy density=150; Scan strategy=A; Scanning speed=0.111",
+            "source": "table p.3",
+        },
+        {
+            "sample": "16",
+            "condition": "6",
+            "relative_density": "98.6 %",
+            "yield_strength": "414.07 MPa",
+            "tensile_strength": "530.37 MPa",
+            "elongation": "1.17 %",
+            "process": "Energy density=150; Scan strategy=C; Scanning speed=0.111",
+            "source": "table p.3",
+        },
+    ]
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How do energy density and scan strategy affect LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scan strategy"],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 4,
+            "measurement_count": 4,
+            "comparison_count": 1,
+            "characterization_count": 2,
+            "interpretation_count": 0,
+        },
+        "report_seed": {},
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+                "source": "table p.5",
+            },
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "Sample 14",
+                "property": "relative density",
+                "value": "99.45",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.2",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "yield strength",
+                "value": "462.02",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "tensile strength",
+                "value": "584.44",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "elongation",
+                "value": "41.9",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+        ],
+        "sample_series": sample_series,
+        "evidence_units": [
+            {
+                "unit_kind": "characterization",
+                "value_payload": {
+                    "source_value_text": (
+                        "temperature gradient, solidification rate and "
+                        "Marangoni effect explain sub-grain changes"
+                    )
+                },
+            }
+        ],
+        "source_refs": [{"display_label": "P001 · Table 3 · p.3"}],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+
+    markdown = service._objective_report_draft_markdown(context, language="zh")
+
+    assert "## 4. P001：16 组样品的综合性能结果" in markdown
+    assert "| Sample | Condition | Process | Relative density | Yield strength | UTS | Elongation | Source |" in markdown
+    for expected in (
+        "Sample 1",
+        "95.4 %",
+        "Sample 14",
+        "99.45 %",
+        "462.02 MPa",
+        "584.44 MPa",
+        "41.9 %",
+        "Sample 16",
+        "530.37 MPa",
+    ):
+        assert expected in markdown
+    assert "这组数据中最突出的样品是 **Sample 14**" in markdown
+
+
+def test_research_objective_report_draft_matches_expert_report_surface(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": (
+                "How do energy density, scanning strategy, scanning speed, and "
+                "Selective Laser Melting affect densification and microstructure "
+                "of 316L stainless steel?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": [
+                "energy density",
+                "scanning strategy",
+                "scanning speed",
+                "Selective Laser Melting",
+            ],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 4,
+            "measurement_count": 4,
+            "comparison_count": 1,
+            "characterization_count": 2,
+            "interpretation_count": 0,
+        },
+        "report_seed": {
+            "paper_contribution_map": [
+                {
+                    "paper_label": "P001",
+                    "paper_role": "primary_experiment",
+                    "contribution_summary": (
+                        "P001 - Influence of porosity on mechanical and corrosion "
+                        "properties of SLM 316L stainless steel contributes "
+                        "variables: Laser power and Scanning speed; properties: "
+                        "Mechanical properties and Corrosion properties."
+                    ),
+                    "changed_variables": ["Laser power", "Scanning speed"],
+                    "measured_property_scope": [
+                        "Mechanical properties",
+                        "Corrosion properties",
+                    ],
+                },
+                {
+                    "paper_label": "P002",
+                    "paper_role": "primary_experiment",
+                    "contribution_summary": (
+                        "P002 - Effect of energy density and scanning strategy "
+                        "on densification, microstructure and mechanical "
+                        "properties of 316L stainless steel processed via "
+                        "selective laser melting contributes variables: energy "
+                        "density, scanning strategy, and scanning speed."
+                    ),
+                    "changed_variables": [
+                        "energy density",
+                        "scanning strategy",
+                        "scanning speed",
+                    ],
+                    "measured_property_scope": [
+                        "densification",
+                        "microstructure",
+                    ],
+                },
+            ]
+        },
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "L-VED",
+                "value": "91.90",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "M-VED",
+                "value": "98.92",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+                "source": "table p.5",
+            },
+            {
+                "property": "densification",
+                "sample": "Wrought",
+                "value": "100",
+                "unit": "%",
+                "source": "table p.5",
+            },
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "Sample 14",
+                "property": "relative density",
+                "value": "99.45",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.2",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "yield strength",
+                "value": "462.02",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "tensile strength",
+                "value": "584.44",
+                "unit": "MPa",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+            {
+                "sample": "Sample 14",
+                "property": "elongation",
+                "value": "41.9",
+                "unit": "%",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            },
+        ],
+        "sample_series": [
+            {
+                "sample": "14",
+                "condition": "6",
+                "relative_density": "99.45 %",
+                "yield_strength": "462.02 MPa",
+                "tensile_strength": "584.44 MPa",
+                "elongation": "41.9 %",
+                "process": "Energy density=150; Scan strategy=A",
+                "source": "table p.3",
+            }
+        ],
+        "evidence_units": [
+            {
+                "unit_kind": "characterization",
+                "value_payload": {
+                    "source_value_text": (
+                        "temperature gradient, solidification rate and "
+                        "Marangoni effect explain sub-grain changes"
+                    )
+                },
+            }
+        ],
+        "source_refs": [{"display_label": "P001 · Table 3 · p.3"}],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+
+    markdown = service._objective_report_draft_markdown(context, language="zh")
+
+    assert markdown.startswith(
+        "# SLM/LPBF 316L 不锈钢中能量输入与扫描策略对致密化和组织性能的影响"
+    )
+    assert "本报告围绕 **SLM/LPBF 成形 316L 不锈钢**" in markdown
+    assert (
+        "在 SLM/LPBF 制备 316L 不锈钢时，能量输入、扫描速度和扫描策略如何影响材料的致密化、微观组织以及力学性能？"
+        in markdown
+    )
+    assert "316L stainless steel 中energy density" not in markdown
+    assert "contributes variables" not in markdown
+    assert (
+        "| P001 | 主实验来源 | 提供 16 组 SLM 316L 样品，包含 relative density、yield strength、UTS、elongation，是判断参数组合与综合性能关系的核心数据 |"
+        in markdown
+    )
+    assert "| P002 | 背景证据 | 提供 build platform preheating 对组织形貌影响的补充信息 |" in markdown
+
+
+def test_research_objective_report_draft_uses_source_ved_process_rows(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("VED Process Rows")
+    collection_id = collection["collection_id"]
+    service = ResearchObjectiveService(collection_service=collection_service)
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "doc-p003",
+                    "title": "P003 VED 316L",
+                    "text": "L-VED, M-VED and H-VED were compared.",
+                }
+            ],
+            table_cells=[
+                {
+                    "cell_id": "cell-header-id",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 0,
+                    "col_index": 0,
+                    "cell_text": "ID",
+                },
+                {
+                    "cell_id": "cell-header-ved",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 0,
+                    "col_index": 1,
+                    "cell_text": "VED [J/mm 3]",
+                },
+                {
+                    "cell_id": "cell-header-power",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 0,
+                    "col_index": 2,
+                    "cell_text": "Laser power [W]",
+                },
+                {
+                    "cell_id": "cell-header-speed",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 0,
+                    "col_index": 3,
+                    "cell_text": "Scanning speed [mm/s]",
+                },
+                {
+                    "cell_id": "cell-header-hatch",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 0,
+                    "col_index": 4,
+                    "cell_text": "Hatch spacing [ μ m]",
+                },
+                {
+                    "cell_id": "cell-l-id",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 1,
+                    "col_index": 0,
+                    "cell_text": "L-VED",
+                    "header_path": "ID",
+                },
+                {
+                    "cell_id": "cell-l-ved",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 1,
+                    "col_index": 1,
+                    "cell_text": "50.8",
+                    "header_path": "VED [J/mm 3]",
+                },
+                {
+                    "cell_id": "cell-l-power",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 1,
+                    "col_index": 2,
+                    "cell_text": "160",
+                    "header_path": "Laser power [W]",
+                },
+                {
+                    "cell_id": "cell-l-speed",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 1,
+                    "col_index": 3,
+                    "cell_text": "875",
+                    "header_path": "Scanning speed [mm/s]",
+                },
+                {
+                    "cell_id": "cell-l-hatch",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 1,
+                    "col_index": 4,
+                    "cell_text": "120",
+                    "header_path": "Hatch spacing [ μ m]",
+                },
+                {
+                    "cell_id": "cell-m-id",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 2,
+                    "col_index": 0,
+                    "cell_text": "M-VED",
+                    "header_path": "ID",
+                },
+                {
+                    "cell_id": "cell-m-ved",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 2,
+                    "col_index": 1,
+                    "cell_text": "79.4",
+                    "header_path": "VED [J/mm 3]",
+                },
+                {
+                    "cell_id": "cell-m-power",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 2,
+                    "col_index": 2,
+                    "cell_text": "190",
+                    "header_path": "Laser power [W]",
+                },
+                {
+                    "cell_id": "cell-m-speed",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 2,
+                    "col_index": 3,
+                    "cell_text": "800",
+                    "header_path": "Scanning speed [mm/s]",
+                },
+                {
+                    "cell_id": "cell-m-hatch",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 2,
+                    "col_index": 4,
+                    "cell_text": "100",
+                    "header_path": "Hatch spacing [ μ m]",
+                },
+                {
+                    "cell_id": "cell-h-id",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 3,
+                    "col_index": 0,
+                    "cell_text": "H-VED",
+                    "header_path": "ID",
+                },
+                {
+                    "cell_id": "cell-h-ved",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 3,
+                    "col_index": 1,
+                    "cell_text": "84.3",
+                    "header_path": "VED [J/mm 3]",
+                },
+                {
+                    "cell_id": "cell-h-power",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 3,
+                    "col_index": 2,
+                    "cell_text": "220",
+                    "header_path": "Laser power [W]",
+                },
+                {
+                    "cell_id": "cell-h-speed",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 3,
+                    "col_index": 3,
+                    "cell_text": "725",
+                    "header_path": "Scanning speed [mm/s]",
+                },
+                {
+                    "cell_id": "cell-h-hatch",
+                    "document_id": "doc-p003",
+                    "table_id": "table-process",
+                    "row_index": 3,
+                    "col_index": 4,
+                    "cell_text": "120",
+                    "header_path": "Hatch spacing [ μ m]",
+                },
+            ],
+        ),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How do energy density and scan strategy affect LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scanning strategy"],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {"evidence_unit_count": 4, "measurement_count": 4},
+        "report_seed": {},
+        "representative_measurements": [
+            {
+                "property": "densification",
+                "sample": "L-VED",
+                "value": "91.90",
+                "unit": "%",
+            },
+            {
+                "property": "densification",
+                "sample": "M-VED",
+                "value": "98.92",
+                "unit": "%",
+            },
+            {
+                "property": "densification",
+                "sample": "H-VED",
+                "value": "99.60",
+                "unit": "%",
+            },
+        ],
+        "sample_series": [],
+        "evidence_units": [],
+        "source_refs": [],
+    }
+    context["ved_process_rows"] = service._objective_report_ved_process_rows(
+        collection_id
+    )
+    context["report_plan"] = service._objective_report_plan_context(context)
+
+    markdown = service._objective_report_draft_markdown(context, language="zh")
+
+    assert "| L-VED | 160 W | 875 | 120 um | 50.8 | 91.90 % |" in markdown
+    assert "| M-VED | 190 W | 800 | 100 um | 79.4 | 98.92 % |" in markdown
+    assert "| H-VED | 220 W | 725 | 120 um | 84.3 | 99.60 % |" in markdown
+
+
+def test_research_objective_report_draft_includes_mechanism_observation_details(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How do energy density and scan strategy affect LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density", "scanning strategy"],
+            "property_axes": ["densification", "microstructure"],
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {
+            "evidence_unit_count": 6,
+            "measurement_count": 0,
+            "characterization_count": 6,
+        },
+        "report_seed": {},
+        "representative_measurements": [],
+        "sample_series": [],
+        "evidence_units": [
+            {
+                "unit_kind": "characterization",
+                "sample": "as-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "fine carbides (M23C6) were observed at the melting pool "
+                        "and sub-grain boundaries, and the delta-ferrite was "
+                        "presented within the grains."
+                    )
+                },
+            },
+            {
+                "unit_kind": "characterization",
+                "sample": "HT-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "the phase transformation from delta-ferrite to "
+                        "sigma-phase was detected in HT-SLM."
+                    )
+                },
+            },
+            {
+                "unit_kind": "characterization",
+                "sample": "HIP-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "HIP-SLM had a relatively small amount of carbides and "
+                        "delta-ferrite owing to long heat treatment under high pressure."
+                    )
+                },
+            },
+            {
+                "unit_kind": "characterization",
+                "sample": "as-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "fine cellular and elongated columnar structures were "
+                        "attributed to temperature gradient and solidification rate."
+                    )
+                },
+            },
+            {
+                "unit_kind": "interpretation",
+                "sample": "as-SLM",
+                "value_payload": {
+                    "source_value_text": (
+                        "cellular microstructure developed owing to rapid "
+                        "solidification and Marangoni effect."
+                    )
+                },
+            },
+        ],
+        "source_refs": [],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+
+    markdown = service._objective_report_draft_markdown(context, language="zh")
+
+    for expected in (
+        "fine carbides",
+        "delta-ferrite",
+        "sigma-phase",
+        "HT-SLM",
+        "HIP-SLM",
+        "fine cellular",
+        "elongated columnar",
+        "temperature gradient",
+        "solidification rate",
+        "Marangoni effect",
+    ):
+        assert expected in markdown
+
+
+def test_research_objective_report_mechanism_lines_preserve_sample_labels(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    evidence_units = [
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample": "HIP-SLM",
+            "value_payload": {
+                "source_value_text": (
+                    "a relatively small amount of carbides and δ-ferrite were "
+                    "observed owing to a relatively long heat treatment time "
+                    "with high pressure."
+                )
+            },
+        },
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample": "316L stainless steel",
+            "value_payload": {"source_value_text": "significantly affect"},
+        },
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample": "HT-SLM",
+            "value_payload": {
+                "source_value_text": (
+                    "the phase transformation from δ-ferrite to σ-phase was "
+                    "detected; therefore, the carbide, δ-ferrite, and σ-phase "
+                    "were existed in the HT-SLM."
+                )
+            },
+        },
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample": "as-SLM",
+            "value_payload": {
+                "source_value_text": (
+                    "fine carbides (M23C6) were observed at the melting pool "
+                    "and sub-grain boundaries, and the δ-ferrite was presented "
+                    "within the grains."
+                )
+            },
+        },
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample": "as-SLM",
+            "value_payload": {
+                "source_value_text": (
+                    "the different sub-grain shapes (i.e., fine cellular and "
+                    "elongated columnar structures) were attributed to the "
+                    "temperature gradient and solidification rate in the molten pool"
+                )
+            },
+        },
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample": "as-SLM",
+            "value_payload": {
+                "source_value_text": (
+                    "a cellular microstructure with various sub-grain shapes "
+                    "was developed owing to the rapid solidification and "
+                    "Marangoni effect"
+                )
+            },
+        },
+    ]
+
+    lines = service._objective_report_mechanism_observation_lines(evidence_units)
+    text = "\n".join(lines)
+
+    assert "HIP-SLM: a relatively small amount of carbides" in text
+    assert "HT-SLM" in text
+    assert "σ-phase" in text
+    assert "as-SLM: fine carbides" in text
+    assert "fine cellular and elongated columnar" in text
+    assert "significantly affect" not in text
+
+
+def test_research_objective_report_context_prioritizes_phase_mechanism_units(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    evidence_units = [
+        {
+            "evidence_unit_id": f"measurement-{index}",
+            "unit_kind": "measurement",
+            "property_normalized": "density",
+            "value_payload": {"source_value_text": f"{95 + index}%"},
+        }
+        for index in range(2)
+    ] + [
+        {
+            "evidence_unit_id": "generic-cellular",
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample_context": {"sample": "as-SLM"},
+            "value_payload": {
+                "source_value_text": "formation of equiaxed cellular structure"
+            },
+        },
+        {
+            "evidence_unit_id": "ht-phase",
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample_context": {"sample_label": "HT-SLM"},
+            "value_payload": {
+                "source_value_text": (
+                    "the phase transformation from δ-ferrite to σ-phase was "
+                    "detected; therefore, the carbide, δ-ferrite, and σ-phase "
+                    "were existed in the HT-SLM."
+                )
+            },
+        },
+        {
+            "evidence_unit_id": "hip-phase",
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "sample_context": {"sample_label": "HIP-SLM"},
+            "value_payload": {
+                "source_value_text": (
+                    "a relatively small amount of carbides and δ-ferrite were "
+                    "observed owing to a relatively long heat treatment time "
+                    "with high pressure."
+                )
+            },
+        },
+    ]
+
+    compact = service._objective_report_evidence_units(evidence_units, limit=2)
+    payload = json.dumps(compact, ensure_ascii=False)
+
+    assert "HT-SLM" in payload
+    assert "σ-phase" in payload
+    assert "HIP-SLM" in payload
+
+
+def test_research_objective_paper_contributions_use_source_paper_labels(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    p001_document_id = "doc-energy-density"
+    p003_document_id = "doc-ved-fatigue"
+    frame_views = [
+        {
+            "document_id": p003_document_id,
+            "title": (
+                "aadb0ac3d77b403e80593f85d17d97a2_P003-Effects of "
+                "volumetric energy density on defect structure and fatigue "
+                "behaviour of powder bed fusion manufactured 316L stainless "
+                "steel.pdf"
+            ),
+            "source_filename": (
+                "aadb0ac3d77b403e80593f85d17d97a2_P003-Effects of "
+                "volumetric energy density on defect structure and fatigue "
+                "behaviour of powder bed fusion manufactured 316L stainless "
+                "steel.pdf"
+            ),
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["volumetric energy density"],
+            "measured_property_scope": ["densification"],
+        },
+        {
+            "document_id": p001_document_id,
+            "title": (
+                "2eb73dc558fc4b16ba1fa23d917ad671_P001-Effect of energy "
+                "density and scanning strategy on densification, "
+                "microstructure and mechanical properties of 316L stainless "
+                "steel processed via selective laser melting.pdf"
+            ),
+            "source_filename": (
+                "2eb73dc558fc4b16ba1fa23d917ad671_P001-Effect of energy "
+                "density and scanning strategy on densification, "
+                "microstructure and mechanical properties of 316L stainless "
+                "steel processed via selective laser melting.pdf"
+            ),
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["energy density", "scanning strategy"],
+            "measured_property_scope": ["densification", "microstructure"],
+        },
+    ]
+    evidence_units = (
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": "obj-energy-density",
+                "document_id": p003_document_id,
+                "unit_kind": "measurement",
+                "property_normalized": "densification",
+                "value_payload": {"value": 99.6},
+                "unit": "%",
+                "source_refs": [
+                    {"source_kind": "table", "source_ref": "table-5", "page": 5}
+                ],
+            }
+        ),
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "objective_id": "obj-energy-density",
+                "document_id": p001_document_id,
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "value_payload": {"value": 99.45},
+                "unit": "%",
+                "source_refs": [
+                    {"source_kind": "table", "source_ref": "table-3", "page": 3}
+                ],
+            }
+        ),
+    )
+
+    contributions = service._objective_conclusion_paper_contributions(
+        frame_views=frame_views,
+        evidence_units=evidence_units,
+    )
+    labels = service._objective_document_display_labels(contributions)
+    source_refs = service._objective_conclusion_source_refs(
+        evidence_units,
+        paper_contributions=contributions,
+    )
+
+    assert [row["paper_label"] for row in contributions] == ["P003", "P001"]
+    assert labels[p003_document_id] == "P003"
+    assert labels[p001_document_id] == "P001"
+    assert [row["display_label"] for row in source_refs] == [
+        "P003 · Table 5 · p.5",
+        "P001 · Table 3 · p.3",
+    ]
+
+
+def test_research_objective_report_section_plan_and_packets_are_scoped(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How does energy density affect LPBF 316L density?",
+            "material_scope": ["316L stainless steel"],
+        },
+        "readiness": {"state": "partial", "warnings": ["No comparisons yet"]},
+        "evidence_summary": {
+            "evidence_unit_count": 3,
+            "measurement_count": 1,
+            "comparison_count": 1,
+            "characterization_count": 1,
+            "interpretation_count": 0,
+        },
+        "report_seed": {
+            "headline_conclusion": "Higher energy density improves densification.",
+            "scientific_context": "LPBF 316L densification is process sensitive.",
+            "key_findings": [{"summary": "Density increases from L-VED to H-VED."}],
+            "evidence_matrix": {"measurement_result_count": 3},
+            "paper_contribution_map": [
+                {"paper_label": "P001", "contribution": "parameter matrix"}
+            ],
+            "controlled_comparisons": [
+                {"summary": "H-VED has higher density than L-VED."}
+            ],
+            "mechanism_chain": {
+                "steps": ["energy density", "porosity", "relative density"],
+            },
+            "limitations": [{"summary": "Only one paper has comparable density."}],
+        },
+        "representative_measurements": [
+            {
+                "property": "relative density",
+                "sample": "H-VED",
+                "value": "99.60%",
+                "source": "P001 Table 1",
+            }
+        ],
+        "evidence_units": [
+            {"evidence_unit_id": "eu-measure", "unit_kind": "measurement"},
+            {"evidence_unit_id": "eu-compare", "unit_kind": "comparison"},
+            {"evidence_unit_id": "eu-char", "unit_kind": "characterization"},
+        ],
+        "source_refs": [
+            {
+                "evidence_unit_id": "eu-measure",
+                "display_label": "P001 Table 1",
+                "source_kind": "table",
+            }
+        ],
+    }
+
+    plan = service._build_objective_report_plan(language="zh")
+    packets = service._build_objective_report_section_packets(context, language="zh")
+
+    assert [section["key"] for section in plan["sections"]] == [
+        "objective_header",
+        "summary",
+        "research_question",
+        "evidence_sources",
+        "ved_densification",
+        "sample_series",
+        "scan_strategy",
+        "mechanism_chain",
+        "discussion",
+        "conclusion",
+        "limitations",
+    ]
+    assert plan["report_version"] == "objective_report_sectioned_v1"
+    assert packets[0]["section"]["heading"] == "# 研究目标报告"
+    packets_by_key = {item["section"]["key"]: item["packet"] for item in packets}
+    assert "objective" in packets_by_key["objective_header"]
+    assert (
+        packets_by_key["summary"]["representative_measurements"][0][
+            "value"
+        ]
+        == "99.60%"
+    )
+    assert packets_by_key["scan_strategy"]["evidence_units"] == [
+        {"evidence_unit_id": "eu-measure", "unit_kind": "measurement"},
+        {"evidence_unit_id": "eu-compare", "unit_kind": "comparison"},
+    ]
+    assert packets_by_key["mechanism_chain"]["evidence_units"] == [
+        {"evidence_unit_id": "eu-char", "unit_kind": "characterization"}
+    ]
+    assert "limitations" in packets_by_key["limitations"]
+    assert len(json.dumps(packets_by_key["scan_strategy"])) < len(
+        json.dumps(context)
+    )
+
+
+def test_research_objective_report_warnings_verify_section_claims(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How does energy density affect LPBF 316L density?",
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {"evidence_unit_count": 1, "measurement_count": 1},
+        "report_seed": {},
+        "representative_measurements": [
+            {
+                "property": "relative density",
+                "sample": "H-VED",
+                "value": "99.60%",
+                "source": "P001 Table 1",
+            }
+        ],
+        "evidence_units": [
+            {
+                "evidence_unit_id": "eu-density",
+                "unit_kind": "measurement",
+                "value_payload": {"source_value_text": "99.60%"},
+            }
+        ],
+        "source_refs": [
+            {
+                "display_label": "P001 Table 1",
+                "source_kind": "table",
+                "page": 5,
+            }
+        ],
+    }
+    markdown = (
+        "# 研究目标\nEnergy density objective.\n\n"
+        "## 集合级结论\nThe report cites [P999 Table 9] and says 101.20%.\n\n"
+        "## 文献贡献图\nP001 contributes.\n\n"
+        "## 证据矩阵\nOne measurement.\n\n"
+        "## 受控比较\nNo comparison.\n\n"
+        "## 机制链路\nNo mechanism.\n\n"
+        "## 证据来源\n[P999 Table 9].\n\n"
+        "## 局限性与不确定性\nSingle paper."
+    )
+
+    warnings = service._objective_report_warnings(context, markdown)
+
+    assert "Unsupported numeric value in objective report: 101.20%" in warnings
+    assert "Unknown source reference in objective report: P999 Table 9" in warnings
+
+
+def test_research_objective_report_warnings_do_not_require_non_core_measurements(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = {
+        "schema_version": "objective_report_context.v2",
+        "objective": {
+            "question": "How does energy density affect LPBF 316L density?",
+        },
+        "readiness": {"state": "partial"},
+        "evidence_summary": {"evidence_unit_count": 1, "measurement_count": 1},
+        "report_seed": {},
+        "representative_measurements": [
+            {
+                "property": "relative density",
+                "sample": "off-target",
+                "value": "98.15",
+                "unit": "%",
+                "source": "P004 Table 1",
+            }
+        ],
+        "representative_material_measurements": [
+            {
+                "sample": "as-SLM",
+                "property": "hardness",
+                "value": "198.4",
+                "unit": "HV",
+                "source": "P004 Table 2",
+            }
+        ],
+        "evidence_units": [
+            {
+                "evidence_unit_id": "eu-density",
+                "unit_kind": "measurement",
+                "value_payload": {"source_value_text": "98.15%"},
+            }
+        ],
+        "source_refs": [
+            {
+                "display_label": "P004 Table 1",
+                "source_kind": "table",
+                "page": 5,
+            }
+        ],
+    }
+    context["report_plan"] = service._objective_report_plan_context(context)
+    markdown = (
+        "# 研究目标\nEnergy density objective.\n\n"
+        "## 集合级结论\nOnly the core evidence is discussed.\n\n"
+        "## 文献贡献图\nP004 contributes background.\n\n"
+        "## 证据矩阵\nOne measurement.\n\n"
+        "## 受控比较\nNo comparison.\n\n"
+        "## 机制链路\nNo mechanism.\n\n"
+        "## 证据来源\nP004 Table 1.\n\n"
+        "## 局限性与不确定性\nSingle paper."
+    )
+
+    warnings = service._objective_report_warnings(context, markdown)
+
+    assert not any("Missing representative measurement" in item for item in warnings)
+
+
 def test_research_objective_service_forces_extractable_objective_route_roles(
     tmp_path,
 ):
@@ -1323,7 +3816,9 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
     ]
 
 
-def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path):
+def test_research_objective_fragmented_table_cells_repair_table_matrix_before_extraction(
+    tmp_path,
+):
     service = ResearchObjectiveService(
         collection_service=CollectionService(tmp_path / "collections"),
     )
@@ -1374,11 +3869,26 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         page=1,
         caption_text="Density results",
         heading_path="Results",
-        column_headers=["Specimens", "Density (%)"],
+        column_headers=[
+            "Specimens",
+            "Type of heat treatment",
+            "Laser power (W)",
+            "Scan speed (mm/s)",
+            "Laser energy density (J/ mm 3 )",
+            "Density (%)",
+        ],
         table_matrix=[
-            ["Specimens", "Density (%)"],
-            ["as-SLM (140/", "92.19"],
-            ["S2", "99.5"],
+            [
+                "Specimens",
+                "Type of heat treatment",
+                "Laser power (W)",
+                "Scan speed (mm/s)",
+                "Laser energy density (J/ mm 3 )",
+                "Density (%)",
+            ],
+            ["as-SLM (100/", "-", "100", "100", "278", "97.83"],
+            ["100) HT-SLM (100/", "Furnace HT", "100", "100", "278", "98.70"],
+            ["100) HIP-SLM (100/", "HIP", "100", "100", "278", "98.15"],
         ],
     )
     table_cells = [
@@ -1387,62 +3897,94 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
             row_index=1,
             col_index=0,
             header_path="Specimens",
-            cell_text="as-SLM (140/",
+            cell_text="as-SLM (100/",
         ),
         SimpleNamespace(
             table_id="table-1",
             row_index=1,
             col_index=1,
-            header_path="Density (%)",
-            cell_text="92.19",
+            header_path="Type of heat treatment",
+            cell_text="-",
         ),
         SimpleNamespace(
             table_id="table-1",
             row_index=2,
             col_index=0,
             header_path="Specimens",
-            cell_text="S2",
+            cell_text="100) HT-SLM (100/",
         ),
         SimpleNamespace(
             table_id="table-1",
             row_index=2,
             col_index=1,
-            header_path="Density (%)",
-            cell_text="99.5",
+            header_path="Type of heat treatment",
+            cell_text="Furnace HT",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=3,
+            col_index=0,
+            header_path="Specimens",
+            cell_text="100) HIP-SLM (100/",
+        ),
+        SimpleNamespace(
+            table_id="table-1",
+            row_index=3,
+            col_index=1,
+            header_path="Type of heat treatment",
+            cell_text="HIP",
         ),
     ]
 
-    class RepairExtractor:
+    class TableMatrixRepairExtractor:
         def __init__(self) -> None:
+            self.repair_payloads: list[dict[str, Any]] = []
             self.unit_payloads: list[dict[str, Any]] = []
+
+        def repair_table_matrix(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredTableMatrixRepair:
+            self.repair_payloads.append(payload)
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=[
+                    [
+                        "Specimens",
+                        "Type of heat treatment",
+                        "Laser power (W)",
+                        "Scan speed (mm/s)",
+                        "Laser energy density (J/ mm 3 )",
+                        "Density (%)",
+                    ],
+                    ["as-SLM (100/100)", "-", "100", "100", "278", "97.83"],
+                    [
+                        "100) HT-SLM (100/100)",
+                        "Furnace HT",
+                        "100",
+                        "100",
+                        "278",
+                        "98.70",
+                    ],
+                    [
+                        "100) HIP-SLM (100/100)",
+                        "HIP",
+                        "100",
+                        "100",
+                        "278",
+                        "98.15",
+                    ],
+                ],
+                confidence=0.88,
+            )
 
         def extract_objective_evidence_units(
             self,
             payload: dict[str, Any],
         ) -> StructuredObjectiveEvidenceUnits:
             self.unit_payloads.append(payload)
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
-                        property_normalized="relative density",
-                        material_system={},
-                        sample_context={"label": "repaired row label"},
-                        process_context={},
-                        test_condition={},
-                        value_payload={
-                            "value": 92.19,
-                            "source_value_text": "92.19",
-                        },
-                        unit="%",
-                        join_keys={"sample_key": "repaired row label"},
-                        resolution_status="resolved",
-                        confidence=0.86,
-                    )
-                ]
-            )
+            return StructuredObjectiveEvidenceUnits()
 
-    extractor = RepairExtractor()
+    extractor = TableMatrixRepairExtractor()
 
     units = service._build_objective_evidence_units(
         collection_id="col-test",
@@ -1456,31 +3998,80 @@ def test_research_objective_fragmented_table_cells_use_llm_repair_path(tmp_path)
         table_cells_by_document_id={"paper-1": table_cells},
     )
 
-    assert len(extractor.unit_payloads) == 1
-    assert extractor.unit_payloads[0]["source"]["table_cells"][0] == {
+    assert len(extractor.repair_payloads) == 1
+    repair_payload = extractor.repair_payloads[0]
+    assert set(repair_payload) == {"table_role", "repair_focus", "source"}
+    assert "objective" not in repair_payload
+    assert "paper_frame" not in repair_payload
+    assert "evidence_route" not in repair_payload
+    assert repair_payload["source"]["table_cells"][0] == {
         "row_index": 1,
         "col_index": 0,
         "header_path": "Specimens",
-        "cell_text": "as-SLM (140/",
+        "cell_text": "as-SLM (100/",
     }
-    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
-    assert len(measurements) == 2
-    assert {unit.value_payload.get("value") for unit in measurements} == {92.19, 99.5}
-    assert any(
-        unit.sample_context == {"label": "repaired row label"}
-        for unit in measurements
+    assert all(
+        cell["col_index"] == 0
+        for cell in repair_payload["source"]["table_cells"]
     )
-    assert any(
-        unit.sample_context.get("Specimens") == "S2"
+    assert extractor.unit_payloads == []
+    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    assert len(measurements) == 3
+    assert {unit.value_payload.get("value") for unit in measurements} == {
+        97.83,
+        98.70,
+        98.15,
+    }
+    sample_labels = {
+        str(unit.sample_context.get("Specimens") or "")
         for unit in measurements
+    }
+    assert sample_labels == {
+        "as-SLM (100/100)",
+        "HT-SLM (100/100)",
+        "HIP-SLM (100/100)",
+    }
+    assert all(
+        "100) HT-SLM" not in label and "100) HIP-SLM" not in label
+        for label in sample_labels
     )
     assert all(
         unit.material_system == {"family": "316L stainless steel"}
         for unit in measurements
     )
     assert all(
-        unit.sample_context.get("Specimens") != "as-SLM (140/"
+        "(100/" not in str(unit.sample_context.get("Specimens") or "")
+        or str(unit.sample_context.get("Specimens") or "").endswith("(100/100)")
         for unit in measurements
+    )
+
+
+def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+
+    assert service._objective_table_source_needs_llm_structural_repair(
+        route=route,
+        source={
+            "table_matrix": [
+                ["Specimens", "Density (%)"],
+                ["100) HIP-SLM (100/", "98.15"],
+            ],
+            "table_cells": [],
+        },
     )
 
 

@@ -600,6 +600,9 @@ def app_client(monkeypatch, tmp_path):
     from application.core.workspace_overview_service import WorkspaceService
     from main import create_app
 
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
+
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
@@ -753,7 +756,13 @@ def app_client(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
 
-    return TestClient(create_app())
+    client = TestClient(create_app())
+    login_response = client.post(
+        f"{API_V1_PREFIX}/auth/login",
+        json={"email": "admin@example.com", "password": "admin-password"},
+    )
+    assert login_response.status_code == 200
+    return client
 
 
 def test_collection_task_flow(app_client):
@@ -1470,16 +1479,27 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
 
 
 def test_reports_routes_are_exposed(app_client):
-    reports_resp = app_client.get(f"{API_V1_PREFIX}/collections/demo/reports/communities")
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Reports Collection"},
+    )
+    assert create_resp.status_code == 200
+    collection_id = create_resp.json()["collection_id"]
+
+    reports_resp = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/reports/communities"
+    )
     assert reports_resp.status_code == 200
-    assert reports_resp.json()["collection_id"] == "demo"
+    assert reports_resp.json()["collection_id"] == collection_id
 
     detail_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/demo/reports/communities/42"
+        f"{API_V1_PREFIX}/collections/{collection_id}/reports/communities/42"
     )
     assert detail_resp.status_code == 200
     assert detail_resp.json()["community_id"] == 42
 
-    patterns_resp = app_client.get(f"{API_V1_PREFIX}/collections/demo/reports/patterns")
+    patterns_resp = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/reports/patterns"
+    )
     assert patterns_resp.status_code == 200
-    assert patterns_resp.json()["collection_id"] == "demo"
+    assert patterns_resp.json()["collection_id"] == collection_id

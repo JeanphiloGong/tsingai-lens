@@ -450,6 +450,10 @@ For backend and frontend setup, see:
 - [`backend/README.md`](backend/README.md)
 - [`frontend/README.md`](frontend/README.md)
 
+For self-hosted deployment with published Docker images, see:
+
+- [`deploy/README.md`](deploy/README.md)
+
 ## Development Status
 
 Lens is under active development.

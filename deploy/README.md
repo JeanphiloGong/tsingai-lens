@@ -7,8 +7,9 @@ published Docker images instead of building from the source tree.
 
 - Docker Engine with the Docker Compose plugin (`docker compose`) is the
   default runtime.
-- Podman can be used only when it provides a Docker-compatible
-  `docker compose` command, because `./scripts/lens` calls Docker Compose.
+- Podman can be used with `podman compose`; use the
+  [Podman Runtime](#podman-runtime) commands because `./scripts/lens` calls
+  Docker Compose.
 
 ## One-Line Install
 
@@ -67,6 +68,43 @@ The wrapper also creates missing runtime files and directories when needed:
 - `.env`
 - `backend.env`
 - `data/backend/`
+
+## Podman Runtime
+
+Use this path on machines without Docker. Run the Compose commands directly
+with Podman from the deploy bundle directory:
+
+```bash
+cd lens-deploy
+podman compose --env-file .env -f compose.yml pull
+podman compose --env-file .env -f compose.yml up -d
+podman compose --env-file .env -f compose.yml ps
+```
+
+Useful Podman equivalents:
+
+```bash
+podman compose --env-file .env -f compose.yml logs -f
+podman compose --env-file .env -f compose.yml restart backend
+podman compose --env-file .env -f compose.yml down
+```
+
+When the backend container needs to call a vLLM server running on the host,
+start vLLM so it listens beyond host-local loopback, then point Lens at the
+Podman host gateway:
+
+```bash
+uv run vllm-control start --host 0.0.0.0
+```
+
+```bash
+LLM_BASE_URL=http://host.containers.internal:8008/v1
+LLM_MODEL=<served-model-name>
+LLM_API_KEY=not-needed
+```
+
+Keep `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, and `EMBEDDING_API_KEY` empty
+unless the configured service exposes an OpenAI-compatible embeddings endpoint.
 
 ## Manual Configure
 

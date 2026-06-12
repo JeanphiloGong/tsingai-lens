@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from application.source.collection_service import CollectionService
+from application.derived.core_fact_projection import build_core_fact_projection_records
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
@@ -60,7 +61,7 @@ def resolve_collection_output_dir(collection_id: str) -> Path:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=paths.output_dir.resolve(),
-            missing_artifacts=["core_fact_repository.objective_evidence_units"],
+            missing_artifacts=["core_fact_repository.comparison_artifacts"],
         )
     return paths.output_dir.resolve()
 
@@ -79,12 +80,13 @@ def load_graph_payload(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     collection_service.get_collection(collection_id)
     facts = core_fact_repository.read_collection_facts(collection_id)
-    if not facts.objective_evidence_units:
+    if not facts.graph_ready:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=_graph_error_output_dir(collection_id),
-            missing_artifacts=["core_fact_repository.objective_evidence_units"],
+            missing_artifacts=_missing_core_graph_inputs(facts),
         )
+    projection = build_core_fact_projection_records(facts)
 
     return load_core_graph_payload(
         profiles=tuple(profile.to_record() for profile in facts.document_profiles),
@@ -99,7 +101,26 @@ def load_graph_payload(
         ),
         max_nodes=max_nodes,
         min_weight=min_weight,
+        evidence_cards=projection.evidence_cards,
+        comparison_rows=projection.comparison_rows,
     )
+
+
+def _missing_core_graph_inputs(facts: Any) -> list[str]:
+    missing: list[str] = []
+    if not facts.document_profiles:
+        missing.append("core_fact_repository.document_profiles")
+    if not facts.evidence_cards_ready:
+        missing.append("core_fact_repository.evidence_cards")
+    if not (
+        facts.objective_evidence_units_ready
+        or facts.objective_logic_chains
+        or facts.comparable_results
+        or facts.collection_comparable_results
+        or facts.comparison_rows
+    ):
+        missing.append("core_fact_repository.comparison_artifacts")
+    return missing or ["core_fact_repository.comparison_artifacts"]
 
 
 def get_collection_graph(

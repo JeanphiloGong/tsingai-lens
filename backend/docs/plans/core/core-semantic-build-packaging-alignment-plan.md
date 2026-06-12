@@ -217,7 +217,7 @@ must not absorb:
 
 - update `comparison_service.py`
 - update `workspace_overview_service.py`
-- update `collection_build_task_runner.py`
+- update `application/pipeline/collection_build/service.py`
 - update tests that import the moved services
 
 ### Phase 4: Reconfirm Documentation Boundaries

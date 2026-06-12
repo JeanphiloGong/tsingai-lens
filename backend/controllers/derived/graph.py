@@ -49,6 +49,7 @@ def _graph_node_not_found_detail(
 @router.get(
     "/{collection_id}/graph",
     response_model=CollectionGraphResponse,
+    response_model_exclude_unset=True,
     summary="获取集合图数据",
 )
 async def get_collection_graph(
@@ -115,6 +116,7 @@ async def export_collection_graphml(
 @router.get(
     "/{collection_id}/graph/nodes/{node_id}/neighbors",
     response_model=CollectionGraphNeighborhoodResponse,
+    response_model_exclude_unset=True,
     summary="获取节点一跳邻域",
 )
 async def get_collection_graph_neighbors(

@@ -310,10 +310,9 @@ Exit criteria:
 
 Primary backend changes:
 
-- rename
-  [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
-  to a build-oriented name such as `collection_build_task_runner.py`
-- rename `IndexTaskRunner` to `CollectionBuildTaskRunner`
+- move collection build orchestration to
+  [`../../../application/pipeline/collection_build/service.py`](../../../../application/pipeline/collection_build/service.py)
+- use `CollectionBuildPipelineService` as the build workflow entry
 - rename `run_index_task()` to `run_build_task()`
 - update logs to say `build task` instead of `index task`
 - update any tests that still assert `index` naming

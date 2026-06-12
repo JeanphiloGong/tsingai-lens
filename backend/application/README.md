@@ -23,7 +23,9 @@ Inside it, business responsibilities are now grouped as:
 - [`goal/README.md`](goal/README.md)
   Goal Brief intake and research-intent shaping
 - [`source/README.md`](source/README.md)
-  Collection lifecycle, Source indexing orchestration, and artifact readiness
+  Collection lifecycle, build-task records, Source artifact loading, and artifact readiness
+- [`pipeline/README.md`](pipeline/README.md)
+  Application workflow orchestration such as collection build sequencing
 - [`core/README.md`](core/README.md)
   Research-fact backbone generation and workspace overview assembly
 - [`derived/README.md`](derived/README.md)

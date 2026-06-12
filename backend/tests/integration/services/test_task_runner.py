@@ -12,7 +12,7 @@ if "devtools" not in sys.modules:
 
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
-from application.source.collection_build_task_runner import CollectionBuildTaskRunner
+from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import (
@@ -119,8 +119,8 @@ def _write_source_artifact_outputs(
     )
 
 
-def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
-    import application.source.collection_build_task_runner as task_runner_module
+def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
+    import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
@@ -128,7 +128,7 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     artifact_registry = ArtifactRegistryService(
         tmp_path / "collections",
     )
-    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
+    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Composite Papers")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -153,7 +153,7 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
     task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
+    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
@@ -201,13 +201,87 @@ def test_build_task_runner_builds_collection_artifacts(monkeypatch, tmp_path):
     assert core_facts.research_objectives_ready is True
     assert core_facts.paper_skims
 
-def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
-    import application.source.collection_build_task_runner as task_runner_module
+
+def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):
+    import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = CollectionService(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
-    runner = CollectionBuildTaskRunner(collection_service, task_service, artifact_registry)
+    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Empty Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+
+    default_config = tmp_path / "configs" / "default.yaml"
+    default_config.parent.mkdir(parents=True, exist_ok=True)
+    default_config.write_text("dummy: true\n", encoding="utf-8")
+
+    async def fail_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        raise AssertionError("source artifacts should not run for an empty collection")
+
+    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
+    monkeypatch.setattr(
+        task_runner_module,
+        "load_config",
+        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
+    )
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fail_build_source_artifacts)
+
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+
+    assert result["status"] == "failed"
+    assert result["current_stage"] == "failed"
+    assert result["pipeline_nodes"]["files_registered"]["status"] == "failed"
+    assert result["pipeline_nodes"]["source_artifacts"]["status"] == "skipped"
+    assert "files_registered: 集合内没有可构建文件" in result["errors"]
+
+
+def test_build_pipeline_service_marks_source_artifact_errors_failed(monkeypatch, tmp_path):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
+
+    collection = collection_service.create_collection("Source Error Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(collection["collection_id"], "paper.txt", b"bad pdf")
+
+    default_config = tmp_path / "configs" / "default.yaml"
+    default_config.parent.mkdir(parents=True, exist_ok=True)
+    default_config.write_text("dummy: true\n", encoding="utf-8")
+
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        return [DummyWorkflowOutput(errors=["docling import failed"])]
+
+    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
+    monkeypatch.setattr(
+        task_runner_module,
+        "load_config",
+        lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir),
+    )
+    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
+
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+
+    assert result["status"] == "failed"
+    assert result["current_stage"] == "failed"
+    assert result["pipeline_nodes"]["source_artifacts"]["status"] == "failed"
+    assert result["pipeline_nodes"]["artifact_registry"]["status"] == "skipped"
+    assert result["errors"] == ["source_artifacts: docling import failed"]
+
+
+def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplog):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Logging Progress Collection")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -231,7 +305,7 @@ def test_build_task_runner_logs_stage_progress(monkeypatch, tmp_path, caplog):
 
     task = task_service.create_task(collection["collection_id"], "build")
     with caplog.at_level("INFO"):
-        asyncio.run(runner.run_build_task(task["task_id"], collection["collection_id"]))
+        asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
 
     assert any(
         "Build task progress" in record.message

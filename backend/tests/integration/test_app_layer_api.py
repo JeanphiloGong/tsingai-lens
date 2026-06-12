@@ -426,7 +426,7 @@ def test_request_id_is_generated_and_echoed(app_client):
 
 
 def test_request_id_is_echoed_and_propagated_to_background_build(app_client, monkeypatch):
-    import application.source.collection_build_task_runner as task_runner_module
+    import application.pipeline.collection_build.service as task_runner_module
     from utils.logger import REQUEST_ID_HEADER, get_request_id
 
     captured: dict[str, str | None] = {}
@@ -471,7 +471,7 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
     release = threading.Event()
     finished = threading.Event()
 
-    def fake_run_build_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
+    def fake_run_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
         captured["args"] = args
         captured["kwargs"] = kwargs
         started.set()
@@ -479,18 +479,18 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
         finished.set()
         return {"task_id": args[0], "collection_id": args[1], "status": "queued"}
 
-    def fail_run_build_task(*args, **kwargs):  # noqa: ANN002, ANN003
+    def fail_run_task(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("async build entry should not be scheduled directly")
 
     monkeypatch.setattr(
-        tasks_controller.build_task_runner,
-        "run_build_task_blocking",
-        fake_run_build_task_blocking,
+        tasks_controller.build_pipeline_service,
+        "run_task_blocking",
+        fake_run_task_blocking,
     )
     monkeypatch.setattr(
-        tasks_controller.build_task_runner,
-        "run_build_task",
-        fail_run_build_task,
+        tasks_controller.build_pipeline_service,
+        "run_task",
+        fail_run_task,
     )
 
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Blocking Entry Set"})
@@ -584,7 +584,7 @@ def app_client(monkeypatch, tmp_path):
         ReportPatternsResponse,
     )
     import application.derived.graph_service as graph_service_module
-    import application.source.collection_build_task_runner as task_runner_module
+    import application.pipeline.collection_build.service as task_runner_module
     import application.derived.report_service as report_service_module
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
@@ -595,7 +595,7 @@ def app_client(monkeypatch, tmp_path):
         ResearchViewAggregationService,
     )
     from application.goal.brief_service import GoalService
-    from application.source.collection_build_task_runner import CollectionBuildTaskRunner
+    from application.pipeline.collection_build.service import CollectionBuildPipelineService
     from application.source.task_service import TaskService
     from application.core.workspace_overview_service import WorkspaceService
     from main import create_app
@@ -629,7 +629,7 @@ def app_client(monkeypatch, tmp_path):
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
     )
-    runner = CollectionBuildTaskRunner(
+    runner = CollectionBuildPipelineService(
         collection_service,
         task_service,
         artifact_registry,
@@ -725,7 +725,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(tasks_controller, "build_task_runner", runner)
+    monkeypatch.setattr(tasks_controller, "build_pipeline_service", runner)
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
@@ -1427,7 +1427,7 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
 
 
 def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.source.collection_build_task_runner as task_runner_module
+    import application.pipeline.collection_build.service as task_runner_module
 
     captured: dict[str, object] = {}
 

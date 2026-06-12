@@ -219,7 +219,7 @@ class DocumentProfileService:
                 facts.document_profiles,
                 collection_id,
             )
-        return self.build_document_profiles(collection_id)
+        raise DocumentProfilesNotReadyError(collection_id)
 
     def build_document_profiles(
         self,

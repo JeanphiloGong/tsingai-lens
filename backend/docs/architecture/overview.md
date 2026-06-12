@@ -29,8 +29,8 @@ Within the repository-wide system:
   Current HTTP route surface for collections, tasks, workspace, graph,
   reports, documents, evidence, and comparisons
 - `application/`
-  Use-case orchestration layer with active business-domain packages plus some
-  remaining legacy flat services
+  Use-case orchestration layer with active business-domain packages, explicit
+  pipeline orchestration, and some remaining legacy flat services
 - `domain/`
   Domain models and port definitions
 - `infra/`
@@ -61,8 +61,8 @@ larger flat service bag.
 ## Main Runtime Flow
 
 1. collection material enters through collection and ingestion surfaces
-2. indexing orchestration runs Source-side indexing/runtime preparation plus
-   the Lens backbone
+2. collection build pipeline orchestration runs Source-side runtime preparation
+   plus the Lens backbone
 3. document profiling produces coarse document-type and review-risk signals
 4. paper-facts extraction produces the primary research objects
 5. evidence and comparable-result generation produce the primary collection

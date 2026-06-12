@@ -11,16 +11,16 @@ from controllers.schemas.source.task import (
     TaskListResponse,
     TaskResponse,
 )
-from application.source.collection_service import CollectionService
-from application.source.collection_build_task_runner import CollectionBuildTaskRunner
-from application.source.task_service import TaskService
 from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.task_service import TaskService
+from application.pipeline.collection_build.service import CollectionBuildPipelineService
 
 router = APIRouter(tags=["tasks"])
 collection_service = CollectionService()
 task_service = TaskService()
 artifact_registry_service = ArtifactRegistryService()
-build_task_runner = CollectionBuildTaskRunner(
+build_pipeline_service = CollectionBuildPipelineService(
     collection_service=collection_service,
     task_service=task_service,
     artifact_registry_service=artifact_registry_service,
@@ -64,7 +64,7 @@ async def create_build_task(
         payload.verbose,
     )
     future = _build_executor.submit(
-        build_task_runner.run_build_task_blocking,
+        build_pipeline_service.run_task_blocking,
         task["task_id"],
         collection_id,
         verbose=payload.verbose,

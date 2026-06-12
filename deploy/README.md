@@ -89,6 +89,17 @@ podman compose --env-file .env -f compose.yml restart backend
 podman compose --env-file .env -f compose.yml down
 ```
 
+The backend data volume uses the SELinux relabel option `:Z`:
+
+```yaml
+./data/backend:/app/data:Z
+```
+
+This lets Podman write runtime data on SELinux Enforcing hosts such as Fedora,
+RHEL, and CentOS. Without that label the backend can fail with
+`PermissionError` while creating `/app/data/collections`, and the frontend will
+show `502 Bad Gateway` because nginx cannot reach the backend.
+
 When the backend container needs to call a vLLM server running on the host,
 start vLLM so it listens beyond host-local loopback, then point Lens at the
 Podman host gateway:

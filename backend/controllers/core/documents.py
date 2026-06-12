@@ -17,9 +17,15 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfilesNotReadyError,
 )
 from application.source.collection_service import DocumentSourceUnavailableError
+from application.source.document_markdown_service import (
+    DocumentMarkdownNotReadyError,
+    DocumentMarkdownService,
+    SourceDocumentNotFoundError,
+)
 from controllers.schemas.core.documents import (
     DocumentComparisonSemanticListResponse,
     DocumentContentResponse,
+    DocumentMarkdownResponse,
     DocumentProfileItemResponse,
     DocumentProfileListResponse,
 )
@@ -27,6 +33,7 @@ from controllers.schemas.core.documents import (
 router = APIRouter(prefix="/collections", tags=["documents"])
 document_profile_service = DocumentProfileService()
 comparison_service = ComparisonService()
+document_markdown_service = DocumentMarkdownService()
 
 
 def _document_profiles_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -41,6 +48,14 @@ def _document_content_not_ready_detail(collection_id: str) -> dict[str, str]:
     return {
         "code": "document_content_not_ready",
         "message": "The collection does not have document content yet. Finish indexing first.",
+        "collection_id": collection_id,
+    }
+
+
+def _document_markdown_not_ready_detail(collection_id: str) -> dict[str, str]:
+    return {
+        "code": "document_markdown_not_ready",
+        "message": "The collection does not have parsed Markdown content yet. Finish indexing first.",
         "collection_id": collection_id,
     }
 
@@ -171,6 +186,40 @@ async def get_collection_document_content(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return DocumentContentResponse(**payload)
+
+
+@router.get(
+    "/{collection_id}/documents/{document_id}/markdown",
+    response_model=DocumentMarkdownResponse,
+    summary="读取 collection 内单个文档的 Markdown 展示投影",
+)
+async def get_collection_document_markdown(
+    collection_id: str,
+    document_id: str,
+) -> DocumentMarkdownResponse:
+    try:
+        payload = document_markdown_service.get_document_markdown(
+            collection_id,
+            document_id,
+        )
+    except SourceDocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "document_not_found",
+                "message": str(exc),
+                "collection_id": exc.collection_id,
+                "document_id": exc.document_id,
+            },
+        ) from exc
+    except DocumentMarkdownNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_document_markdown_not_ready_detail(exc.collection_id),
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DocumentMarkdownResponse(**payload)
 
 
 @router.get(

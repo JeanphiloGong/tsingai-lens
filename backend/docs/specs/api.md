@@ -813,13 +813,40 @@ failed
 
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/markdown`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/source`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
 
 其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
 返回原文阅读器内容与 section fallback 结构，`/source` 以 inline file
 response 返回该 document 的原始上传文件，供浏览器 PDF/source reader
-直接展示。
+直接展示。`/markdown` 返回从 Source artifacts 生成的展示用 Markdown
+投影，供文档详情页默认阅读论文原文；它不是新的事实来源，也不替代
+`documents`、`blocks`、`tables`、`figures` 等 Source artifacts。
+
+`/markdown` 最小返回结构：
+
+- `collection_id`
+- `document_id`
+- `title`
+- `source_filename`
+- `parser`
+- `markdown`
+- `source_map`
+- `warnings`
+
+`source_map` 用于把 Markdown 展示片段回指到 Source artifact，至少包含：
+
+- `markdown_anchor`
+- `artifact_type`
+- `artifact_id`
+- `block_id`
+- `table_id`
+- `figure_id`
+- `block_type`
+- `page`
+- `heading_path`
+- `text_unit_ids`
 
 `/content` 的每个 block 仍是 backend source locator unit，不是前端可见
 章节模型。前端可以用这些字段做 fallback 定位，但默认 UI 不应暴露
@@ -850,6 +877,8 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
 文档页语义要求：
 
 - `documents` 是 source-of-truth recovery surface，不是主比较页
+- document detail 默认展示解析后的 Markdown 论文阅读视图
+- PDF/source file 是可选预览和证据定位参考，不是默认阅读入口
 - comparison 或 result drilldown 回到文档时，应能稳定落到对应 paper
 - document detail 应能够承载来自 result/evidence 的 traceback deep link
 

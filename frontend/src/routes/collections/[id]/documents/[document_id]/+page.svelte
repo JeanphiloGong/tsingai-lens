@@ -6,8 +6,10 @@
 		buildDocumentWorkbenchModel,
 		fetchDocumentComparisonSemantics,
 		fetchDocumentContent,
+		fetchDocumentMarkdown,
 		type DocumentComparisonSemanticsResponse,
 		type DocumentContentResponse,
+		type DocumentMarkdownResponse,
 		type DocumentWorkbenchModel,
 		type SourceAnchor,
 		type WorkbenchLocalGraph,
@@ -30,6 +32,7 @@
 		type SampleMatrixRow
 	} from '../../../../_shared/researchView';
 	import LocalGraphPanel from './_components/LocalGraphPanel.svelte';
+	import MarkdownPaperReader from './_components/MarkdownPaperReader.svelte';
 	import PaperReader from './_components/PaperReader.svelte';
 	import StructuredExtractionPanel from './_components/StructuredExtractionPanel.svelte';
 
@@ -50,10 +53,12 @@
 	let extractionDetailsOpen = false;
 	let sourceJumpToken = 0;
 	let contentForModel: DocumentContentResponse | null = null;
+	let markdownForReader: DocumentMarkdownResponse | null = null;
 	let comparisonSemanticsForModel: DocumentComparisonSemanticsResponse | null = null;
 	let relatedResultsForModel: ResultListItem[] = [];
 	let evidenceTracebacksById = new Map<string, EvidenceTracebackResponse>();
 	let loadingTracebackIds = new Set<string>();
+	let readerMode: 'parsed-paper' | 'pdf-preview' = 'parsed-paper';
 
 	type SelectItemOptions = {
 		preserveGraphNodeId?: string;
@@ -69,7 +74,8 @@
 	$: requestedReturnTo = safeReturnTo($page.url.searchParams.get('return_to'));
 	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
 	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedPageNumber ?? ''}`;
-	$: hasDocumentSource = Boolean(contentForModel);
+	$: hasMarkdownSource = Boolean(markdownForReader?.markdown);
+	$: hasDocumentSource = Boolean(contentForModel || markdownForReader?.markdown);
 	$: hasExtractionDetails = Boolean(
 		paperAggregation ||
 		comparisonSemanticsForModel?.count ||
@@ -120,6 +126,7 @@
 		loading = true;
 		model = null;
 		contentForModel = null;
+		markdownForReader = null;
 		comparisonSemanticsForModel = null;
 		relatedResultsForModel = [];
 		evidenceTracebacksById = new Map();
@@ -129,10 +136,13 @@
 		selectedPaperMaterialId = '';
 		selectedMatrixValue = null;
 		extractionDetailsOpen = false;
+		readerMode =
+			currentRequestedEvidenceId || requestedAnchorId || requestedPageNumber ? 'pdf-preview' : 'parsed-paper';
 
 		const researchPromise = loadPaperResearchView(currentCollectionId, currentDocumentId);
-		const [contentResult, resultsResult, semanticsResult] = await Promise.allSettled([
+		const [contentResult, markdownResult, resultsResult, semanticsResult] = await Promise.allSettled([
 			fetchDocumentContent(currentCollectionId, currentDocumentId),
+			fetchDocumentMarkdown(currentCollectionId, currentDocumentId),
 			fetchCollectionResults(currentCollectionId, {
 				source_document_id: currentDocumentId,
 				limit: 20
@@ -145,6 +155,7 @@
 		if (generation !== loadGeneration) return;
 
 		contentForModel = contentResult.status === 'fulfilled' ? contentResult.value : null;
+		markdownForReader = markdownResult.status === 'fulfilled' ? markdownResult.value : null;
 		relatedResultsForModel = resultsResult.status === 'fulfilled' ? resultsResult.value.items : [];
 		comparisonSemanticsForModel =
 			semanticsResult.status === 'fulfilled' ? semanticsResult.value : null;
@@ -187,6 +198,7 @@
 		const sourceSpanId = `source-anchor-${requestedAnchorId}`;
 		if (!nextModel.source_anchors_by_span_id[sourceSpanId]) return false;
 		selectedSourceSpanId = sourceSpanId;
+		readerMode = 'pdf-preview';
 		sourceJumpToken += 1;
 		return true;
 	}
@@ -196,6 +208,7 @@
 		const sourceSpan = nextModel.source_spans.find((span) => span.page === requestedPageNumber);
 		if (!sourceSpan) return false;
 		selectedSourceSpanId = sourceSpan.id;
+		readerMode = 'pdf-preview';
 		sourceJumpToken += 1;
 		return true;
 	}
@@ -237,6 +250,7 @@
 		selectedItemId = item.id;
 		activeTab = tab ?? item.tab;
 		selectedSourceSpanId = item.source_span_id;
+		if (extractionDetailsOpen && item.source_span_id) readerMode = 'pdf-preview';
 		sourceJumpToken += 1;
 		const graph = graphForSelection(model, item.id);
 		const preservedNodeId = options.preserveGraphNodeId;
@@ -305,11 +319,13 @@
 			return;
 		}
 		selectedSourceSpanId = sourceSpanId;
+		readerMode = 'pdf-preview';
 		sourceJumpToken += 1;
 	}
 
 	function selectSourceSpan(sourceSpanId: string) {
 		selectedSourceSpanId = sourceSpanId;
+		readerMode = 'pdf-preview';
 		const linkedItem = model?.selectable_items.find((item) => item.source_span_id === sourceSpanId);
 		if (linkedItem) {
 			selectItem(linkedItem.id);
@@ -341,6 +357,14 @@
 	function toggleExtractionDetails() {
 		if (!hasExtractionDetails) return;
 		extractionDetailsOpen = !extractionDetailsOpen;
+	}
+
+	function showParsedPaper() {
+		if (hasMarkdownSource) readerMode = 'parsed-paper';
+	}
+
+	function showPdfPreview() {
+		readerMode = 'pdf-preview';
 	}
 
 	async function loadPaperResearchView(
@@ -482,17 +506,49 @@
 			class="workbench-main"
 		>
 			<section class="reader-column">
-				<PaperReader
-					title={model.title}
-					metadata={model.metadata}
-					pages={model.pages}
-					sourceFileUrl={model.sourceFileUrl}
-					sourceFilename={model.source_filename}
-					activeSourceSpanId={selectedSourceSpanId}
-					activeSourceAnchor={selectedSourceAnchor}
-					{sourceJumpToken}
-					onSelectSourceSpan={selectSourceSpan}
-				/>
+				<div class="reader-mode-tabs" role="tablist" aria-label={$t('workbench.readerModeLabel')}>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={readerMode === 'parsed-paper'}
+						class:active={readerMode === 'parsed-paper'}
+						disabled={!hasMarkdownSource}
+						on:click={showParsedPaper}
+					>
+						{$t('workbench.parsedPaperView')}
+					</button>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={readerMode === 'pdf-preview'}
+						class:active={readerMode === 'pdf-preview'}
+						on:click={showPdfPreview}
+					>
+						{$t('workbench.pdfPreview')}
+					</button>
+				</div>
+
+				<div class="reader-surface">
+					{#if readerMode === 'parsed-paper' && hasMarkdownSource}
+						<MarkdownPaperReader
+							markdown={markdownForReader}
+							sourceFileUrl={model.sourceFileUrl}
+							onShowPdf={showPdfPreview}
+						/>
+					{:else}
+						<PaperReader
+							title={model.title}
+							metadata={model.metadata}
+							pages={model.pages}
+							sourceFileUrl={model.sourceFileUrl}
+							sourceFilename={model.source_filename}
+							activeSourceSpanId={selectedSourceSpanId}
+							activeSourceAnchor={selectedSourceAnchor}
+							{sourceJumpToken}
+							onSelectSourceSpan={selectSourceSpan}
+						/>
+					{/if}
+				</div>
 			</section>
 
 			{#if extractionDetailsOpen && hasExtractionDetails}
@@ -702,6 +758,11 @@
 								</section>
 							{/if}
 						</section>
+					{:else if paperResearchError}
+						<section class="paper-research-panel paper-research-panel--unavailable" role="status">
+							<h2>{$t('research.paper.unavailableTitle')}</h2>
+							<p>{paperResearchError}</p>
+						</section>
 					{/if}
 				</section>
 
@@ -907,6 +968,51 @@
 	.details-status-panel {
 		min-width: 0;
 		height: 100%;
+		overflow: hidden;
+	}
+
+	.reader-column {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+		gap: 10px;
+	}
+
+	.reader-mode-tabs {
+		display: inline-flex;
+		width: fit-content;
+		max-width: 100%;
+		gap: 4px;
+		padding: 4px;
+		border: 1px solid #dbeafe;
+		border-radius: 10px;
+		background: #ffffff;
+	}
+
+	.reader-mode-tabs button {
+		min-height: 32px;
+		padding: 0 12px;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		color: #475569;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.reader-mode-tabs button.active {
+		background: #eff6ff;
+		color: #1d4ed8;
+	}
+
+	.reader-mode-tabs button:disabled {
+		color: #94a3b8;
+		cursor: not-allowed;
+	}
+
+	.reader-surface {
+		min-height: 0;
 		overflow: hidden;
 	}
 

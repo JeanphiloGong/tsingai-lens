@@ -5,8 +5,10 @@ published Docker images instead of building from the source tree.
 
 ## Prerequisites
 
-- Docker Engine
-- Docker Compose plugin (`docker compose`)
+- Docker Engine with the Docker Compose plugin (`docker compose`) is the
+  default runtime.
+- Podman can be used only when it provides a Docker-compatible
+  `docker compose` command, because `./scripts/lens` calls Docker Compose.
 
 ## One-Line Install
 
@@ -19,6 +21,9 @@ curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/dep
 
 Use `--ref <git-ref>` when you want the deploy files themselves to come from a
 specific branch or tag.
+
+Before the first start, edit `backend.env` to set the bootstrap admin account
+and any LLM or embedding environment variables. See [Manual Configure](#manual-configure).
 
 Then run:
 

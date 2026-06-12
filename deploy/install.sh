@@ -112,6 +112,14 @@ mkdir -p "$TARGET_DIR/data/backend"
 cat <<EOF
 Lens deploy bundle installed in $TARGET_DIR
 
+Runtime:
+  Install Docker Engine with the Docker Compose plugin before starting Lens.
+  Podman can also be used if it provides a Docker-compatible "docker compose" command.
+
+Before startup:
+  Edit $TARGET_DIR/backend.env for BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD
+  and optional LLM / embedding environment variables.
+
 Next steps:
   cd $TARGET_DIR
   ./scripts/lens doctor
@@ -119,4 +127,7 @@ Next steps:
 
 Open:
   http://localhost:$(grep '^LENS_HTTP_PORT=' "$TARGET_DIR/.env" | cut -d= -f2-)
+
+More details:
+  $TARGET_DIR/README.md
 EOF

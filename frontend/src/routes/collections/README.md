@@ -30,7 +30,9 @@ This node owns the collection workspace route family in the frontend.
 - render the collection-bound AI research copilot as a top-level collection tab
   with explicit answer source modes and clickable document/evidence source links
   back to Core-owned surfaces
-- render document detail as a paper reader plus structured understanding workbench
+- render document detail as a Source-first paper reader as soon as document
+  content exists, with structured extraction details available as an explicit
+  split-view expansion only after downstream Core artifacts are ready
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
 - surface graph and report capabilities to the user

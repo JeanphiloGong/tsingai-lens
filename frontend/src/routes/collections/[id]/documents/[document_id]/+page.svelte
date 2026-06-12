@@ -47,6 +47,7 @@
 	let selectedSourceSpanId = '';
 	let selectedGraphNodeId = '';
 	let graphCollapsed = false;
+	let extractionDetailsOpen = false;
 	let sourceJumpToken = 0;
 	let contentForModel: DocumentContentResponse | null = null;
 	let comparisonSemanticsForModel: DocumentComparisonSemanticsResponse | null = null;
@@ -68,6 +69,13 @@
 	$: requestedReturnTo = safeReturnTo($page.url.searchParams.get('return_to'));
 	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
 	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedPageNumber ?? ''}`;
+	$: hasDocumentSource = Boolean(contentForModel);
+	$: hasExtractionDetails = Boolean(
+		paperAggregation ||
+		comparisonSemanticsForModel?.count ||
+		comparisonSemanticsForModel?.variant_dossiers.length ||
+		relatedResultsForModel.length
+	);
 	$: selectedGraph = graphForSelection(model, selectedItemId);
 	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
 	$: paperMaterialRows = paperAggregation?.materials ?? [];
@@ -120,6 +128,7 @@
 		paperResearchError = '';
 		selectedPaperMaterialId = '';
 		selectedMatrixValue = null;
+		extractionDetailsOpen = false;
 
 		const researchPromise = loadPaperResearchView(currentCollectionId, currentDocumentId);
 		const [contentResult, resultsResult, semanticsResult] = await Promise.allSettled([
@@ -312,13 +321,26 @@
 	}
 
 	function openTab(tab: WorkbenchTab) {
+		if (!hasExtractionDetails) return;
+		extractionDetailsOpen = true;
 		activeTab = tab;
 		const item = model?.selectable_items.find((candidate) => candidate.tab === tab);
 		if (item) selectItem(item.id, tab);
 	}
 
+	function toggleGraphPanel() {
+		if (!hasExtractionDetails) return;
+		extractionDetailsOpen = true;
+		graphCollapsed = !graphCollapsed;
+	}
+
 	function setActiveTab(tab: WorkbenchTab) {
 		activeTab = tab;
+	}
+
+	function toggleExtractionDetails() {
+		if (!hasExtractionDetails) return;
+		extractionDetailsOpen = !extractionDetailsOpen;
 	}
 
 	async function loadPaperResearchView(
@@ -419,13 +441,26 @@
 		</label>
 
 		<div class="top-actions">
-			<button type="button" on:click={() => openTab('overview')}
-				>{$t('workbench.actionOverview')}</button
+			<button type="button" disabled={!hasExtractionDetails} on:click={() => openTab('overview')}>
+				{$t('workbench.actionOverview')}
+			</button>
+			<button type="button" disabled={!hasExtractionDetails} on:click={() => openTab('evidence')}>
+				{$t('workbench.actionEvidence')}
+			</button>
+			<button
+				type="button"
+				disabled={!hasExtractionDetails}
+				title={hasExtractionDetails
+					? $t('workbench.extractionDetailsReady')
+					: $t('workbench.extractionDetailsUnavailable')}
+				aria-pressed={extractionDetailsOpen}
+				on:click={toggleExtractionDetails}
 			>
-			<button type="button" on:click={() => openTab('evidence')}
-				>{$t('workbench.actionEvidence')}</button
-			>
-			<button type="button" on:click={() => (graphCollapsed = !graphCollapsed)}>
+				{extractionDetailsOpen
+					? $t('workbench.hideExtractionDetails')
+					: $t('workbench.showExtractionDetails')}
+			</button>
+			<button type="button" disabled={!hasExtractionDetails} on:click={toggleGraphPanel}>
 				{$t('workbench.actionGraph')}
 			</button>
 			<button class="primary" type="button">{$t('workbench.actionExport')}</button>
@@ -440,8 +475,12 @@
 				<div class="skeleton skeleton--short"></div>
 			</section>
 		</main>
-	{:else if model && paperAggregation}
-		<main class="workbench-main">
+	{:else if model && hasDocumentSource}
+		<main
+			class:workbench-main--details-open={extractionDetailsOpen && hasExtractionDetails}
+			class:workbench-main--reader-only={!extractionDetailsOpen || !hasExtractionDetails}
+			class="workbench-main"
+		>
 			<section class="reader-column">
 				<PaperReader
 					title={model.title}
@@ -456,232 +495,243 @@
 				/>
 			</section>
 
-			<section class="extraction-column">
-				<StructuredExtractionPanel
-					{model}
-					{activeTab}
-					{selectedItemId}
-					onSelectItem={selectItem}
-					onJumpToSource={jumpToSource}
-					onOpenTab={setActiveTab}
-				/>
+			{#if extractionDetailsOpen && hasExtractionDetails}
+				<section class="extraction-column">
+					<StructuredExtractionPanel
+						{model}
+						{activeTab}
+						{selectedItemId}
+						onSelectItem={selectItem}
+						onJumpToSource={jumpToSource}
+						onOpenTab={setActiveTab}
+					/>
 
-				{#if paperAggregation}
-					<section class="paper-research-panel" aria-label={$t('research.paper.title')}>
-						<div class="paper-research-panel__header">
-							<div>
-								<h2>{$t('research.paper.title')}</h2>
-								<p>{paperAggregation.paper_title}</p>
-							</div>
-							<span class={`research-state research-state--${paperAggregation.state}`}>
-								{$t(`research.state.${paperAggregation.state}`)}
-							</span>
-						</div>
-
-						<div class="paper-research-summary">
-							<div>
-								<span>{$t('research.overview.materials')}</span>
-								<strong
-									>{paperAggregation.overview.material_systems.join(', ') ||
-										$t('research.emptyValue')}</strong
-								>
-							</div>
-							<div>
-								<span>{$t('research.overview.samples')}</span>
-								<strong>{paperAggregation.overview.sample_variant_count}</strong>
-							</div>
-							<div>
-								<span>{$t('research.overview.variables')}</span>
-								<strong
-									>{paperAggregation.overview.main_process_variables.join(', ') ||
-										$t('research.emptyValue')}</strong
-								>
-							</div>
-							<div>
-								<span>{$t('research.overview.properties')}</span>
-								<strong
-									>{paperAggregation.overview.measured_properties.join(', ') ||
-										$t('research.emptyValue')}</strong
-								>
-							</div>
-						</div>
-
-						{#if paperMaterialRows.length}
-							<section class="paper-research-section">
-								<h3>{$t('research.paperMaterials.title')}</h3>
-								<div class="paper-material-tabs" aria-label={$t('research.paperMaterials.title')}>
-									{#each paperMaterialRows as material (material.material_id)}
-										<button
-											type="button"
-											class:active={activePaperMaterial?.material_id === material.material_id}
-											on:click={() => selectPaperMaterial(material.material_id)}
-										>
-											{material.canonical_name}
-										</button>
-									{/each}
+					{#if paperAggregation}
+						<section class="paper-research-panel" aria-label={$t('research.paper.title')}>
+							<div class="paper-research-panel__header">
+								<div>
+									<h2>{$t('research.paper.title')}</h2>
+									<p>{paperAggregation.paper_title}</p>
 								</div>
-								{#if activePaperMaterial}
-									<div class="paper-material-card">
-										<div>
-											<span>{$t('research.materials.aliases')}</span>
-											<strong
-												>{activePaperMaterial.aliases.join(', ') ||
-													$t('research.emptyValue')}</strong
-											>
-										</div>
-										<div>
-											<span>{$t('research.overview.samples')}</span>
-											<strong>{activePaperMaterial.sample_count}</strong>
-										</div>
-										<div>
-											<span>{$t('research.overview.processes')}</span>
-											<strong
-												>{activePaperMaterial.process_families.join(', ') ||
-													$t('research.emptyValue')}</strong
-											>
-										</div>
-										<div>
-											<span>{$t('research.overview.properties')}</span>
-											<strong
-												>{activePaperMaterial.measured_properties.join(', ') ||
-													$t('research.emptyValue')}</strong
-											>
-										</div>
-										<div>
-											<span>{$t('research.materials.comparisons')}</span>
-											<strong>{activePaperMaterial.comparison_count}</strong>
-										</div>
-									</div>
-									{#if activePaperMaterial.warnings.length}
-										<div class="paper-material-warning" role="status">
-											<strong>{$t('research.warnings')}</strong>
-											<span
-												>{activePaperMaterial.warnings
-													.map((warning) => warning.message)
-													.join(' | ')}</span
-											>
-										</div>
-									{/if}
-								{/if}
-							</section>
-						{/if}
+								<span class={`research-state research-state--${paperAggregation.state}`}>
+									{$t(`research.state.${paperAggregation.state}`)}
+								</span>
+							</div>
 
-						{#if sampleMatrixRows().length}
-							<section class="paper-research-section">
-								<h3>{$t('research.sampleMatrix.title')}</h3>
-								<div class="paper-matrix-wrapper">
-									<table class="paper-matrix-table">
-										<thead>
-											<tr>
-												<th>{$t('research.sampleMatrix.sample')}</th>
-												<th>{$t('research.comparison.material')}</th>
-												<th>{$t('research.comparison.process')}</th>
-												{#each sampleColumns as column (column.column_id)}
-													<th>{column.label}</th>
-												{/each}
-											</tr>
-										</thead>
-										<tbody>
-											{#each sampleMatrixRows() as row (row.row_id)}
+							<div class="paper-research-summary">
+								<div>
+									<span>{$t('research.overview.materials')}</span>
+									<strong
+										>{paperAggregation.overview.material_systems.join(', ') ||
+											$t('research.emptyValue')}</strong
+									>
+								</div>
+								<div>
+									<span>{$t('research.overview.samples')}</span>
+									<strong>{paperAggregation.overview.sample_variant_count}</strong>
+								</div>
+								<div>
+									<span>{$t('research.overview.variables')}</span>
+									<strong
+										>{paperAggregation.overview.main_process_variables.join(', ') ||
+											$t('research.emptyValue')}</strong
+									>
+								</div>
+								<div>
+									<span>{$t('research.overview.properties')}</span>
+									<strong
+										>{paperAggregation.overview.measured_properties.join(', ') ||
+											$t('research.emptyValue')}</strong
+									>
+								</div>
+							</div>
+
+							{#if paperMaterialRows.length}
+								<section class="paper-research-section">
+									<h3>{$t('research.paperMaterials.title')}</h3>
+									<div class="paper-material-tabs" aria-label={$t('research.paperMaterials.title')}>
+										{#each paperMaterialRows as material (material.material_id)}
+											<button
+												type="button"
+												class:active={activePaperMaterial?.material_id === material.material_id}
+												on:click={() => selectPaperMaterial(material.material_id)}
+											>
+												{material.canonical_name}
+											</button>
+										{/each}
+									</div>
+									{#if activePaperMaterial}
+										<div class="paper-material-card">
+											<div>
+												<span>{$t('research.materials.aliases')}</span>
+												<strong
+													>{activePaperMaterial.aliases.join(', ') ||
+														$t('research.emptyValue')}</strong
+												>
+											</div>
+											<div>
+												<span>{$t('research.overview.samples')}</span>
+												<strong>{activePaperMaterial.sample_count}</strong>
+											</div>
+											<div>
+												<span>{$t('research.overview.processes')}</span>
+												<strong
+													>{activePaperMaterial.process_families.join(', ') ||
+														$t('research.emptyValue')}</strong
+												>
+											</div>
+											<div>
+												<span>{$t('research.overview.properties')}</span>
+												<strong
+													>{activePaperMaterial.measured_properties.join(', ') ||
+														$t('research.emptyValue')}</strong
+												>
+											</div>
+											<div>
+												<span>{$t('research.materials.comparisons')}</span>
+												<strong>{activePaperMaterial.comparison_count}</strong>
+											</div>
+										</div>
+										{#if activePaperMaterial.warnings.length}
+											<div class="paper-material-warning" role="status">
+												<strong>{$t('research.warnings')}</strong>
+												<span
+													>{activePaperMaterial.warnings
+														.map((warning) => warning.message)
+														.join(' | ')}</span
+												>
+											</div>
+										{/if}
+									{/if}
+								</section>
+							{/if}
+
+							{#if sampleMatrixRows().length}
+								<section class="paper-research-section">
+									<h3>{$t('research.sampleMatrix.title')}</h3>
+									<div class="paper-matrix-wrapper">
+										<table class="paper-matrix-table">
+											<thead>
 												<tr>
-													<td>{row.sample_label}</td>
-													<td>{row.material}</td>
-													<td>
-														{Object.entries(row.process_context)
-															.map(([key, value]) => `${key}: ${value}`)
-															.join(' | ') || '--'}
-													</td>
+													<th>{$t('research.sampleMatrix.sample')}</th>
+													<th>{$t('research.comparison.material')}</th>
+													<th>{$t('research.comparison.process')}</th>
 													{#each sampleColumns as column (column.column_id)}
-														{@const value = row.values[column.key]}
-														<td>
-															{#if value}
-																<button
-																	type="button"
-																	class={`paper-matrix-value paper-matrix-value--${matrixCellStatus(value)}`}
-																	on:click={() => openMatrixEvidence(value)}
-																>
-																	{formatEvidenceBackedValue(value)}
-																</button>
-															{:else}
-																<span class="paper-matrix-missing">--</span>
-															{/if}
-														</td>
+														<th>{column.label}</th>
 													{/each}
 												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
-							</section>
-						{/if}
-
-						{#if conditionSeries().length}
-							<section class="paper-research-section">
-								<h3>{$t('research.conditionSeries.title')}</h3>
-								<div class="condition-series-list">
-									{#each conditionSeries() as series (series.series_id)}
-										<article class="condition-series-card">
-											<strong>{series.property} / {series.condition_axis}</strong>
-											<div>
-												{#each series.points as point (point.point_id)}
-													<button type="button" on:click={() => openMatrixEvidence(point.result)}>
-														{point.condition_value ?? '--'}{point.condition_unit
-															? ` ${point.condition_unit}`
-															: ''}
-														-&gt; {formatEvidenceBackedValue(point.result)}
-													</button>
+											</thead>
+											<tbody>
+												{#each sampleMatrixRows() as row (row.row_id)}
+													<tr>
+														<td>{row.sample_label}</td>
+														<td>{row.material}</td>
+														<td>
+															{Object.entries(row.process_context)
+																.map(([key, value]) => `${key}: ${value}`)
+																.join(' | ') || '--'}
+														</td>
+														{#each sampleColumns as column (column.column_id)}
+															{@const value = row.values[column.key]}
+															<td>
+																{#if value}
+																	<button
+																		type="button"
+																		class={`paper-matrix-value paper-matrix-value--${matrixCellStatus(value)}`}
+																		on:click={() => openMatrixEvidence(value)}
+																	>
+																		{formatEvidenceBackedValue(value)}
+																	</button>
+																{:else}
+																	<span class="paper-matrix-missing">--</span>
+																{/if}
+															</td>
+														{/each}
+													</tr>
 												{/each}
-											</div>
-										</article>
-									{/each}
-								</div>
-							</section>
-						{/if}
+											</tbody>
+										</table>
+									</div>
+								</section>
+							{/if}
 
-						{#if selectedMatrixValue}
-							<section class="paper-evidence-panel" aria-label={$t('research.evidence.title')}>
-								<div class="paper-evidence-panel__header">
-									<h3>{$t('research.evidence.title')}</h3>
-									<button type="button" on:click={closeMatrixEvidence}>
-										{$t('research.evidence.close')}
-									</button>
-								</div>
-								<p>
-									<strong>{formatEvidenceBackedValue(selectedMatrixValue)}</strong>
-									<span>{$t(`research.valueStatus.${selectedMatrixValue.status}`)}</span>
-								</p>
-								{#if selectedMatrixValue.evidence_refs.length}
-									<ul>
-										{#each selectedMatrixValue.evidence_refs as ref (ref.evidence_ref_id)}
-											<li>{ref.evidence_ref_id} / {ref.locator ?? ref.document_id ?? '--'}</li>
+							{#if conditionSeries().length}
+								<section class="paper-research-section">
+									<h3>{$t('research.conditionSeries.title')}</h3>
+									<div class="condition-series-list">
+										{#each conditionSeries() as series (series.series_id)}
+											<article class="condition-series-card">
+												<strong>{series.property} / {series.condition_axis}</strong>
+												<div>
+													{#each series.points as point (point.point_id)}
+														<button type="button" on:click={() => openMatrixEvidence(point.result)}>
+															{point.condition_value ?? '--'}{point.condition_unit
+																? ` ${point.condition_unit}`
+																: ''}
+															-&gt; {formatEvidenceBackedValue(point.result)}
+														</button>
+													{/each}
+												</div>
+											</article>
 										{/each}
-									</ul>
-								{:else}
-									<p>{$t('research.evidence.missing')}</p>
-								{/if}
-							</section>
-						{/if}
-					</section>
-				{/if}
-			</section>
+									</div>
+								</section>
+							{/if}
 
-			<section class:graph-column--collapsed={graphCollapsed} class="graph-column">
-				<LocalGraphPanel
-					graph={selectedGraph}
-					selectedNodeId={selectedGraphNodeId}
-					collapsed={graphCollapsed}
-					onToggleCollapse={() => (graphCollapsed = !graphCollapsed)}
-					onSelectNode={(nodeId) => (selectedGraphNodeId = nodeId)}
-					onSelectItem={handleGraphItemSelect}
-					onJumpToSource={jumpToSource}
-				/>
-			</section>
+							{#if selectedMatrixValue}
+								<section class="paper-evidence-panel" aria-label={$t('research.evidence.title')}>
+									<div class="paper-evidence-panel__header">
+										<h3>{$t('research.evidence.title')}</h3>
+										<button type="button" on:click={closeMatrixEvidence}>
+											{$t('research.evidence.close')}
+										</button>
+									</div>
+									<p>
+										<strong>{formatEvidenceBackedValue(selectedMatrixValue)}</strong>
+										<span>{$t(`research.valueStatus.${selectedMatrixValue.status}`)}</span>
+									</p>
+									{#if selectedMatrixValue.evidence_refs.length}
+										<ul>
+											{#each selectedMatrixValue.evidence_refs as ref (ref.evidence_ref_id)}
+												<li>{ref.evidence_ref_id} / {ref.locator ?? ref.document_id ?? '--'}</li>
+											{/each}
+										</ul>
+									{:else}
+										<p>{$t('research.evidence.missing')}</p>
+									{/if}
+								</section>
+							{/if}
+						</section>
+					{/if}
+				</section>
+
+				<section class:graph-column--collapsed={graphCollapsed} class="graph-column">
+					<LocalGraphPanel
+						graph={selectedGraph}
+						selectedNodeId={selectedGraphNodeId}
+						collapsed={graphCollapsed}
+						onToggleCollapse={() => (graphCollapsed = !graphCollapsed)}
+						onSelectNode={(nodeId) => (selectedGraphNodeId = nodeId)}
+						onSelectItem={handleGraphItemSelect}
+						onJumpToSource={jumpToSource}
+					/>
+				</section>
+			{:else}
+				<section class="details-status-panel" role="status">
+					<strong>{$t('workbench.sourceReadyTitle')}</strong>
+					<span
+						>{hasExtractionDetails
+							? $t('workbench.extractionDetailsClosed')
+							: $t('workbench.extractionDetailsUnavailable')}</span
+					>
+				</section>
+			{/if}
 		</main>
 	{:else if model}
 		<main class="workbench-main">
 			<section class="loading-panel research-unavailable-panel" role="alert">
-				<h2>{$t('research.paper.unavailableTitle')}</h2>
-				<p>{paperResearchError || $t('research.paper.unavailableBody')}</p>
+				<h2>{$t('workbench.sourceContentUnavailableTitle')}</h2>
+				<p>{paperResearchError || $t('workbench.sourceContentUnavailableBody')}</p>
 				<a href={backHref()}>{$t('workbench.documents')}</a>
 			</section>
 		</main>
@@ -818,6 +868,12 @@
 		background: #f8fafc;
 	}
 
+	.top-actions button:disabled {
+		color: #94a3b8;
+		cursor: not-allowed;
+		background: #f8fafc;
+	}
+
 	.top-actions .primary {
 		border-color: #2563eb;
 		background: #2563eb;
@@ -831,16 +887,24 @@
 	.workbench-main {
 		display: grid;
 		height: calc(100vh - 64px);
-		grid-template-columns: 700px 480px 420px;
 		column-gap: 16px;
 		padding: 16px 20px 20px;
 		box-sizing: border-box;
 		overflow: hidden;
 	}
 
+	.workbench-main--reader-only {
+		grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+	}
+
+	.workbench-main--details-open {
+		grid-template-columns: 700px 480px 420px;
+	}
+
 	.reader-column,
 	.extraction-column,
-	.graph-column {
+	.graph-column,
+	.details-status-panel {
 		min-width: 0;
 		height: 100%;
 		overflow: hidden;
@@ -850,6 +914,29 @@
 		display: grid;
 		grid-template-rows: minmax(0, 1fr) auto;
 		gap: 12px;
+	}
+
+	.details-status-panel {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+		padding: 14px;
+		border: 1px solid #dbeafe;
+		border-radius: 16px;
+		background: #ffffff;
+		color: #334155;
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.details-status-panel strong {
+		color: #0f172a;
+		font-size: 14px;
+		line-height: 20px;
+	}
+
+	.details-status-panel span {
+		color: #64748b;
 	}
 
 	.paper-research-panel {
@@ -1189,7 +1276,7 @@
 	}
 
 	@media (min-width: 1729px) {
-		.workbench-main {
+		.workbench-main--details-open {
 			grid-template-columns: minmax(700px, 760px) 500px 420px;
 		}
 	}
@@ -1207,7 +1294,7 @@
 			width: auto;
 		}
 
-		.workbench-main {
+		.workbench-main--details-open {
 			grid-template-columns: minmax(0, 52%) minmax(420px, 31%) minmax(300px, 17%);
 		}
 	}
@@ -1221,7 +1308,7 @@
 			width: 260px;
 		}
 
-		.workbench-main {
+		.workbench-main--details-open {
 			grid-template-columns: minmax(0, 52%) minmax(420px, 1fr);
 		}
 
@@ -1270,13 +1357,18 @@
 		}
 
 		.reader-column {
-			order: 2;
+			order: 1;
 			height: 760px;
 		}
 
 		.extraction-column {
-			order: 1;
+			order: 2;
 			height: 720px;
+		}
+
+		.details-status-panel {
+			order: 2;
+			min-height: 120px;
 		}
 
 		.graph-column {

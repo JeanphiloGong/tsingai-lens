@@ -1,8 +1,8 @@
 # Persistence Adapters
 
 This node owns repository construction and persistence backend implementations
-for app-layer collection, task, artifact, Goal session, Source artifact, and
-Core semantic fact state.
+for app-layer collection, task, artifact, Goal session, Source artifact, Core
+semantic fact state, and evaluation state.
 
 ## Scope
 
@@ -28,10 +28,10 @@ Core semantic fact state.
   In-memory implementations for tests and isolated runs
 - `sqlite/`
   SQLite-backed Goal conversation session persistence, Source artifact
-  persistence, and Core semantic fact persistence. Core fact storage includes
-  collection-level readiness metadata so empty-but-completed fact families do
-  not require file artifact probes. The application layer depends on
-  repository ports and does not import SQLite table names, SQL, or connection
-  details.
+  persistence, Core semantic fact persistence, and collection-bound evaluation
+  persistence. Core fact storage includes collection-level readiness metadata
+  so empty-but-completed fact families do not require file artifact probes. The
+  application layer depends on repository ports and does not import SQLite
+  table names, SQL, or connection details.
 - `mysql/`
   Placeholder for future relational persistence work

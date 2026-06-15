@@ -28,6 +28,9 @@ Inside it, business responsibilities are now grouped as:
   Application workflow orchestration such as collection build sequencing
 - [`core/README.md`](core/README.md)
   Research-fact backbone generation and workspace overview assembly
+- [`evaluation/README.md`](evaluation/README.md)
+  Collection-bound Core/Goal quality evaluation over existing artifacts,
+  gold answers, prediction snapshots, summary scores, and failure records
 - [`derived/README.md`](derived/README.md)
   Graph and report views derived from Core or Source artifacts
 

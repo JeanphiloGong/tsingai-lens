@@ -11,6 +11,7 @@ from domain.ports import (
     ArtifactRepository,
     CollectionRepository,
     CoreFactRepository,
+    EvaluationRepository,
     GoalSessionRepository,
     SourceArtifactRepository,
     TaskRepository,
@@ -28,6 +29,7 @@ from infra.persistence.memory import (
 from infra.persistence.sqlite import (
     SqliteAuthRepository,
     SqliteCoreFactRepository,
+    SqliteEvaluationRepository,
     SqliteGoalSessionRepository,
     SqliteSourceArtifactRepository,
 )
@@ -110,6 +112,12 @@ def build_core_fact_repository(
     db_path: Path | None = None,
 ) -> CoreFactRepository:
     return SqliteCoreFactRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_evaluation_repository(
+    db_path: Path | None = None,
+) -> EvaluationRepository:
+    return SqliteEvaluationRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_persistence_bundle(

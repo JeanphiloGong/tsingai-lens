@@ -1,0 +1,396 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Final, Mapping
+
+
+EVALUATION_TARGET_LAYERS: Final[frozenset[str]] = frozenset({"core", "goal"})
+EVALUATION_LAYERS: Final[frozenset[str]] = frozenset(
+    {"source", "core_extraction", "core_normalization", "goal", "unknown"}
+)
+EVALUATION_FAILURE_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "missing_gold_item",
+        "extra_prediction",
+        "numeric_value_mismatch",
+        "unit_mismatch",
+        "evidence_trace_missing",
+        "comparison_value_mismatch",
+        "comparison_direction_mismatch",
+        "missing_required_claim",
+        "forbidden_overclaim",
+        "evidence_not_grounded",
+    }
+)
+
+
+@dataclass(frozen=True)
+class EvaluationGoldSet:
+    gold_id: str
+    collection_id: str
+    version: str
+    target_layer: str
+    metric_profile: str
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationGoldSet":
+        return cls(
+            gold_id=_normalize_text(payload.get("gold_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            version=_normalize_text(payload.get("version")) or "v1",
+            target_layer=_normalize_choice(
+                payload.get("target_layer"),
+                allowed=EVALUATION_TARGET_LAYERS,
+                default="core",
+            ),
+            metric_profile=_normalize_text(payload.get("metric_profile"))
+            or "materials_core_v1",
+            description=_normalize_text(payload.get("description")),
+            metadata=_normalize_mapping(payload.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "gold_id": self.gold_id,
+            "collection_id": self.collection_id,
+            "version": self.version,
+            "target_layer": self.target_layer,
+            "metric_profile": self.metric_profile,
+            "description": self.description,
+            "metadata": dict(self.metadata or {}),
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationGoldItem:
+    gold_item_id: str
+    gold_id: str
+    document_id: str
+    family: str
+    item_key: str
+    payload: dict[str, Any]
+    evidence_refs: tuple[dict[str, Any], ...] = ()
+    metadata: dict[str, Any] | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationGoldItem":
+        return cls(
+            gold_item_id=_normalize_text(payload.get("gold_item_id")) or "",
+            gold_id=_normalize_text(payload.get("gold_id")) or "",
+            document_id=_normalize_text(payload.get("document_id")) or "",
+            family=_normalize_text(payload.get("family")) or "",
+            item_key=_normalize_text(payload.get("item_key")) or "",
+            payload=_normalize_mapping(payload.get("payload")),
+            evidence_refs=_normalize_mapping_tuple(payload.get("evidence_refs")),
+            metadata=_normalize_mapping(payload.get("metadata")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "gold_item_id": self.gold_item_id,
+            "gold_id": self.gold_id,
+            "document_id": self.document_id,
+            "family": self.family,
+            "item_key": self.item_key,
+            "payload": dict(self.payload),
+            "evidence_refs": [dict(item) for item in self.evidence_refs],
+            "metadata": dict(self.metadata or {}),
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationPredictionItem:
+    item_id: str
+    document_id: str
+    family: str
+    item_key: str
+    payload: dict[str, Any]
+    source_refs: tuple[dict[str, Any], ...] = ()
+    confidence: float | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationPredictionItem":
+        return cls(
+            item_id=_normalize_text(payload.get("item_id")) or "",
+            document_id=_normalize_text(payload.get("document_id")) or "",
+            family=_normalize_text(payload.get("family")) or "",
+            item_key=_normalize_text(payload.get("item_key")) or "",
+            payload=_normalize_mapping(payload.get("payload")),
+            source_refs=_normalize_mapping_tuple(payload.get("source_refs")),
+            confidence=_normalize_optional_float(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "document_id": self.document_id,
+            "family": self.family,
+            "item_key": self.item_key,
+            "payload": dict(self.payload),
+            "source_refs": [dict(item) for item in self.source_refs],
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationPredictionSnapshot:
+    snapshot_id: str
+    collection_id: str
+    target_layer: str
+    fact_source: str
+    system_context: dict[str, Any]
+    artifact_counts: dict[str, int]
+    items: tuple[EvaluationPredictionItem, ...]
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationPredictionSnapshot":
+        return cls(
+            snapshot_id=_normalize_text(payload.get("snapshot_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            target_layer=_normalize_choice(
+                payload.get("target_layer"),
+                allowed=EVALUATION_TARGET_LAYERS,
+                default="core",
+            ),
+            fact_source=_normalize_text(payload.get("fact_source")) or "paper_facts",
+            system_context=_normalize_mapping(payload.get("system_context")),
+            artifact_counts=_normalize_int_mapping(payload.get("artifact_counts")),
+            items=tuple(
+                EvaluationPredictionItem.from_mapping(item)
+                for item in _normalize_mapping_sequence(payload.get("items"))
+            ),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "collection_id": self.collection_id,
+            "target_layer": self.target_layer,
+            "fact_source": self.fact_source,
+            "system_context": dict(self.system_context),
+            "artifact_counts": dict(self.artifact_counts),
+            "items": [item.to_record() for item in self.items],
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationScore:
+    score_id: str
+    evaluation_run_id: str
+    family: str
+    metric: str
+    value: float
+    numerator: float | None = None
+    denominator: float | None = None
+    document_id: str | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationScore":
+        return cls(
+            score_id=_normalize_text(payload.get("score_id")) or "",
+            evaluation_run_id=_normalize_text(payload.get("evaluation_run_id")) or "",
+            family=_normalize_text(payload.get("family")) or "overall",
+            metric=_normalize_text(payload.get("metric")) or "",
+            value=_normalize_optional_float(payload.get("value")) or 0.0,
+            numerator=_normalize_optional_float(payload.get("numerator")),
+            denominator=_normalize_optional_float(payload.get("denominator")),
+            document_id=_normalize_text(payload.get("document_id")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "score_id": self.score_id,
+            "evaluation_run_id": self.evaluation_run_id,
+            "family": self.family,
+            "metric": self.metric,
+            "value": self.value,
+            "numerator": self.numerator,
+            "denominator": self.denominator,
+            "document_id": self.document_id,
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationFailure:
+    failure_id: str
+    evaluation_run_id: str
+    document_id: str
+    family: str
+    failure_type: str
+    likely_layer: str
+    severity: str
+    gold_item_id: str | None
+    prediction_item_id: str | None
+    gold: dict[str, Any] | None
+    prediction: dict[str, Any] | None
+    reason: str | None = None
+    source_refs: tuple[dict[str, Any], ...] = ()
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationFailure":
+        return cls(
+            failure_id=_normalize_text(payload.get("failure_id")) or "",
+            evaluation_run_id=_normalize_text(payload.get("evaluation_run_id")) or "",
+            document_id=_normalize_text(payload.get("document_id")) or "",
+            family=_normalize_text(payload.get("family")) or "",
+            failure_type=_normalize_choice(
+                payload.get("failure_type"),
+                allowed=EVALUATION_FAILURE_TYPES,
+                default="missing_gold_item",
+            ),
+            likely_layer=_normalize_choice(
+                payload.get("likely_layer"),
+                allowed=EVALUATION_LAYERS,
+                default="unknown",
+            ),
+            severity=_normalize_text(payload.get("severity")) or "medium",
+            gold_item_id=_normalize_text(payload.get("gold_item_id")),
+            prediction_item_id=_normalize_text(payload.get("prediction_item_id")),
+            gold=_normalize_optional_mapping(payload.get("gold")),
+            prediction=_normalize_optional_mapping(payload.get("prediction")),
+            reason=_normalize_text(payload.get("reason")),
+            source_refs=_normalize_mapping_tuple(payload.get("source_refs")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "failure_id": self.failure_id,
+            "evaluation_run_id": self.evaluation_run_id,
+            "document_id": self.document_id,
+            "family": self.family,
+            "failure_type": self.failure_type,
+            "likely_layer": self.likely_layer,
+            "severity": self.severity,
+            "gold_item_id": self.gold_item_id,
+            "prediction_item_id": self.prediction_item_id,
+            "gold": dict(self.gold) if self.gold is not None else None,
+            "prediction": (
+                dict(self.prediction) if self.prediction is not None else None
+            ),
+            "reason": self.reason,
+            "source_refs": [dict(item) for item in self.source_refs],
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationRun:
+    evaluation_run_id: str
+    collection_id: str
+    gold_id: str
+    prediction_snapshot_id: str
+    target_layer: str
+    fact_source: str
+    metric_profile: str
+    status: str
+    summary: dict[str, Any]
+    scores: tuple[EvaluationScore, ...] = ()
+    failures: tuple[EvaluationFailure, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationRun":
+        return cls(
+            evaluation_run_id=_normalize_text(payload.get("evaluation_run_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            gold_id=_normalize_text(payload.get("gold_id")) or "",
+            prediction_snapshot_id=_normalize_text(
+                payload.get("prediction_snapshot_id")
+            )
+            or "",
+            target_layer=_normalize_choice(
+                payload.get("target_layer"),
+                allowed=EVALUATION_TARGET_LAYERS,
+                default="core",
+            ),
+            fact_source=_normalize_text(payload.get("fact_source")) or "paper_facts",
+            metric_profile=_normalize_text(payload.get("metric_profile"))
+            or "materials_core_v1",
+            status=_normalize_text(payload.get("status")) or "ready",
+            summary=_normalize_mapping(payload.get("summary")),
+            scores=tuple(
+                EvaluationScore.from_mapping(score)
+                for score in _normalize_mapping_sequence(payload.get("scores"))
+            ),
+            failures=tuple(
+                EvaluationFailure.from_mapping(failure)
+                for failure in _normalize_mapping_sequence(payload.get("failures"))
+            ),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "evaluation_run_id": self.evaluation_run_id,
+            "collection_id": self.collection_id,
+            "gold_id": self.gold_id,
+            "prediction_snapshot_id": self.prediction_snapshot_id,
+            "target_layer": self.target_layer,
+            "fact_source": self.fact_source,
+            "metric_profile": self.metric_profile,
+            "status": self.status,
+            "summary": dict(self.summary),
+            "scores": [score.to_record() for score in self.scores],
+            "failures": [failure.to_record() for failure in self.failures],
+        }
+
+
+def _normalize_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_choice(value: Any, *, allowed: frozenset[str], default: str) -> str:
+    text = (_normalize_text(value) or default).lower()
+    return text if text in allowed else default
+
+
+def _normalize_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
+def _normalize_optional_mapping(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return _normalize_mapping(value)
+
+
+def _normalize_mapping_sequence(value: Any) -> tuple[dict[str, Any], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, Mapping):
+        return (_normalize_mapping(value),)
+    if isinstance(value, (str, bytes)):
+        return ()
+    try:
+        return tuple(_normalize_mapping(item) for item in value if isinstance(item, Mapping))
+    except TypeError:
+        return ()
+
+
+def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
+    return _normalize_mapping_sequence(value)
+
+
+def _normalize_int_mapping(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, int] = {}
+    for key, item in value.items():
+        try:
+            normalized[str(key)] = int(item)
+        except (TypeError, ValueError):
+            normalized[str(key)] = 0
+    return normalized
+
+
+def _normalize_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

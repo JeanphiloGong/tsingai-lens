@@ -76,6 +76,14 @@ class _FakeOpenAIClient:
         self.beta = _FakeBeta(parsed)
 
 
+def _json_text_extractor(client: _FakeOpenAIClient) -> CoreLLMStructuredExtractor:
+    return CoreLLMStructuredExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+
 def test_core_llm_extractor_validates_json_text_response():
     client = _FakeOpenAIClient(
         """```json
@@ -89,7 +97,7 @@ def test_core_llm_extractor_validates_json_text_response():
         }
         ```"""
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -120,7 +128,7 @@ def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -134,8 +142,8 @@ def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
     assert mentions.result_claims == []
 
 
-def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
-    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
     parsed_mentions = StructuredTextWindowMentions()
     client = _FakeOpenAIClient("unused", parsed=parsed_mentions)
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
@@ -156,6 +164,35 @@ def test_core_llm_extractor_uses_provider_parse_mode(monkeypatch):
     assert "JSON schema:" in parse_call["messages"][1]["content"]
 
 
+def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "json_text")
+    client = _FakeOpenAIClient(
+        """
+        {
+          "method_mentions": [],
+          "material_mentions": [],
+          "variant_mentions": [],
+          "condition_mentions": [],
+          "baseline_mentions": [],
+          "result_claims": []
+        }
+        """
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    mentions = extractor.extract_text_window_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
+        }
+    )
+
+    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert len(client.chat.completions.calls) == 1
+    assert client.beta.chat.completions.calls == []
+
+
 def test_core_llm_extractor_validates_paper_skim_response():
     client = _FakeOpenAIClient(
         """
@@ -174,7 +211,7 @@ def test_core_llm_extractor_validates_paper_skim_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     skim = extractor.extract_paper_skim(
         {
@@ -210,7 +247,7 @@ def test_core_llm_extractor_validates_research_objective_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     objectives = extractor.discover_research_objectives(
         {
@@ -239,7 +276,7 @@ def test_core_llm_extractor_validates_axis_canonicalization_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     canonicalization_plan = extractor.canonicalize_research_objective_axes(
         {
@@ -276,7 +313,7 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     merge_plan = extractor.merge_research_objectives(
         {
@@ -307,7 +344,7 @@ def test_core_llm_extractor_validates_objective_paper_frame_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     frame = extractor.frame_objective_paper(
         {
@@ -353,7 +390,7 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     routes = extractor.route_objective_evidence(
         {
@@ -400,7 +437,7 @@ def test_core_llm_extractor_validates_objective_evidence_units_response():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     units = extractor.extract_objective_evidence_units(
         {
@@ -501,7 +538,7 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -545,7 +582,7 @@ def test_core_llm_extractor_accepts_null_result_property_names():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -628,7 +665,7 @@ def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     mentions = extractor.extract_table_batch_mentions(
         {
@@ -681,7 +718,7 @@ def test_core_llm_extractor_accepts_empty_table_batch_mentions():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     mentions = extractor.extract_table_batch_mentions(
         {
@@ -704,7 +741,7 @@ def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = _json_text_extractor(client)
 
     with pytest.raises(ValidationError) as exc_info:
         extractor.extract_table_batch_mentions(
@@ -719,11 +756,11 @@ def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
     assert "keywords" in str(exc_info.value)
 
 
-def test_core_llm_extractor_falls_back_to_json_text_for_invalid_mode(monkeypatch, caplog):
+def test_core_llm_extractor_falls_back_to_default_for_invalid_mode(monkeypatch, caplog):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "not-a-mode")
 
     with caplog.at_level("WARNING"):
         extractor = CoreLLMStructuredExtractor(client=_FakeOpenAIClient("{}"), model="fake-model")
 
-    assert extractor.extraction_mode == "json_text"
+    assert extractor.extraction_mode == "provider_parse"
     assert "Invalid CORE_LLM_EXTRACTION_MODE=not-a-mode" in caplog.text

@@ -77,8 +77,10 @@ The temporary mode values should be:
 - `json_text`
 - `provider_parse`
 
-The default should remain `json_text` until production collection benchmarks
-show that `provider_parse` is worth the latency cost.
+The default is now `provider_parse` after the local OpenAI-compatible
+`merged-qwen` endpoint proved it supports `beta.chat.completions.parse(...)`.
+`json_text` remains an explicit fallback for providers without structured parse
+support.
 
 This plan explicitly rejects:
 
@@ -191,7 +193,7 @@ multiple callers.
 ## Execution Order
 
 1. Move the JSON compliance guidance into production prompt builders.
-2. Add the mode switch to the Core extractor with `json_text` as the default.
+2. Add the mode switch to the Core extractor with `provider_parse` as the default.
 3. Add targeted unit coverage for the prompt content and extractor mode
    selection.
 4. Rerun the canonical text-window benchmarks against both modes.
@@ -234,7 +236,8 @@ python3 scripts/benchmarks/text_window_probe.py --mode provider_structured_parse
 
 ### Collection Verification
 
-Run the same real collection under both modes:
+Run the same real collection under both modes when comparing providers or
+debugging a suspected structured-parse regression:
 
 ```bash
 cd backend
@@ -272,7 +275,7 @@ This child plan is done only when:
 - production prompt builders include the JSON compliance guidance
 - `CORE_LLM_EXTRACTION_MODE` switches the production extractor between the two
   temporary paths without changing callers
-- the default mode remains explicit and documented
+- the default mode remains explicit and documented as `provider_parse`
 - production benchmark reruns can compare the two modes on the same collection
 - the backend has enough evidence to decide whether the dual-mode period
   should continue or be closed

@@ -23,6 +23,11 @@ It does not own:
 - `extractor.py`
   provider call orchestration and response parsing for the Core extraction path
 
+The default extraction mode is `provider_parse`, which uses the configured
+OpenAI-compatible provider's structured parse endpoint. Set
+`CORE_LLM_EXTRACTION_MODE=json_text` only when the provider does not support
+structured parsing and the caller accepts local JSON text parsing risk.
+
 ## Local Docs
 
 - [`docs/structured-extraction/README.md`](docs/structured-extraction/README.md)

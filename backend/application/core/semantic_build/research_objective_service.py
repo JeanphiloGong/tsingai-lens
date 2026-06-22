@@ -28,7 +28,7 @@ from domain.core import (
     project_objective_material_rows,
 )
 from domain.ports import CoreFactRepository, SourceArtifactRepository
-from domain.source import SourceArtifactSet
+from domain.source import SourceArtifactSet, SourceDocumentTree
 from infra.persistence.factory import (
     build_core_fact_repository,
     build_source_artifact_repository,
@@ -448,6 +448,13 @@ class ResearchObjectiveService:
         tables_by_document_id = self._group_by_document_id(artifacts.tables)
         table_cells_by_document_id = self._group_by_document_id(artifacts.table_cells)
         figures_by_document_id = self._group_by_document_id(artifacts.figures)
+        document_trees_by_document_id = {
+            document.document_id: self.source_artifact_repository.read_document_tree(
+                collection_id,
+                document.document_id,
+            )
+            for document in artifacts.documents
+        }
         extractor = self._get_structured_extractor()
 
         logger.info(
@@ -487,6 +494,7 @@ class ResearchObjectiveService:
                 blocks=document_blocks,
                 tables=document_tables,
                 figures=document_figures,
+                document_tree=document_trees_by_document_id.get(document.document_id),
             )
             parsed = extractor.extract_paper_skim(payload)
             record = parsed.model_dump()
@@ -594,6 +602,7 @@ class ResearchObjectiveService:
             profiles_by_document_id=profiles_by_document_id,
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
             progress_callback=progress_callback,
         )
         objective_evidence_routes = self._build_objective_evidence_routes(
@@ -1214,6 +1223,7 @@ class ResearchObjectiveService:
         profiles_by_document_id: dict[str, Any],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
+        document_trees_by_document_id: dict[str, SourceDocumentTree],
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectivePaperFrame, ...]:
         context_by_objective_id = {
@@ -1280,6 +1290,7 @@ class ResearchObjectiveService:
                     profile=profiles_by_document_id.get(document_id),
                     blocks=blocks_by_document_id.get(document_id, []),
                     tables=tables,
+                    document_tree=document_trees_by_document_id.get(document_id),
                 )
                 parsed = extractor.frame_objective_paper(payload)
                 record = parsed.model_dump()
@@ -7244,6 +7255,7 @@ class ResearchObjectiveService:
         profile: Any,
         blocks: list[Any],
         tables: list[Any],
+        document_tree: SourceDocumentTree | None,
     ) -> dict[str, Any]:
         return {
             "collection_id": collection_id,
@@ -7258,11 +7270,24 @@ class ResearchObjectiveService:
                 "source_filename": self._resolve_source_filename(document),
             },
             "document_profile": profile.to_record() if profile else {},
-            "section_snippets": self._build_frame_section_snippets(blocks),
+            "section_snippets": self._build_frame_section_snippets(
+                blocks,
+                document_tree=document_tree,
+            ),
             "table_summaries": self._build_frame_table_summaries(tables),
         }
 
-    def _build_frame_section_snippets(self, blocks: list[Any]) -> list[dict[str, Any]]:
+    def _build_frame_section_snippets(
+        self,
+        blocks: list[Any],
+        *,
+        document_tree: SourceDocumentTree | None = None,
+    ) -> list[dict[str, Any]]:
+        if document_tree is not None:
+            snippets = self._build_frame_section_snippets_from_tree(document_tree)
+            if snippets:
+                return snippets
+
         snippets: list[dict[str, Any]] = []
         for block in sorted(
             blocks,
@@ -7289,6 +7314,79 @@ class ResearchObjectiveService:
             if len(snippets) >= _FRAME_SECTION_SNIPPET_LIMIT:
                 break
         return snippets
+
+    def _build_frame_section_snippets_from_tree(
+        self,
+        document_tree: SourceDocumentTree,
+    ) -> list[dict[str, Any]]:
+        snippets: list[dict[str, Any]] = []
+        nodes = self._document_tree_nodes_in_order(document_tree)
+        section_nodes = [
+            node
+            for node in nodes
+            if node.node_type == "section"
+            and not self._tree_node_in_reference_branch(document_tree, node)
+        ]
+        for node in section_nodes:
+            text = self._section_text_from_tree_node(document_tree, node)
+            if not text and node.title:
+                text = node.title
+            if not text:
+                continue
+            snippets.append(
+                {
+                    "section_label": self._tree_section_label(node),
+                    "block_type": "section",
+                    "text": text[:_FRAME_SECTION_TEXT_CHARS],
+                }
+            )
+            if len(snippets) >= _FRAME_SECTION_SNIPPET_LIMIT:
+                return snippets
+
+        if snippets:
+            return snippets
+
+        unsectioned_texts = [
+            str(node.text or "").strip()
+            for node in nodes
+            if node.node_type in {"paragraph", "list_item"}
+            and node.parent_id == document_tree.root_node_id
+            and not self._tree_node_in_reference_branch(document_tree, node)
+            and str(node.text or "").strip()
+        ]
+        text = "\n\n".join(unsectioned_texts).strip()
+        if not text:
+            return []
+        return [
+            {
+                "section_label": "Unsectioned",
+                "block_type": "section",
+                "text": text[:_FRAME_SECTION_TEXT_CHARS],
+            }
+        ]
+
+    def _section_text_from_tree_node(
+        self,
+        document_tree: SourceDocumentTree,
+        node: Any,
+    ) -> str:
+        texts: list[str] = []
+        for child_id in node.child_ids:
+            child = document_tree.nodes[child_id]
+            if child.node_type in {"section", "references_section"}:
+                continue
+            if child.node_type not in {"paragraph", "list_item"}:
+                continue
+            text = str(child.text or "").strip()
+            if text:
+                texts.append(text)
+        return "\n\n".join(texts).strip()
+
+    def _tree_section_label(self, node: Any) -> str:
+        if getattr(node, "heading_path", ()):
+            return " > ".join(str(part) for part in node.heading_path if str(part))
+        title = str(getattr(node, "title", "") or "").strip()
+        return title or "Unsectioned"
 
     def _build_frame_table_summaries(self, tables: list[Any]) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
@@ -7570,13 +7668,18 @@ class ResearchObjectiveService:
         blocks: list[Any],
         tables: list[Any],
         figures: list[Any],
+        document_tree: SourceDocumentTree | None = None,
     ) -> dict[str, Any]:
         ordered_blocks = sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
         )
-        headings = self._extract_headings(ordered_blocks)
-        text_preview = self._build_text_preview(document, ordered_blocks)
+        headings = self._extract_headings_from_tree(document_tree)
+        if not headings:
+            headings = self._extract_headings(ordered_blocks)
+        text_preview = self._build_text_preview_from_tree(document_tree)
+        if not text_preview:
+            text_preview = self._build_text_preview(document, ordered_blocks)
         return {
             "collection_id": collection_id,
             "document_id": document.document_id,
@@ -7628,6 +7731,29 @@ class ResearchObjectiveService:
                 break
         return headings
 
+    def _extract_headings_from_tree(
+        self,
+        document_tree: SourceDocumentTree | None,
+    ) -> list[str]:
+        if document_tree is None:
+            return []
+        headings: list[str] = []
+        seen: set[str] = set()
+        for node in self._document_tree_nodes_in_order(document_tree):
+            if node.node_type not in {"section", "references_section"}:
+                continue
+            heading = self._tree_section_label(node)
+            if not heading:
+                continue
+            key = heading.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            headings.append(heading)
+            if len(headings) >= _SKIM_HEADING_LIMIT:
+                break
+        return headings
+
     def _build_text_preview(self, document: Any, blocks: list[Any]) -> str:
         parts = [
             str(getattr(block, "text", "") or "").strip()
@@ -7639,6 +7765,45 @@ class ResearchObjectiveService:
         if not text:
             text = str(document.text or "").strip()
         return text[:_SKIM_TEXT_PREVIEW_CHARS]
+
+    def _build_text_preview_from_tree(
+        self,
+        document_tree: SourceDocumentTree | None,
+    ) -> str:
+        if document_tree is None:
+            return ""
+        parts = [
+            str(node.text or "").strip()
+            for node in self._document_tree_nodes_in_order(document_tree)
+            if node.node_type in {"paragraph", "list_item"}
+            and not self._tree_node_in_reference_branch(document_tree, node)
+            and str(node.text or "").strip()
+        ]
+        return "\n\n".join(parts).strip()[:_SKIM_TEXT_PREVIEW_CHARS]
+
+    def _document_tree_nodes_in_order(
+        self,
+        document_tree: SourceDocumentTree,
+    ) -> list[Any]:
+        return sorted(
+            document_tree.nodes.values(),
+            key=lambda node: (int(getattr(node, "order", 0) or 0), node.node_id),
+        )
+
+    def _tree_node_in_reference_branch(
+        self,
+        document_tree: SourceDocumentTree,
+        node: Any,
+    ) -> bool:
+        current = node
+        while current is not None:
+            if current.node_type in {"references_section", "reference_entry"}:
+                return True
+            if getattr(current, "semantic_role", None) == "references":
+                return True
+            parent_id = getattr(current, "parent_id", None)
+            current = document_tree.nodes.get(parent_id) if parent_id else None
+        return False
 
     def _resolve_source_filename(self, document: Any) -> str | None:
         metadata = getattr(document, "metadata", {}) or {}

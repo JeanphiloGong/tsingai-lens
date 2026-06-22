@@ -5900,6 +5900,31 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
                     "heading_path": "Abstract",
                 },
                 {
+                    "block_id": "b2b",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Additional abstract context stayed in the same section.",
+                    "block_order": 3,
+                    "heading_path": "Abstract",
+                },
+                {
+                    "block_id": "b-ref-heading",
+                    "document_id": "paper-1",
+                    "block_type": "heading",
+                    "text": "References",
+                    "block_order": 90,
+                    "heading_path": "References",
+                    "heading_level": 1,
+                },
+                {
+                    "block_id": "b-ref-body",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Reference text should not be skimmed as paper evidence.",
+                    "block_order": 91,
+                    "heading_path": "References",
+                },
+                {
                     "block_id": "b3",
                     "document_id": "paper-2",
                     "block_type": "paragraph",
@@ -6044,11 +6069,24 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     assert extractor.unit_payloads[0]["evidence_route"]["source_kind"] == "text_window"
     assert extractor.unit_payloads[0]["evidence_route"]["source_ref"] == "b2"
     assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
+    assert extractor.skim_payloads[0]["headings"] == ["Abstract", "References"]
+    assert "Additional abstract context" in extractor.skim_payloads[0]["text_preview"]
+    assert "Reference text should not" not in extractor.skim_payloads[0]["text_preview"]
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
     assert extractor.frame_payloads[0]["objective_context"]["objective_id"] == (
         facts.research_objectives[0].objective_id
     )
+    assert extractor.frame_payloads[0]["section_snippets"] == [
+        {
+            "section_label": "Abstract",
+            "block_type": "section",
+            "text": (
+                "LPBF 316L was compared before and after heat treatment.\n\n"
+                "Additional abstract context stayed in the same section."
+            ),
+        }
+    ]
     assert extractor.frame_payloads[0]["table_summaries"][0]["table_id"] == "table-1"
     assert any(
         "Research objective paper skim document started" in record.message

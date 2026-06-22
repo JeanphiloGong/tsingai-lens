@@ -274,6 +274,104 @@ const translations: Record<Language, Translations> = {
 			warnings: 'Warnings',
 			warningPaperCount: '{message} ({count} papers)',
 			warningOccurrenceCount: '{message} ({count} occurrences)',
+			understanding: {
+				title: 'Research understanding',
+				objectiveBody:
+					'Claims, relations, contexts, and evidence references projected from the objective evidence workspace.',
+				materialBody:
+					'Claims, relations, contexts, and evidence references projected from the material research view.',
+				summary: 'Research understanding summary',
+				claims: 'Claims',
+				relationsLabel: 'Relations',
+				evidenceRefs: 'Evidence',
+				contexts: 'Contexts',
+				contextPrefix: 'Context: ',
+				claimFilters: 'Claim filters',
+				filterByType: 'Type',
+				filterByStatus: 'Support status',
+				allClaimTypes: 'All types',
+				allStatuses: 'All statuses',
+				filteredClaimCount: '{shown} of {total}',
+				relatedToSelectedClaim: 'For selected claim',
+				claimDetail: 'Claim detail',
+				evidenceStripHint: 'Selected claim evidence is highlighted.',
+				contextMaterial: 'Material',
+				contextProperty: 'Property',
+				contextProcess: 'Process context',
+				contextTest: 'Test condition',
+				limitations: 'Limitations',
+				sourceObjects: 'Source objects: ',
+				curationTitle: 'Expert curation',
+				curationClaimType: 'Curated type',
+				curationStatus: 'Curated support status',
+				curationStatement: 'Curated claim',
+				curationNote: 'Curation note',
+				curationReviewer: 'Curator',
+				curationSubmit: 'Save curation',
+				curationSaving: 'Saving...',
+				curationSaved: 'Curation saved: {id}',
+				feedbackTitle: 'Expert feedback',
+				feedbackStatus: 'Review result',
+				feedbackIssue: 'Issue type',
+				feedbackNote: 'Feedback note',
+				feedbackReviewer: 'Reviewer',
+				feedbackSubmit: 'Save feedback',
+				feedbackSaving: 'Saving...',
+				feedbackSaved: 'Feedback saved: {id}',
+				feedbackStatuses: {
+					correct: 'Correct',
+					partial: 'Partially correct',
+					incorrect: 'Incorrect',
+					unclear: 'Unclear'
+				},
+				feedbackIssues: {
+					none: 'No issue',
+					evidence_not_grounded: 'Evidence does not support it',
+					missing_evidence: 'Missing evidence',
+					wrong_context: 'Wrong context',
+					wrong_relation: 'Wrong relation',
+					overclaim: 'Overclaim',
+					unclear_statement: 'Unclear statement',
+					other: 'Other'
+				},
+				noClaims: 'No claims are available yet.',
+				noRelations: 'No relations are available yet.',
+				noEvidence: 'No evidence references are available yet.',
+				noContexts: 'No context records are linked to this claim.',
+				noSelectedClaim: 'Select a claim to review its evidence and context.',
+				empty: 'No structured understanding can be built from the current data yet.',
+				unavailable: 'The backend has not returned a research understanding projection yet.',
+				states: {
+					empty: 'Empty',
+					partial: 'Partial',
+					ready: 'Ready',
+					limited: 'Limited'
+				},
+				statuses: {
+					supported: 'Supported',
+					limited: 'Limited',
+					conflicted: 'Conflicted',
+					unsupported: 'Unsupported'
+				},
+				types: {
+					finding: 'Finding',
+					measurement: 'Measurement',
+					comparison: 'Comparison',
+					mechanism: 'Mechanism',
+					limitation: 'Limitation',
+					context: 'Context'
+				},
+				relations: {
+					improves: 'Improves',
+					reduces: 'Reduces',
+					increases: 'Increases',
+					decreases: 'Decreases',
+					correlates: 'Correlates',
+					explains: 'Explains',
+					conflicts: 'Conflicts',
+					compares: 'Compares'
+				}
+			},
 			state: {
 				empty: 'Empty',
 				processing: 'Processing',
@@ -369,28 +467,6 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: 'Other evidence',
 				contextTitle: 'Objective context',
 				variableAxes: 'Variable axes',
-				objectiveReportTitle: 'Research objective report',
-				objectiveReportBody:
-					'LLM-generated Markdown report persisted by the backend from objective-scoped evidence.',
-				objectiveReportNotReadyTitle: 'Report has not been generated',
-				objectiveReportNotReadyBody:
-					'Generate a report after the objective evidence units are ready. The page does not call the LLM while loading.',
-				generateObjectiveReport: 'Generate report',
-				refreshObjectiveReport: 'Refresh report',
-				regenerateObjectiveReport: 'Regenerate report',
-				conclusionPackageTitle: 'Research conclusion package',
-				conclusionPackageBody:
-					'Objective-scoped report package with conclusions, paper contributions, evidence, mechanism, and uncertainty.',
-				collectionConclusion: 'Collection-level conclusion',
-				reportStatus: 'Package status: {status}',
-				reportEvidenceMatrix: 'Report evidence matrix',
-				reportConclusionTitle: 'Collection-level findings',
-				primaryEvidenceTitle: 'Primary evidence table',
-				mechanismChainTitle: 'Mechanism chain',
-				noConclusionPackage:
-					'No structured conclusion package is available yet; use the evidence audit below for source review.',
-				noExpertReport:
-					'The conclusion package is available, but the expert report view has not been assembled yet.',
 				scientificContext: 'Scientific context',
 				keyFindings: 'Key findings',
 				researchFocus: 'Research focus',
@@ -538,12 +614,7 @@ const translations: Record<Language, Translations> = {
 				title: 'Material research dossier',
 				mainLabel: 'Material research dossier content',
 				subtitle:
-					'A material report that keeps each result tied to its preparation state, test condition, evidence, and comparability boundary.',
-				tabs: {
-					label: 'Material dossier view',
-					structured: 'Structured dossier',
-					narrative: 'Narrative research'
-				},
+					'A material research workspace that keeps each result tied to its preparation state, test condition, evidence, and comparability boundary.',
 				tags: {
 					alloySteel: 'Alloy steel'
 				},
@@ -552,31 +623,10 @@ const translations: Record<Language, Translations> = {
 					viewPapers: 'View papers',
 					viewEvidence: 'View evidence',
 					askCopilot: 'Ask Copilot',
-					generatePdf: 'Generate review PDF',
 					refresh: 'Refresh',
 					exportCsv: 'Export data CSV'
 				},
 				sections: {
-					overview: {
-						title: 'Material report overview',
-						body: '{material} appears mainly in {processes} studies. Results are organized by material state, test condition, performance response, and source evidence rather than one cross-paper parameter ranking.'
-					},
-					findings: {
-						title: 'Key findings',
-						body: 'Evidence-backed conclusions derived from the sample values and source anchors.'
-					},
-					samples: {
-						title: 'Samples and process parameters',
-						body: 'Review the samples and how their process conditions differ.'
-					},
-					graph: {
-						title: 'Material state map',
-						body: 'Read sample-level states as preparation, test condition, observed response, and source evidence.'
-					},
-					chain: {
-						title: 'Representative material states',
-						body: 'Read each high-signal sample as a material state: preparation and post-treatment, test conditions, performance response, interpretation, and source evidence.'
-					},
 					materialProblems: {
 						title: 'Material questions',
 						body: 'Group the evidence by materials-science questions instead of a flat property matrix.'
@@ -650,90 +700,6 @@ const translations: Record<Language, Translations> = {
 				performance: {
 					summary: '{samples} sample(s), {properties} measured property column(s).'
 				},
-				findings: {
-					empty: 'No evidence-backed finding can be derived from the current material values yet.',
-					supportedByValues: '{values}. Evidence: {evidence}.',
-					highestStrengthTitle: '{sample} shows the highest strength',
-					splitStrengthTitle: 'Strength maxima are split across samples',
-					highestElongationTitle: '{sample} shows the highest elongation',
-					highestPropertyTitle: '{sample} shows the highest {property}',
-					summaryPropertyTitle: '{property} is available as an evidence-backed property',
-					summaryPropertyBody: '{property} is reported as {value}. Evidence: {evidence}.',
-					densityMismatchTitle: 'Highest density does not align with highest strength',
-					densityMismatchBody:
-						'{densitySample} has the highest density ({densityValue}), while {strengthSample} leads strength ({strengthValues}). Evidence: {evidence}.',
-					tradeoffTitle: 'Current data suggests a strength-ductility trade-off',
-					tradeoffBody:
-						'{strengthSample} leads strength while {elongationSample} leads elongation. Evidence: {evidence}.',
-					processOnlyTitle: 'Samples differ by process context',
-					processOnlyBody:
-						'The current matrix varies by {changed}, but comparable performance values are not ready yet.',
-					types: {
-						directObservation: 'direct observation',
-						comparativeInference: 'comparative inference',
-						trendHypothesis: 'trend hypothesis',
-						structuralObservation: 'structural observation'
-					}
-				},
-				chain: {
-					stepsLabel: 'Representative material state evidence chain',
-					processContext: 'Preparation and post-treatment',
-					testConditions: 'Test conditions',
-					results: 'Performance response',
-					whyBest: 'Materials interpretation',
-					boundary: 'Comparability boundary',
-					boundaryReady:
-						'Preparation, test condition, result, and source evidence are resolved for this chain.',
-					traceback: 'Traceback',
-					collectionScope: 'collection-level evidence',
-					backgroundText:
-						'{material} is studied through {processes}; this parameter set is supported by {paper}.',
-					scoreLabel: '{best}/{total} leading properties',
-					comparisonSummary: 'This sample leads {count} of {total} tracked properties: {best}.',
-					comparisonNoLeader:
-						'This sample has {count} comparable values, but none is the best among the tracked {total} properties.',
-					notBestFor: 'Not the leader for: {properties}.',
-					bestInMatrix: 'leading in this matrix',
-					observed: 'observed',
-					noProcessContext: 'No process parameters were attached to this sample row.',
-					noTestConditions:
-						'No explicit test condition was attached to this row; verify the source paper before comparing across conditions.',
-					empty:
-						'No representative material state can be built from the current material report package yet.',
-					packageUnavailable: 'Material report package has not been generated for this material.'
-				},
-				report: {
-					documentTitle: 'Material report',
-					llmBody:
-						'LLM-generated Markdown conclusion report persisted by the backend from material evidence.',
-					draftBody:
-						'Deterministic grounded draft from the material report package. Generate a report to let the LLM summarize conclusions.',
-					draftStatus: 'deterministic draft',
-					generate: 'Generate report',
-					refresh: 'Refresh report',
-					regenerate: 'Regenerate report',
-					sectionsTitle: 'Thematic analysis',
-					sectionsBody:
-						'Read the material evidence as scoped scientific themes; the complete sample matrix stays in the supporting appendix.',
-					sectionLabel: 'Report theme: {title}'
-				},
-				state: {
-					cardLabel: 'State {index}',
-					sourceLine: 'Source: {source}',
-					roles: {
-						texture: 'texture prediction state',
-						hardness: 'high-hardness state',
-						densification: 'densification / porosity state',
-						tensile: 'tensile response state',
-						representative: 'representative material state'
-					},
-					interpretation: 'Observed response: {values}. {boundary}',
-					notGlobalBest:
-						'This does not make the state globally optimal; non-leading or unverified responses include {properties}.',
-					sourceBounded:
-						'Interpret this inside its source paper and test condition, not as a cross-paper global ranking.',
-					noValues: 'no comparable numeric response'
-				},
 				problems: {
 					densification: {
 						title: 'Densification and porosity',
@@ -783,36 +749,6 @@ const translations: Record<Language, Translations> = {
 					summaryOnly:
 						'Available collection summary values: {values}. A trend chart needs paired sample values.'
 				},
-				graph: {
-					label: 'Material-scoped research chain map',
-					chainLabel: 'Chain {index}',
-					sample: 'Sample and paper context',
-					empty: 'No high-signal research chain can be mapped from the current sample matrix yet.'
-				},
-				narrative: {
-					mainLabel: 'Narrative material research dossier',
-					eyebrow: 'Interactive review draft',
-					overviewTitle: 'What does this literature set study?',
-					lead: '{material} is studied in the current collection mainly through {processes}. The dossier covers {papers} paper(s), {samples} sample(s), {properties}, and {evidence} evidence anchor(s), so the narrative below stays tied to the structured matrix.',
-					unspecifiedProcess: 'unspecified processes',
-					unspecifiedProperties: 'reported properties',
-					sampleDesignTitle: 'How are the samples designed?',
-					sampleDesignBody:
-						'The current matrix identifies {samples} sample(s). Controlled variables include {controlled}; changed variables include {changed}. This makes the sample set useful for reading process-property differences while keeping the original values available below.',
-					noControlledVariables: 'no clearly controlled variable',
-					noChangedVariables: 'no clearly changed variable',
-					findingsTitle: 'What are the main performance findings?',
-					findingsBody:
-						'The cards summarize the strongest observed values first, then keep the supporting evidence close to each conclusion.',
-					trendQuestion: 'How do variables affect performance?',
-					trendBody:
-						'For {property}, {first} is reported as {firstValue}, while {second} is reported as {secondValue}. Current conclusion: {conclusion}. Treat this as an evidence-backed comparison, not a full mechanism unless more source context supports it.',
-					trendEmpty:
-						'The current matrix does not yet expose enough comparable numeric values to write a trend narrative.',
-					evidenceTitle: 'Where is the evidence?',
-					evidenceBody:
-						'Each evidence chip opens the same source drawer used by the structured tables, so the narrative remains traceable to source locations.'
-				},
 				evidence: {
 					drawerTitle: 'Evidence detail',
 					code: 'No.',
@@ -848,24 +784,6 @@ const translations: Record<Language, Translations> = {
 					actions: 'Actions',
 					tip: 'Tip',
 					tipBody: 'Click a performance value or evidence anchor to inspect the source context.'
-				},
-				pdf: {
-					title: 'Generate material review PDF',
-					body: 'AI will generate a review from key findings, trend interpretation, supporting performance data, and evidence locations.',
-					generate: 'Generate review',
-					cancel: 'Cancel',
-					generatedTitle: 'Material review PDF',
-					generatedStatus: 'Generated',
-					generatedWithWarnings: 'Generated with {count} warning(s)',
-					loadingStatus: 'Checking for an existing review draft...',
-					generatingStatus: 'Generating review draft...',
-					failedStatus: 'Report generation failed. Regenerate to try again.',
-					reportTitle: 'Report title',
-					readiness: 'Readiness',
-					previewMarkdown: 'Preview Markdown',
-					view: 'View PDF',
-					download: 'Download',
-					regenerate: 'Regenerate'
 				}
 			},
 			paperMaterials: {
@@ -1316,7 +1234,7 @@ const translations: Record<Language, Translations> = {
 				'These views can still help, but they should follow the main collection analysis rather than replace it.',
 			advancedTitle: 'Advanced analysis and settings',
 			advancedLead:
-				'Reports, read-only settings, and raw identifiers live here so the core workflow stays clean.',
+				'Tasks, read-only settings, and debug metadata live here so the core workflow stays clean.',
 			debugTitle: 'Debug metadata',
 			debugTaskId: 'Latest task ID',
 			debugCollectionId: 'Collection ID'
@@ -2241,6 +2159,8 @@ const translations: Record<Language, Translations> = {
 				objective_logic_chains_started: 'Assembling Logic Chains',
 				paper_facts_started: 'Paper Facts Started',
 				comparison_rows_started: 'Comparison Rows Started',
+				research_understandings_started: 'Persisting Research Understanding',
+				research_understandings_completed: 'Research Understanding Persisted',
 				artifacts_ready: 'Artifacts Ready',
 				failed: 'Failed'
 			},
@@ -2528,34 +2448,6 @@ const translations: Record<Language, Translations> = {
 				action: 'Generate graph'
 			}
 		},
-		reports: {
-			title: 'Reports',
-			lead: 'Review community summaries and pattern-level findings derived from indexed reports.',
-			degradedLead:
-				'Reports stay out of the default app-layer workflow until a collection-scoped reports API exists.',
-			degradedNote:
-				'This workspace no longer calls retrieval reports endpoints by default for app-layer collections.',
-			degradedTitle: 'Temporarily hidden in workspace',
-			degradedBody:
-				'Community reports and pattern summaries still need a dedicated collection-scoped API. Until then, the workspace keeps this area as a non-fetching placeholder to avoid misleading 404s.',
-			loading: 'Loading reports...',
-			submit: 'Refresh',
-			patternsTitle: 'Pattern summaries',
-			communitiesTitle: 'Community summaries',
-			resultCount: '{count} item(s)',
-			emptyPatterns: 'No pattern summaries are available.',
-			emptyCommunities: 'No community summaries are available.',
-			emptyDetail: 'Select a community to inspect its detail.',
-			detailLoading: 'Loading community detail...',
-			communityLabel: 'Community',
-			ratingLabel: 'Rating',
-			sizeLabel: 'Size',
-			entitiesLabel: 'Entities',
-			relationshipsLabel: 'Relationships',
-			documentsLabel: 'Documents',
-			levelLabel: 'Level',
-			sortLabel: 'Sort'
-		},
 		settings: {
 			title: 'Settings',
 			lead: 'Collection-level defaults come from the app-layer metadata.',
@@ -2610,7 +2502,7 @@ const translations: Record<Language, Translations> = {
 				'Use graph preview and GraphML export as secondary analysis, not the primary end state.',
 			advancedTitle: 'Advanced access',
 			advancedDesc:
-				'Tasks, reports, and read-only settings stay inside the workspace so the primary route tree remains focused.',
+				'Tasks, read-only settings, and debug metadata stay inside the workspace so the primary route tree remains focused.',
 			tutorialTitle: 'Visualizing Your Knowledge Graph (Gephi)',
 			tutorialSub: 'Export GraphML from the web UI and explore it in Gephi.',
 			tutorialStep1Title: '1. Build a collection graph',
@@ -2918,6 +2810,102 @@ const translations: Record<Language, Translations> = {
 			warnings: '警告',
 			warningPaperCount: '{message}（{count} 篇文献）',
 			warningOccurrenceCount: '{message}（{count} 次）',
+			understanding: {
+				title: '研究理解',
+				objectiveBody: '从该研究目标的证据工作区投影出的 Claim、关系、上下文和证据引用。',
+				materialBody: '从该材料 research-view 投影出的 Claim、关系、上下文和证据引用。',
+				summary: '研究理解摘要',
+				claims: 'Claim',
+				relationsLabel: '关系',
+				evidenceRefs: '证据',
+				contexts: '上下文',
+				contextPrefix: '上下文：',
+				claimFilters: 'Claim 筛选',
+				filterByType: '类型',
+				filterByStatus: '证据状态',
+				allClaimTypes: '全部类型',
+				allStatuses: '全部状态',
+				filteredClaimCount: '{shown} / {total}',
+				relatedToSelectedClaim: '关联当前 Claim',
+				claimDetail: 'Claim 详情',
+				evidenceStripHint: '当前 Claim 的证据会被高亮。',
+				contextMaterial: '材料',
+				contextProperty: '性能',
+				contextProcess: '工艺上下文',
+				contextTest: '测试条件',
+				limitations: '局限',
+				sourceObjects: '来源对象：',
+				curationTitle: '专家校正',
+				curationClaimType: '校正类型',
+				curationStatus: '校正证据状态',
+				curationStatement: '校正后的 Claim',
+				curationNote: '校正备注',
+				curationReviewer: '校正人',
+				curationSubmit: '保存校正',
+				curationSaving: '保存中...',
+				curationSaved: '校正已保存：{id}',
+				feedbackTitle: '专家反馈',
+				feedbackStatus: '复核结果',
+				feedbackIssue: '问题类型',
+				feedbackNote: '反馈备注',
+				feedbackReviewer: '复核人',
+				feedbackSubmit: '保存反馈',
+				feedbackSaving: '保存中...',
+				feedbackSaved: '反馈已保存：{id}',
+				feedbackStatuses: {
+					correct: '正确',
+					partial: '部分正确',
+					incorrect: '错误',
+					unclear: '不清楚'
+				},
+				feedbackIssues: {
+					none: '没有问题',
+					evidence_not_grounded: '证据不支撑',
+					missing_evidence: '缺少证据',
+					wrong_context: '上下文错误',
+					wrong_relation: '关系错误',
+					overclaim: '过度结论',
+					unclear_statement: '表述不清',
+					other: '其他'
+				},
+				noClaims: '暂未得到 Claim。',
+				noRelations: '暂未得到关系。',
+				noEvidence: '暂未得到证据引用。',
+				noContexts: '当前 Claim 暂未关联上下文记录。',
+				noSelectedClaim: '请选择一个 Claim 查看证据和上下文。',
+				empty: '当前数据还不足以构建结构化研究理解。',
+				unavailable: '后端暂未返回研究理解投影。',
+				states: {
+					empty: '为空',
+					partial: '部分可用',
+					ready: '可用',
+					limited: '受限'
+				},
+				statuses: {
+					supported: '有证据',
+					limited: '受限',
+					conflicted: '冲突',
+					unsupported: '未支撑'
+				},
+				types: {
+					finding: '发现',
+					measurement: '测量',
+					comparison: '比较',
+					mechanism: '机制',
+					limitation: '局限',
+					context: '上下文'
+				},
+				relations: {
+					improves: '改善',
+					reduces: '降低',
+					increases: '升高',
+					decreases: '下降',
+					correlates: '相关',
+					explains: '解释',
+					conflicts: '冲突',
+					compares: '比较'
+				}
+			},
 			state: {
 				empty: '为空',
 				processing: '处理中',
@@ -3011,23 +2999,6 @@ const translations: Record<Language, Translations> = {
 				otherEvidence: '其他证据',
 				contextTitle: '目标上下文',
 				variableAxes: '变化轴',
-				objectiveReportTitle: '研究目标报告',
-				objectiveReportBody: '由后端基于该目标证据持久化生成的 Markdown 报告。',
-				objectiveReportNotReadyTitle: '报告尚未生成',
-				objectiveReportNotReadyBody: '目标证据单元就绪后可生成报告。页面加载时不会调用 LLM。',
-				generateObjectiveReport: '生成报告',
-				refreshObjectiveReport: '刷新报告',
-				regenerateObjectiveReport: '重新生成报告',
-				conclusionPackageTitle: '科研结论包',
-				conclusionPackageBody: '按该研究目标组织结论、文献贡献、支撑证据、机制链和不确定性。',
-				collectionConclusion: '集合级结论',
-				reportStatus: '结论包状态：{status}',
-				reportEvidenceMatrix: '报告证据矩阵',
-				reportConclusionTitle: '集合级发现',
-				primaryEvidenceTitle: '主要支撑数据表',
-				mechanismChainTitle: '机制链',
-				noConclusionPackage: '暂未生成结构化结论包；可先使用下方证据审查核对来源。',
-				noExpertReport: '结论包已返回，但专家报告视图尚未组装。',
 				scientificContext: '科研背景',
 				keyFindings: '关键发现',
 				researchFocus: '研究范围',
@@ -3163,12 +3134,7 @@ const translations: Record<Language, Translations> = {
 			materialDossier: {
 				title: '材料研究档案',
 				mainLabel: '材料研究档案内容',
-				subtitle: '一份材料报告：每个结果都保留制备状态、测试条件、证据来源和可比较边界。',
-				tabs: {
-					label: '材料档案视图',
-					structured: '结构化档案',
-					narrative: '叙事研究'
-				},
+				subtitle: '材料研究工作区：每个结果都保留制备状态、测试条件、证据来源和可比较边界。',
 				tags: {
 					alloySteel: '合金钢'
 				},
@@ -3177,31 +3143,10 @@ const translations: Record<Language, Translations> = {
 					viewPapers: '查看文献',
 					viewEvidence: '查看证据',
 					askCopilot: '询问助手',
-					generatePdf: '生成综述 PDF',
 					refresh: '刷新',
 					exportCsv: '导出数据 CSV'
 				},
 				sections: {
-					overview: {
-						title: '材料报告概览',
-						body: '{material} 主要围绕 {processes} 展开。结果按材料状态、测试条件、性能响应和来源证据组织，而不是做跨论文最佳参数排行。'
-					},
-					findings: {
-						title: '关键发现',
-						body: '由样品数值和证据锚点约束生成的可追溯结论。'
-					},
-					samples: {
-						title: '样品与工艺参数',
-						body: '了解有哪些样品及其工艺条件差异。'
-					},
-					graph: {
-						title: '材料状态图',
-						body: '按制备、测试条件、观测响应和来源证据阅读样品级状态。'
-					},
-					chain: {
-						title: '代表性材料状态',
-						body: '把每个高信号样品作为一个材料状态阅读：制备/后处理、测试条件、性能响应、材料学解释和来源证据。'
-					},
 					materialProblems: {
 						title: '材料问题归纳',
 						body: '按材料科学问题归纳证据，而不是只展示一张平铺性能矩阵。'
@@ -3274,81 +3219,6 @@ const translations: Record<Language, Translations> = {
 				performance: {
 					summary: '共 {samples} 个样品，{properties} 项性能指标。'
 				},
-				findings: {
-					empty: '当前材料数值还不足以生成可追溯关键发现。',
-					supportedByValues: '{values}。证据：{evidence}。',
-					highestStrengthTitle: '{sample} 表现出最高强度',
-					splitStrengthTitle: '强度最高项分布在不同样品',
-					highestElongationTitle: '{sample} 表现出最高延伸率',
-					highestPropertyTitle: '{sample} 表现出最高{property}',
-					summaryPropertyTitle: '{property} 已作为可追溯性能指标返回',
-					summaryPropertyBody: '{property} 报告值为 {value}。证据：{evidence}。',
-					densityMismatchTitle: '最高密度并不对应最高强度',
-					densityMismatchBody:
-						'{densitySample} 的密度最高（{densityValue}），但 {strengthSample} 的强度领先（{strengthValues}）。证据：{evidence}。',
-					tradeoffTitle: '当前数据提示存在强度-塑性权衡',
-					tradeoffBody:
-						'{strengthSample} 强度领先，而 {elongationSample} 延伸率领先。证据：{evidence}。',
-					processOnlyTitle: '样品之间存在工艺上下文差异',
-					processOnlyBody: '当前矩阵的变化变量是 {changed}，但可比较性能值尚未就绪。',
-					types: {
-						directObservation: '直接观察',
-						comparativeInference: '比较推断',
-						trendHypothesis: '趋势假设',
-						structuralObservation: '结构观察'
-					}
-				},
-				chain: {
-					stepsLabel: '代表性材料状态证据链',
-					processContext: '制备与后处理',
-					testConditions: '测试条件',
-					results: '性能响应',
-					whyBest: '材料学解释',
-					boundary: '可比较边界',
-					boundaryReady: '该链路的制备、测试条件、结果和来源证据已经解析。',
-					traceback: '证据回溯',
-					collectionScope: '集合级证据',
-					backgroundText:
-						'{material} 在当前集合中主要通过 {processes} 研究；该参数组合由 {paper} 支撑。',
-					scoreLabel: '{best}/{total} 项指标领先',
-					comparisonSummary: '该样品在 {total} 个跟踪指标中有 {count} 项领先：{best}。',
-					comparisonNoLeader:
-						'该样品有 {count} 个可比较数值，但在 {total} 个跟踪指标中暂未成为最高项。',
-					notBestFor: '非领先指标：{properties}。',
-					bestInMatrix: '本矩阵领先',
-					observed: '已观测',
-					noProcessContext: '该样品行暂未绑定工艺参数。',
-					noTestConditions: '该行暂未绑定明确测试条件；跨条件比较前需要回到原文核查。',
-					empty: '当前材料报告包还不足以构建代表性材料状态。',
-					packageUnavailable: '该材料尚未生成材料报告包。'
-				},
-				report: {
-					documentTitle: '材料报告',
-					llmBody: '由后端基于材料证据持久化生成的 LLM Markdown 结论报告。',
-					draftBody: '当前展示的是材料报告包的确定性草稿。生成报告后，由 LLM 总结科研结论。',
-					draftStatus: '确定性草稿',
-					generate: '生成报告',
-					refresh: '刷新报告',
-					regenerate: '重新生成报告',
-					sectionsTitle: '主题分析',
-					sectionsBody: '按材料科学问题阅读证据；完整样品矩阵保留在支撑附录中。',
-					sectionLabel: '报告主题：{title}'
-				},
-				state: {
-					cardLabel: '状态 {index}',
-					sourceLine: '来源：{source}',
-					roles: {
-						texture: '织构预测状态',
-						hardness: '高硬度状态',
-						densification: '致密化 / 孔隙状态',
-						tensile: '拉伸响应状态',
-						representative: '代表性材料状态'
-					},
-					interpretation: '观测响应：{values}。{boundary}',
-					notGlobalBest: '这不能说明该状态全局最优；非领先或未验证响应包括 {properties}。',
-					sourceBounded: '应在来源论文和测试条件内解释，不能作为跨论文全局排名。',
-					noValues: '暂无可比较数值响应'
-				},
 				problems: {
 					densification: {
 						title: '致密化和孔隙',
@@ -3394,34 +3264,6 @@ const translations: Record<Language, Translations> = {
 					empty: '暂无可绘制的数值趋势。',
 					summaryOnly: '可用集合汇总值：{values}。趋势图需要成对样品数值。'
 				},
-				graph: {
-					label: '材料范围科研链路图',
-					chainLabel: '链路 {index}',
-					sample: '样品与论文背景',
-					empty: '当前样品矩阵还不足以映射高信号科研链路。'
-				},
-				narrative: {
-					mainLabel: '叙事型材料研究档案',
-					eyebrow: '交互式综述草稿',
-					overviewTitle: '这批文献主要研究了什么？',
-					lead: '当前集合围绕 {material} 展开，主要涉及 {processes}。本档案覆盖 {papers} 篇文献、{samples} 个样品、{properties} 和 {evidence} 个证据锚点；下面的叙事内容仍由结构化矩阵支撑。',
-					unspecifiedProcess: '未明确工艺',
-					unspecifiedProperties: '已报告性能',
-					sampleDesignTitle: '样品是如何设计的？',
-					sampleDesignBody:
-						'当前矩阵识别到 {samples} 个样品。控制变量包括 {controlled}；变化变量包括 {changed}。这使得样品集适合阅读工艺差异与性能差异之间的关系，同时保留原始数值以便核查。',
-					noControlledVariables: '暂无明确控制变量',
-					noChangedVariables: '暂无明确变化变量',
-					findingsTitle: '主要性能结果是什么？',
-					findingsBody: '卡片先总结当前最高观测值，再把支撑证据贴近每条结论。',
-					trendQuestion: '变量如何影响性能？',
-					trendBody:
-						'对于 {property}，{first} 的报告值为 {firstValue}，{second} 的报告值为 {secondValue}。当前结论：{conclusion}。除非更多原文上下文支持，否则这里应视为有证据支撑的比较，而不是完整机制解释。',
-					trendEmpty: '当前矩阵还没有足够可比较的数值来写出趋势叙事。',
-					evidenceTitle: '证据在哪里？',
-					evidenceBody:
-						'每个证据 chip 都会打开和结构化表格相同的来源抽屉，因此叙事内容仍然可以追溯到原文位置。'
-				},
 				evidence: {
 					drawerTitle: '证据详情',
 					code: '编号',
@@ -3457,24 +3299,6 @@ const translations: Record<Language, Translations> = {
 					actions: '操作',
 					tip: '提示',
 					tipBody: '点击表格中的性能值或证据锚点，可查看来源上下文。'
-				},
-				pdf: {
-					title: '生成材料综述 PDF',
-					body: 'AI 将基于关键发现、趋势解释、支撑性能数据和证据定位生成综述。',
-					generate: '生成综述',
-					cancel: '取消',
-					generatedTitle: '材料综述 PDF',
-					generatedStatus: '已生成',
-					generatedWithWarnings: '已生成，包含 {count} 条警告',
-					loadingStatus: '正在检查已有综述草稿...',
-					generatingStatus: '正在生成综述草稿...',
-					failedStatus: '报告生成失败。请重新生成后再试。',
-					reportTitle: '报告标题',
-					readiness: '就绪度',
-					previewMarkdown: '预览 Markdown',
-					view: '查看 PDF',
-					download: '下载',
-					regenerate: '重新生成'
 				}
 			},
 			paperMaterials: {
@@ -3887,7 +3711,7 @@ const translations: Record<Language, Translations> = {
 			nextDocuments: '查看文档',
 			nextGraph: '打开图谱',
 			advancedTitle: '高级分析与设置',
-			advancedLead: '报告、只读设置和原始标识符都收进这里，保证主流程保持干净。',
+			advancedLead: '任务、只读设置和调试元数据都收进这里，保证主流程保持干净。',
 			debugTitle: '调试元数据',
 			debugTaskId: '最近任务 ID',
 			debugCollectionId: '集合 ID'
@@ -4787,6 +4611,8 @@ const translations: Record<Language, Translations> = {
 				objective_logic_chains_started: '组装科研链路',
 				paper_facts_started: '论文事实生成中',
 				comparison_rows_started: '比较行生成中',
+				research_understandings_started: '研究理解持久化中',
+				research_understandings_completed: '研究理解已持久化',
 				artifacts_ready: '产物已就绪',
 				failed: '失败'
 			},
@@ -5065,33 +4891,6 @@ const translations: Record<Language, Translations> = {
 				action: '生成图谱'
 			}
 		},
-		reports: {
-			title: '报告',
-			lead: '查看社区总结以及从社区报告中提炼出的规律。',
-			degradedLead:
-				'在 collection 维度的 reports 接口补齐前，报告能力暂时不进入 app-layer 默认工作流。',
-			degradedNote: '当前工作区不会再默认请求 retrieval reports 接口，避免新集合出现误导性的 404。',
-			degradedTitle: '工作区中暂时隐藏',
-			degradedBody:
-				'社区报告和规律总结仍需要单独的 collection-scoped reports API。在接口补齐前，这里只保留不触发请求的占位说明。',
-			loading: '报告加载中...',
-			submit: '刷新',
-			patternsTitle: '规律总结',
-			communitiesTitle: '社区总结',
-			resultCount: '{count} 项',
-			emptyPatterns: '当前没有规律总结。',
-			emptyCommunities: '当前没有社区总结。',
-			emptyDetail: '选择一个社区查看详情。',
-			detailLoading: '社区详情加载中...',
-			communityLabel: '社区',
-			ratingLabel: '评分',
-			sizeLabel: '规模',
-			entitiesLabel: '实体',
-			relationshipsLabel: '关系',
-			documentsLabel: '文档',
-			levelLabel: '层级',
-			sortLabel: '排序'
-		},
 		settings: {
 			title: '设置',
 			lead: '集合级默认值来自 app-layer 元数据。',
@@ -5139,7 +4938,7 @@ const translations: Record<Language, Translations> = {
 			surfaceGraphTitle: '图谱',
 			surfaceGraphDesc: '图谱预览和 GraphML 导出属于辅助分析，不是主终点。',
 			advancedTitle: '高级入口',
-			advancedDesc: '任务、报告和只读设置保留在工作区分区中，主路由树保持聚焦。',
+			advancedDesc: '任务、只读设置和调试元数据保留在工作区分区中，主路由树保持聚焦。',
 			tutorialTitle: '知识图谱可视化（Gephi）',
 			tutorialSub: '通过 Web 界面导出 GraphML，并在 Gephi 中分析结构。',
 			tutorialStep1Title: '1. 构建集合图谱',

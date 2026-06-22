@@ -8,8 +8,8 @@ approval gates, and verification rules.
 
 - Module purpose:
   own the SvelteKit browser application for collections, workspace browsing,
-  evidence/comparison views, graph/report surfaces, and conditional protocol
-  browsing through the same-origin backend contract.
+  evidence/comparison views, graph surfaces, and conditional protocol browsing
+  through the same-origin backend contract.
 - Default focus:
   keep the collection workspace and evidence/comparison flows aligned with the
   Lens v1 product boundary.

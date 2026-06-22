@@ -140,7 +140,6 @@ class _EmptyResearchObjectiveService:
             "evidence_routes": [],
             "evidence_units": [],
             "logic_chain": None,
-            "conclusion_package": None,
             "existing_comparison_rows": [],
             "warnings": [],
         }
@@ -275,26 +274,6 @@ class _ObjectiveResearchService(_EmptyResearchObjectiveService):
                 },
                 "summary": "LPBF energy density and scan strategy shape strength and ductility.",
                 "confidence": 0.88,
-            },
-            "conclusion_package": {
-                "schema_version": "objective_conclusion.v1",
-                "title": "LPBF 316L strength conclusion",
-                "status": "ready",
-                "conclusions": [
-                    {
-                        "claim": "S014 combines high density with the strongest mechanical response.",
-                        "evidence_unit_ids": ["oeu_strength"],
-                        "strength": "supported",
-                    }
-                ],
-                "limitations": [],
-                "source_refs": [
-                    {
-                        "evidence_unit_id": "oeu_strength",
-                        "document_id": "paper-a",
-                        "evidence_id": "ev_strength",
-                    }
-                ],
             },
             "existing_comparison_rows": [],
             "warnings": [],
@@ -496,4 +475,4 @@ def test_objective_context_is_available_to_grounded_chat(tmp_path):
     assert "focused_objective_id: obj_lpbf_strength" in prompt
     assert "objective_research_view" in prompt
     assert "LPBF energy density and scan strategy shape strength" in prompt
-    assert "S014 combines high density" in prompt
+    assert "oeu_strength" in prompt

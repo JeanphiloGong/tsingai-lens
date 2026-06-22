@@ -74,7 +74,7 @@ This cleanup covers:
 This cleanup does not cover:
 
 - redesign of Goal Brief or Goal Consumer payloads
-- graph/report semantic cutover
+- graph semantic cutover or report retirement
 - query runtime redesign
 - evidence id stabilization
 - frontend page IA redesign

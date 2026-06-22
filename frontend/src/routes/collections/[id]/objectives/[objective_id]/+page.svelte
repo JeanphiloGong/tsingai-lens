@@ -2,11 +2,10 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
+	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
 	import {
-		createObjectiveReport,
-		fetchObjectiveReport,
 		fetchObjectiveResearchView,
 		formatShortIdentifier,
 		getResearchViewStateTone,
@@ -59,11 +58,6 @@
 		count: number;
 	};
 
-	type MarkdownReportBlock =
-		| { kind: 'h1' | 'h2' | 'h3' | 'p'; text: string }
-		| { kind: 'ul' | 'ol'; items: string[] }
-		| { kind: 'table'; headers: string[]; rows: string[][] };
-
 	const evidenceKindOrder = [
 		'measurement',
 		'test_condition',
@@ -85,9 +79,7 @@
 
 	let objectiveView: ObjectiveResearchView | null = null;
 	let loading = false;
-	let reportGenerating = false;
 	let error = '';
-	let reportError = '';
 	let loadedKey = '';
 	let selectedEvidenceUnitId = '';
 	let selectedEvidenceKind = 'all';
@@ -102,8 +94,7 @@
 	$: frames = objectiveView?.paper_frames ?? [];
 	$: evidenceUnits = objectiveView?.evidence_units ?? [];
 	$: evidenceRoutes = objectiveView?.evidence_routes ?? [];
-	$: objectiveReport = objectiveView?.objective_report ?? null;
-	$: objectiveReportBlocks = parseMarkdownReport(objectiveReport?.markdown ?? '');
+	$: understanding = objectiveView?.understanding ?? null;
 	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
 	$: evidenceKindOptions = buildEvidenceKindOptions(evidenceUnits);
 	$: evidenceDocumentOptions = buildEvidenceDocumentOptions(frames, evidenceUnits);
@@ -146,7 +137,6 @@
 		error = '';
 		try {
 			objectiveView = await fetchObjectiveResearchView(collectionId, objectiveId);
-			reportError = '';
 		} catch (err) {
 			objectiveView = null;
 			error = errorMessage(err);
@@ -155,150 +145,8 @@
 		}
 	}
 
-	async function generateObjectiveReport(forceRegenerate = false) {
-		if (!collectionId || !objectiveId || reportGenerating) return;
-		reportGenerating = true;
-		reportError = '';
-		try {
-			const report = await createObjectiveReport(collectionId, objectiveId, {
-				language: 'zh',
-				force_regenerate: forceRegenerate
-			});
-			if (objectiveView) {
-				objectiveView = {
-					...objectiveView,
-					objective_report: report
-				};
-			}
-		} catch (err) {
-			reportError = errorMessage(err);
-		} finally {
-			reportGenerating = false;
-		}
-	}
-
-	async function refreshObjectiveReport() {
-		if (!collectionId || !objectiveId || reportGenerating) return;
-		reportGenerating = true;
-		reportError = '';
-		try {
-			const report = await fetchObjectiveReport(collectionId, objectiveId);
-			if (objectiveView) {
-				objectiveView = {
-					...objectiveView,
-					objective_report: report
-				};
-			}
-		} catch (err) {
-			reportError = errorMessage(err);
-		} finally {
-			reportGenerating = false;
-		}
-	}
-
 	function listLabel(items: string[]) {
 		return items.length ? items.join(', ') : $t('research.emptyValue');
-	}
-
-	function parseMarkdownReport(markdown: string): MarkdownReportBlock[] {
-		const blocks: MarkdownReportBlock[] = [];
-		let paragraph: string[] = [];
-		let listKind: 'ul' | 'ol' | null = null;
-		let listItems: string[] = [];
-		let tableLines: string[] = [];
-		const flushParagraph = () => {
-			const text = paragraph.join(' ').trim();
-			if (text) blocks.push({ kind: 'p', text });
-			paragraph = [];
-		};
-		const flushList = () => {
-			if (listKind && listItems.length) {
-				blocks.push({ kind: listKind, items: listItems });
-			}
-			listKind = null;
-			listItems = [];
-		};
-		const flushTable = () => {
-			const table = parseMarkdownTable(tableLines);
-			if (table) {
-				blocks.push(table);
-			} else if (tableLines.length) {
-				paragraph.push(...tableLines);
-				flushParagraph();
-			}
-			tableLines = [];
-		};
-		const flushOpenBlocks = () => {
-			flushTable();
-			flushList();
-			flushParagraph();
-		};
-		for (const rawLine of markdown.split(/\r?\n/)) {
-			const line = rawLine.trim();
-			if (!line) {
-				flushOpenBlocks();
-				continue;
-			}
-			const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-			if (heading) {
-				flushOpenBlocks();
-				blocks.push({
-					kind: heading[1].length === 1 ? 'h1' : heading[1].length === 2 ? 'h2' : 'h3',
-					text: heading[2].trim()
-				});
-				continue;
-			}
-			if (line.startsWith('|') && line.endsWith('|')) {
-				flushParagraph();
-				flushList();
-				tableLines.push(line);
-				continue;
-			}
-			const listItem = /^[-*]\s+(.+)$/.exec(line);
-			if (listItem) {
-				flushParagraph();
-				flushTable();
-				if (listKind && listKind !== 'ul') flushList();
-				listKind = 'ul';
-				listItems.push(listItem[1].trim());
-				continue;
-			}
-			const orderedListItem = /^\d+[.)]\s+(.+)$/.exec(line);
-			if (orderedListItem) {
-				flushParagraph();
-				flushTable();
-				if (listKind && listKind !== 'ol') flushList();
-				listKind = 'ol';
-				listItems.push(orderedListItem[1].trim());
-				continue;
-			}
-			flushTable();
-			flushList();
-			paragraph.push(line);
-		}
-		flushOpenBlocks();
-		return blocks;
-	}
-
-	function parseMarkdownTable(lines: string[]): MarkdownReportBlock | null {
-		if (lines.length < 2 || !isMarkdownSeparatorRow(lines[1])) return null;
-		const headers = splitMarkdownTableRow(lines[0]);
-		const rows = lines.slice(2).map(splitMarkdownTableRow).filter((row) => row.length);
-		if (!headers.length || !rows.length) return null;
-		return { kind: 'table', headers, rows };
-	}
-
-	function isMarkdownSeparatorRow(line: string) {
-		const cells = splitMarkdownTableRow(line);
-		return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-	}
-
-	function splitMarkdownTableRow(line: string) {
-		return line
-			.replace(/^\|/, '')
-			.replace(/\|$/, '')
-			.split('|')
-			.map((cell) => cell.trim());
 	}
 
 	function frameTitle(frame: ObjectivePaperFrame) {
@@ -764,8 +612,6 @@
 			query: queryString(params)
 		};
 	}
-
-
 </script>
 
 <svelte:head>
@@ -833,112 +679,16 @@
 			</div>
 		</header>
 
-		<section class="objective-report-layout">
-			<section class="objective-section objective-section--report">
-				{#if objectiveReport?.markdown && (objectiveReport.status === 'ready' || objectiveReport.status === 'ready_with_warnings')}
-					<div class="objective-report-reader-header">
-						<div>
-							<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
-							<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
-						</div>
-						<div class="objective-report-actions objective-report-actions--compact">
-							<button type="button" on:click={refreshObjectiveReport} disabled={reportGenerating}>
-								{$t('research.objectiveWorkspace.refreshObjectiveReport')}
-							</button>
-							<button type="button" on:click={() => generateObjectiveReport(true)} disabled={reportGenerating}>
-								{$t('research.objectiveWorkspace.regenerateObjectiveReport')}
-							</button>
-						</div>
-					</div>
-					<article class="objective-report-document" aria-label={$t('research.objectiveWorkspace.objectiveReportTitle')}>
-						<div class="objective-report-document__meta">
-							<span>{humanizeCode(objectiveReport.status)}</span>
-							{#if objectiveReport.model}
-								<span>{objectiveReport.model}</span>
-							{/if}
-							{#if objectiveReport.generated_at}
-								<span>{objectiveReport.generated_at}</span>
-							{/if}
-						</div>
-						{#each objectiveReportBlocks as block, index (`report-${block.kind}-${index}`)}
-							{#if block.kind === 'h1'}
-								<h1>{block.text}</h1>
-							{:else if block.kind === 'h2'}
-								<h2>{block.text}</h2>
-							{:else if block.kind === 'h3'}
-								<h3>{block.text}</h3>
-							{:else if block.kind === 'ul'}
-								<ul class="objective-report-document__list">
-									{#each block.items as item, itemIndex (`report-ul-${index}-${itemIndex}`)}
-										<li>{item}</li>
-									{/each}
-								</ul>
-							{:else if block.kind === 'ol'}
-								<ol class="objective-report-document__list">
-									{#each block.items as item, itemIndex (`report-ol-${index}-${itemIndex}`)}
-										<li>{item}</li>
-									{/each}
-								</ol>
-							{:else if block.kind === 'table'}
-								<div class="objective-report-table-wrap">
-									<table class="objective-report-table">
-										<thead>
-											<tr>
-												{#each block.headers as header, headerIndex (`report-table-${index}-header-${headerIndex}`)}
-													<th>{header}</th>
-												{/each}
-											</tr>
-										</thead>
-										<tbody>
-											{#each block.rows as row, rowIndex (`report-table-${index}-row-${rowIndex}`)}
-												<tr>
-													{#each block.headers as _header, cellIndex (`report-table-${index}-cell-${rowIndex}-${cellIndex}`)}
-														<td>{row[cellIndex] ?? ''}</td>
-													{/each}
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
-							{:else if block.kind === 'p'}
-								<p>{block.text}</p>
-							{/if}
-						{/each}
-					</article>
-				{:else}
-					<div class="section-heading">
-						<div>
-							<h3>{$t('research.objectiveWorkspace.objectiveReportTitle')}</h3>
-							<p>{$t('research.objectiveWorkspace.objectiveReportBody')}</p>
-						</div>
-						<span>{objectiveReport ? humanizeCode(objectiveReport.status) : boolState(false)}</span>
-					</div>
-					<article class="objective-report-empty">
-						<h4>{$t('research.objectiveWorkspace.objectiveReportNotReadyTitle')}</h4>
-						<p>
-							{objectiveReport?.message || $t('research.objectiveWorkspace.objectiveReportNotReadyBody')}
-						</p>
-						<div class="objective-report-actions">
-							<button type="button" on:click={() => generateObjectiveReport(false)} disabled={reportGenerating}>
-								{$t('research.objectiveWorkspace.generateObjectiveReport')}
-							</button>
-							{#if objectiveReport}
-								<button type="button" on:click={refreshObjectiveReport} disabled={reportGenerating}>
-									{$t('research.objectiveWorkspace.refreshObjectiveReport')}
-								</button>
-								<button type="button" on:click={() => generateObjectiveReport(true)} disabled={reportGenerating}>
-									{$t('research.objectiveWorkspace.regenerateObjectiveReport')}
-								</button>
-							{/if}
-						</div>
-						{#if reportError}
-							<p class="objective-report-error" role="alert">{reportError}</p>
-						{/if}
-					</article>
-				{/if}
-			</section>
+		<ResearchUnderstandingWorkbench
+			{understanding}
+			{collectionId}
+			returnTo={objectiveHref()}
+			bodyKey="research.understanding.objectiveBody"
+			titleId="objective-understanding-title"
+		/>
 
-			<aside class="objective-report-aside" aria-label={$t('research.objectiveWorkspace.summary')}>
+		<section class="objective-summary-layout">
+			<aside class="objective-summary-panel" aria-label={$t('research.objectiveWorkspace.summary')}>
 				<div class="objective-summary-panel__heading">
 					<span>{$t('research.objectiveWorkspace.summary')}</span>
 					<strong>{boolState(objectiveView.readiness.evidence_units_ready)}</strong>
@@ -1007,312 +757,317 @@
 				<span>{evidenceUnits.length}</span>
 			</summary>
 			<section class="objective-workspace-grid">
-			<div class="objective-main-column">
-				<section class="objective-section" aria-labelledby="paper-contribution-title">
-					<div class="section-heading">
-						<div>
-							<h3 id="paper-contribution-title">
-								{$t('research.objectiveWorkspace.paperContributionTitle')}
-							</h3>
-							<p>{$t('research.objectiveWorkspace.paperContributionBody')}</p>
+				<div class="objective-main-column">
+					<section class="objective-section" aria-labelledby="paper-contribution-title">
+						<div class="section-heading">
+							<div>
+								<h3 id="paper-contribution-title">
+									{$t('research.objectiveWorkspace.paperContributionTitle')}
+								</h3>
+								<p>{$t('research.objectiveWorkspace.paperContributionBody')}</p>
+							</div>
+							<span>{boolState(objectiveView.readiness.frames_ready)}</span>
 						</div>
-						<span>{boolState(objectiveView.readiness.frames_ready)}</span>
-					</div>
-					{#if paperCoverage.length}
-						<div class="paper-contribution-list">
-							{#each paperCoverage as paper (paper.frame.frame_id)}
-								<article class="paper-contribution-card">
-									<div class="paper-contribution-card__header">
-										<div>
-											<span>{paper.frame.paper_role}</span>
-											<h4>{frameTitle(paper.frame)}</h4>
+						{#if paperCoverage.length}
+							<div class="paper-contribution-list">
+								{#each paperCoverage as paper (paper.frame.frame_id)}
+									<article class="paper-contribution-card">
+										<div class="paper-contribution-card__header">
+											<div>
+												<span>{paper.frame.paper_role}</span>
+												<h4>{frameTitle(paper.frame)}</h4>
+											</div>
+											<strong>{paper.frame.relevance}</strong>
 										</div>
-										<strong>{paper.frame.relevance}</strong>
-									</div>
-									<p>{paperContributionSummary(paper)}</p>
-									<div class="paper-contribution-card__metrics">
-										<div>
-											<strong>{paper.units.length}</strong>
-											<span>{$t('research.objectives.evidenceUnits')}</span>
+										<p>{paperContributionSummary(paper)}</p>
+										<div class="paper-contribution-card__metrics">
+											<div>
+												<strong>{paper.units.length}</strong>
+												<span>{$t('research.objectives.evidenceUnits')}</span>
+											</div>
+											<div>
+												<strong>{paper.routeCount}</strong>
+												<span>{$t('research.objectives.routes')}</span>
+											</div>
+											<div>
+												<strong>{paper.frame.relevant_tables.length}</strong>
+												<span>{$t('research.objectiveWorkspace.relevantTables')}</span>
+											</div>
 										</div>
-										<div>
-											<strong>{paper.routeCount}</strong>
-											<span>{$t('research.objectives.routes')}</span>
-										</div>
-										<div>
-											<strong>{paper.frame.relevant_tables.length}</strong>
-											<span>{$t('research.objectiveWorkspace.relevantTables')}</span>
-										</div>
-									</div>
-									<dl>
-										<div>
-											<dt>{$t('research.objectiveWorkspace.changedVariables')}</dt>
-											<dd>{listLabel(paper.frame.changed_variables)}</dd>
-										</div>
-										<div>
-											<dt>{$t('research.objectiveWorkspace.measuredScope')}</dt>
-											<dd>{listLabel(paper.frame.measured_property_scope)}</dd>
-										</div>
-										<div>
-											<dt>{$t('research.objectiveWorkspace.relevantSections')}</dt>
-											<dd>{listLabel(paper.frame.relevant_sections)}</dd>
-										</div>
-									</dl>
-									<a
-										class="source-action"
-										href={resolve('/collections/[id]/documents/[document_id]', {
-											id: collectionId,
-											document_id: paper.frame.document_id
-										})}
+										<dl>
+											<div>
+												<dt>{$t('research.objectiveWorkspace.changedVariables')}</dt>
+												<dd>{listLabel(paper.frame.changed_variables)}</dd>
+											</div>
+											<div>
+												<dt>{$t('research.objectiveWorkspace.measuredScope')}</dt>
+												<dd>{listLabel(paper.frame.measured_property_scope)}</dd>
+											</div>
+											<div>
+												<dt>{$t('research.objectiveWorkspace.relevantSections')}</dt>
+												<dd>{listLabel(paper.frame.relevant_sections)}</dd>
+											</div>
+										</dl>
+										<a
+											class="source-action"
+											href={resolve('/collections/[id]/documents/[document_id]', {
+												id: collectionId,
+												document_id: paper.frame.document_id
+											})}
+										>
+											{$t('research.objectiveWorkspace.openPaper')}
+										</a>
+									</article>
+								{/each}
+							</div>
+						{:else}
+							<div class="empty-panel">{$t('research.objectiveWorkspace.noFrames')}</div>
+						{/if}
+					</section>
+
+					<section class="objective-section" bind:this={evidenceSection}>
+						<div class="section-heading">
+							<div>
+								<h3>{$t('research.objectiveWorkspace.evidenceUnitsTitle')}</h3>
+								<p>{$t('research.objectiveWorkspace.evidenceUnitsBody')}</p>
+							</div>
+							<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
+						</div>
+
+						{#if representativeEvidenceUnits.length}
+							<div class="supporting-evidence-list">
+								{#each representativeEvidenceUnits as unit (unit.evidence_unit_id)}
+									<button
+										class:selected={selectedEvidenceUnit?.evidence_unit_id ===
+											unit.evidence_unit_id}
+										type="button"
+										on:click={() => focusEvidenceUnit(unit)}
 									>
-										{$t('research.objectiveWorkspace.openPaper')}
-									</a>
-								</article>
-							{/each}
-						</div>
-					{:else}
-						<div class="empty-panel">{$t('research.objectiveWorkspace.noFrames')}</div>
-					{/if}
-				</section>
+										<span>{$t(evidenceKindLabelKey(unit.unit_kind))}</span>
+										<strong>{evidenceUnitValue(unit)}</strong>
+										{#if evidenceCardFacts(unit).length}
+											<div class="evidence-unit-card__facts">
+												{#each evidenceCardFacts(unit) as fact, index (`supporting-${unit.evidence_unit_id}-${fact}-${index}`)}
+													<span>{fact}</span>
+												{/each}
+											</div>
+										{/if}
+										<small>
+											{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(
+												unit.confidence
+											)}
+										</small>
+									</button>
+								{/each}
+							</div>
+						{/if}
 
-				<section class="objective-section" bind:this={evidenceSection}>
-					<div class="section-heading">
-						<div>
-							<h3>{$t('research.objectiveWorkspace.evidenceUnitsTitle')}</h3>
-							<p>{$t('research.objectiveWorkspace.evidenceUnitsBody')}</p>
-						</div>
-						<span>{boolState(objectiveView.readiness.evidence_units_ready)}</span>
-					</div>
-
-					{#if representativeEvidenceUnits.length}
-						<div class="supporting-evidence-list">
-							{#each representativeEvidenceUnits as unit (unit.evidence_unit_id)}
-								<button
-									class:selected={selectedEvidenceUnit?.evidence_unit_id === unit.evidence_unit_id}
-									type="button"
-									on:click={() => focusEvidenceUnit(unit)}
-								>
-									<span>{$t(evidenceKindLabelKey(unit.unit_kind))}</span>
-									<strong>{evidenceUnitValue(unit)}</strong>
-									{#if evidenceCardFacts(unit).length}
-										<div class="evidence-unit-card__facts">
-											{#each evidenceCardFacts(unit) as fact, index (`supporting-${unit.evidence_unit_id}-${fact}-${index}`)}
-												<span>{fact}</span>
+						{#if evidenceUnits.length}
+							<details class="evidence-audit" bind:open={evidenceAuditOpen}>
+								<summary>
+									{$t('research.objectiveWorkspace.allEvidenceReview')}
+									<span>{filteredEvidenceUnits.length}</span>
+								</summary>
+								<div class="evidence-audit__body">
+									<div
+										class="evidence-toolbar"
+										aria-label={$t('research.objectiveWorkspace.evidenceFilters')}
+									>
+										<label>
+											<span>{$t('research.objectiveWorkspace.evidenceKindFilter')}</span>
+											<select bind:value={selectedEvidenceKind}>
+												{#each evidenceKindOptions as option (option.value)}
+													<option value={option.value}>
+														{option.label} ({option.count})
+													</option>
+												{/each}
+											</select>
+										</label>
+										<label>
+											<span>{$t('research.objectiveWorkspace.paperFilter')}</span>
+											<select bind:value={selectedEvidenceDocumentId}>
+												{#each evidenceDocumentOptions as option (option.value)}
+													<option value={option.value}>
+														{option.label} ({option.count})
+													</option>
+												{/each}
+											</select>
+										</label>
+									</div>
+									{#if evidenceGroups.length}
+										<div class="evidence-group-list">
+											{#each evidenceGroups as group (group.kind)}
+												<section class="evidence-group" aria-label={$t(group.labelKey)}>
+													<div class="evidence-group__header">
+														<h4>{$t(group.labelKey)}</h4>
+														<span
+															>{$t('research.objectiveWorkspace.unitCount', {
+																count: group.units.length
+															})}</span
+														>
+													</div>
+													<div class="evidence-unit-list">
+														{#each evidenceGroupPreview(group.units) as unit (unit.evidence_unit_id)}
+															<button
+																class:selected={selectedEvidenceUnit?.evidence_unit_id ===
+																	unit.evidence_unit_id}
+																class="evidence-unit-card"
+																type="button"
+																on:click={() => (selectedEvidenceUnitId = unit.evidence_unit_id)}
+															>
+																<span>{evidenceUnitTitle(unit)}</span>
+																<strong>{evidenceUnitValue(unit)}</strong>
+																{#if evidenceCardFacts(unit).length}
+																	<div class="evidence-unit-card__facts">
+																		{#each evidenceCardFacts(unit) as fact, index (`${fact}-${index}`)}
+																			<span>{fact}</span>
+																		{/each}
+																	</div>
+																{/if}
+																<small>
+																	{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(
+																		unit.confidence
+																	)}
+																</small>
+															</button>
+														{/each}
+													</div>
+													{#if evidenceGroupHiddenCount(group.units)}
+														<p class="evidence-group__limit-note">
+															{$t('research.objectiveWorkspace.evidencePreviewLimit', {
+																shown: EVIDENCE_GROUP_PREVIEW_LIMIT,
+																total: group.units.length
+															})}
+														</p>
+													{/if}
+												</section>
 											{/each}
+										</div>
+									{:else}
+										<div class="empty-panel">
+											{$t('research.objectiveWorkspace.noEvidenceUnits')}
 										</div>
 									{/if}
-									<small>
-										{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(unit.confidence)}
-									</small>
-								</button>
-							{/each}
-						</div>
-					{/if}
-
-					{#if evidenceUnits.length}
-						<details class="evidence-audit" bind:open={evidenceAuditOpen}>
-							<summary>
-								{$t('research.objectiveWorkspace.allEvidenceReview')}
-								<span>{filteredEvidenceUnits.length}</span>
-							</summary>
-							<div class="evidence-audit__body">
-								<div
-									class="evidence-toolbar"
-									aria-label={$t('research.objectiveWorkspace.evidenceFilters')}
-								>
-									<label>
-										<span>{$t('research.objectiveWorkspace.evidenceKindFilter')}</span>
-										<select bind:value={selectedEvidenceKind}>
-											{#each evidenceKindOptions as option (option.value)}
-												<option value={option.value}>
-													{option.label} ({option.count})
-												</option>
-											{/each}
-										</select>
-									</label>
-									<label>
-										<span>{$t('research.objectiveWorkspace.paperFilter')}</span>
-										<select bind:value={selectedEvidenceDocumentId}>
-											{#each evidenceDocumentOptions as option (option.value)}
-												<option value={option.value}>
-													{option.label} ({option.count})
-												</option>
-											{/each}
-										</select>
-									</label>
 								</div>
-								{#if evidenceGroups.length}
-									<div class="evidence-group-list">
-										{#each evidenceGroups as group (group.kind)}
-											<section class="evidence-group" aria-label={$t(group.labelKey)}>
-												<div class="evidence-group__header">
-													<h4>{$t(group.labelKey)}</h4>
-													<span
-														>{$t('research.objectiveWorkspace.unitCount', {
-															count: group.units.length
-														})}</span
-													>
-												</div>
-												<div class="evidence-unit-list">
-													{#each evidenceGroupPreview(group.units) as unit (unit.evidence_unit_id)}
-														<button
-															class:selected={selectedEvidenceUnit?.evidence_unit_id ===
-																unit.evidence_unit_id}
-															class="evidence-unit-card"
-															type="button"
-															on:click={() => (selectedEvidenceUnitId = unit.evidence_unit_id)}
-														>
-															<span>{evidenceUnitTitle(unit)}</span>
-															<strong>{evidenceUnitValue(unit)}</strong>
-															{#if evidenceCardFacts(unit).length}
-																<div class="evidence-unit-card__facts">
-																	{#each evidenceCardFacts(unit) as fact, index (`${fact}-${index}`)}
-																		<span>{fact}</span>
-																	{/each}
-																</div>
-															{/if}
-															<small>
-																{evidenceCardSourceLabel(unit.document_id)} · {confidenceLabel(
-																	unit.confidence
-																)}
-															</small>
-														</button>
-													{/each}
-												</div>
-												{#if evidenceGroupHiddenCount(group.units)}
-													<p class="evidence-group__limit-note">
-														{$t('research.objectiveWorkspace.evidencePreviewLimit', {
-															shown: EVIDENCE_GROUP_PREVIEW_LIMIT,
-															total: group.units.length
-														})}
-													</p>
-												{/if}
-											</section>
+							</details>
+						{:else}
+							<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
+						{/if}
+					</section>
+				</div>
+
+				<aside
+					class="objective-side-panel"
+					aria-label={$t('research.objectiveWorkspace.evidenceDetail')}
+				>
+					<div class="section-heading">
+						<div>
+							<h3>{$t('research.objectiveWorkspace.evidenceDetail')}</h3>
+							<p>{$t('research.objectiveWorkspace.evidenceDetailBody')}</p>
+						</div>
+					</div>
+					{#if selectedEvidenceUnit}
+						<article class="evidence-detail">
+							<div class="evidence-detail__header">
+								<h4>{evidenceUnitTitle(selectedEvidenceUnit)}</h4>
+								<span>{selectedEvidenceUnit.resolution_status}</span>
+							</div>
+							<section class="evidence-chain-section">
+								<h5>{$t('research.objectiveWorkspace.finding')}</h5>
+								<p>{evidenceUnitValue(selectedEvidenceUnit)}</p>
+								<dl>
+									<div>
+										<dt>{$t('research.objectiveWorkspace.kind')}</dt>
+										<dd>{selectedEvidenceUnit.unit_kind}</dd>
+									</div>
+									{#if selectedEvidenceUnit.property_normalized}
+										<div>
+											<dt>{$t('research.objectiveWorkspace.property')}</dt>
+											<dd>{selectedEvidenceUnit.property_normalized}</dd>
+										</div>
+									{/if}
+									{#if selectedEvidenceUnit.unit}
+										<div>
+											<dt>{$t('research.objectiveWorkspace.value')}</dt>
+											<dd>{selectedEvidenceUnit.unit}</dd>
+										</div>
+									{/if}
+									<div>
+										<dt>{$t('research.objectiveWorkspace.confidence')}</dt>
+										<dd>{confidenceLabel(selectedEvidenceUnit.confidence)}</dd>
+									</div>
+								</dl>
+							</section>
+
+							{#if recordEntries(selectedEvidenceUnit.sample_context).length || recordEntries(selectedEvidenceUnit.process_context).length}
+								<section class="evidence-chain-section">
+									<h5>{$t('research.objectiveWorkspace.sampleAndProcess')}</h5>
+									<div class="evidence-context-list">
+										{#each recordEntries(selectedEvidenceUnit.sample_context) as entry, index (`sample-${entry.key}-${index}`)}
+											<span>{entry.key}: {entry.value}</span>
+										{/each}
+										{#each recordEntries(selectedEvidenceUnit.process_context) as entry, index (`process-${entry.key}-${index}`)}
+											<span>{entry.key}: {entry.value}</span>
 										{/each}
 									</div>
-								{:else}
-									<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
-								{/if}
-							</div>
-						</details>
+								</section>
+							{/if}
+
+							{#if recordEntries(selectedEvidenceUnit.test_condition).length}
+								<section class="evidence-chain-section">
+									<h5>{$t('research.objectiveWorkspace.testCondition')}</h5>
+									<div class="evidence-context-list">
+										{#each recordEntries(selectedEvidenceUnit.test_condition) as entry, index (`test-${entry.key}-${index}`)}
+											<span>{entry.key}: {entry.value}</span>
+										{/each}
+									</div>
+								</section>
+							{/if}
+
+							{#if recordEntries(selectedEvidenceUnit.baseline_context).length}
+								<section class="evidence-chain-section">
+									<h5>{$t('research.objectiveWorkspace.comparisonBaseline')}</h5>
+									<div class="evidence-context-list">
+										{#each recordEntries(selectedEvidenceUnit.baseline_context) as entry, index (`baseline-${entry.key}-${index}`)}
+											<span>{entry.key}: {entry.value}</span>
+										{/each}
+									</div>
+								</section>
+							{/if}
+
+							{#if recordEntries(selectedEvidenceUnit.resolved_condition).length}
+								<section class="evidence-chain-section">
+									<h5>{$t('research.objectiveWorkspace.resolvedCondition')}</h5>
+									<div class="evidence-context-list">
+										{#each recordEntries(selectedEvidenceUnit.resolved_condition) as entry, index (`resolved-${entry.key}-${index}`)}
+											<span>{entry.key}: {entry.value}</span>
+										{/each}
+									</div>
+								</section>
+							{/if}
+
+							<section class="evidence-chain-section evidence-source-list">
+								<h5>{$t('research.objectiveWorkspace.sourceTraceback')}</h5>
+								{#each sourceEntries(selectedEvidenceUnit) as source, index (`${source.label}-${index}`)}
+									{#if source.documentId}
+										<!-- eslint-disable svelte/no-navigation-without-resolve -->
+										<a
+											href={`${resolve('/collections/[id]/documents/[document_id]', {
+												id: collectionId,
+												document_id: source.documentId
+											})}${source.query}`}>{source.label}</a
+										>
+										<!-- eslint-enable svelte/no-navigation-without-resolve -->
+									{:else}
+										<span>{source.label}</span>
+									{/if}
+								{/each}
+							</section>
+						</article>
 					{:else}
 						<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
 					{/if}
-				</section>
-			</div>
-
-			<aside
-				class="objective-side-panel"
-				aria-label={$t('research.objectiveWorkspace.evidenceDetail')}
-			>
-				<div class="section-heading">
-					<div>
-						<h3>{$t('research.objectiveWorkspace.evidenceDetail')}</h3>
-						<p>{$t('research.objectiveWorkspace.evidenceDetailBody')}</p>
-					</div>
-				</div>
-				{#if selectedEvidenceUnit}
-					<article class="evidence-detail">
-						<div class="evidence-detail__header">
-							<h4>{evidenceUnitTitle(selectedEvidenceUnit)}</h4>
-							<span>{selectedEvidenceUnit.resolution_status}</span>
-						</div>
-						<section class="evidence-chain-section">
-							<h5>{$t('research.objectiveWorkspace.finding')}</h5>
-							<p>{evidenceUnitValue(selectedEvidenceUnit)}</p>
-							<dl>
-								<div>
-									<dt>{$t('research.objectiveWorkspace.kind')}</dt>
-									<dd>{selectedEvidenceUnit.unit_kind}</dd>
-								</div>
-								{#if selectedEvidenceUnit.property_normalized}
-									<div>
-										<dt>{$t('research.objectiveWorkspace.property')}</dt>
-										<dd>{selectedEvidenceUnit.property_normalized}</dd>
-									</div>
-								{/if}
-								{#if selectedEvidenceUnit.unit}
-									<div>
-										<dt>{$t('research.objectiveWorkspace.value')}</dt>
-										<dd>{selectedEvidenceUnit.unit}</dd>
-									</div>
-								{/if}
-								<div>
-									<dt>{$t('research.objectiveWorkspace.confidence')}</dt>
-									<dd>{confidenceLabel(selectedEvidenceUnit.confidence)}</dd>
-								</div>
-							</dl>
-						</section>
-
-						{#if recordEntries(selectedEvidenceUnit.sample_context).length || recordEntries(selectedEvidenceUnit.process_context).length}
-							<section class="evidence-chain-section">
-								<h5>{$t('research.objectiveWorkspace.sampleAndProcess')}</h5>
-								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.sample_context) as entry, index (`sample-${entry.key}-${index}`)}
-										<span>{entry.key}: {entry.value}</span>
-									{/each}
-									{#each recordEntries(selectedEvidenceUnit.process_context) as entry, index (`process-${entry.key}-${index}`)}
-										<span>{entry.key}: {entry.value}</span>
-									{/each}
-								</div>
-							</section>
-						{/if}
-
-						{#if recordEntries(selectedEvidenceUnit.test_condition).length}
-							<section class="evidence-chain-section">
-								<h5>{$t('research.objectiveWorkspace.testCondition')}</h5>
-								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.test_condition) as entry, index (`test-${entry.key}-${index}`)}
-										<span>{entry.key}: {entry.value}</span>
-									{/each}
-								</div>
-							</section>
-						{/if}
-
-						{#if recordEntries(selectedEvidenceUnit.baseline_context).length}
-							<section class="evidence-chain-section">
-								<h5>{$t('research.objectiveWorkspace.comparisonBaseline')}</h5>
-								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.baseline_context) as entry, index (`baseline-${entry.key}-${index}`)}
-										<span>{entry.key}: {entry.value}</span>
-									{/each}
-								</div>
-							</section>
-						{/if}
-
-						{#if recordEntries(selectedEvidenceUnit.resolved_condition).length}
-							<section class="evidence-chain-section">
-								<h5>{$t('research.objectiveWorkspace.resolvedCondition')}</h5>
-								<div class="evidence-context-list">
-									{#each recordEntries(selectedEvidenceUnit.resolved_condition) as entry, index (`resolved-${entry.key}-${index}`)}
-										<span>{entry.key}: {entry.value}</span>
-									{/each}
-								</div>
-							</section>
-						{/if}
-
-						<section class="evidence-chain-section evidence-source-list">
-							<h5>{$t('research.objectiveWorkspace.sourceTraceback')}</h5>
-							{#each sourceEntries(selectedEvidenceUnit) as source, index (`${source.label}-${index}`)}
-								{#if source.documentId}
-									<!-- eslint-disable svelte/no-navigation-without-resolve -->
-									<a
-										href={`${resolve('/collections/[id]/documents/[document_id]', {
-											id: collectionId,
-											document_id: source.documentId
-										})}${source.query}`}>{source.label}</a
-									>
-									<!-- eslint-enable svelte/no-navigation-without-resolve -->
-								{:else}
-									<span>{source.label}</span>
-								{/if}
-							{/each}
-						</section>
-					</article>
-				{:else}
-					<div class="empty-panel">{$t('research.objectiveWorkspace.noEvidenceUnits')}</div>
-				{/if}
-			</aside>
+				</aside>
 			</section>
 		</details>
 
@@ -1409,7 +1164,7 @@
 
 	.objective-hero,
 	.objective-state-card,
-	.objective-report-aside,
+	.objective-summary-panel,
 	.objective-section,
 	.objective-side-panel,
 	.objective-audit-shell {
@@ -1540,39 +1295,39 @@
 		color: var(--danger-text);
 	}
 
-	.objective-report-layout {
+	.objective-summary-layout {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+		grid-template-columns: minmax(0, 1fr);
 		gap: 18px;
 		align-items: start;
 	}
 
 	.objective-section,
-	.objective-report-aside,
+	.objective-summary-panel,
 	.objective-side-panel {
 		padding: 20px;
 	}
 
 	.objective-section,
-	.objective-report-aside,
+	.objective-summary-panel,
 	.objective-side-panel,
 	.objective-audit-shell,
-		.objective-main-column,
-		.objective-summary-list,
-		.research-focus,
-		.representative-evidence,
-		.evidence-group-list,
-		.evidence-group,
-		.paper-contribution-list,
-		.evidence-detail,
-		.evidence-chain-section,
-		.evidence-context-list,
-		.evidence-source-list,
-		.evidence-audit,
-		.evidence-audit__body,
-		.supporting-evidence-list,
-		.evidence-unit-list,
-		.evidence-toolbar {
+	.objective-main-column,
+	.objective-summary-list,
+	.research-focus,
+	.representative-evidence,
+	.evidence-group-list,
+	.evidence-group,
+	.paper-contribution-list,
+	.evidence-detail,
+	.evidence-chain-section,
+	.evidence-context-list,
+	.evidence-source-list,
+	.evidence-audit,
+	.evidence-audit__body,
+	.supporting-evidence-list,
+	.evidence-unit-list,
+	.evidence-toolbar {
 		display: grid;
 		gap: 14px;
 		min-width: 0;
@@ -1652,188 +1407,6 @@
 		text-transform: uppercase;
 	}
 
-	.objective-report-document,
-	.objective-report-empty {
-		display: grid;
-		gap: 18px;
-		min-width: 0;
-	}
-
-	.objective-report-document {
-		max-width: 920px;
-		padding: 4px 0 16px;
-	}
-
-	.objective-report-reader-header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 16px;
-		border-bottom: 1px solid var(--border-default);
-		padding-bottom: 16px;
-		min-width: 0;
-	}
-
-	.objective-report-reader-header div:first-child {
-		display: grid;
-		gap: 5px;
-		min-width: 0;
-	}
-
-	.objective-report-reader-header h3 {
-		margin: 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 18px;
-		text-transform: uppercase;
-	}
-
-	.objective-report-reader-header p {
-		margin: 0;
-		color: var(--text-secondary);
-		font-size: 14px;
-		line-height: 22px;
-	}
-
-	.objective-report-document__meta,
-	.objective-report-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		min-width: 0;
-	}
-
-	.objective-report-document__meta span {
-		border: 1px solid var(--border-default);
-		border-radius: 999px;
-		padding: 4px 9px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 16px;
-		background: var(--bg-subtle);
-	}
-
-	.objective-report-document h1,
-	.objective-report-document h2,
-	.objective-report-document h3,
-	.objective-report-empty h4 {
-		margin: 0;
-		color: var(--text-primary);
-		overflow-wrap: anywhere;
-	}
-
-	.objective-report-document h1 {
-		font-size: 28px;
-		line-height: 36px;
-	}
-
-	.objective-report-document h2 {
-		margin-top: 12px;
-		border-top: 1px solid var(--border-default);
-		padding-top: 22px;
-		font-size: 21px;
-		line-height: 30px;
-	}
-
-	.objective-report-document h3,
-	.objective-report-empty h4 {
-		font-size: 17px;
-		line-height: 24px;
-	}
-
-	.objective-report-document p,
-	.objective-report-document li,
-	.objective-report-empty p {
-		margin: 0;
-		color: var(--text-primary);
-		font-size: 15px;
-		line-height: 26px;
-		overflow-wrap: anywhere;
-	}
-
-	.objective-report-document__list {
-		display: grid;
-		gap: 7px;
-		margin: 0;
-		padding-left: 22px;
-	}
-
-	.objective-report-table-wrap {
-		overflow-x: auto;
-		max-width: 100%;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-	}
-
-	.objective-report-table {
-		width: 100%;
-		min-width: 640px;
-		border-collapse: collapse;
-		background: var(--surface-card);
-	}
-
-	.objective-report-table th,
-	.objective-report-table td {
-		border-bottom: 1px solid var(--border-default);
-		padding: 10px 12px;
-		text-align: left;
-		vertical-align: top;
-		overflow-wrap: anywhere;
-		word-break: break-word;
-	}
-
-	.objective-report-table th {
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 18px;
-		text-transform: uppercase;
-		background: var(--bg-subtle);
-	}
-
-	.objective-report-table td {
-		color: var(--text-primary);
-		font-size: 14px;
-		line-height: 22px;
-	}
-
-	.objective-report-table tr:last-child td {
-		border-bottom: 0;
-	}
-
-	.objective-report-actions button {
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-		padding: 9px 12px;
-		color: var(--text-primary);
-		background: var(--surface-card);
-		cursor: pointer;
-		font: inherit;
-		font-weight: 650;
-	}
-
-	.objective-report-actions--compact {
-		justify-content: flex-end;
-		flex: 0 0 auto;
-	}
-
-	.objective-report-actions--compact button {
-		padding: 7px 10px;
-		font-size: 13px;
-	}
-
-	.objective-report-actions button:hover:not(:disabled) {
-		border-color: var(--color-accent);
-	}
-
-	.objective-report-actions button:disabled {
-		cursor: wait;
-		opacity: 0.65;
-	}
-
-	.objective-report-error {
-		color: var(--danger-text);
-	}
-
 	.research-focus h4,
 	.representative-evidence h4,
 	.comparison-readiness h4 {
@@ -1849,17 +1422,17 @@
 		gap: 10px;
 	}
 
-	.objective-report-aside .research-focus__grid {
+	.objective-summary-panel .research-focus__grid {
 		grid-template-columns: 1fr;
 	}
 
-		.research-focus__grid div,
-		.comparison-readiness {
-			border: 1px solid var(--border-default);
-			border-radius: var(--radius-md);
-			padding: 12px;
-			background: var(--bg-subtle);
-		}
+	.research-focus__grid div,
+	.comparison-readiness {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--bg-subtle);
+	}
 
 	.research-focus__grid p {
 		margin: 4px 0 0;
@@ -1875,7 +1448,7 @@
 		gap: 8px;
 	}
 
-	.objective-report-aside .evidence-readiness {
+	.objective-summary-panel .evidence-readiness {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
@@ -2353,7 +1926,6 @@
 	}
 
 	@media (max-width: 1040px) {
-		.objective-report-layout,
 		.objective-workspace-grid {
 			grid-template-columns: 1fr;
 		}
@@ -2371,7 +1943,6 @@
 		}
 
 		.objective-hero,
-		.objective-report-reader-header,
 		.section-heading,
 		.evidence-group__header,
 		.paper-contribution-card__header,
@@ -2400,12 +1971,12 @@
 			justify-items: start;
 		}
 
-			.evidence-toolbar,
-			.supporting-evidence-list,
-			.evidence-unit-list,
-			.evidence-readiness,
-			.research-focus__grid,
-			.representative-evidence__list,
+		.evidence-toolbar,
+		.supporting-evidence-list,
+		.evidence-unit-list,
+		.evidence-readiness,
+		.research-focus__grid,
+		.representative-evidence__list,
 		.paper-contribution-card__metrics,
 		.paper-contribution-card dl,
 		.evidence-detail dl {

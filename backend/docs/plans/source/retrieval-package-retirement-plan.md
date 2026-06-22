@@ -56,7 +56,7 @@ evaluation.
   `infra/source/contracts`, `infra/source/ingestion`, and
   `infra/source/runtime`
 - active Source runtime package code no longer imports `retrieval.*`
-- Core-first graph/report cutover has already happened
+- Core-first graph cutover and report-surface retirement have already happened
 - public query surfaces backed by GraphRAG have already been retired
 
 ### What Still Remains

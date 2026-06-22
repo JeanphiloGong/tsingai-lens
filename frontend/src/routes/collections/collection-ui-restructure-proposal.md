@@ -141,7 +141,6 @@ the product.
 ### Layer 4: Derived / Advanced Views
 
 - `graph`
-- `reports`
 - export tools
 
 These remain available, but they should not compete with the main collection
@@ -163,7 +162,6 @@ Under `More`:
 
 - `Protocol`
 - `Graph`
-- `Reports`
 - exports
 
 ### Transitional Navigation
@@ -324,7 +322,8 @@ should be collapsible by default once the collection has files.
 
 ### Advanced Section
 
-Reports, raw settings, and debugging-style metadata should remain collapsed.
+Raw settings and debugging-style metadata should remain collapsed. Retired
+reports should not be reintroduced as a collapsed alternate answer path.
 
 ## Page Role Proposal
 

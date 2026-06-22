@@ -53,7 +53,7 @@
   collection 的研究助手入口；它必须显示 `collection_grounded`、
   `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的
   `material_id` 作为显式 focus context
-- 报告结果不再是当前浏览器主流程；workspace 只保留降级说明，不再维护前端 reports API 客户端
+- 报告结果不再是当前浏览器主流程；frontend 不再维护 reports API 客户端或工作区占位入口
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
   产品入口统一收敛到 collection workspace 和 `/api/docs`
 

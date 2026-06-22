@@ -24,7 +24,7 @@ This node owns the collection workspace route family in the frontend.
   diagnostics
 - render collection-level document profile screening signals
 - render canonical collection materials, collection-scoped material profiles, and
-  persisted material LLM conclusion reports as a More / material dossier surface
+  material research understanding as a More / material dossier surface
 - render collection-level evidence cards and source-anchor entry points
 - render global comparison review as a More / All Comparisons surface
 - render the collection-bound AI research copilot as a top-level collection tab
@@ -36,7 +36,8 @@ This node owns the collection workspace route family in the frontend.
   explicit split-view expansion only after downstream Core artifacts are ready
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
-- surface graph and report capabilities to the user
+- surface graph, research-understanding, evidence, and comparison capabilities
+  to the user
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

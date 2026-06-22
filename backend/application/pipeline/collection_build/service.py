@@ -9,6 +9,7 @@ from config import CONFIG_DIR
 from infra.source.config.pipeline_mode import IndexingMethod
 
 from application.core.comparison_service import ComparisonService
+from application.core.research_view_aggregation_service import ResearchViewAggregationService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.research_objective_service import (
@@ -23,6 +24,7 @@ from application.pipeline.collection_build.definitions import (
     FINALIZE,
     PAPER_FACTS,
     RESEARCH_OBJECTIVES,
+    RESEARCH_UNDERSTANDINGS,
     SOURCE_ARTIFACTS,
 )
 from application.pipeline.collection_build.nodes import (
@@ -33,6 +35,7 @@ from application.pipeline.collection_build.nodes import (
     finalize,
     paper_facts,
     research_objectives,
+    research_understandings,
     source_artifacts,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
@@ -79,6 +82,7 @@ class CollectionBuildPipelineService:
         paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
+        research_view_aggregation_service: ResearchViewAggregationService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
@@ -101,6 +105,15 @@ class CollectionBuildPipelineService:
         )
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
+        )
+        self.research_view_aggregation_service = (
+            research_view_aggregation_service
+            or ResearchViewAggregationService(
+                collection_service=self.collection_service,
+                document_profile_service=self.document_profile_service,
+                paper_facts_service=self.paper_facts_service,
+                comparison_service=self.comparison_service,
+            )
         )
 
     def _resolve_load_config(self):
@@ -190,6 +203,7 @@ class CollectionBuildPipelineService:
                     "research_objective_service": self.research_objective_service,
                     "paper_facts_service": self.paper_facts_service,
                     "comparison_service": self.comparison_service,
+                    "research_view_aggregation_service": self.research_view_aggregation_service,
                     "objective_progress_callback": self._build_objective_progress_callback(
                         task_id,
                         collection_id,
@@ -264,6 +278,7 @@ class CollectionBuildPipelineService:
                 RESEARCH_OBJECTIVES: research_objectives.run,
                 PAPER_FACTS: paper_facts.run,
                 COMPARISON_ROWS: comparison_rows.run,
+                RESEARCH_UNDERSTANDINGS: research_understandings.run,
                 FINALIZE: finalize.run,
             }
         )

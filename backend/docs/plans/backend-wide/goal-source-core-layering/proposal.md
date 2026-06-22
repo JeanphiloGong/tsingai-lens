@@ -191,8 +191,6 @@ Derived:
   -> `application/derived/graph_service.py`
 - `application/graph/core_projection_service.py`
   -> `application/derived/graph_projection_service.py`
-- `application/reports/service.py`
-  -> `application/derived/report_service.py`
 - `application/protocol/*`
   -> `application/derived/protocol/*`
 
@@ -237,14 +235,10 @@ Derived:
 
 - `controllers/graph.py`
   -> `controllers/derived/graph.py`
-- `controllers/reports.py`
-  -> `controllers/derived/reports.py`
 - `controllers/protocol.py`
   -> `controllers/derived/protocol.py`
 - `controllers/schemas/graph.py`
   -> `controllers/schemas/derived/graph.py`
-- `controllers/schemas/report.py`
-  -> `controllers/schemas/derived/report.py`
 - `controllers/schemas/protocol.py`
   -> `controllers/schemas/derived/protocol.py`
 
@@ -415,7 +409,7 @@ Runtime checks:
   - indexing task orchestration
   - documents, evidence, and comparisons services
   - workspace API
-  - graph/report/protocol derived surfaces
+  - graph/protocol derived surfaces
 
 ## Non-Goals And Guardrails
 

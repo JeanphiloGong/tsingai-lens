@@ -9,6 +9,9 @@ vi.mock('./api', () => ({
 }));
 
 const {
+	createResearchUnderstandingCuration,
+	createResearchUnderstandingFeedback,
+	fetchResearchUnderstandingCurations,
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
@@ -90,6 +93,38 @@ describe('research view shared helpers', () => {
 			papers: [{ document_id: 'doc_1', source_filename: 'paper-a.pdf', state: 'ready' }],
 			sample_matrix: {
 				rows: [{ row_id: 'row_1', sample_id: 'S1', sample_label: 'S1', material: '316L' }]
+			},
+			understanding: {
+				schema_version: 'research_understanding.v1',
+				state: 'ready',
+				scope: {
+					scope_type: 'material',
+					collection_id: 'col_123',
+					material_id: 'mat_316l',
+					title: '316L stainless steel'
+				},
+				claims: [
+					{
+						claim_id: 'claim_1',
+						claim_type: 'finding',
+						statement: '316L has traceable density evidence.',
+						status: 'supported',
+						evidence_ref_ids: ['E001']
+					}
+				],
+				relations: [],
+				evidence_refs: [
+					{
+						evidence_ref_id: 'E001',
+						source_kind: 'table',
+						document_id: 'doc_1',
+						label: 'P001 Table 1',
+						traceability_status: 'resolved'
+					}
+				],
+				contexts: [],
+				warnings: [],
+				summary: { claim_count: 1, relation_count: 0, evidence_ref_count: 1, context_count: 0 }
 			}
 		});
 
@@ -102,6 +137,10 @@ describe('research view shared helpers', () => {
 		expect(materialProfile.papers[0].title).toBe('paper-a.pdf');
 		expect(materialProfile.papers[0].source_filename).toBe('paper-a.pdf');
 		expect(materialProfile.sample_matrix.rows[0].sample_id).toBe('S1');
+		expect(materialProfile.understanding?.claims[0].statement).toBe(
+			'316L has traceable density evidence.'
+		);
+		expect(materialProfile.understanding?.evidence_refs[0].label).toBe('P001 Table 1');
 
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
@@ -149,7 +188,30 @@ describe('research view shared helpers', () => {
 			paper_frames: [{ frame_id: 'opf_1', document_id: 'doc_1', relevance: 'high' }],
 			evidence_routes: [],
 			evidence_units: [],
-			logic_chain: null
+			logic_chain: null,
+			understanding: {
+				schema_version: 'research_understanding.v1',
+				state: 'limited',
+				scope: {
+					scope_type: 'objective',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					title: 'How does heat treatment affect corrosion resistance?'
+				},
+				claims: [
+					{
+						claim_id: 'claim_obj_1',
+						claim_type: 'finding',
+						statement: 'Current evidence is limited.',
+						status: 'limited'
+					}
+				],
+				relations: [],
+				evidence_refs: [],
+				contexts: [],
+				warnings: ['claims_without_evidence_refs'],
+				summary: { claim_count: 1, relation_count: 0, evidence_ref_count: 0, context_count: 0 }
+			}
 		});
 
 		const objectiveView = await fetchObjectiveResearchView('col_123', 'obj_1');
@@ -159,6 +221,135 @@ describe('research view shared helpers', () => {
 		);
 		expect(objectiveView.objective.objective_id).toBe('obj_1');
 		expect(objectiveView.paper_frames[0].frame_id).toBe('opf_1');
+		expect(objectiveView.understanding?.state).toBe('limited');
+		expect(objectiveView.understanding?.claims[0].statement).toBe('Current evidence is limited.');
+	});
+
+	it('posts research understanding feedback through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			feedback_id: 'ruf_1',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			claim_id: 'claim_1',
+			review_status: 'incorrect',
+			issue_type: 'evidence_not_grounded',
+			note: 'The claim cites the wrong table.',
+			reviewer: 'materials-expert',
+			created_at: '2026-06-18T09:00:00+00:00'
+		});
+
+		const feedback = await createResearchUnderstandingFeedback('col_123', {
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			claim_id: 'claim_1',
+			review_status: 'incorrect',
+			issue_type: 'evidence_not_grounded',
+			note: 'The claim cites the wrong table.',
+			reviewer: 'materials-expert'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/feedback',
+			{
+				method: 'POST',
+				body: JSON.stringify({
+					scope_type: 'objective',
+					scope_id: 'obj_1',
+					claim_id: 'claim_1',
+					review_status: 'incorrect',
+					issue_type: 'evidence_not_grounded',
+					note: 'The claim cites the wrong table.',
+					reviewer: 'materials-expert'
+				})
+			}
+		);
+		expect(feedback.feedback_id).toBe('ruf_1');
+	});
+
+	it('posts expert claim curation through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			curation_id: 'ruc_1',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			claim_id: 'claim_1',
+			curated_claim_type: 'mechanism',
+			curated_status: 'limited',
+			curated_statement: 'Nitrogen improves strength with limited mechanism evidence.',
+			curated_evidence_ref_ids: ['ev_1'],
+			curated_context_ids: ['ctx_1'],
+			note: 'Needs microstructure evidence before marking supported.',
+			reviewer: 'materials-expert',
+			updated_at: '2026-06-18T09:00:00+00:00'
+		});
+
+		const curation = await createResearchUnderstandingCuration('col_123', {
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			claim_id: 'claim_1',
+			curated_claim_type: 'mechanism',
+			curated_status: 'limited',
+			curated_statement: 'Nitrogen improves strength with limited mechanism evidence.',
+			curated_evidence_ref_ids: ['ev_1'],
+			curated_context_ids: ['ctx_1'],
+			note: 'Needs microstructure evidence before marking supported.',
+			reviewer: 'materials-expert'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/curations',
+			{
+				method: 'POST',
+				body: JSON.stringify({
+					scope_type: 'objective',
+					scope_id: 'obj_1',
+					claim_id: 'claim_1',
+					curated_claim_type: 'mechanism',
+					curated_status: 'limited',
+					curated_statement: 'Nitrogen improves strength with limited mechanism evidence.',
+					curated_evidence_ref_ids: ['ev_1'],
+					curated_context_ids: ['ctx_1'],
+					note: 'Needs microstructure evidence before marking supported.',
+					reviewer: 'materials-expert'
+				})
+			}
+		);
+		expect(curation.curation_id).toBe('ruc_1');
+	});
+
+	it('lists expert claim curations through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			items: [
+				{
+					curation_id: 'ruc_1',
+					collection_id: 'col_123',
+					scope_type: 'objective',
+					scope_id: 'obj_1',
+					claim_id: 'claim_1',
+					curated_claim_type: 'mechanism',
+					curated_status: 'limited',
+					curated_statement: 'Nitrogen improves strength with limited mechanism evidence.',
+					curated_evidence_ref_ids: ['ev_1'],
+					curated_context_ids: ['ctx_1'],
+					note: 'Needs microstructure evidence before marking supported.',
+					reviewer: 'materials-expert',
+					updated_at: '2026-06-18T09:00:00+00:00'
+				}
+			]
+		});
+
+		const curations = await fetchResearchUnderstandingCurations('col_123', {
+			scope_type: 'objective',
+			scope_id: 'obj_1'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/curations?scope_type=objective&scope_id=obj_1'
+		);
+		expect(curations[0].curation_id).toBe('ruc_1');
+		expect(curations[0].curated_status).toBe('limited');
 	});
 
 	it('shortens long internal identifiers for display fallback', () => {

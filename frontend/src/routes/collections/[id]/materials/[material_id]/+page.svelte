@@ -2,28 +2,15 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { onDestroy } from 'svelte';
-	import { errorMessage, isHttpStatusError } from '../../../../_shared/api';
-	import { language, t } from '../../../../_shared/i18n';
+	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
+	import { errorMessage } from '../../../../_shared/api';
+	import { t } from '../../../../_shared/i18n';
 	import {
-		buildMaterialReviewMarkdownUrl,
-		buildMaterialReviewPdfUrl,
-		createMaterialReviewReport,
-		fetchMaterialReviewReport,
-		type MaterialReviewReport
-	} from '../../../../_shared/materialReviewReport';
-	import {
-		createMaterialReport,
-		fetchMaterialReport,
 		fetchMaterialResearchView,
 		formatEvidenceBackedValue,
 		formatShortIdentifier,
 		type EvidenceBackedValue,
 		type EvidenceReference,
-		type MaterialReportArtifact,
-		type MaterialReportDocument,
-		type MaterialReportPerformanceResult,
-		type MaterialReportStateChain,
 		type MaterialPaperCoverage,
 		type MaterialProfile,
 		type PropertySummary,
@@ -32,26 +19,6 @@
 	} from '../../../../_shared/researchView';
 
 	type Translate = (key: string, vars?: Record<string, string | number>) => string;
-
-	type MaterialDossierTab = 'structured' | 'narrative';
-
-	type MaterialReportMarkdownInline =
-		| { type: 'text'; text: string }
-		| { type: 'citation'; id: string };
-
-	type MaterialReportMarkdownTable = {
-		headers: MaterialReportMarkdownInline[][];
-		rows: MaterialReportMarkdownInline[][][];
-	};
-
-	type MaterialReportMarkdownBlock =
-		| { type: 'heading'; level: number; key: string; text: string; anchor: string }
-		| { type: 'paragraph'; key: string; parts: MaterialReportMarkdownInline[] }
-		| { type: 'list'; key: string; ordered: boolean; items: MaterialReportMarkdownInline[][] }
-		| { type: 'table'; key: string; table: MaterialReportMarkdownTable }
-		| { type: 'code'; key: string; text: string }
-		| { type: 'quote'; key: string; parts: MaterialReportMarkdownInline[] }
-		| { type: 'rule'; key: string };
 
 	type PropertyColumn = {
 		key: string;
@@ -120,47 +87,10 @@
 		evidenceCode: string;
 	};
 
-	type KeyFinding = {
-		key: string;
-		title: string;
-		body: string;
-		type: string;
-		confidence: string;
-		supportedValues: SupportedValue[];
-		evidenceCodes: string[];
-	};
-
-	type ChainEntry = {
-		key: string;
-		label: string;
-		value: string;
-	};
-
-	type ParameterChainMetric = {
-		key: string;
-		supportedValue: SupportedValue;
-		isBest: boolean;
-	};
-
 	type EvidenceCodeSummary = {
 		visibleLabels: string[];
 		hiddenCount: number;
 		title: string;
-	};
-
-	type BestParameterChain = {
-		key: string;
-		row: SampleMatrixRow;
-		sampleLabel: string;
-		scoreLabel: string;
-		background: string;
-		processEntries: ChainEntry[];
-		testConditionEntries: ChainEntry[];
-		metrics: ParameterChainMetric[];
-		comparisonSummary: string;
-		notLeadingProperties: string[];
-		evidenceCodes: string[];
-		sourceLocation: string;
 	};
 
 	type MaterialProblemCard = {
@@ -202,34 +132,6 @@
 		'post treatment summary',
 		'scan strategy'
 	].map(processAlias);
-	const TEST_CONDITION_HINTS = [
-		'test',
-		'condition',
-		'environment',
-		'electrolyte',
-		'solution',
-		'strain',
-		'loading',
-		'frequency',
-		'specimen',
-		'surface',
-		'temperature',
-		'corrosion',
-		'medium',
-		'ph'
-	];
-	const RESULT_CONTEXT_HINTS = [
-		'density',
-		'hardness',
-		'strength',
-		'elongation',
-		'potential',
-		'current',
-		'resistance',
-		'defect',
-		'grain',
-		'melt pool'
-	];
 
 	const PREFERRED_PROPERTY_GROUPS = [
 		{
@@ -266,35 +168,15 @@
 
 	let materialProfile: MaterialProfile | null = null;
 	let selectedEvidence: EvidenceDrawerDetail | null = null;
-	let pdfDrawerOpen = false;
-	let pdfReport: MaterialReviewReport | null = null;
-	let pdfReportLoading = false;
-	let pdfReportError = '';
-	let pdfReportPollTimer: number | null = null;
-	let materialReport: MaterialReportArtifact | null = null;
-	let materialReportLoading = false;
-	let materialReportError = '';
 	let loading = false;
 	let error = '';
 	let loadedKey = '';
-	let activeDossierTab: MaterialDossierTab = 'structured';
 
 	$: collectionId = $page.params.id ?? '';
 	$: materialId = $page.params.material_id ?? '';
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
-	$: reportPackage = materialProfile?.report_package ?? null;
-	$: materialReportReady =
-		materialReport?.markdown &&
-		(materialReport.status === 'ready' || materialReport.status === 'ready_with_warnings');
-	$: reportDocument =
-		materialReportReady && materialReport
-			? materialReportDocumentFromArtifact(materialReport)
-			: (reportPackage?.document ?? null);
-	$: reportDocumentBlocks = reportDocument ? parseMaterialReportMarkdown(reportDocument) : [];
-	$: reportChains = reportPackage?.representative_states?.length
-		? reportPackage.representative_states
-		: (reportPackage?.material_state_chains ?? []);
+	$: understanding = materialProfile?.understanding ?? null;
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
@@ -302,7 +184,6 @@
 	$: performanceRows = materialPerformanceRows(
 		focusedSampleRows,
 		propertyColumns,
-		bestParameterChains,
 		propertySummaries,
 		materialProfile?.canonical_name ?? materialId,
 		$t
@@ -315,8 +196,7 @@
 		collectionId,
 		$t,
 		propertySummaries,
-		materialProfile?.canonical_name ?? materialId,
-		reportPackage
+		materialProfile?.canonical_name ?? materialId
 	);
 	$: processSummary = buildProcessSummary(focusedSampleRows, $t);
 	$: comparisonRows = buildComparisonRows(focusedSampleRows, propertyColumns, processSummary, $t);
@@ -328,22 +208,6 @@
 		materialProfile?.canonical_name ?? materialId,
 		$t
 	).slice(0, 4);
-	$: keyFindings = buildKeyFindings(
-		focusedSampleRows,
-		propertyColumns,
-		processSummary,
-		evidenceCodeMap,
-		$t,
-		propertySummaries,
-		materialProfile?.canonical_name ?? materialId
-	);
-	$: bestParameterChains = buildBestParameterChains(
-		materialProfile,
-		focusedSampleRows,
-		propertyColumns,
-		evidenceCodeMap,
-		$t
-	);
 	$: bestPropertyValues = buildBestPropertyValues(
 		focusedSampleRows,
 		propertyColumns,
@@ -366,26 +230,17 @@
 		propertyColumns.length;
 	$: if (collectionId && materialId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
-		resetPdfReportState();
-		resetMaterialReportState();
 		void loadMaterialPage();
 	}
-	$: pdfReportReady = pdfReport?.status === 'ready' || pdfReport?.status === 'ready_with_warnings';
-	$: pdfReportGenerating = pdfReport?.status === 'generating';
-	$: pdfReportBusy = pdfReportLoading || pdfReportGenerating;
-
-	onDestroy(clearReportPoll);
 
 	async function loadMaterialPage() {
 		await loadMaterialProfile();
-		await loadMaterialReportStatus();
 	}
 
 	async function loadMaterialProfile() {
 		loading = true;
 		error = '';
 		selectedEvidence = null;
-		pdfDrawerOpen = false;
 		try {
 			materialProfile = await fetchMaterialResearchView(collectionId, materialId);
 		} catch (err) {
@@ -396,118 +251,17 @@
 		}
 	}
 
-	async function loadMaterialReportStatus() {
-		if (!collectionId || !materialId) return;
-		const requestedCollection = collectionId;
-		const requestedMaterial = materialId;
-		materialReportLoading = true;
-		materialReportError = '';
-		try {
-			const report = await fetchMaterialReport(requestedCollection, requestedMaterial);
-			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
-			materialReport = report;
-		} catch (err) {
-			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
-			if (isHttpStatusError(err, 404)) {
-				materialReport = null;
-			} else {
-				materialReportError = errorMessage(err);
-			}
-		} finally {
-			if (requestedCollection === collectionId && requestedMaterial === materialId) {
-				materialReportLoading = false;
-			}
-		}
-	}
-
-	async function generateMaterialReport(forceRegenerate = false) {
-		if (!collectionId || !materialId || materialReportLoading) return;
-		const requestedCollection = collectionId;
-		const requestedMaterial = materialId;
-		materialReportLoading = true;
-		materialReportError = '';
-		try {
-			const report = await createMaterialReport(requestedCollection, requestedMaterial, {
-				language: 'zh',
-				force_regenerate: forceRegenerate
-			});
-			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
-			materialReport = report;
-		} catch (err) {
-			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
-			materialReportError = errorMessage(err);
-		} finally {
-			if (requestedCollection === collectionId && requestedMaterial === materialId) {
-				materialReportLoading = false;
-			}
-		}
-	}
-
-	function resetMaterialReportState() {
-		materialReport = null;
-		materialReportLoading = false;
-		materialReportError = '';
-	}
-
-	async function loadPdfReportStatus() {
-		if (!collectionId || !materialId) return;
-		const requestedCollection = collectionId;
-		const requestedMaterial = materialId;
-		pdfReportLoading = true;
-		pdfReportError = '';
-		try {
-			const report = await fetchMaterialReviewReport(requestedCollection, requestedMaterial);
-			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
-			pdfReport = report;
-			updateReportPolling(report);
-		} catch (err) {
-			if (requestedCollection !== collectionId || requestedMaterial !== materialId) return;
-			clearReportPoll();
-			if (isHttpStatusError(err, 404)) {
-				pdfReport = null;
-			} else {
-				pdfReportError = errorMessage(err);
-			}
-		} finally {
-			if (requestedCollection === collectionId && requestedMaterial === materialId) {
-				pdfReportLoading = false;
-			}
-		}
-	}
-
-	function resetPdfReportState() {
-		clearReportPoll();
-		pdfReport = null;
-		pdfReportLoading = false;
-		pdfReportError = '';
-	}
-
-	function updateReportPolling(report: MaterialReviewReport | null) {
-		if (report?.status === 'generating') {
-			scheduleReportPoll();
-		} else {
-			clearReportPoll();
-		}
-	}
-
-	function scheduleReportPoll() {
-		if (!browser) return;
-		clearReportPoll();
-		pdfReportPollTimer = window.setTimeout(() => {
-			pdfReportPollTimer = null;
-			void loadPdfReportStatus();
-		}, 2500);
-	}
-
-	function clearReportPoll() {
-		if (browser && pdfReportPollTimer !== null) {
-			window.clearTimeout(pdfReportPollTimer);
-		}
-		pdfReportPollTimer = null;
-	}
-
 	function materialPapers(): MaterialPaperCoverage[] {
 		return materialProfile?.papers ?? [];
+	}
+
+	function materialHref() {
+		return collectionId && materialId
+			? resolve('/collections/[id]/materials/[material_id]', {
+					id: collectionId,
+					material_id: materialId
+				})
+			: '';
 	}
 
 	function sampleMatrixColumns(
@@ -967,17 +721,6 @@
 			.join('; ');
 	}
 
-	function propertyRole(column: PropertyColumn) {
-		const text = normalizeForMatch(`${column.key} ${column.label} ${column.shortLabel}`);
-		if (text.includes('density')) return 'density';
-		if (text.includes('elongation') || text.includes('strain')) return 'elongation';
-		if (text.includes('yield') || text.includes('tensile') || text.includes('uts')) {
-			return 'strength';
-		}
-		if (text.includes('hardness')) return 'hardness';
-		return 'other';
-	}
-
 	function bestValueForColumn(rows: SampleMatrixRow[], column: PropertyColumn) {
 		return rows
 			.map((row) => ({
@@ -1005,600 +748,6 @@
 
 	function comparableValueCount(row: SampleMatrixRow, columns: PropertyColumn[]) {
 		return columns.filter((column) => numericValue(row.values[column.key]) !== null).length;
-	}
-
-	function rowLeaderCount(
-		row: SampleMatrixRow,
-		columns: PropertyColumn[],
-		bestByColumn: Map<string, NonNullable<ReturnType<typeof bestValueForColumn>>>
-	) {
-		return columns.filter((column) => {
-			const best = bestByColumn.get(column.key);
-			return Boolean(best && best.row.row_id === row.row_id);
-		}).length;
-	}
-
-	function rowPerformanceScore(
-		row: SampleMatrixRow,
-		columns: PropertyColumn[],
-		bestByColumn: Map<string, NonNullable<ReturnType<typeof bestValueForColumn>>>
-	) {
-		return (
-			rowLeaderCount(row, columns, bestByColumn) * 100 +
-			comparableValueCount(row, columns) * 10 +
-			(row.evidence_refs.length ? 1 : 0)
-		);
-	}
-
-	function bestRowsByCompositeScore(rows: SampleMatrixRow[], columns: PropertyColumn[]) {
-		const bestByColumn = bestValueMap(rows, columns);
-		return rows
-			.map((row, index) => ({
-				row,
-				index,
-				score: rowPerformanceScore(row, columns, bestByColumn)
-			}))
-			.filter((item) => rowLeaderCount(item.row, columns, bestByColumn) > 0)
-			.sort((first, second) => second.score - first.score || first.index - second.index)
-			.slice(0, 3);
-	}
-
-	function processEntryLabel(key: string, translate: Translate) {
-		return processLabel(key, translate);
-	}
-
-	function hasDisplayValue(value: unknown) {
-		if (value === null || value === undefined) return false;
-		const text = String(value).trim();
-		return Boolean(text && text !== '-' && text !== '--');
-	}
-
-	function chainEntryAlias(entry: ChainEntry) {
-		return `${processAlias(entry.label)}:${normalizeForMatch(entry.value)}`;
-	}
-
-	function processChainEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
-		const entries = Object.entries(row.process_context)
-			.filter(([, value]) => hasDisplayValue(value))
-			.filter(([key]) => !isLikelyTestConditionKey(key))
-			.map(([key]) => ({
-				key,
-				label: processEntryLabel(key, translate),
-				value: processValueWithUnit(row, key)
-			}))
-			.filter((entry) => entry.value !== '--');
-
-		const preferred = entries.filter((entry) =>
-			[...PROCESS_SUMMARY_KEYS, ...PROCESS_BRIEF_KEYS.map(processAlias)].includes(
-				processAlias(entry.key)
-			)
-		);
-		const selected = preferred.length ? preferred : entries;
-		return uniqueChainEntries(selected).slice(0, 6);
-	}
-
-	function isLikelyTestConditionKey(key: string) {
-		const normalized = key.toLowerCase().replace(/_/g, ' ');
-		if (normalized.includes('build platform')) return false;
-		return TEST_CONDITION_HINTS.some((hint) => normalized.includes(hint));
-	}
-
-	function isLikelyResultContextKey(key: string) {
-		const normalized = key.toLowerCase().replace(/_/g, ' ');
-		if (normalized.includes('energy density')) return false;
-		return RESULT_CONTEXT_HINTS.some((hint) => normalized.includes(hint));
-	}
-
-	function testConditionEntries(row: SampleMatrixRow, translate: Translate): ChainEntry[] {
-		const processAliases = new Set(processChainEntries(row, translate).map(chainEntryAlias));
-		const fromTestConditions = Object.entries(row.test_condition ?? {})
-			.filter(([, value]) => hasDisplayValue(value))
-			.filter(([key, value]) => isDisplayableConditionEntry(key, value))
-			.map(([key, value]) => ({
-				key: `test:${key}`,
-				label: processEntryLabel(key, translate),
-				value: String(value)
-			}))
-			.filter((entry) => !processAliases.has(chainEntryAlias(entry)));
-		const fromProcessContext = Object.entries(row.process_context)
-			.filter(([, value]) => hasDisplayValue(value))
-			.filter(([key]) => isLikelyTestConditionKey(key))
-			.map(([key]) => ({
-				key: `process:${key}`,
-				label: processEntryLabel(key, translate),
-				value: processValueWithUnit(row, key)
-			}))
-			.filter((entry) => entry.value !== '--');
-		return uniqueChainEntries([...fromTestConditions, ...fromProcessContext]).slice(0, 4);
-	}
-
-	function isDisplayableConditionEntry(key: string, value: unknown) {
-		const normalized = key.toLowerCase().replace(/_/g, ' ').trim();
-		if (normalized === 'details' || normalized === 'detail' || normalized === 'description') {
-			return false;
-		}
-		if (Array.isArray(value)) return value.length > 0 && value.join(', ').length <= 120;
-		return String(value).length <= 120;
-	}
-
-	function uniqueChainEntries(entries: ChainEntry[]) {
-		const seen = new Set<string>();
-		return entries.filter((entry) => {
-			const key = chainEntryAlias(entry);
-			if (seen.has(key)) return false;
-			seen.add(key);
-			return true;
-		});
-	}
-
-	function chainBackgroundProcessText(row: SampleMatrixRow, translate: Translate) {
-		const entries = processChainEntries(row, translate).filter(
-			(entry) => !isLikelyResultContextKey(entry.label)
-		);
-		if (entries.length) {
-			return joinedList(
-				entries.slice(0, 3).map((entry) => `${entry.label} ${entry.value}`),
-				translate('research.materialDossier.narrative.unspecifiedProcess')
-			);
-		}
-		return translate('research.materialDossier.narrative.unspecifiedProcess');
-	}
-
-	function sourceLocationForValue(value: SupportedValue) {
-		const ref = value.value.evidence_refs[0];
-		return ref?.locator || value.evidenceCode || '--';
-	}
-
-	function sourceLocationForValues(values: SupportedValue[]) {
-		const locations = uniqueList(
-			values.map(sourceLocationForValue).filter((value) => value !== '--')
-		);
-		return locations.slice(0, 3).join(', ') || '--';
-	}
-
-	function reportContextEntries(
-		context: Record<string, string>,
-		translate: Translate
-	): ChainEntry[] {
-		return Object.entries(context)
-			.filter(([, value]) => hasDisplayValue(value))
-			.map(([key, value]) => ({
-				key,
-				label: processEntryLabel(key, translate),
-				value: String(value)
-			}))
-			.slice(0, 8);
-	}
-
-	function reportResultLabel(result: MaterialReportPerformanceResult) {
-		if (result.display_value) return result.display_value;
-		if (result.value !== null && result.value !== undefined) {
-			return result.unit ? `${result.value} ${result.unit}` : String(result.value);
-		}
-		return '--';
-	}
-
-	function reportEvidenceCodes(refs: EvidenceReference[], codeMap: Map<string, string>): string[] {
-		return uniqueList(
-			refs.map((ref) => evidenceCode(ref, codeMap)).filter((code) => code !== '--')
-		);
-	}
-
-	function reportChainEvidenceCodes(
-		chain: MaterialReportStateChain,
-		codeMap: Map<string, string>
-	): string[] {
-		return reportEvidenceCodes(
-			[
-				...chain.source_evidence,
-				...chain.performance_results.flatMap((result) => result.evidence_refs)
-			],
-			codeMap
-		);
-	}
-
-	function reportChainSourceLocation(chain: MaterialReportStateChain) {
-		const locations = uniqueList(
-			[
-				...chain.source_evidence,
-				...chain.performance_results.flatMap((result) => result.evidence_refs)
-			]
-				.map((ref) => ref.locator || '')
-				.filter(Boolean)
-		);
-		return locations.slice(0, 3).join(', ') || '--';
-	}
-
-	function materialReportDocumentFromArtifact(
-		report: MaterialReportArtifact
-	): MaterialReportDocument {
-		return {
-			schema_version: 'material_report_document.v1',
-			status: report.status === 'ready_with_warnings' ? 'partial' : 'ready',
-			title: report.title,
-			markdown: report.markdown ?? '',
-			citations: reportPackage?.document?.citations ?? {},
-			outline: materialReportOutline(report.markdown ?? ''),
-			warnings: [],
-			evidence_appendix: reportPackage?.document?.evidence_appendix ??
-				reportPackage?.evidence_appendix ?? {
-					sample_matrix_row_count: 0,
-					property_count: 0,
-					evidence_count: 0,
-					source_table_count: 0
-				}
-		};
-	}
-
-	function materialReportOutline(markdown: string) {
-		return markdown
-			.split(/\r?\n/)
-			.map((line) => /^(#{1,3})\s+(.+)$/.exec(line.trim()))
-			.filter((match): match is RegExpExecArray => Boolean(match))
-			.map((match) => ({
-				level: match[1].length,
-				title: match[2].trim(),
-				anchor: match[2]
-					.trim()
-					.toLowerCase()
-					.replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
-					.replace(/^-|-$/g, '')
-			}));
-	}
-
-	function humanizeStatus(value: string) {
-		return value.replace(/_/g, ' ');
-	}
-
-	function reportReferenceCodes(
-		refs: EvidenceReference[],
-		codeMap: Map<string, string>,
-		limit = 5
-	) {
-		return reportEvidenceCodes(refs, codeMap).slice(0, limit);
-	}
-
-	function parseMaterialReportMarkdown(
-		document: MaterialReportDocument
-	): MaterialReportMarkdownBlock[] {
-		const blocks: MaterialReportMarkdownBlock[] = [];
-		let listItems: MaterialReportMarkdownInline[][] = [];
-		let listOrdered = false;
-		let tableLines: string[] = [];
-		let codeLines: string[] = [];
-		let inCodeBlock = false;
-		const flushList = () => {
-			if (!listItems.length) return;
-			blocks.push({
-				type: 'list',
-				key: `list:${blocks.length}`,
-				ordered: listOrdered,
-				items: listItems
-			});
-			listItems = [];
-			listOrdered = false;
-		};
-		const flushTable = () => {
-			if (tableLines.length >= 2) {
-				blocks.push({
-					type: 'table',
-					key: `table:${blocks.length}`,
-					table: parseMaterialReportTable(tableLines, document)
-				});
-			}
-			tableLines = [];
-		};
-		const flushCode = () => {
-			if (!codeLines.length) return;
-			blocks.push({
-				type: 'code',
-				key: `code:${blocks.length}`,
-				text: codeLines.join('\n')
-			});
-			codeLines = [];
-		};
-
-		for (const line of document.markdown.split('\n')) {
-			const text = line.trim();
-			if (/^```/.test(text)) {
-				if (inCodeBlock) {
-					flushCode();
-					inCodeBlock = false;
-				} else {
-					flushList();
-					flushTable();
-					inCodeBlock = true;
-				}
-				continue;
-			}
-			if (inCodeBlock) {
-				codeLines.push(line.replace(/\s+$/g, ''));
-				continue;
-			}
-			if (!text) {
-				flushList();
-				flushTable();
-				continue;
-			}
-			if (/^-{3,}$/.test(text)) {
-				flushList();
-				flushTable();
-				blocks.push({ type: 'rule', key: `rule:${blocks.length}` });
-				continue;
-			}
-			if (isMaterialReportTableLine(text)) {
-				flushList();
-				tableLines.push(text);
-				continue;
-			}
-			flushTable();
-			const heading = /^(#{1,3})\s+(.+)$/.exec(text);
-			if (heading) {
-				flushList();
-				blocks.push({
-					type: 'heading',
-					level: heading[1].length,
-					key: `heading:${blocks.length}`,
-					text: heading[2],
-					anchor: reportHeadingAnchor(document, heading[2])
-				});
-				continue;
-			}
-			const listItem = /^(-|\d+\.)\s+(.+)$/.exec(text);
-			if (listItem) {
-				const ordered = listItem[1].endsWith('.');
-				if (listItems.length && listOrdered !== ordered) {
-					flushList();
-				}
-				listOrdered = ordered;
-				listItems.push(parseMaterialReportInline(listItem[2], document));
-				continue;
-			}
-			const quote = /^>\s+(.+)$/.exec(text);
-			if (quote) {
-				flushList();
-				blocks.push({
-					type: 'quote',
-					key: `quote:${blocks.length}`,
-					parts: parseMaterialReportInline(quote[1], document)
-				});
-				continue;
-			}
-			flushList();
-			blocks.push({
-				type: 'paragraph',
-				key: `paragraph:${blocks.length}`,
-				parts: parseMaterialReportInline(text, document)
-			});
-		}
-		if (inCodeBlock) flushCode();
-		flushTable();
-		flushList();
-		return blocks;
-	}
-
-	function isMaterialReportTableLine(text: string) {
-		return text.startsWith('|') && text.endsWith('|') && text.includes('|');
-	}
-
-	function isMaterialReportTableSeparator(text: string) {
-		return /^\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|$/.test(text);
-	}
-
-	function parseMaterialReportTableLine(text: string) {
-		return text
-			.slice(1, -1)
-			.split('|')
-			.map((cell) => cell.trim());
-	}
-
-	function parseMaterialReportTable(
-		lines: string[],
-		document: MaterialReportDocument
-	): MaterialReportMarkdownTable {
-		const headerLine = lines[0] ?? '';
-		const bodyLines = isMaterialReportTableSeparator(lines[1] ?? '')
-			? lines.slice(2)
-			: lines.slice(1);
-		return {
-			headers: parseMaterialReportTableLine(headerLine).map((cell) =>
-				parseMaterialReportInline(cell, document)
-			),
-			rows: bodyLines.map((row) =>
-				parseMaterialReportTableLine(row).map((cell) => parseMaterialReportInline(cell, document))
-			)
-		};
-	}
-
-	function parseMaterialReportInline(text: string, document: MaterialReportDocument) {
-		const parts: MaterialReportMarkdownInline[] = [];
-		const citationPattern = /\[(E\d{3,})\]/g;
-		let cursor = 0;
-		for (const match of text.matchAll(citationPattern)) {
-			const index = match.index ?? 0;
-			if (index > cursor) {
-				parts.push({ type: 'text', text: text.slice(cursor, index) });
-			}
-			const citationId = match[1];
-			if (document.citations[citationId]) {
-				parts.push({ type: 'citation', id: citationId });
-			} else {
-				parts.push({ type: 'text', text: match[0] });
-			}
-			cursor = index + match[0].length;
-		}
-		if (cursor < text.length) {
-			parts.push({ type: 'text', text: text.slice(cursor) });
-		}
-		return parts;
-	}
-
-	function reportHeadingAnchor(document: MaterialReportDocument, title: string) {
-		return (
-			document.outline.find((item) => item.title === title)?.anchor ||
-			title
-				.toLowerCase()
-				.replace(/[^a-z0-9]+/g, '-')
-				.replace(/^-|-$/g, '')
-		);
-	}
-
-	function reportDocumentNavItems(document: MaterialReportDocument) {
-		return document.outline.filter((item) => item.level === 2).slice(0, 12);
-	}
-
-	function openReportCitation(document: MaterialReportDocument, citationId: string) {
-		const ref = document.citations[citationId];
-		if (!ref) return;
-		const code = evidenceCode(ref, evidenceCodeMap);
-		const row = evidenceRows.find((item) => item.code === code);
-		if (row) {
-			openEvidenceRow({
-				...row,
-				code: citationId,
-				detail: {
-					...row.detail,
-					anchor: citationId
-				}
-			});
-			return;
-		}
-		openEvidenceRow({
-			key: `material-report:${citationId}`,
-			code: citationId,
-			claim: `${document.title} ${citationId}`,
-			type: sourceTypeLabel(ref, $t),
-			location: ref.locator || '--',
-			confidence: confidenceScore(ref.confidence),
-			href: evidenceHref(ref, collectionId),
-			detail: {
-				title: `${document.title} ${citationId}`,
-				sample: document.title,
-				source: paperTitle(ref),
-				location: ref.locator || '--',
-				anchor: citationId,
-				confidence: confidenceLabel(ref.confidence, $t),
-				excerpt: $t('research.materialDossier.evidence.contextUnavailable'),
-				href: evidenceHref(ref, collectionId)
-			}
-		});
-	}
-
-	function tableHeaderLabel(parts: MaterialReportMarkdownInline[]) {
-		const text = parts
-			.map((part) => (part.type === 'text' ? part.text : part.id))
-			.join('')
-			.trim();
-		return text || 'column';
-	}
-
-	function renderedTableHeaderLabel(table: MaterialReportMarkdownTable, index: number) {
-		return tableHeaderLabel(table.headers[index] ?? []);
-	}
-
-	function chainMetricRows(
-		row: SampleMatrixRow,
-		columns: PropertyColumn[],
-		codeMap: Map<string, string>,
-		bestByColumn: Map<string, NonNullable<ReturnType<typeof bestValueForColumn>>>,
-		translate: Translate
-	): ParameterChainMetric[] {
-		return columns
-			.map((column) => {
-				const value = row.values[column.key];
-				if (!value || numericValue(value) === null) return null;
-				return {
-					key: `${row.row_id}:${column.key}`,
-					supportedValue: supportedValue(row, column, value, codeMap, translate),
-					isBest: bestByColumn.get(column.key)?.row.row_id === row.row_id
-				};
-			})
-			.filter((item): item is ParameterChainMetric => item !== null);
-	}
-
-	function chainComparisonSummary(
-		metrics: ParameterChainMetric[],
-		translate: Translate,
-		totalProperties: number
-	) {
-		const bestMetrics = metrics.filter((metric) => metric.isBest);
-		if (bestMetrics.length) {
-			return translate('research.materialDossier.chain.comparisonSummary', {
-				best: bestMetrics
-					.map(
-						(metric) => `${metric.supportedValue.property} ${metric.supportedValue.displayValue}`
-					)
-					.join(', '),
-				count: bestMetrics.length,
-				total: totalProperties
-			});
-		}
-		return translate('research.materialDossier.chain.comparisonNoLeader', {
-			count: metrics.length,
-			total: totalProperties
-		});
-	}
-
-	function chainScoreLabel(
-		metrics: ParameterChainMetric[],
-		translate: Translate,
-		totalProperties: number
-	) {
-		const bestCount = metrics.filter((metric) => metric.isBest).length;
-		return translate('research.materialDossier.chain.scoreLabel', {
-			best: bestCount,
-			total: totalProperties
-		});
-	}
-
-	function chainBackground(
-		profile: MaterialProfile | null,
-		row: SampleMatrixRow,
-		translate: Translate
-	) {
-		const material = profile?.canonical_name || row.material || '--';
-		const paper = row.document_id
-			? materialPapers().find((item) => item.document_id === row.document_id)?.title
-			: null;
-		return translate('research.materialDossier.chain.backgroundText', {
-			material,
-			processes: chainBackgroundProcessText(row, translate),
-			paper: paper || translate('research.materialDossier.chain.collectionScope')
-		});
-	}
-
-	function buildBestParameterChains(
-		profile: MaterialProfile | null,
-		rows: SampleMatrixRow[],
-		columns: PropertyColumn[],
-		codeMap: Map<string, string>,
-		translate: Translate
-	): BestParameterChain[] {
-		if (!rows.length || !columns.length) return [];
-		const bestByColumn = bestValueMap(rows, columns);
-		return bestRowsByCompositeScore(rows, columns).map(({ row }, index) => {
-			const metrics = chainMetricRows(row, columns, codeMap, bestByColumn, translate);
-			const leadingProperties = metrics
-				.filter((metric) => metric.isBest)
-				.map((metric) => metric.supportedValue.property);
-			const allProperties = metrics.map((metric) => metric.supportedValue.property);
-			return {
-				key: row.row_id,
-				row,
-				sampleLabel: sampleDisplayLabel(row, translate, index),
-				scoreLabel: chainScoreLabel(metrics, translate, columns.length),
-				background: chainBackground(profile, row, translate),
-				processEntries: processChainEntries(row, translate),
-				testConditionEntries: testConditionEntries(row, translate),
-				metrics,
-				comparisonSummary: chainComparisonSummary(metrics, translate, columns.length),
-				notLeadingProperties: allProperties.filter(
-					(property) => !leadingProperties.includes(property)
-				),
-				evidenceCodes: evidenceCodesForValues(metrics.map((metric) => metric.supportedValue)),
-				sourceLocation: sourceLocationForValues(metrics.map((metric) => metric.supportedValue))
-			};
-		});
 	}
 
 	function buildBestPropertyValues(
@@ -1671,12 +820,11 @@
 	function materialPerformanceRows(
 		rows: SampleMatrixRow[],
 		columns: PropertyColumn[],
-		chains: BestParameterChain[],
 		summaries: PropertySummary[],
 		materialName: string,
 		translate: Translate
 	): SampleMatrixRow[] {
-		const selectedRows = highSignalPerformanceRows(rows, columns, chains);
+		const selectedRows = highSignalPerformanceRows(rows, columns);
 		const summaryValues = summaries
 			.map((summary) => {
 				const column = summaryColumnForProperty(summary, columns);
@@ -1711,15 +859,13 @@
 
 	function highSignalPerformanceRows(
 		rows: SampleMatrixRow[],
-		columns: PropertyColumn[],
-		chains: BestParameterChain[]
+		columns: PropertyColumn[]
 	) {
 		if (rows.length <= MAX_PERFORMANCE_ROWS) {
 			if (!columns.length) return rows;
 			return rows.filter((row) => rowHasAnyColumnValue(row, columns));
 		}
 		const selected = new Map<string, SampleMatrixRow>();
-		for (const chain of chains.slice(0, 3)) selected.set(chain.row.row_id, chain.row);
 		for (const column of columns) {
 			const best = bestValueForColumn(rows, column);
 			if (best) selected.set(best.row.row_id, best.row);
@@ -1790,228 +936,6 @@
 		);
 	}
 
-	function supportedValueSummary(values: SupportedValue[]) {
-		return values.map((value) => `${value.property} = ${value.displayValue}`).join(', ');
-	}
-
-	function findingConfidence(values: SupportedValue[], translate: Translate) {
-		const confidences = values
-			.map((item) => item.value.confidence ?? item.value.evidence_refs[0]?.confidence)
-			.filter((item): item is number => item !== null && item !== undefined);
-		if (!confidences.length) return '--';
-		return confidenceLabel(Math.min(...confidences), translate);
-	}
-
-	function finding(
-		key: string,
-		title: string,
-		body: string,
-		typeKey: string,
-		values: SupportedValue[],
-		translate: Translate
-	): KeyFinding {
-		const supportedValues = uniqueSupportedValues(values);
-		return {
-			key,
-			title,
-			body,
-			type: translate(typeKey),
-			confidence: findingConfidence(supportedValues, translate),
-			supportedValues,
-			evidenceCodes: evidenceCodesForValues(supportedValues)
-		};
-	}
-
-	function buildKeyFindings(
-		rows: SampleMatrixRow[],
-		columns: PropertyColumn[],
-		summary: ProcessSummary,
-		codeMap: Map<string, string>,
-		translate: Translate,
-		summaries: PropertySummary[],
-		materialName: string
-	): KeyFinding[] {
-		const bestByColumn = columns
-			.map((column) => bestValueForColumn(rows, column))
-			.filter((item): item is NonNullable<ReturnType<typeof bestValueForColumn>> => Boolean(item));
-		const valuesForBest = (items: typeof bestByColumn) =>
-			items.map((item) => supportedValue(item.row, item.column, item.value, codeMap, translate));
-		const findings: KeyFinding[] = [];
-		const strengthBest = bestByColumn.filter((item) => propertyRole(item.column) === 'strength');
-		const elongationBest = bestByColumn.filter(
-			(item) => propertyRole(item.column) === 'elongation'
-		);
-		const densityBest = bestByColumn.find((item) => propertyRole(item.column) === 'density');
-
-		if (strengthBest.length) {
-			const values = valuesForBest(strengthBest);
-			const firstSample = values[0].sample;
-			const allSameSample = values.every((value) => value.sample === firstSample);
-			findings.push(
-				finding(
-					'highest-strength',
-					allSameSample
-						? translate('research.materialDossier.findings.highestStrengthTitle', {
-								sample: firstSample
-							})
-						: translate('research.materialDossier.findings.splitStrengthTitle'),
-					translate('research.materialDossier.findings.supportedByValues', {
-						values: supportedValueSummary(values),
-						evidence: evidenceCodesForValues(values).join(', ') || '--'
-					}),
-					'research.materialDossier.findings.types.directObservation',
-					values,
-					translate
-				)
-			);
-		}
-
-		if (elongationBest.length) {
-			const values = valuesForBest(elongationBest);
-			findings.push(
-				finding(
-					'highest-elongation',
-					translate('research.materialDossier.findings.highestElongationTitle', {
-						sample: values[0].sample
-					}),
-					translate('research.materialDossier.findings.supportedByValues', {
-						values: supportedValueSummary(values),
-						evidence: evidenceCodesForValues(values).join(', ') || '--'
-					}),
-					'research.materialDossier.findings.types.directObservation',
-					values,
-					translate
-				)
-			);
-		}
-
-		if (densityBest && strengthBest.length) {
-			const densityValue = supportedValue(
-				densityBest.row,
-				densityBest.column,
-				densityBest.value,
-				codeMap,
-				translate
-			);
-			const strengthValues = valuesForBest(strengthBest);
-			const strengthSample = strengthValues[0].sample;
-			if (densityValue.sample !== strengthSample) {
-				const values = [densityValue, ...strengthValues];
-				findings.push(
-					finding(
-						'density-strength-mismatch',
-						translate('research.materialDossier.findings.densityMismatchTitle'),
-						translate('research.materialDossier.findings.densityMismatchBody', {
-							densitySample: densityValue.sample,
-							densityValue: densityValue.displayValue,
-							strengthSample,
-							strengthValues: supportedValueSummary(strengthValues),
-							evidence: evidenceCodesForValues(values).join(', ') || '--'
-						}),
-						'research.materialDossier.findings.types.comparativeInference',
-						values,
-						translate
-					)
-				);
-			}
-		}
-
-		if (strengthBest.length && elongationBest.length) {
-			const strengthValues = valuesForBest(strengthBest);
-			const elongationValues = valuesForBest(elongationBest);
-			if (strengthValues[0].sample !== elongationValues[0].sample) {
-				const values = [...strengthValues, ...elongationValues];
-				findings.push(
-					finding(
-						'strength-ductility-tradeoff',
-						translate('research.materialDossier.findings.tradeoffTitle'),
-						translate('research.materialDossier.findings.tradeoffBody', {
-							strengthSample: strengthValues[0].sample,
-							elongationSample: elongationValues[0].sample,
-							evidence: evidenceCodesForValues(values).join(', ') || '--'
-						}),
-						'research.materialDossier.findings.types.trendHypothesis',
-						values,
-						translate
-					)
-				);
-			}
-		}
-
-		for (const item of bestByColumn) {
-			if (findings.length >= 4) break;
-			const value = supportedValue(item.row, item.column, item.value, codeMap, translate);
-			const exists = findings.some((existing) =>
-				existing.supportedValues.some((supported) => supported.key === value.key)
-			);
-			if (exists) continue;
-			findings.push(
-				finding(
-					`highest-${item.column.key}`,
-					translate('research.materialDossier.findings.highestPropertyTitle', {
-						sample: value.sample,
-						property: value.property
-					}),
-					translate('research.materialDossier.findings.supportedByValues', {
-						values: `${value.property} = ${value.displayValue}`,
-						evidence: value.evidenceCode
-					}),
-					'research.materialDossier.findings.types.directObservation',
-					[value],
-					translate
-				)
-			);
-		}
-
-		for (const value of summarySupportedValues(
-			summaries,
-			columns,
-			codeMap,
-			materialName,
-			translate
-		)) {
-			if (findings.length >= 4) break;
-			const exists = findings.some((existing) =>
-				existing.supportedValues.some((supported) => supported.key === value.key)
-			);
-			if (exists) continue;
-			findings.push(
-				finding(
-					`summary-${value.column.key}`,
-					translate('research.materialDossier.findings.summaryPropertyTitle', {
-						property: value.property
-					}),
-					translate('research.materialDossier.findings.summaryPropertyBody', {
-						property: value.property,
-						value: value.displayValue,
-						evidence: value.evidenceCode
-					}),
-					'research.materialDossier.findings.types.directObservation',
-					[value],
-					translate
-				)
-			);
-		}
-
-		if (findings.length === 0 && summary.changedLabels.length) {
-			return [
-				{
-					key: 'process-structure',
-					title: translate('research.materialDossier.findings.processOnlyTitle'),
-					body: translate('research.materialDossier.findings.processOnlyBody', {
-						changed: summary.changedLabels.join(', ')
-					}),
-					type: translate('research.materialDossier.findings.types.structuralObservation'),
-					confidence: '--',
-					supportedValues: [],
-					evidenceCodes: []
-				}
-			];
-		}
-
-		return findings.slice(0, 4);
-	}
-
 	function buildEvidenceCodeMap(
 		rows: SampleMatrixRow[],
 		columns: PropertyColumn[],
@@ -2030,11 +954,6 @@
 			for (const ref of summary.evidence_refs) {
 				if (ref.evidence_ref_id && !ids.includes(ref.evidence_ref_id))
 					ids.push(ref.evidence_ref_id);
-			}
-		}
-		for (const ref of Object.values(materialProfile?.report_package?.document?.citations ?? {})) {
-			if (ref.evidence_ref_id && !ids.includes(ref.evidence_ref_id)) {
-				ids.push(ref.evidence_ref_id);
 			}
 		}
 		return new Map(ids.map((id, index) => [id, `E${String(index + 1).padStart(2, '0')}`]));
@@ -2063,77 +982,6 @@
 
 	function paperDisplayName(paper: MaterialPaperCoverage | undefined) {
 		return (paper?.title || paper?.source_filename || '').replace(/\.pdf$/i, '');
-	}
-
-	function reportPaperTitle(paper: {
-		title?: string | null;
-		source_filename?: string | null;
-		document_id: string;
-	}) {
-		return (
-			paper.title ||
-			paper.source_filename ||
-			formatShortIdentifier(paper.document_id)
-		).replace(/\.pdf$/i, '');
-	}
-
-	function paperForRow(row: SampleMatrixRow) {
-		if (!row.document_id) return undefined;
-		return materialPapers().find((paper) => paper.document_id === row.document_id);
-	}
-
-	function paperLabelForRow(row: SampleMatrixRow) {
-		const name = paperDisplayName(paperForRow(row));
-		if (!name) return formatShortIdentifier(row.document_id ?? '');
-		return name.match(/\bP\d{3}\b/i)?.[0] ?? name;
-	}
-
-	function materialStateRole(chain: BestParameterChain, translate: Translate) {
-		const text = normalizeForMatch(
-			[
-				chain.sampleLabel,
-				...chain.metrics.map((metric) => metric.supportedValue.property),
-				...chain.processEntries.map((entry) => `${entry.label} ${entry.value}`)
-			].join(' ')
-		);
-		if (text.includes('odf') || text.includes('jeffrey') || text.includes('texture')) {
-			return translate('research.materialDossier.state.roles.texture');
-		}
-		if (text.includes('hardness'))
-			return translate('research.materialDossier.state.roles.hardness');
-		if (text.includes('density') || text.includes('porosity')) {
-			return translate('research.materialDossier.state.roles.densification');
-		}
-		if (text.includes('yield') || text.includes('tensile') || text.includes('elongation')) {
-			return translate('research.materialDossier.state.roles.tensile');
-		}
-		return translate('research.materialDossier.state.roles.representative');
-	}
-
-	function materialStateTitle(chain: BestParameterChain, translate: Translate) {
-		return `${paperLabelForRow(chain.row)} ${chain.sampleLabel}: ${materialStateRole(chain, translate)}`;
-	}
-
-	function materialStateSource(chain: BestParameterChain, translate: Translate) {
-		const paper = paperDisplayName(paperForRow(chain.row));
-		return paper || translate('research.materialDossier.chain.collectionScope');
-	}
-
-	function materialStateInterpretation(chain: BestParameterChain, translate: Translate) {
-		const leading = chain.metrics.filter((metric) => metric.isBest);
-		const observed = (leading.length ? leading : chain.metrics).slice(0, 3);
-		const values = observed
-			.map((metric) => `${metric.supportedValue.property} ${metric.supportedValue.displayValue}`)
-			.join(', ');
-		const boundary = chain.notLeadingProperties.length
-			? translate('research.materialDossier.state.notGlobalBest', {
-					properties: chain.notLeadingProperties.slice(0, 3).join(', ')
-				})
-			: translate('research.materialDossier.state.sourceBounded');
-		return translate('research.materialDossier.state.interpretation', {
-			values: values || translate('research.materialDossier.state.noValues'),
-			boundary
-		});
 	}
 
 	function valuesForProblem(values: SupportedValue[], role: string) {
@@ -2283,8 +1131,7 @@
 		collection: string,
 		translate: Translate,
 		summaries: PropertySummary[],
-		materialName: string,
-		reportPackage: MaterialProfile['report_package']
+		materialName: string
 	): EvidenceLocatorRow[] {
 		const items: EvidenceLocatorRow[] = [];
 		for (const row of rows) {
@@ -2324,35 +1171,6 @@
 				});
 			}
 		}
-		for (const chain of reportPackage?.material_state_chains ?? []) {
-			for (const ref of [
-				...chain.source_evidence,
-				...chain.performance_results.flatMap((result) => result.evidence_refs)
-			]) {
-				const code = evidenceCode(ref, codeMap);
-				if (items.some((item) => item.code === code)) continue;
-				const detail = {
-					title: chain.material_state || chain.sample_label || chain.sample_id,
-					sample: chain.sample_label || chain.sample_id,
-					source: paperTitle(ref),
-					location: ref.locator || '--',
-					anchor: code,
-					confidence: confidenceLabel(ref.confidence, translate),
-					excerpt: translate('research.materialDossier.evidence.contextUnavailable'),
-					href: evidenceHref(ref, collection)
-				};
-				items.push({
-					key: `${chain.chain_id}:${ref.evidence_ref_id}`,
-					code,
-					claim: `${detail.sample} report-chain evidence`,
-					type: sourceTypeLabel(ref, translate),
-					location: detail.location,
-					confidence: confidenceScore(ref.confidence),
-					href: detail.href,
-					detail
-				});
-			}
-		}
 		return items.slice(0, 8);
 	}
 
@@ -2381,66 +1199,11 @@
 		if (row) openEvidenceRow(row);
 	}
 
-	function uniqueList(values: string[]) {
-		return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-	}
-
-	function joinedList(values: string[], fallback: string) {
-		const cleaned = values.map((value) => value.trim()).filter(Boolean);
-		return cleaned.length ? cleaned.join(', ') : fallback;
-	}
-
-	function narrativeLead(profile: MaterialProfile, translate: Translate) {
-		return translate('research.materialDossier.narrative.lead', {
-			material: profile.canonical_name,
-			processes: joinedList(
-				profile.overview.process_families,
-				translate('research.materialDossier.narrative.unspecifiedProcess')
-			),
-			papers: paperCount,
-			samples: sampleCount,
-			properties: joinedList(
-				propertyColumns.map((column) => column.shortLabel),
-				translate('research.materialDossier.narrative.unspecifiedProperties')
-			),
-			evidence: evidenceCount
-		});
-	}
-
-	function narrativeSampleDesign(translate: Translate) {
-		const controlled = joinedList(
-			processSummary.controlledLabels,
-			translate('research.materialDossier.narrative.noControlledVariables')
-		);
-		const changed = joinedList(
-			processSummary.changedLabels,
-			translate('research.materialDossier.narrative.noChangedVariables')
-		);
-		return translate('research.materialDossier.narrative.sampleDesignBody', {
-			samples: sampleCount,
-			controlled,
-			changed
-		});
-	}
-
-	function narrativeTrendBody(row: ComparisonRow | undefined, translate: Translate) {
-		if (!row) return translate('research.materialDossier.narrative.trendEmpty');
-		return translate('research.materialDossier.narrative.trendBody', {
-			property: row.property,
-			first: row.firstLabel,
-			firstValue: row.firstValue ?? '--',
-			second: row.secondLabel,
-			secondValue: row.secondValue ?? '--',
-			conclusion: row.conclusion
-		});
-	}
-
 	function openValueEvidence(
 		row: SampleMatrixRow,
 		column: PropertyColumn,
 		value: EvidenceBackedValue
 	) {
-		pdfDrawerOpen = false;
 		selectedEvidence = drawerDetailForValue(row, column, value, evidenceCodeMap, collectionId, $t);
 	}
 
@@ -2449,64 +1212,11 @@
 	}
 
 	function openEvidenceRow(row: EvidenceLocatorRow) {
-		pdfDrawerOpen = false;
 		selectedEvidence = row.detail;
 	}
 
 	function closeDrawer() {
 		selectedEvidence = null;
-		pdfDrawerOpen = false;
-	}
-
-	function openPdfDrawer() {
-		selectedEvidence = null;
-		pdfDrawerOpen = true;
-		if (!pdfReportLoading) {
-			void loadPdfReportStatus();
-		}
-	}
-
-	async function generatePdfReport(forceRegenerate = false) {
-		if (!collectionId || !materialId || pdfReportBusy) return;
-		pdfReportLoading = true;
-		pdfReportError = '';
-		try {
-			const report = await createMaterialReviewReport(collectionId, materialId, {
-				language: $language,
-				report_type: 'review_draft',
-				include_appendix: true,
-				force_regenerate: forceRegenerate
-			});
-			pdfReport = report;
-			updateReportPolling(report);
-		} catch (err) {
-			clearReportPoll();
-			pdfReportError = errorMessage(err);
-		} finally {
-			pdfReportLoading = false;
-		}
-	}
-
-	function pdfStatusBody() {
-		if (pdfReportLoading && !pdfReport) {
-			return $t('research.materialDossier.pdf.loadingStatus');
-		}
-		if (pdfReportGenerating) {
-			return $t('research.materialDossier.pdf.generatingStatus');
-		}
-		if (pdfReport?.status === 'failed') {
-			return $t('research.materialDossier.pdf.failedStatus');
-		}
-		return $t('research.materialDossier.pdf.body');
-	}
-
-	function pdfGeneratedStatus(report: MaterialReviewReport) {
-		if (report.status === 'ready_with_warnings') {
-			return $t('research.materialDossier.pdf.generatedWithWarnings', {
-				count: report.warnings.length
-			});
-		}
-		return $t('research.materialDossier.pdf.generatedStatus');
 	}
 
 	function csvEscape(value: string | number | null | undefined) {
@@ -2586,19 +1296,6 @@
 			>
 				{$t('research.materialDossier.actions.askCopilot')}
 			</a>
-			<button class="btn btn--primary-light btn--small" type="button" on:click={openPdfDrawer}>
-				{$t('research.materialDossier.actions.generatePdf')}
-			</button>
-			<button
-				class="btn btn--primary-light btn--small"
-				type="button"
-				disabled={materialReportLoading}
-				on:click={() => generateMaterialReport(Boolean(materialReport))}
-			>
-				{materialReport
-					? $t('research.materialDossier.report.regenerate')
-					: $t('research.materialDossier.report.generate')}
-			</button>
 			<button class="btn btn--ghost btn--small" type="button" on:click={loadMaterialPage}>
 				{$t('research.materialDossier.actions.refresh')}
 			</button>
@@ -2620,914 +1317,309 @@
 			<p>{$t('research.materialProfile.emptyBody')}</p>
 		</section>
 	{:else}
-		<div class="dossier-tabs" role="tablist" aria-label={$t('research.materialDossier.tabs.label')}>
-			<button
-				type="button"
-				role="tab"
-				aria-selected={activeDossierTab === 'structured'}
-				class:active={activeDossierTab === 'structured'}
-				on:click={() => (activeDossierTab = 'structured')}
-			>
-				{$t('research.materialDossier.tabs.structured')}
-			</button>
-			<button
-				type="button"
-				role="tab"
-				aria-selected={activeDossierTab === 'narrative'}
-				class:active={activeDossierTab === 'narrative'}
-				on:click={() => (activeDossierTab = 'narrative')}
-			>
-				{$t('research.materialDossier.tabs.narrative')}
-			</button>
-		</div>
+		<ResearchUnderstandingWorkbench
+			{understanding}
+			{collectionId}
+			returnTo={materialHref()}
+			bodyKey="research.understanding.materialBody"
+			titleId="material-understanding-title"
+		/>
+
+
 		<div class="dossier-layout">
-			{#if activeDossierTab === 'structured'}
-				<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
-					{#if reportDocument}
-						<section
-							id="material-report-document"
-							class="dossier-card material-report-document-card"
-						>
-							<div class="material-report-reader-header">
-								<div>
-									<h3>{$t('research.materialDossier.report.documentTitle')}</h3>
-									<p>
-										{materialReportReady
-											? $t('research.materialDossier.report.llmBody')
-											: $t('research.materialDossier.report.draftBody')}
-									</p>
+			<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
+				<section id="material-problems" class="dossier-card material-problems-card">
+					<div class="dossier-section-heading">
+						<span class="section-number">1</span>
+						<h3>{$t('research.materialDossier.sections.materialProblems.title')}</h3>
+						<p>{$t('research.materialDossier.sections.materialProblems.body')}</p>
+					</div>
+
+					<div class="problem-grid">
+						{#each materialProblemCards as problem (problem.key)}
+							<article class="problem-card">
+								<div class="problem-card__header">
+									<h4>{problem.title}</h4>
+									<span>{problem.status}</span>
 								</div>
-								<div class="material-report-actions">
-									{#if materialReport}
-										<span class="material-report-status"
-											>{humanizeStatus(materialReport.status)}</span
-										>
-										{#if materialReport.model}
-											<span class="material-report-status">{materialReport.model}</span>
-										{/if}
-									{:else}
-										<span class="material-report-status">
-											{$t('research.materialDossier.report.draftStatus')}
-										</span>
-									{/if}
-									<button
-										type="button"
-										on:click={loadMaterialReportStatus}
-										disabled={materialReportLoading}
-									>
-										{$t('research.materialDossier.report.refresh')}
-									</button>
-									<button
-										type="button"
-										on:click={() => generateMaterialReport(Boolean(materialReport))}
-										disabled={materialReportLoading}
-									>
-										{materialReport
-											? $t('research.materialDossier.report.regenerate')
-											: $t('research.materialDossier.report.generate')}
-									</button>
-								</div>
-							</div>
-							{#if materialReport?.message}
-								<p class="material-report-message">{materialReport.message}</p>
-							{/if}
-							{#if materialReportError}
-								<p class="material-report-error" role="alert">{materialReportError}</p>
-							{/if}
-							<article class="material-report-markdown" aria-label={reportDocument.title}>
-								{#each reportDocumentBlocks as block (block.key)}
-									{#if block.type === 'heading'}
-										{#if block.level === 1}
-											<h3 id={block.anchor}>{block.text}</h3>
-										{:else if block.level === 2}
-											<h4 id={block.anchor}>{block.text}</h4>
-										{:else}
-											<h5 id={block.anchor}>{block.text}</h5>
-										{/if}
-									{:else if block.type === 'paragraph'}
-										<p>
-											{#each block.parts as part}
-												{#if part.type === 'citation'}
-													<button
-														type="button"
-														class="report-citation"
-														on:click={() => openReportCitation(reportDocument, part.id)}
-													>
-														[{part.id}]
-													</button>
-												{:else}
-													{part.text}
-												{/if}
-											{/each}
-										</p>
-									{:else if block.type === 'list'}
-										<svelte:element this={block.ordered ? 'ol' : 'ul'}>
-											{#each block.items as item}
-												<li>
-													{#each item as part}
-														{#if part.type === 'citation'}
-															<button
-																type="button"
-																class="report-citation"
-																on:click={() => openReportCitation(reportDocument, part.id)}
-															>
-																[{part.id}]
-															</button>
-														{:else}
-															{part.text}
-														{/if}
-													{/each}
-												</li>
-											{/each}
-										</svelte:element>
-									{:else if block.type === 'table'}
-										<div class="report-table-scroll">
-											<table>
-												<thead>
-													<tr>
-														{#each block.table.headers as header}
-															<th>
-																{#each header as part}
-																	{#if part.type === 'citation'}
-																		<button
-																			type="button"
-																			class="report-citation"
-																			on:click={() => openReportCitation(reportDocument, part.id)}
-																		>
-																			[{part.id}]
-																		</button>
-																	{:else}
-																		{part.text}
-																	{/if}
-																{/each}
-															</th>
-														{/each}
-													</tr>
-												</thead>
-												<tbody>
-													{#each block.table.rows as row}
-														<tr>
-															{#each row as cell, index}
-																<td data-label={renderedTableHeaderLabel(block.table, index)}>
-																	{#each cell as part}
-																		{#if part.type === 'citation'}
-																			<button
-																				type="button"
-																				class="report-citation"
-																				on:click={() => openReportCitation(reportDocument, part.id)}
-																			>
-																				[{part.id}]
-																			</button>
-																		{:else}
-																			{part.text}
-																		{/if}
-																	{/each}
-																</td>
-															{/each}
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-										</div>
-									{:else if block.type === 'code'}
-										<pre><code>{block.text}</code></pre>
-									{:else if block.type === 'quote'}
-										<blockquote>
-											{#each block.parts as part}
-												{#if part.type === 'citation'}
-													<button
-														type="button"
-														class="report-citation"
-														on:click={() => openReportCitation(reportDocument, part.id)}
-													>
-														[{part.id}]
-													</button>
-												{:else}
-													{part.text}
-												{/if}
-											{/each}
-										</blockquote>
-									{:else if block.type === 'rule'}
-										<hr />
-									{/if}
-								{/each}
-							</article>
-						</section>
-					{:else}
-						<section id="material-report-overview" class="dossier-card report-overview-card">
-							<div class="dossier-section-heading">
-								<span class="section-number">1</span>
-								<h3>{$t('research.materialDossier.sections.overview.title')}</h3>
-								<p>
-									{reportPackage?.executive_summary ||
-										$t('research.materialDossier.sections.overview.body', {
-											material: materialProfile.canonical_name,
-											processes: joinedList(
-												materialProfile.overview.process_families,
-												$t('research.materialDossier.narrative.unspecifiedProcess')
-											)
-										})}
-								</p>
-							</div>
-							<div class="report-stat-grid">
-								<div>
-									<strong>{reportPackage?.material_scope.source_paper_count || paperCount}</strong>
-									<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
-								</div>
-								<div>
-									<strong>{reportPackage?.material_scope.sample_row_count || sampleCount}</strong>
-									<span>{$t('research.overview.samples')}</span>
-								</div>
-								<div>
-									<strong
-										>{reportPackage?.evidence_appendix.property_count ||
-											measuredPropertyCount}</strong
-									>
-									<span>{$t('research.overview.properties')}</span>
-								</div>
-								<div>
-									<strong>{reportPackage?.material_scope.evidence_count || evidenceCount}</strong>
-									<span>{$t('research.overview.evidence')}</span>
-								</div>
-							</div>
-							{#if reportPackage?.key_findings.length}
-								<div class="report-finding-list">
-									{#each reportPackage.key_findings as finding (finding.finding_id)}
-										<article class="report-finding">
-											<h4>{finding.title}</h4>
-											<p>{finding.body}</p>
-											<div class="evidence-chip-row">
-												{#each reportReferenceCodes(finding.evidence_refs, evidenceCodeMap) as code}
-													<button
-														type="button"
-														class="evidence-chip"
-														on:click={() => openEvidenceCode(code)}
-													>
-														{code}
-													</button>
-												{/each}
-											</div>
-										</article>
-									{/each}
-								</div>
-							{/if}
-							<div class="paper-contribution-grid">
-								{#each (reportPackage?.paper_contributions?.length ? reportPackage.paper_contributions : materialPapers()).slice(0, 6) as paper (paper.document_id)}
-									<a
-										class="paper-contribution-card"
-										href={resolve('/collections/[id]/documents/[document_id]', {
-											id: collectionId,
-											document_id: paper.document_id
-										})}
-									>
-										<strong>{reportPaperTitle(paper)}</strong>
-										<span>
-											{paper.sample_count}
-											{$t('research.overview.samples')} ·
-											{joinedList(
-												paper.measured_properties.slice(0, 3),
-												$t('research.materialDossier.narrative.unspecifiedProperties')
-											)}
-										</span>
-									</a>
-								{:else}
-									<p class="empty-copy">{$t('research.materialDossier.aside.noLiterature')}</p>
-								{/each}
-							</div>
-						</section>
-
-						{#if reportPackage?.thematic_sections.length}
-							<section id="material-report-sections" class="dossier-card report-section-card">
-								<div class="dossier-section-heading">
-									<span class="section-number">2</span>
-									<h3>{$t('research.materialDossier.report.sectionsTitle')}</h3>
-									<p>{$t('research.materialDossier.report.sectionsBody')}</p>
-								</div>
-								<div class="report-section-list">
-									{#each reportPackage.thematic_sections as section (section.section_id)}
-										<article class="report-section">
-											<strong class="report-section__title">
-												{$t('research.materialDossier.report.sectionLabel', {
-													title: section.title
-												})}
-											</strong>
-											<p>{section.body}</p>
-											{#if section.key_points.length}
-												<ul>
-													{#each section.key_points as point}
-														<li>{point}</li>
-													{/each}
-												</ul>
-											{/if}
-											<div class="evidence-chip-row">
-												{#each reportReferenceCodes(section.evidence_refs, evidenceCodeMap) as code}
-													<button
-														type="button"
-														class="evidence-chip"
-														on:click={() => openEvidenceCode(code)}
-													>
-														{code}
-													</button>
-												{/each}
-											</div>
-										</article>
-									{/each}
-								</div>
-							</section>
-						{/if}
-
-						<section id="representative-material-states" class="dossier-card chain-card">
-							<div class="dossier-section-heading">
-								<span class="section-number">{reportPackage?.thematic_sections.length ? 3 : 2}</span
-								>
-								<h3>{$t('research.materialDossier.sections.chain.title')}</h3>
-								<p>{$t('research.materialDossier.sections.chain.body')}</p>
-							</div>
-
-							<div class="chain-list">
-								{#each reportChains as chain, index (chain.chain_id)}
-									<article class="parameter-chain">
-										<div class="parameter-chain__header">
-											<div>
-												<span class="chain-rank"
-													>{$t('research.materialDossier.state.cardLabel', {
-														index: index + 1
-													})}</span
-												>
-												<h4>{chain.material_state || chain.sample_label || chain.sample_id}</h4>
-												<p>{chain.material || materialProfile.canonical_name}</p>
-											</div>
-											<span class="chain-score">{confidenceLabel(chain.confidence, $t)}</span>
-										</div>
-
-										<div
-											class="chain-steps"
-											aria-label={$t('research.materialDossier.chain.stepsLabel')}
-										>
-											<div class="chain-step">
-												<span>1</span>
-												<strong>{$t('research.materialDossier.chain.processContext')}</strong>
-												{#if reportContextEntries(chain.preparation_context, $t).length}
-													<dl>
-														{#each reportContextEntries(chain.preparation_context, $t) as entry (entry.key)}
-															<div>
-																<dt>{entry.label}</dt>
-																<dd>{entry.value}</dd>
-															</div>
-														{/each}
-													</dl>
-												{:else}
-													<p>{$t('research.materialDossier.chain.noProcessContext')}</p>
-												{/if}
-											</div>
-
-											<div class="chain-step">
-												<span>2</span>
-												<strong>{$t('research.materialDossier.chain.testConditions')}</strong>
-												{#if reportContextEntries(chain.test_conditions, $t).length}
-													<dl>
-														{#each reportContextEntries(chain.test_conditions, $t) as entry (entry.key)}
-															<div>
-																<dt>{entry.label}</dt>
-																<dd>{entry.value}</dd>
-															</div>
-														{/each}
-													</dl>
-												{:else}
-													<p>{$t('research.materialDossier.chain.noTestConditions')}</p>
-												{/if}
-											</div>
-
-											<div class="chain-step chain-step--wide">
-												<span>3</span>
-												<strong>{$t('research.materialDossier.chain.results')}</strong>
-												<div class="chain-metrics">
-													{#each chain.performance_results as result (result.property)}
-														<div class="chain-metric">
-															<span>{result.property}</span>
-															<strong>{reportResultLabel(result)}</strong>
-															<small>
-																{$t('research.materialDossier.chain.observed')}
-																{#if result.condition}
-																	· {result.condition}
-																{/if}
-															</small>
-														</div>
-													{/each}
-												</div>
-											</div>
-										</div>
-
-										<div class="chain-judgement">
-											<div>
-												<strong>{$t('research.materialDossier.chain.boundary')}</strong>
-												{#if chain.comparability_boundary.length || chain.unresolved_fields.length}
-													<p>
-														{[
-															...chain.comparability_boundary,
-															...chain.unresolved_fields.map((field) => `${field} unresolved`)
-														].join(' ')}
-													</p>
-												{:else}
-													<p>{$t('research.materialDossier.chain.boundaryReady')}</p>
-												{/if}
-											</div>
-											<div>
-												<strong>{$t('research.materialDossier.chain.traceback')}</strong>
-												<p>{reportChainSourceLocation(chain)}</p>
-												<div class="evidence-chip-row">
-													{#each reportChainEvidenceCodes(chain, evidenceCodeMap) as code}
-														<button
-															type="button"
-															class="evidence-chip"
-															on:click={() => openEvidenceCode(code)}
-														>
-															{code}
-														</button>
-													{:else}
-														<span class="evidence-chip evidence-chip--muted">--</span>
-													{/each}
-												</div>
-											</div>
-										</div>
-									</article>
-								{:else}
-									<p class="empty-copy">
-										{reportPackage
-											? $t('research.materialDossier.chain.empty')
-											: $t('research.materialDossier.chain.packageUnavailable')}
-									</p>
-								{/each}
-							</div>
-						</section>
-					{/if}
-
-					{#if !reportDocument}
-						<section id="material-problems" class="dossier-card material-problems-card">
-							<div class="dossier-section-heading">
-								<span class="section-number">3</span>
-								<h3>{$t('research.materialDossier.sections.materialProblems.title')}</h3>
-								<p>{$t('research.materialDossier.sections.materialProblems.body')}</p>
-							</div>
-
-							<div class="problem-grid">
-								{#each materialProblemCards as problem (problem.key)}
-									<article class="problem-card">
-										<div class="problem-card__header">
-											<h4>{problem.title}</h4>
-											<span>{problem.status}</span>
-										</div>
-										<p>{problem.body}</p>
-										{#if problem.values.length}
-											<div class="finding-values">
-												{#each problem.values as value (value.key)}
-													<button type="button" on:click={() => openSupportedValue(value)}>
-														<strong>{value.sample}</strong>
-														<span>{value.property} = {value.displayValue}</span>
-														<small>{value.evidenceCode}</small>
-													</button>
-												{/each}
-											</div>
-										{/if}
-									</article>
-								{/each}
-							</div>
-						</section>
-					{/if}
-
-					{#if !reportDocument}
-						<section id="trend-comparison" class="dossier-card">
-							<div class="dossier-section-heading">
-								<span class="section-number">4</span>
-								<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
-								<p>{$t('research.materialDossier.sections.trends.body')}</p>
-							</div>
-
-							<div class="trend-grid">
-								<div class="comparison-panel">
-									<h4>{$t('research.materialDossier.comparison.topic')}</h4>
-									<p>
-										{$t('research.materialDossier.comparison.controls', {
-											controlled: processSummary.controlledLabels.join(', ') || '--'
-										})}
-									</p>
-									<div class="dossier-table-wrapper">
-										<table class="dossier-table dossier-table--compact">
-											<thead>
-												<tr>
-													<th>{$t('research.materialDossier.comparison.variable')}</th>
-													<th>{$t('research.materialDossier.comparison.property')}</th>
-													<th>{$t('research.materialDossier.comparison.observation')}</th>
-													<th>{$t('research.materialDossier.comparison.conclusion')}</th>
-												</tr>
-											</thead>
-											<tbody>
-												{#each comparisonRows as row (row.key)}
-													<tr>
-														<td>{row.variable}</td>
-														<td>{row.property}</td>
-														<td>
-															<div class="comparison-bars">
-																<span>{row.firstValue ?? '--'}</span>
-																<div class="bar-track">
-																	<span
-																		class="bar-fill bar-fill--primary"
-																		style={`width: ${((row.firstValue ?? 0) / row.maxValue) * 100}%`}
-																	></span>
-																	<span
-																		class="bar-fill bar-fill--secondary"
-																		style={`width: ${((row.secondValue ?? 0) / row.maxValue) * 100}%`}
-																	></span>
-																</div>
-																<span>{row.secondValue ?? '--'}</span>
-															</div>
-														</td>
-														<td>{row.conclusion}</td>
-													</tr>
-												{:else}
-													<tr>
-														<td colspan="4" class="empty-cell">
-															{#if summaryTrendValues.length}
-																{$t('research.materialDossier.comparison.summaryOnly', {
-																	values: summaryTrendText(summaryTrendValues)
-																})}
-															{:else}
-																{$t('research.materialDossier.comparison.empty')}
-															{/if}
-														</td>
-													</tr>
-												{/each}
-											</tbody>
-										</table>
-									</div>
-								</div>
-
-								<div class="chart-panel">
-									<h4>{$t('research.materialDossier.chart.title')}</h4>
-									{#if trendRows.length}
-										{@const trend = trendRows[0]}
-										<div class="mini-chart" aria-label={trend.property}>
-											<div class="chart-scale">
-												<span>{Math.ceil(trend.maxValue)}</span>
-												<span>{Math.round(trend.maxValue * 0.75)}</span>
-												<span>{Math.round(trend.maxValue * 0.5)}</span>
-												<span>0</span>
-											</div>
-											<div class="chart-bars">
-												<div class="chart-bar">
-													<span
-														class="chart-bar__fill chart-bar__fill--primary"
-														style={`height: ${((trend.firstValue ?? 0) / trend.maxValue) * 100}%`}
-													></span>
-													<strong>{trend.firstValue ?? '--'}</strong>
-												</div>
-												<div class="chart-bar">
-													<span
-														class="chart-bar__fill chart-bar__fill--secondary"
-														style={`height: ${((trend.secondValue ?? 0) / trend.maxValue) * 100}%`}
-													></span>
-													<strong>{trend.secondValue ?? '--'}</strong>
-												</div>
-											</div>
-											<div class="chart-labels">
-												<span>{trend.firstLabel}</span>
-												<span>{trend.secondLabel}</span>
-											</div>
-										</div>
-										<p class="chart-caption">
-											{$t('research.materialDossier.chart.caption')}
-										</p>
-									{:else}
-										<p class="empty-copy">
-											{#if summaryTrendValues.length}
-												{$t('research.materialDossier.chart.summaryOnly', {
-													values: summaryTrendText(summaryTrendValues)
-												})}
-											{:else}
-												{$t('research.materialDossier.chart.empty')}
-											{/if}
-										</p>
-									{/if}
-								</div>
-							</div>
-						</section>
-					{/if}
-
-					{#if !reportDocument}
-						<section id="performance-results" class="dossier-card">
-							<div class="dossier-section-heading">
-								<span class="section-number">5</span>
-								<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
-								<p>{$t('research.materialDossier.sections.performance.body')}</p>
-							</div>
-
-							<div class="dossier-table-wrapper">
-								<table class="dossier-table dossier-table--wide">
-									<thead>
-										<tr>
-											<th>{$t('research.materialDossier.table.sampleCondition')}</th>
-											<th>{$t('research.materialDossier.table.primaryVariable')}</th>
-											<th>{$t('research.materialDossier.table.processSummary')}</th>
-											{#each propertyColumns as column (column.key)}
-												<th>{column.label}</th>
-											{/each}
-											<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each performanceRows as row, rowIndex (row.row_id)}
-											<tr>
-												<td>
-													<div class="sample-condition">
-														<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
-														<small>{materialProfile.canonical_name}</small>
-													</div>
-												</td>
-												<td>{variableSummary(row, processSummary, $t)}</td>
-												<td>{processBrief(row)}</td>
-												{#each propertyColumns as column (column.key)}
-													{@const value = row.values[column.key]}
-													<td>
-														{#if value}
-															<button
-																type="button"
-																class="value-button"
-																on:click={() => openValueEvidence(row, column, value)}
-															>
-																{formatEvidenceBackedValue(value)}
-															</button>
-														{:else}
-															<span class="empty-value">--</span>
-														{/if}
-													</td>
-												{/each}
-												<td>
-													{#each [rowEvidenceSummary(row, propertyColumns, evidenceCodeMap)] as evidenceSummary}
-														{#if evidenceSummary.visibleLabels.length}
-															<div class="matrix-evidence-chips" title={evidenceSummary.title}>
-																{#each evidenceSummary.visibleLabels as code}
-																	<button
-																		type="button"
-																		class="evidence-chip"
-																		on:click={() => openEvidenceCode(code)}
-																	>
-																		{code}
-																	</button>
-																{/each}
-																{#if evidenceSummary.hiddenCount}
-																	<span class="evidence-chip evidence-chip--muted">
-																		+{evidenceSummary.hiddenCount} more
-																	</span>
-																{/if}
-															</div>
-														{:else}
-															<span class="empty-value">--</span>
-														{/if}
-													{/each}
-												</td>
-											</tr>
+								<p>{problem.body}</p>
+								{#if problem.values.length}
+									<div class="finding-values">
+										{#each problem.values as value (value.key)}
+											<button type="button" on:click={() => openSupportedValue(value)}>
+												<strong>{value.sample}</strong>
+												<span>{value.property} = {value.displayValue}</span>
+												<small>{value.evidenceCode}</small>
+											</button>
 										{/each}
-									</tbody>
-								</table>
-							</div>
-							<p class="dossier-table-note">
-								{$t('research.materialDossier.performance.summary', {
-									samples: performanceRows.length,
-									properties: propertyColumns.length
+									</div>
+								{/if}
+							</article>
+						{/each}
+					</div>
+				</section>
+
+				<section id="trend-comparison" class="dossier-card">
+					<div class="dossier-section-heading">
+						<span class="section-number">2</span>
+						<h3>{$t('research.materialDossier.sections.trends.title')}</h3>
+						<p>{$t('research.materialDossier.sections.trends.body')}</p>
+					</div>
+
+					<div class="trend-grid">
+						<div class="comparison-panel">
+							<h4>{$t('research.materialDossier.comparison.topic')}</h4>
+							<p>
+								{$t('research.materialDossier.comparison.controls', {
+									controlled: processSummary.controlledLabels.join(', ') || '--'
 								})}
 							</p>
-						</section>
-					{/if}
-
-					{#if !reportDocument}
-						<section id="evidence-locator" class="dossier-card">
-							<div class="dossier-section-heading">
-								<span class="section-number">6</span>
-								<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
-								<p>{$t('research.materialDossier.sections.evidence.body')}</p>
-							</div>
-
 							<div class="dossier-table-wrapper">
-								<table class="dossier-table">
+								<table class="dossier-table dossier-table--compact">
 									<thead>
 										<tr>
-											<th>{$t('research.materialDossier.evidence.code')}</th>
-											<th>{$t('research.materialDossier.evidence.claim')}</th>
-											<th>{$t('research.materialDossier.evidence.type')}</th>
-											<th>{$t('research.materialDossier.evidence.location')}</th>
-											<th>{$t('research.materialDossier.evidence.anchor')}</th>
-											<th>{$t('research.materialDossier.evidence.confidence')}</th>
+											<th>{$t('research.materialDossier.comparison.variable')}</th>
+											<th>{$t('research.materialDossier.comparison.property')}</th>
+											<th>{$t('research.materialDossier.comparison.observation')}</th>
+											<th>{$t('research.materialDossier.comparison.conclusion')}</th>
 										</tr>
 									</thead>
 									<tbody>
-										{#each evidenceRows as row (row.key)}
+										{#each comparisonRows as row (row.key)}
 											<tr>
-												<td>{row.code}</td>
+												<td>{row.variable}</td>
+												<td>{row.property}</td>
 												<td>
-													<button
-														type="button"
-														class="evidence-row-button"
-														on:click={() => openEvidenceRow(row)}
-													>
-														{row.claim}
-													</button>
+													<div class="comparison-bars">
+														<span>{row.firstValue ?? '--'}</span>
+														<div class="bar-track">
+															<span
+																class="bar-fill bar-fill--primary"
+																style={`width: ${((row.firstValue ?? 0) / row.maxValue) * 100}%`}
+															></span>
+															<span
+																class="bar-fill bar-fill--secondary"
+																style={`width: ${((row.secondValue ?? 0) / row.maxValue) * 100}%`}
+															></span>
+														</div>
+														<span>{row.secondValue ?? '--'}</span>
+													</div>
 												</td>
-												<td>{row.type}</td>
-												<td>
-													{#if row.href}
-														<a class="dossier-link" href={row.href}>{row.location}</a>
-													{:else}
-														{row.location}
-													{/if}
-												</td>
-												<td>{row.code}</td>
-												<td>{row.confidence}</td>
+												<td>{row.conclusion}</td>
 											</tr>
 										{:else}
 											<tr>
-												<td colspan="6" class="empty-cell">
-													{$t('research.materialDossier.evidence.empty')}
+												<td colspan="4" class="empty-cell">
+													{#if summaryTrendValues.length}
+														{$t('research.materialDossier.comparison.summaryOnly', {
+															values: summaryTrendText(summaryTrendValues)
+														})}
+													{:else}
+														{$t('research.materialDossier.comparison.empty')}
+													{/if}
 												</td>
 											</tr>
 										{/each}
 									</tbody>
 								</table>
 							</div>
-							<a
-								class="footer-link"
-								href={resolve('/collections/[id]/evidence', { id: collectionId })}
-							>
-								{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
-							</a>
-						</section>
-					{/if}
-				</main>
-			{:else}
-				<main
-					class="dossier-main dossier-main--narrative"
-					aria-label={$t('research.materialDossier.narrative.mainLabel')}
-				>
-					<section id="narrative-overview" class="dossier-card narrative-card">
-						<p class="narrative-eyebrow">
-							{$t('research.materialDossier.narrative.eyebrow')}
-						</p>
-						<h3>{$t('research.materialDossier.narrative.overviewTitle')}</h3>
-						<p class="narrative-lede">{narrativeLead(materialProfile, $t)}</p>
-						<div class="narrative-metrics">
-							<div>
-								<strong>{paperCount}</strong>
-								<span>{$t('research.materialDossier.aside.sourcePapers')}</span>
-							</div>
-							<div>
-								<strong>{sampleCount}</strong>
-								<span>{$t('research.overview.samples')}</span>
-							</div>
-							<div>
-								<strong>{measuredPropertyCount}</strong>
-								<span>{$t('research.overview.properties')}</span>
-							</div>
-							<div>
-								<strong>{evidenceCount}</strong>
-								<span>{$t('research.overview.evidence')}</span>
-							</div>
 						</div>
-					</section>
 
-					<section id="narrative-samples" class="dossier-card narrative-card">
-						<div class="narrative-section-heading">
-							<span>1</span>
-							<div>
-								<h3>{$t('research.materialDossier.narrative.sampleDesignTitle')}</h3>
-								<p>{narrativeSampleDesign($t)}</p>
-							</div>
-						</div>
-						<div class="dossier-table-wrapper narrative-table-wrapper">
-							<table class="dossier-table dossier-table--compact">
-								<thead>
-									<tr>
-										<th>{$t('research.materialDossier.table.sampleCondition')}</th>
-										<th>{$t('research.materialDossier.table.primaryVariable')}</th>
-										<th>{$t('research.materialDossier.table.processSummary')}</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each focusedSampleRows.slice(0, 5) as row, rowIndex (row.row_id)}
-										<tr>
-											<td>{sampleDisplayLabel(row, $t, rowIndex)}</td>
-											<td>{variableSummary(row, processSummary, $t)}</td>
-											<td>{processBrief(row)}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					</section>
-
-					<section id="narrative-findings" class="dossier-card narrative-card">
-						<div class="narrative-section-heading">
-							<span>2</span>
-							<div>
-								<h3>{$t('research.materialDossier.narrative.findingsTitle')}</h3>
-								<p>{$t('research.materialDossier.narrative.findingsBody')}</p>
-							</div>
-						</div>
-						<div class="best-value-grid">
-							{#each bestPropertyValues as value (value.key)}
-								<button
-									type="button"
-									class="best-value-card"
-									on:click={() => openSupportedValue(value)}
-								>
-									<span>{value.property}</span>
-									<strong>{value.displayValue}</strong>
-									<small>{value.sample}</small>
-									<em>{value.evidenceCode}</em>
-								</button>
+						<div class="chart-panel">
+							<h4>{$t('research.materialDossier.chart.title')}</h4>
+							{#if trendRows.length}
+								{@const trend = trendRows[0]}
+								<div class="mini-chart" aria-label={trend.property}>
+									<div class="chart-scale">
+										<span>{Math.ceil(trend.maxValue)}</span>
+										<span>{Math.round(trend.maxValue * 0.75)}</span>
+										<span>{Math.round(trend.maxValue * 0.5)}</span>
+										<span>0</span>
+									</div>
+									<div class="chart-bars">
+										<div class="chart-bar">
+											<span
+												class="chart-bar__fill chart-bar__fill--primary"
+												style={`height: ${((trend.firstValue ?? 0) / trend.maxValue) * 100}%`}
+											></span>
+											<strong>{trend.firstValue ?? '--'}</strong>
+										</div>
+										<div class="chart-bar">
+											<span
+												class="chart-bar__fill chart-bar__fill--secondary"
+												style={`height: ${((trend.secondValue ?? 0) / trend.maxValue) * 100}%`}
+											></span>
+											<strong>{trend.secondValue ?? '--'}</strong>
+										</div>
+									</div>
+									<div class="chart-labels">
+										<span>{trend.firstLabel}</span>
+										<span>{trend.secondLabel}</span>
+									</div>
+								</div>
+								<p class="chart-caption">
+									{$t('research.materialDossier.chart.caption')}
+								</p>
 							{:else}
-								<p class="empty-copy">{$t('research.materialDossier.findings.empty')}</p>
-							{/each}
+								<p class="empty-copy">
+									{#if summaryTrendValues.length}
+										{$t('research.materialDossier.chart.summaryOnly', {
+											values: summaryTrendText(summaryTrendValues)
+										})}
+									{:else}
+										{$t('research.materialDossier.chart.empty')}
+									{/if}
+								</p>
+							{/if}
 						</div>
-						<div class="narrative-finding-list">
-							{#each keyFindings as finding (finding.key)}
-								<article class="narrative-finding">
-									<h4>{finding.title}</h4>
-									<p>{finding.body}</p>
-									<div class="evidence-chip-row">
-										{#each finding.evidenceCodes as code}
+					</div>
+				</section>
+
+				<section id="performance-results" class="dossier-card">
+					<div class="dossier-section-heading">
+						<span class="section-number">3</span>
+						<h3>{$t('research.materialDossier.sections.performance.title')}</h3>
+						<p>{$t('research.materialDossier.sections.performance.body')}</p>
+					</div>
+
+					<div class="dossier-table-wrapper">
+						<table class="dossier-table dossier-table--wide">
+							<thead>
+								<tr>
+									<th>{$t('research.materialDossier.table.sampleCondition')}</th>
+									<th>{$t('research.materialDossier.table.primaryVariable')}</th>
+									<th>{$t('research.materialDossier.table.processSummary')}</th>
+									{#each propertyColumns as column (column.key)}
+										<th>{column.label}</th>
+									{/each}
+									<th>{$t('research.materialDossier.table.evidenceAnchors')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each performanceRows as row, rowIndex (row.row_id)}
+									<tr>
+										<td>
+											<div class="sample-condition">
+												<strong>{sampleDisplayLabel(row, $t, rowIndex)}</strong>
+												<small>{materialProfile.canonical_name}</small>
+											</div>
+										</td>
+										<td>{variableSummary(row, processSummary, $t)}</td>
+										<td>{processBrief(row)}</td>
+										{#each propertyColumns as column (column.key)}
+											{@const value = row.values[column.key]}
+											<td>
+												{#if value}
+													<button
+														type="button"
+														class="value-button"
+														on:click={() => openValueEvidence(row, column, value)}
+													>
+														{formatEvidenceBackedValue(value)}
+													</button>
+												{:else}
+													<span class="empty-value">--</span>
+												{/if}
+											</td>
+										{/each}
+										<td>
+											{#each [rowEvidenceSummary(row, propertyColumns, evidenceCodeMap)] as evidenceSummary}
+												{#if evidenceSummary.visibleLabels.length}
+													<div class="matrix-evidence-chips" title={evidenceSummary.title}>
+														{#each evidenceSummary.visibleLabels as code}
+															<button
+																type="button"
+																class="evidence-chip"
+																on:click={() => openEvidenceCode(code)}
+															>
+																{code}
+															</button>
+														{/each}
+														{#if evidenceSummary.hiddenCount}
+															<span class="evidence-chip evidence-chip--muted">
+																+{evidenceSummary.hiddenCount} more
+															</span>
+														{/if}
+													</div>
+												{:else}
+													<span class="empty-value">--</span>
+												{/if}
+											{/each}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					<p class="dossier-table-note">
+						{$t('research.materialDossier.performance.summary', {
+							samples: performanceRows.length,
+							properties: propertyColumns.length
+						})}
+					</p>
+				</section>
+
+				<section id="evidence-locator" class="dossier-card">
+					<div class="dossier-section-heading">
+						<span class="section-number">4</span>
+						<h3>{$t('research.materialDossier.sections.evidence.title')}</h3>
+						<p>{$t('research.materialDossier.sections.evidence.body')}</p>
+					</div>
+
+					<div class="dossier-table-wrapper">
+						<table class="dossier-table">
+							<thead>
+								<tr>
+									<th>{$t('research.materialDossier.evidence.code')}</th>
+									<th>{$t('research.materialDossier.evidence.claim')}</th>
+									<th>{$t('research.materialDossier.evidence.type')}</th>
+									<th>{$t('research.materialDossier.evidence.location')}</th>
+									<th>{$t('research.materialDossier.evidence.anchor')}</th>
+									<th>{$t('research.materialDossier.evidence.confidence')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each evidenceRows as row (row.key)}
+									<tr>
+										<td>{row.code}</td>
+										<td>
 											<button
 												type="button"
-												class="evidence-chip"
-												on:click={() => openEvidenceCode(code)}
+												class="evidence-row-button"
+												on:click={() => openEvidenceRow(row)}
 											>
-												{code}
+												{row.claim}
 											</button>
-										{:else}
-											<span class="evidence-chip evidence-chip--muted">--</span>
-										{/each}
-									</div>
-								</article>
-							{/each}
-						</div>
-					</section>
-
-					<section id="narrative-trends" class="dossier-card narrative-card">
-						<div class="narrative-section-heading">
-							<span>3</span>
-							<div>
-								<h3>{$t('research.materialDossier.narrative.trendQuestion')}</h3>
-								<p>{narrativeTrendBody(trendRows[0], $t)}</p>
-							</div>
-						</div>
-						{#if trendRows.length}
-							{@const trend = trendRows[0]}
-							<div class="narrative-comparison-card">
-								<div>
-									<strong>{trend.firstLabel}</strong>
-									<span>{trend.property}: {trend.firstValue ?? '--'}</span>
-								</div>
-								<div>
-									<strong>{trend.secondLabel}</strong>
-									<span>{trend.property}: {trend.secondValue ?? '--'}</span>
-								</div>
-							</div>
-						{/if}
-						<div class="evidence-chip-row">
-							{#each evidenceRows.slice(0, 4) as row (row.key)}
-								<button type="button" class="evidence-chip" on:click={() => openEvidenceRow(row)}>
-									{row.code}
-								</button>
-							{/each}
-						</div>
-					</section>
-
-					<section id="narrative-evidence" class="dossier-card narrative-card">
-						<div class="narrative-section-heading">
-							<span>4</span>
-							<div>
-								<h3>{$t('research.materialDossier.narrative.evidenceTitle')}</h3>
-								<p>{$t('research.materialDossier.narrative.evidenceBody')}</p>
-							</div>
-						</div>
-						<div class="evidence-chip-row">
-							{#each evidenceRows as row (row.key)}
-								<button type="button" class="evidence-chip" on:click={() => openEvidenceRow(row)}>
-									{row.code}
-								</button>
-							{:else}
-								<span class="evidence-chip evidence-chip--muted">
-									{$t('research.materialDossier.evidence.empty')}
-								</span>
-							{/each}
-						</div>
-						<a
-							class="footer-link"
-							href={resolve('/collections/[id]/evidence', { id: collectionId })}
-						>
-							{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
-						</a>
-					</section>
-				</main>
-			{/if}
+										</td>
+										<td>{row.type}</td>
+										<td>
+											{#if row.href}
+												<a class="dossier-link" href={row.href}>{row.location}</a>
+											{:else}
+												{row.location}
+											{/if}
+										</td>
+										<td>{row.code}</td>
+										<td>{row.confidence}</td>
+									</tr>
+								{:else}
+									<tr>
+										<td colspan="6" class="empty-cell">
+											{$t('research.materialDossier.evidence.empty')}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					<a
+						class="footer-link"
+						href={resolve('/collections/[id]/evidence', { id: collectionId })}
+					>
+						{$t('research.materialDossier.evidence.viewAll', { count: evidenceCount })}
+					</a>
+				</section>
+			</main>
 
 			<aside class="dossier-aside" aria-label={$t('research.materialDossier.aside.label')}>
 				<section class="aside-card aside-card--source">
@@ -3542,50 +1634,20 @@
 					</p>
 				</section>
 
-				<nav
-					class="aside-card quick-nav"
-					aria-label={$t('research.materialDossier.aside.quickNav')}
-				>
+				<nav class="aside-card quick-nav" aria-label={$t('research.materialDossier.aside.quickNav')}>
 					<h3>{$t('research.materialDossier.aside.quickNav')}</h3>
-					{#if activeDossierTab === 'structured'}
-						{#if reportDocument}
-							{#each reportDocumentNavItems(reportDocument) as item (item.anchor)}
-								<a href={`#${item.anchor}`}>{item.title}</a>
-							{/each}
-						{:else}
-							<a href="#material-report-overview"
-								>1 {$t('research.materialDossier.sections.overview.title')}</a
-							>
-							<a href="#representative-material-states"
-								>2 {$t('research.materialDossier.sections.chain.title')}</a
-							>
-							<a href="#material-problems"
-								>3 {$t('research.materialDossier.sections.materialProblems.title')}</a
-							>
-							<a href="#trend-comparison"
-								>4 {$t('research.materialDossier.sections.trends.title')}</a
-							>
-							<a href="#performance-results"
-								>5 {$t('research.materialDossier.sections.performance.title')}</a
-							>
-							<a href="#evidence-locator"
-								>6 {$t('research.materialDossier.sections.evidence.title')}</a
-							>
-						{/if}
-					{:else}
-						<a href="#narrative-overview"
-							>1 {$t('research.materialDossier.narrative.overviewTitle')}</a
-						>
-						<a href="#narrative-samples"
-							>2 {$t('research.materialDossier.narrative.sampleDesignTitle')}</a
-						>
-						<a href="#narrative-findings"
-							>3 {$t('research.materialDossier.narrative.findingsTitle')}</a
-						>
-						<a href="#narrative-evidence"
-							>4 {$t('research.materialDossier.narrative.evidenceTitle')}</a
-						>
-					{/if}
+					<a href="#material-problems"
+						>1 {$t('research.materialDossier.sections.materialProblems.title')}</a
+					>
+					<a href="#trend-comparison"
+						>2 {$t('research.materialDossier.sections.trends.title')}</a
+					>
+					<a href="#performance-results"
+						>3 {$t('research.materialDossier.sections.performance.title')}</a
+					>
+					<a href="#evidence-locator"
+						>4 {$t('research.materialDossier.sections.evidence.title')}</a
+					>
 				</nav>
 
 				<section class="aside-card">
@@ -3684,126 +1746,6 @@
 		</aside>
 	{/if}
 
-	{#if pdfDrawerOpen}
-		<aside class="detail-drawer" aria-label={$t('research.materialDossier.pdf.title')}>
-			<div class="detail-drawer__header">
-				<h3>
-					{pdfReportReady
-						? $t('research.materialDossier.pdf.generatedTitle')
-						: $t('research.materialDossier.pdf.title')}
-				</h3>
-				<button type="button" on:click={closeDrawer}>
-					{$t('research.evidence.close')}
-				</button>
-			</div>
-			{#if pdfReportReady && pdfReport}
-				<p
-					class:pdf-status--warning={pdfReport.status === 'ready_with_warnings'}
-					class="pdf-status"
-				>
-					{pdfGeneratedStatus(pdfReport)}
-				</p>
-				<dl class="pdf-data">
-					<div>
-						<dt>{$t('research.materialDossier.pdf.reportTitle')}</dt>
-						<dd>{pdfReport.title ?? materialProfile?.canonical_name ?? materialId}</dd>
-					</div>
-					<div>
-						<dt>{$t('research.materialDossier.pdf.readiness')}</dt>
-						<dd>{pdfReport.readiness} · {pdfReport.readiness_reason}</dd>
-					</div>
-				</dl>
-				{#if pdfReport.warnings.length}
-					<ul class="pdf-warning-list">
-						{#each pdfReport.warnings as warning}
-							<li>{warning}</li>
-						{/each}
-					</ul>
-				{/if}
-				<div class="drawer-actions">
-					<a
-						class="btn btn--ghost btn--small"
-						href={buildMaterialReviewMarkdownUrl(collectionId, materialId)}
-						target="_blank"
-						rel="noreferrer"
-					>
-						{$t('research.materialDossier.pdf.previewMarkdown')}
-					</a>
-					<a
-						class="btn btn--ghost btn--small"
-						href={buildMaterialReviewPdfUrl(collectionId, materialId)}
-						target="_blank"
-						rel="noreferrer"
-					>
-						{$t('research.materialDossier.pdf.view')}
-					</a>
-					<a
-						class="btn btn--ghost btn--small"
-						href={buildMaterialReviewPdfUrl(collectionId, materialId)}
-						download
-					>
-						{$t('research.materialDossier.pdf.download')}
-					</a>
-					<button
-						class="btn btn--primary-light btn--small"
-						type="button"
-						disabled={pdfReportBusy}
-						on:click={() => generatePdfReport(true)}
-					>
-						{$t('research.materialDossier.pdf.regenerate')}
-					</button>
-				</div>
-			{:else}
-				<p>{pdfStatusBody()}</p>
-				{#if pdfReportError}
-					<p class="pdf-error" role="alert">{pdfReportError}</p>
-				{/if}
-				<ul class="pdf-list">
-					<li>{$t('research.materialDossier.sections.overview.title')}</li>
-					<li>{$t('research.materialDossier.sections.chain.title')}</li>
-					<li>{$t('research.materialDossier.sections.materialProblems.title')}</li>
-					<li>{$t('research.materialDossier.sections.trends.title')}</li>
-					<li>{$t('research.materialDossier.sections.performance.title')}</li>
-					<li>{$t('research.materialDossier.sections.evidence.title')}</li>
-				</ul>
-				<dl class="pdf-data">
-					<div>
-						<dt>{$t('research.materialDossier.aside.sourcePapers')}</dt>
-						<dd>{paperCount}</dd>
-					</div>
-					<div>
-						<dt>{$t('research.overview.samples')}</dt>
-						<dd>{sampleCount}</dd>
-					</div>
-					<div>
-						<dt>{$t('research.overview.properties')}</dt>
-						<dd>{measuredPropertyCount}</dd>
-					</div>
-					<div>
-						<dt>{$t('research.overview.evidence')}</dt>
-						<dd>{evidenceCount}</dd>
-					</div>
-				</dl>
-				<div class="drawer-actions">
-					<button class="btn btn--ghost btn--small" type="button" on:click={closeDrawer}>
-						{$t('research.materialDossier.pdf.cancel')}
-					</button>
-					<button
-						class="btn btn--primary-light btn--small"
-						type="button"
-						disabled={pdfReportBusy}
-						on:click={() => generatePdfReport(pdfReport?.status === 'failed')}
-					>
-						{pdfReportBusy
-							? $t('research.materialDossier.pdf.generatingStatus')
-							: pdfReport?.status === 'failed'
-								? $t('research.materialDossier.pdf.regenerate')
-								: $t('research.materialDossier.pdf.generate')}
-					</button>
-				</div>
-			{/if}
-		</aside>
-	{/if}
 </section>
 
 <style>
@@ -3890,46 +1832,6 @@
 		gap: 8px;
 	}
 
-	.dossier-tabs {
-		width: fit-content;
-		display: inline-flex;
-		gap: 4px;
-		padding: 4px;
-		border: 1px solid #dbe4f0;
-		border-radius: 10px;
-		background: #ffffff;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
-	}
-
-	.dossier-tabs button {
-		min-height: 32px;
-		padding: 0 12px;
-		border: 0;
-		border-radius: 8px;
-		background: transparent;
-		color: #475569;
-		font-size: 14px;
-		font-weight: 700;
-		line-height: 20px;
-		cursor: pointer;
-	}
-
-	.dossier-tabs button.active {
-		background: #eff6ff;
-		color: #2563eb;
-	}
-
-	.btn--primary-light {
-		border-color: #bfdbfe;
-		background: #eff6ff;
-		color: #2563eb;
-	}
-
-	.btn--primary-light:not(:disabled):hover {
-		background: #dbeafe;
-		color: #1d4ed8;
-	}
-
 	.btn:disabled {
 		cursor: wait;
 		opacity: 0.65;
@@ -3968,10 +1870,6 @@
 		display: grid;
 		gap: 16px;
 		min-width: 0;
-	}
-
-	.dossier-main--narrative {
-		max-width: 880px;
 	}
 
 	.dossier-card {
@@ -4070,520 +1968,6 @@
 		color: #64748b;
 		font-size: 12px;
 		line-height: 18px;
-	}
-
-	.report-overview-card,
-	.material-report-document-card,
-	.material-problems-card {
-		gap: 14px;
-	}
-
-	.material-report-document-card {
-		padding: 0;
-	}
-
-	.material-report-reader-header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 16px;
-		padding: 18px 24px;
-		border-bottom: 1px solid #e2e8f0;
-	}
-
-	.material-report-reader-header > div:first-child {
-		display: grid;
-		gap: 5px;
-		min-width: 0;
-	}
-
-	.material-report-reader-header h3 {
-		margin: 0;
-		color: #64748b;
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 18px;
-		text-transform: uppercase;
-	}
-
-	.material-report-reader-header p {
-		margin: 0;
-		color: #64748b;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.material-report-actions {
-		display: flex;
-		flex: 0 0 auto;
-		flex-wrap: wrap;
-		justify-content: flex-end;
-		gap: 8px;
-	}
-
-	.material-report-actions button {
-		min-height: 32px;
-		border: 1px solid #dbe3ef;
-		border-radius: 8px;
-		padding: 6px 10px;
-		background: #ffffff;
-		color: #0f172a;
-		cursor: pointer;
-		font: inherit;
-		font-size: 13px;
-		font-weight: 750;
-	}
-
-	.material-report-actions button:disabled {
-		cursor: wait;
-		opacity: 0.65;
-	}
-
-	.material-report-status {
-		display: inline-flex;
-		align-items: center;
-		min-height: 32px;
-		border: 1px solid #dbe3ef;
-		border-radius: 999px;
-		padding: 0 9px;
-		background: #f8fafc;
-		color: #64748b;
-		font-size: 12px;
-		line-height: 16px;
-	}
-
-	.material-report-error {
-		margin: 14px 24px 0;
-		color: #b42318;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.material-report-message {
-		margin: 14px 24px 0;
-		color: #64748b;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.material-report-markdown {
-		display: grid;
-		gap: 12px;
-		padding: 24px;
-		color: #1e293b;
-	}
-
-	.material-report-markdown h3,
-	.material-report-markdown h4,
-	.material-report-markdown h5 {
-		margin: 0;
-		color: #0f172a;
-		letter-spacing: 0;
-	}
-
-	.material-report-markdown h3 {
-		font-size: 28px;
-		font-weight: 850;
-		line-height: 36px;
-	}
-
-	.material-report-markdown h4 {
-		margin-top: 10px;
-		padding-top: 14px;
-		border-top: 1px solid #e2e8f0;
-		font-size: 18px;
-		font-weight: 800;
-		line-height: 26px;
-	}
-
-	.material-report-markdown h5 {
-		font-size: 15px;
-		font-weight: 800;
-		line-height: 22px;
-	}
-
-	.material-report-markdown p,
-	.material-report-markdown li {
-		margin: 0;
-		color: #334155;
-		font-size: 14px;
-		line-height: 23px;
-		overflow-wrap: anywhere;
-	}
-
-	.material-report-markdown ul {
-		display: grid;
-		gap: 7px;
-		margin: 0;
-		padding-left: 20px;
-	}
-
-	.material-report-markdown ol {
-		display: grid;
-		gap: 7px;
-		margin: 0;
-		padding-left: 22px;
-	}
-
-	.material-report-markdown hr {
-		width: 100%;
-		margin: 6px 0;
-		border: 0;
-		border-top: 1px solid #e2e8f0;
-	}
-
-	.material-report-markdown blockquote {
-		margin: 0;
-		padding: 10px 12px;
-		border-left: 3px solid #2563eb;
-		background: #f8fbff;
-		color: #334155;
-		font-size: 14px;
-		line-height: 23px;
-	}
-
-	.material-report-markdown pre {
-		margin: 0;
-		padding: 12px;
-		overflow-x: auto;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #f8fafc;
-		color: #0f172a;
-		font-size: 13px;
-		line-height: 21px;
-	}
-
-	.report-table-scroll {
-		overflow-x: auto;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #ffffff;
-	}
-
-	.material-report-markdown table {
-		width: 100%;
-		border-collapse: collapse;
-		min-width: 560px;
-	}
-
-	.material-report-markdown th,
-	.material-report-markdown td {
-		padding: 9px 11px;
-		border-bottom: 1px solid #e2e8f0;
-		text-align: left;
-		vertical-align: top;
-		color: #334155;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.material-report-markdown th {
-		background: #f8fafc;
-		color: #0f172a;
-		font-weight: 800;
-	}
-
-	.material-report-markdown tr:last-child td {
-		border-bottom: 0;
-	}
-
-	.report-citation {
-		display: inline-flex;
-		align-items: center;
-		min-height: 22px;
-		margin-left: 3px;
-		padding: 0 6px;
-		border: 1px solid #bfdbfe;
-		border-radius: 6px;
-		background: #eff6ff;
-		color: #2563eb;
-		font-size: 12px;
-		font-weight: 850;
-		line-height: 18px;
-		cursor: pointer;
-	}
-
-	.report-citation:hover {
-		border-color: #2563eb;
-		background: #dbeafe;
-	}
-
-	.report-stat-grid {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 10px;
-	}
-
-	.report-stat-grid div {
-		display: grid;
-		gap: 3px;
-		padding: 12px;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #fbfdff;
-	}
-
-	.report-stat-grid strong {
-		color: #0f172a;
-		font-size: 20px;
-		font-weight: 800;
-		line-height: 28px;
-	}
-
-	.report-stat-grid span {
-		color: #64748b;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-	}
-
-	.paper-contribution-grid,
-	.problem-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 10px;
-	}
-
-	.paper-contribution-card,
-	.problem-card {
-		display: grid;
-		gap: 8px;
-		padding: 12px;
-		border: 1px solid #dbeafe;
-		border-radius: 8px;
-		background: #ffffff;
-		color: #0f172a;
-		text-decoration: none;
-	}
-
-	.paper-contribution-card:hover {
-		border-color: #2563eb;
-		background: #eff6ff;
-	}
-
-	.paper-contribution-card strong,
-	.report-finding h4,
-	.report-section__title,
-	.problem-card h4 {
-		margin: 0;
-		color: #0f172a;
-		font-size: 14px;
-		font-weight: 800;
-		line-height: 20px;
-		overflow-wrap: anywhere;
-	}
-
-	.paper-contribution-card span,
-	.problem-card p {
-		margin: 0;
-		color: #475569;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.problem-card__header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 10px;
-	}
-
-	.problem-card__header span {
-		flex: 0 0 auto;
-		padding: 2px 7px;
-		border: 1px solid #bfdbfe;
-		border-radius: 999px;
-		background: #eff6ff;
-		color: #2563eb;
-		font-size: 11px;
-		font-weight: 800;
-		line-height: 16px;
-	}
-
-	.chain-card {
-		border-color: #bae6fd;
-		background: #f8fbff;
-	}
-
-	.chain-list,
-	.parameter-chain {
-		display: grid;
-		gap: 12px;
-	}
-
-	.parameter-chain {
-		padding: 14px;
-		border: 1px solid #dbeafe;
-		border-radius: 10px;
-		background: #ffffff;
-	}
-
-	.parameter-chain__header,
-	.chain-judgement {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 12px;
-		align-items: start;
-	}
-
-	.parameter-chain__header h4 {
-		margin: 4px 0 0;
-		color: #0f172a;
-		font-size: 18px;
-		font-weight: 800;
-		line-height: 26px;
-	}
-
-	.parameter-chain__header p,
-	.chain-step p,
-	.chain-judgement p {
-		margin: 0;
-		color: #475569;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.chain-rank,
-	.chain-score {
-		display: inline-flex;
-		align-items: center;
-		min-height: 24px;
-		padding: 3px 8px;
-		border-radius: 6px;
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 18px;
-	}
-
-	.chain-rank {
-		background: #dbeafe;
-		color: #1d4ed8;
-	}
-
-	.chain-score {
-		border: 1px solid #bbf7d0;
-		background: #f0fdf4;
-		color: #15803d;
-		white-space: nowrap;
-	}
-
-	.chain-steps {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 10px;
-	}
-
-	.chain-step {
-		display: grid;
-		align-content: start;
-		gap: 8px;
-		padding: 12px;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		background: #fbfdff;
-	}
-
-	.chain-step--wide {
-		grid-column: 1 / -1;
-	}
-
-	.chain-step > span {
-		width: 24px;
-		height: 24px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 999px;
-		background: #0f172a;
-		color: #ffffff;
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 18px;
-	}
-
-	.chain-step > strong,
-	.chain-judgement strong {
-		color: #0f172a;
-		font-size: 13px;
-		font-weight: 800;
-		line-height: 20px;
-	}
-
-	.chain-step dl {
-		display: grid;
-		gap: 6px;
-		margin: 0;
-	}
-
-	.chain-step dl div {
-		display: grid;
-		grid-template-columns: minmax(110px, 0.5fr) minmax(0, 1fr);
-		gap: 8px;
-	}
-
-	.chain-step dt {
-		color: #64748b;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-	}
-
-	.chain-step dd {
-		margin: 0;
-		color: #0f172a;
-		font-size: 13px;
-		font-weight: 700;
-		line-height: 20px;
-		overflow-wrap: anywhere;
-	}
-
-	.chain-metrics {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-		gap: 8px;
-	}
-
-	.chain-metric {
-		display: grid;
-		gap: 2px;
-		min-height: 86px;
-		padding: 10px;
-		border: 1px solid #dbeafe;
-		border-radius: 8px;
-		background: #ffffff;
-		color: #0f172a;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.chain-metric:hover {
-		border-color: #2563eb;
-		background: #eff6ff;
-	}
-
-	.chain-metric span,
-	.chain-metric small {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.chain-metric strong {
-		color: #0f172a;
-		font-size: 17px;
-		font-weight: 800;
-		line-height: 24px;
-	}
-
-	.chain-judgement {
-		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.45fr);
-		padding-top: 2px;
-	}
-
-	.chain-judgement > div {
-		display: grid;
-		gap: 6px;
 	}
 
 	.dossier-table-wrapper {
@@ -4802,153 +2186,6 @@
 		text-align: center;
 	}
 
-	.narrative-card {
-		gap: 14px;
-		padding: 18px;
-	}
-
-	.narrative-eyebrow {
-		margin: 0;
-		color: #2563eb;
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 18px;
-		text-transform: uppercase;
-	}
-
-	.narrative-card h3,
-	.narrative-finding h4 {
-		margin: 0;
-		color: #0f172a;
-	}
-
-	.narrative-card h3 {
-		font-size: 20px;
-		font-weight: 800;
-		line-height: 28px;
-	}
-
-	.narrative-lede,
-	.narrative-section-heading p,
-	.narrative-finding p {
-		margin: 0;
-		color: #475569;
-		font-size: 15px;
-		line-height: 25px;
-	}
-
-	.narrative-metrics,
-	.best-value-grid,
-	.narrative-comparison-card {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-		gap: 10px;
-	}
-
-	.narrative-metrics div,
-	.best-value-card,
-	.narrative-comparison-card div,
-	.narrative-finding {
-		border: 1px solid #e2e8f0;
-		border-radius: 10px;
-		background: #f8fbff;
-	}
-
-	.narrative-metrics div {
-		display: grid;
-		gap: 2px;
-		padding: 12px;
-	}
-
-	.narrative-metrics strong {
-		color: #0f172a;
-		font-size: 22px;
-		line-height: 28px;
-	}
-
-	.narrative-metrics span,
-	.best-value-card span,
-	.best-value-card small,
-	.best-value-card em,
-	.narrative-comparison-card span {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.narrative-section-heading {
-		display: grid;
-		grid-template-columns: 28px minmax(0, 1fr);
-		gap: 12px;
-		align-items: start;
-	}
-
-	.narrative-section-heading > span {
-		width: 26px;
-		height: 26px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 8px;
-		background: #2563eb;
-		color: #ffffff;
-		font-size: 13px;
-		font-weight: 800;
-		line-height: 18px;
-	}
-
-	.narrative-table-wrapper .dossier-table {
-		min-width: 620px;
-	}
-
-	.best-value-card {
-		display: grid;
-		gap: 3px;
-		padding: 12px;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.best-value-card:hover {
-		border-color: #2563eb;
-		background: #eff6ff;
-	}
-
-	.best-value-card strong {
-		color: #0f172a;
-		font-size: 18px;
-		line-height: 26px;
-	}
-
-	.best-value-card em {
-		font-style: normal;
-		font-weight: 800;
-		color: #2563eb;
-	}
-
-	.narrative-finding-list,
-	.evidence-chip-row {
-		display: grid;
-		gap: 10px;
-	}
-
-	.narrative-finding {
-		display: grid;
-		gap: 8px;
-		padding: 14px;
-	}
-
-	.narrative-finding h4 {
-		font-size: 16px;
-		font-weight: 800;
-		line-height: 24px;
-	}
-
-	.evidence-chip-row {
-		display: flex;
-		flex-wrap: wrap;
-	}
-
 	.matrix-evidence-chips {
 		display: flex;
 		align-items: center;
@@ -4979,18 +2216,6 @@
 		border-color: #e2e8f0;
 		color: #64748b;
 		cursor: default;
-	}
-
-	.narrative-comparison-card div {
-		display: grid;
-		gap: 4px;
-		padding: 14px;
-	}
-
-	.narrative-comparison-card strong {
-		color: #0f172a;
-		font-size: 14px;
-		line-height: 22px;
 	}
 
 	.footer-link {
@@ -5124,23 +2349,20 @@
 		cursor: pointer;
 	}
 
-	.detail-drawer dl,
-	.pdf-data {
+	.detail-drawer dl {
 		display: grid;
 		gap: 10px;
 		margin: 0;
 	}
 
-	.detail-drawer dt,
-	.pdf-data dt {
+	.detail-drawer dt {
 		color: #64748b;
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 18px;
 	}
 
-	.detail-drawer dd,
-	.pdf-data dd {
+	.detail-drawer dd {
 		margin: 3px 0 0;
 		color: #0f172a;
 		font-size: 14px;
@@ -5149,51 +2371,6 @@
 
 	.drawer-wide dd {
 		color: #475569;
-	}
-
-	.pdf-list {
-		margin: 0;
-		padding-left: 18px;
-		color: #475569;
-		font-size: 14px;
-		line-height: 22px;
-	}
-
-	.pdf-status {
-		margin: 0;
-		color: #16a34a;
-		font-weight: 700;
-	}
-
-	.pdf-status--warning {
-		color: #f59e0b;
-	}
-
-	.pdf-error {
-		margin: 0;
-		color: #b91c1c;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.pdf-warning-list {
-		margin: 0;
-		padding-left: 18px;
-		color: #92400e;
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.drawer-actions {
-		display: flex;
-		justify-content: flex-end;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-
-	.drawer-actions .btn:disabled {
-		cursor: not-allowed;
-		opacity: 0.6;
 	}
 
 	:root[data-theme='dark'] .dossier-topline span:last-child,
@@ -5205,49 +2382,25 @@
 	:root[data-theme='dark'] .detail-drawer h3,
 	:root[data-theme='dark'] .dossier-table th,
 	:root[data-theme='dark'] .dossier-table td,
-	:root[data-theme='dark'] .report-stat-grid strong,
-	:root[data-theme='dark'] .paper-contribution-card strong,
 	:root[data-theme='dark'] .problem-card h4,
 	:root[data-theme='dark'] .paper-mini-card span,
 	:root[data-theme='dark'] .chart-bar strong,
 	:root[data-theme='dark'] .chart-labels,
-	:root[data-theme='dark'] .narrative-card h3,
-	:root[data-theme='dark'] .narrative-finding h4,
-	:root[data-theme='dark'] .narrative-metrics strong,
-	:root[data-theme='dark'] .best-value-card strong,
-	:root[data-theme='dark'] .parameter-chain__header h4,
-	:root[data-theme='dark'] .chain-step > strong,
-	:root[data-theme='dark'] .chain-judgement strong,
-	:root[data-theme='dark'] .chain-step dd,
-	:root[data-theme='dark'] .chain-metric strong,
-	:root[data-theme='dark'] .narrative-comparison-card strong,
-	:root[data-theme='dark'] .detail-drawer dd,
-	:root[data-theme='dark'] .pdf-data dd {
+	:root[data-theme='dark'] .detail-drawer dd {
 		color: var(--text-primary);
 	}
 
-	:root[data-theme='dark'] .dossier-tabs,
 	:root[data-theme='dark'] .dossier-state-card,
 	:root[data-theme='dark'] .dossier-card,
-	:root[data-theme='dark'] .parameter-chain,
-	:root[data-theme='dark'] .chain-step,
-	:root[data-theme='dark'] .chain-metric,
 	:root[data-theme='dark'] .aside-card,
 	:root[data-theme='dark'] .detail-drawer,
 	:root[data-theme='dark'] .paper-mini-card,
-	:root[data-theme='dark'] .narrative-metrics div,
-	:root[data-theme='dark'] .best-value-card,
-	:root[data-theme='dark'] .narrative-comparison-card div,
-	:root[data-theme='dark'] .narrative-finding,
-	:root[data-theme='dark'] .report-stat-grid div,
-	:root[data-theme='dark'] .paper-contribution-card,
 	:root[data-theme='dark'] .problem-card,
 	:root[data-theme='dark'] .mini-chart {
 		border-color: var(--border-default);
 		background: var(--surface-card);
 	}
 
-	:root[data-theme='dark'] .dossier-tabs button.active,
 	:root[data-theme='dark'] .dossier-table th,
 	:root[data-theme='dark'] .detail-drawer__header button {
 		background: rgba(120, 140, 180, 0.16);
@@ -5262,20 +2415,9 @@
 	:root[data-theme='dark'] .dossier-header p,
 	:root[data-theme='dark'] .dossier-section-heading p,
 	:root[data-theme='dark'] .dossier-table-note,
-	:root[data-theme='dark'] .parameter-chain__header p,
-	:root[data-theme='dark'] .chain-step p,
-	:root[data-theme='dark'] .chain-judgement p,
-	:root[data-theme='dark'] .chain-step dt,
-	:root[data-theme='dark'] .chain-metric span,
-	:root[data-theme='dark'] .chain-metric small,
-	:root[data-theme='dark'] .report-stat-grid span,
-	:root[data-theme='dark'] .paper-contribution-card span,
 	:root[data-theme='dark'] .problem-card p,
 	:root[data-theme='dark'] .comparison-panel > p,
 	:root[data-theme='dark'] .chart-caption,
-	:root[data-theme='dark'] .narrative-lede,
-	:root[data-theme='dark'] .narrative-section-heading p,
-	:root[data-theme='dark'] .narrative-finding p,
 	:root[data-theme='dark'] .empty-value,
 	:root[data-theme='dark'] .empty-copy,
 	:root[data-theme='dark'] .empty-cell {
@@ -5286,14 +2428,6 @@
 		.dossier-layout,
 		.trend-grid {
 			grid-template-columns: 1fr;
-		}
-
-		.parameter-chain__header,
-		.chain-judgement,
-		.chain-steps,
-		.report-stat-grid {
-			grid-template-columns: 1fr;
-			grid-column: auto;
 		}
 
 		.dossier-aside {
@@ -5309,55 +2443,12 @@
 			justify-content: stretch;
 		}
 
-		.dossier-header__actions .btn,
-		.drawer-actions .btn {
+		.dossier-header__actions .btn {
 			width: 100%;
 		}
 
 		.comparison-bars {
 			grid-template-columns: 1fr;
-		}
-
-		.report-table-scroll {
-			overflow-x: visible;
-			border: 0;
-			background: transparent;
-		}
-
-		.material-report-markdown table,
-		.material-report-markdown thead,
-		.material-report-markdown tbody,
-		.material-report-markdown tr,
-		.material-report-markdown th,
-		.material-report-markdown td {
-			display: block;
-			width: 100%;
-			min-width: 0;
-		}
-
-		.material-report-markdown thead {
-			display: none;
-		}
-
-		.material-report-markdown tr {
-			margin-bottom: 10px;
-			border: 1px solid #e2e8f0;
-			border-radius: 8px;
-			background: #ffffff;
-			overflow: hidden;
-		}
-
-		.material-report-markdown td {
-			display: grid;
-			grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
-			gap: 10px;
-			border-bottom: 1px solid #e2e8f0;
-		}
-
-		.material-report-markdown td::before {
-			content: attr(data-label);
-			color: #64748b;
-			font-weight: 800;
 		}
 	}
 </style>

@@ -23,6 +23,16 @@ function collectionPayload() {
 	};
 }
 
+function authPayload() {
+	return {
+		user: {
+			user_id: 'user_1',
+			email: 'reader@example.com',
+			display_name: 'Reader'
+		}
+	};
+}
+
 function workspacePayload() {
 	return {
 		collection: collectionPayload(),
@@ -198,6 +208,80 @@ function objectivePayload() {
 				}
 			},
 			confidence: 0.83
+		},
+		understanding: {
+			schema_version: 'research_understanding.v1',
+			state: 'ready',
+			scope: {
+				scope_type: 'objective',
+				collection_id: collectionId,
+				material_id: null,
+				objective_id: objectiveId,
+				document_id: null,
+				title: 'How does heat treatment affect LPBF 316L tensile strength?'
+			},
+			claims: [
+				{
+					claim_id: 'claim_measure',
+					claim_type: 'measurement',
+					statement: 'Yield strength reached 560 MPa.',
+					status: 'supported',
+					confidence: 0.92,
+					strength: null,
+					evidence_ref_ids: ['ref_measure'],
+					context_ids: ['ctx_objective'],
+					source_object_ids: ['unit_measure'],
+					warnings: []
+				}
+			],
+			relations: [
+				{
+					relation_id: 'rel_heat_treatment',
+					relation_type: 'improves',
+					subject: 'HT-SLM',
+					predicate: 'improves',
+					object: 'as-built baseline',
+					status: 'supported',
+					confidence: 0.79,
+					evidence_ref_ids: ['ref_measure'],
+					context_ids: ['ctx_objective'],
+					source_object_ids: ['unit_compare'],
+					warnings: []
+				}
+			],
+			evidence_refs: [
+				{
+					evidence_ref_id: 'ref_measure',
+					source_kind: 'table',
+					document_id: 'doc_1',
+					label: 'table · table-2 · p. 5',
+					locator: { source_ref: 'table-2', page: 5 },
+					fact_ids: ['unit_measure'],
+					anchor_ids: ['anc_1'],
+					confidence: 0.92,
+					traceability_status: 'resolved',
+					quote: 'Yield strength reached 560 MPa.',
+					href: null
+				}
+			],
+			contexts: [
+				{
+					context_id: 'ctx_objective',
+					label: 'Objective scope',
+					material_scope: ['316L stainless steel'],
+					process_context: { variable_process_axes: ['heat treatment'] },
+					test_condition: {},
+					property_scope: ['yield strength'],
+					limitations: []
+				}
+			],
+			warnings: [],
+			summary: {
+				claim_count: 1,
+				relation_count: 1,
+				evidence_ref_count: 1,
+				context_count: 1
+			}
 		}
 	};
 }
@@ -211,6 +295,9 @@ async function mockObjectiveApis(page: Page) {
 			return route.continue();
 		}
 
+		if (path === '/api/v1/auth/me') {
+			return route.fulfill(json(authPayload()));
+		}
 		if (path === '/api/v1/collections') {
 			return route.fulfill(json({ items: [collectionPayload()] }));
 		}
@@ -237,6 +324,9 @@ async function mockObjectivesNotReadyApis(page: Page) {
 			return route.continue();
 		}
 
+		if (path === '/api/v1/auth/me') {
+			return route.fulfill(json(authPayload()));
+		}
 		if (path === '/api/v1/collections') {
 			return route.fulfill(json({ items: [collectionPayload()] }));
 		}
@@ -272,7 +362,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 	expect(hasOverflow).toBe(false);
 }
 
-test('objective workspace renders logic-chain screenshots and source links', async ({
+test('objective workspace renders research understanding screenshots and source links', async ({
 	page
 }, testInfo) => {
 	await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -285,12 +375,19 @@ test('objective workspace renders logic-chain screenshots and source links', asy
 			name: 'How does heat treatment affect LPBF 316L tensile strength?'
 		})
 	).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Logic chain' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Evidence units' })).toBeVisible();
-	await expect(page.getByRole('link', { name: 'table · table-2 · p. 5' })).toHaveAttribute(
+	await expect(page.getByRole('heading', { name: 'Research understanding' })).toBeVisible();
+	await expect(
+		page.getByLabel('Claims').getByText('Yield strength reached 560 MPa.')
+	).toBeVisible();
+	const understandingEvidence = page.getByLabel('Evidence').getByRole('link', {
+		name: /table · table-2 · p\. 5/
+	});
+	await expect(understandingEvidence).toHaveAttribute(
 		'href',
-		'/collections/col_123/documents/doc_1?page=5&evidence_id=ev_1&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
+		'/collections/col_123/documents/doc_1?page=5&source_ref=table-2&evidence_id=ref_measure&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
 	);
+	await page.getByText('Evidence audit').click();
+	await expect(page.getByRole('heading', { name: 'Supporting evidence' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('objective-workspace-desktop.png'),
@@ -299,8 +396,11 @@ test('objective workspace renders logic-chain screenshots and source links', asy
 
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
-	await expect(page.getByRole('heading', { name: 'Logic chain' })).toBeInViewport();
-	await expect(page.getByRole('heading', { name: 'Evidence units' })).toBeVisible();
+	const mobileUnderstandingHeading = page.getByRole('heading', { name: 'Research understanding' });
+	await mobileUnderstandingHeading.scrollIntoViewIfNeeded();
+	await expect(mobileUnderstandingHeading).toBeInViewport();
+	await page.getByText('Evidence audit').click();
+	await expect(page.getByRole('heading', { name: 'Supporting evidence' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('objective-workspace-mobile.png'),

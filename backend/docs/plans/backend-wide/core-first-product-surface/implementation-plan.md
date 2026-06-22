@@ -37,7 +37,7 @@ It should be read as the current closure plan for:
 The five-layer backend architecture already states that:
 
 - Core is the only producer of stable research facts
-- graph, reports, and protocol are downstream or derived surfaces
+- graph and protocol are downstream or derived surfaces
 - Source may gather or index material, but it must not define product-facing
   research facts
 
@@ -47,8 +47,6 @@ That architecture now has concrete code movement behind it:
   reads
   only `document_profiles.parquet`, `evidence_cards.parquet`, and
   `comparison_rows.parquet`
-- [`../../../application/derived/report_service.py`](../../../../application/derived/report_service.py)
-  derives pattern-group style report payloads from Core artifacts
 - [`../../../application/source/artifact_registry_service.py`](../../../../application/source/artifact_registry_service.py)
   computes `graph_generated` and `graph_ready` from Core graph inputs rather
   than GraphRAG entity artifacts
@@ -70,10 +68,10 @@ runtime logic retreats behind Source-only ownership".
 
 This closure plan covers:
 
-- Core-first contract freeze for graph and reports
+- Core-first contract freeze for graph
 - Core-based readiness semantics for workspace and task payloads
 - Source-only boundary rules for GraphRAG and retrieval runtime usage
-- public vocabulary cleanup for task stages and graph/report semantics
+- public vocabulary cleanup for task stages and graph semantics
 - documentation and regression-guard work needed after the code cutover
 
 This closure plan does not cover:
@@ -99,11 +97,10 @@ The current backend state should be read as follows.
 
 ### Reports
 
-- report routes remain available, but their semantic source is now Core
-- the report service should be interpreted as Core-derived pattern grouping,
-  not as GraphRAG community summarization
-- route-path compatibility may remain temporarily even if the underlying
-  semantics have changed
+- report routes are retired from the public product surface
+- ResearchUnderstanding plus evidence audit is the replacement review surface
+- old route-path compatibility should not be reintroduced as a parallel
+  Markdown or pattern-report answer path
 
 ### Workspace And Tasks
 
@@ -171,18 +168,10 @@ The report surface must be interpreted as a Core-derived secondary view.
 
 Frozen rules:
 
-- report payloads must be assembled from Core artifacts
-- report detail and summary objects must remain traceable to Core document,
+- report routes must not be treated as product-facing readiness prerequisites
+- report artifacts must not be generated as a second semantic authority
+- ResearchUnderstanding projections must stay traceable to Core document,
   evidence, and comparison ids
-- report semantics must not depend on GraphRAG communities, community reports,
-  entities, or relationships
-
-Compatibility note:
-
-- route paths such as `/reports/communities` may remain temporarily for
-  compatibility
-- route names do not override the semantic rule that the backing model is now
-  Core-derived pattern grouping
 
 ### 4. Workspace Readiness Contract
 
@@ -262,7 +251,6 @@ Backend docs must match the Core-first code path.
 At minimum, backend docs must no longer describe:
 
 - graph as a community/entity graph surface
-- reports as GraphRAG community reports
 - graph readiness as entity/relationship readiness
 - public task stages as `graphrag_*`
 
@@ -276,7 +264,7 @@ Goal:
 
 Primary changes:
 
-- update graph/report/task wording in
+- update graph/task wording in
   [`../specs/api.md`](../../../specs/api.md)
 - update retained plan docs whose old text still assumes dual-path or
   GraphRAG-first product semantics

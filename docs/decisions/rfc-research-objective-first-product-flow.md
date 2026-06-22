@@ -16,7 +16,8 @@ The core judgment is:
   comparison, but should not become the only owner of extracted facts
 - the final product object should be a traceable research logic chain, not
   only a comparison table or a set of evidence cards
-- comparison rows, evidence cards, reports, graph nodes, and workspace panels
+- comparison rows, evidence cards, research-understanding workspaces, graph
+  nodes, and workspace panels
   should be projections or support views over resolved evidence units and
   research logic chains, not separate final answers
 - the old collection-wide `ComparisonRowRecord` should be retired as a Core
@@ -37,7 +38,7 @@ collection
 -> objective workspace
 -> objective-scoped evidence units
 -> paper-level and cross-paper research logic chain
--> objective report and workspace projections
+-> research understanding and workspace projections
 ```
 
 The intended backend semantic flow becomes:
@@ -52,7 +53,7 @@ Source artifacts
 -> objective-scoped evidence-unit extraction
 -> evidence resolution
 -> research logic-chain assembly
--> objective-scoped comparison and report projections
+-> objective-scoped comparison and research-understanding projections
 ```
 
 ## Relationship To Current Docs
@@ -333,7 +334,7 @@ New primary Core records should be:
 - `ObjectiveMeasurementResult`
 - `ObjectiveComparisonRow`
 - `ObjectiveLogicChain`
-- `ObjectiveReport`
+- `ResearchUnderstanding`
 
 The SQLite-backed Core repository should persist those records in tables such
 as:
@@ -347,7 +348,7 @@ as:
 - `core_objective_measurement_results`
 - `core_objective_comparison_rows`
 - `core_objective_logic_chains`
-- `core_objective_reports`
+- research-understanding artifacts owned by the collection build pipeline
 
 These records should carry objective provenance, but the final facts should
 still normalize reusable material, process, property, condition, baseline, and
@@ -355,9 +356,10 @@ evidence fields. They should not become unstructured objective-local text
 results.
 
 `ObjectiveEvidenceUnit` and `ObjectiveLogicChain` are the authoritative Core
-outputs for the objective-first path. Evidence cards, reports, graph nodes,
-workspace panels, material views, and any comparison matrix should be generated
-from those records as projections for review, navigation, and presentation.
+outputs for the objective-first path. Evidence cards, research-understanding
+workspaces, graph nodes, workspace panels, material views, and any comparison
+matrix should be generated from those records as projections for review,
+navigation, and presentation.
 
 The old collection-wide `ComparisonRowRecord` shape should not be retained as
 an authoritative semantic surface. It is too flat for objective-first
@@ -509,14 +511,15 @@ GET /api/v1/collections/{collection_id}/objectives
 GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view
 ```
 
-Future objective-scoped comparison, evidence, and report routes should stay in
-that objective route family unless the API spec explicitly renames the resource.
+Future objective-scoped comparison and evidence routes should stay in that
+objective route family unless the API spec explicitly renames the resource.
+Research-understanding data is returned from `research-view`; old report routes
+are retired and should not be reintroduced as a parallel Markdown answer path.
 The intended follow-up surfaces are:
 
 ```text
 GET /api/v1/collections/{collection_id}/objectives/{objective_id}/comparison-rows
 GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence
-GET /api/v1/collections/{collection_id}/objectives/{objective_id}/report
 ```
 
 Material-first routes should be removed from the primary product contract after
@@ -525,7 +528,6 @@ the cutover:
 ```text
 GET /api/v1/collections/{collection_id}/materials
 GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view
-GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report
 ```
 
 If a temporary migration bridge is unavoidable during rollout, it must be

@@ -22,6 +22,27 @@ EVALUATION_FAILURE_TYPES: Final[frozenset[str]] = frozenset(
         "evidence_not_grounded",
     }
 )
+RESEARCH_UNDERSTANDING_REVIEW_STATUSES: Final[frozenset[str]] = frozenset(
+    {"correct", "incorrect", "partial", "unclear"}
+)
+RESEARCH_UNDERSTANDING_ISSUE_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "none",
+        "evidence_not_grounded",
+        "missing_evidence",
+        "wrong_context",
+        "wrong_relation",
+        "overclaim",
+        "unclear_statement",
+        "other",
+    }
+)
+RESEARCH_UNDERSTANDING_CLAIM_TYPES: Final[frozenset[str]] = frozenset(
+    {"finding", "measurement", "comparison", "mechanism", "limitation", "context"}
+)
+RESEARCH_UNDERSTANDING_CLAIM_STATUSES: Final[frozenset[str]] = frozenset(
+    {"supported", "limited", "conflicted", "unsupported"}
+)
 
 
 @dataclass(frozen=True)
@@ -334,6 +355,119 @@ class EvaluationRun:
         }
 
 
+@dataclass(frozen=True)
+class ResearchUnderstandingFeedback:
+    feedback_id: str
+    collection_id: str
+    scope_type: str
+    scope_id: str
+    claim_id: str
+    review_status: str
+    issue_type: str
+    note: str | None
+    reviewer: str | None
+    created_at: str
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstandingFeedback":
+        return cls(
+            feedback_id=_normalize_text(payload.get("feedback_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            scope_type=_normalize_text(payload.get("scope_type")) or "",
+            scope_id=_normalize_text(payload.get("scope_id")) or "",
+            claim_id=_normalize_text(payload.get("claim_id")) or "",
+            review_status=_normalize_choice(
+                payload.get("review_status"),
+                allowed=RESEARCH_UNDERSTANDING_REVIEW_STATUSES,
+                default="unclear",
+            ),
+            issue_type=_normalize_choice(
+                payload.get("issue_type"),
+                allowed=RESEARCH_UNDERSTANDING_ISSUE_TYPES,
+                default="other",
+            ),
+            note=_normalize_text(payload.get("note")),
+            reviewer=_normalize_text(payload.get("reviewer")),
+            created_at=_normalize_text(payload.get("created_at")) or "",
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "feedback_id": self.feedback_id,
+            "collection_id": self.collection_id,
+            "scope_type": self.scope_type,
+            "scope_id": self.scope_id,
+            "claim_id": self.claim_id,
+            "review_status": self.review_status,
+            "issue_type": self.issue_type,
+            "note": self.note,
+            "reviewer": self.reviewer,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass(frozen=True)
+class ResearchUnderstandingCuration:
+    curation_id: str
+    collection_id: str
+    scope_type: str
+    scope_id: str
+    claim_id: str
+    curated_claim_type: str
+    curated_status: str
+    curated_statement: str
+    curated_evidence_ref_ids: tuple[str, ...]
+    curated_context_ids: tuple[str, ...]
+    note: str | None
+    reviewer: str | None
+    updated_at: str
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstandingCuration":
+        return cls(
+            curation_id=_normalize_text(payload.get("curation_id")) or "",
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            scope_type=_normalize_text(payload.get("scope_type")) or "",
+            scope_id=_normalize_text(payload.get("scope_id")) or "",
+            claim_id=_normalize_text(payload.get("claim_id")) or "",
+            curated_claim_type=_normalize_choice(
+                payload.get("curated_claim_type"),
+                allowed=RESEARCH_UNDERSTANDING_CLAIM_TYPES,
+                default="finding",
+            ),
+            curated_status=_normalize_choice(
+                payload.get("curated_status"),
+                allowed=RESEARCH_UNDERSTANDING_CLAIM_STATUSES,
+                default="limited",
+            ),
+            curated_statement=_normalize_text(payload.get("curated_statement")) or "",
+            curated_evidence_ref_ids=_normalize_text_tuple(
+                payload.get("curated_evidence_ref_ids")
+            ),
+            curated_context_ids=_normalize_text_tuple(payload.get("curated_context_ids")),
+            note=_normalize_text(payload.get("note")),
+            reviewer=_normalize_text(payload.get("reviewer")),
+            updated_at=_normalize_text(payload.get("updated_at")) or "",
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "curation_id": self.curation_id,
+            "collection_id": self.collection_id,
+            "scope_type": self.scope_type,
+            "scope_id": self.scope_id,
+            "claim_id": self.claim_id,
+            "curated_claim_type": self.curated_claim_type,
+            "curated_status": self.curated_status,
+            "curated_statement": self.curated_statement,
+            "curated_evidence_ref_ids": list(self.curated_evidence_ref_ids),
+            "curated_context_ids": list(self.curated_context_ids),
+            "note": self.note,
+            "reviewer": self.reviewer,
+            "updated_at": self.updated_at,
+        }
+
+
 def _normalize_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -373,6 +507,22 @@ def _normalize_mapping_sequence(value: Any) -> tuple[dict[str, Any], ...]:
 
 def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
     return _normalize_mapping_sequence(value)
+
+
+def _normalize_text_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)):
+        normalized = _normalize_text(value)
+        return (normalized,) if normalized else ()
+    try:
+        return tuple(
+            normalized
+            for item in value
+            if (normalized := _normalize_text(item)) is not None
+        )
+    except TypeError:
+        return ()
 
 
 def _normalize_int_mapping(value: Any) -> dict[str, int]:

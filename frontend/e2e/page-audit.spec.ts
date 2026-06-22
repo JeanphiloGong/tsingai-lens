@@ -21,11 +21,11 @@ const routes = [
 	['/system', 'System'],
 	[`/collections/${collectionId}`, 'Research overview'],
 	[`/collections/${collectionId}/documents`, 'Paper review list'],
-	[`/collections/${collectionId}/documents/${documentId}?page=2`, 'Paper scope'],
+	[`/collections/${collectionId}/documents/${documentId}?page=2`, 'Source view is ready'],
 	[`/collections/${collectionId}/materials`, 'Canonical materials detected'],
 	[`/collections/${collectionId}/materials/${materialId}`, '316L stainless steel'],
 	[`/collections/${collectionId}/objectives`, 'Research objectives'],
-	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Research conclusion package'],
+	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Research understanding'],
 	[`/collections/${collectionId}/results`, 'Extracted Results'],
 	[`/collections/${collectionId}/results/${resultId}`, 'Evidence chain'],
 	[`/collections/${collectionId}/evidence`, 'Evidence Review'],
@@ -268,6 +268,9 @@ async function mockApis(page: Page) {
 
 		if (!path.startsWith('/api/v1/')) return route.continue();
 
+		if (path === '/api/v1/auth/me') {
+			return route.fulfill(json(authPayload()));
+		}
 		if (path === '/api/v1/collections') {
 			if (method === 'POST') return route.fulfill(json(collection(auditState)));
 			return route.fulfill(json({ items: [collection(auditState)] }));
@@ -294,6 +297,9 @@ async function mockApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
 			return route.fulfill(json(documentContent()));
 		}
+		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/markdown`) {
+			return route.fulfill(json(documentMarkdown()));
+		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/research-view`) {
 			return route.fulfill(json(documentResearchView()));
 		}
@@ -319,11 +325,6 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/materials/${materialId}/research-view`) {
 			return route.fulfill(json(materialProfile()));
-		}
-		if (path === `/api/v1/collections/${collectionId}/materials/${materialId}/review-report`) {
-			return route.fulfill(
-				json({ status: 'ready', pdf_url: '#', markdown_url: '#', updated_at: now() })
-			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
 			return route.fulfill(json(objectives()));
@@ -387,6 +388,16 @@ function json(body: unknown, status = 200) {
 
 function now() {
 	return '2026-05-14T00:00:00Z';
+}
+
+function authPayload() {
+	return {
+		user: {
+			user_id: 'user_1',
+			email: 'reader@example.com',
+			display_name: 'Reader'
+		}
+	};
 }
 
 function readAuditState(url: URL, referer?: string) {
@@ -506,6 +517,101 @@ function evidenceRef() {
 		locator: 'Table 2',
 		confidence: 0.95,
 		traceability_status: 'direct'
+	};
+}
+
+function understanding(scopeType: 'objective' | 'material') {
+	const title =
+		scopeType === 'objective'
+			? 'How does heat treatment affect LPBF 316L tensile strength?'
+			: '316L stainless steel';
+	const scope =
+		scopeType === 'objective'
+			? {
+					scope_type: 'objective',
+					collection_id: collectionId,
+					material_id: null,
+					objective_id: objectiveId,
+					document_id: null,
+					title
+				}
+			: {
+					scope_type: 'material',
+					collection_id: collectionId,
+					material_id: materialId,
+					objective_id: null,
+					document_id: null,
+					title
+				};
+	return {
+		schema_version: 'research_understanding.v1',
+		state: 'ready',
+		scope,
+		claims: [
+			{
+				claim_id: `${scopeType}_claim_1`,
+				claim_type: 'measurement',
+				statement:
+					scopeType === 'objective'
+						? 'Yield strength reached 560 MPa.'
+						: 'Hardness is reported as 215 HV.',
+				status: 'supported',
+				confidence: 0.92,
+				strength: null,
+				evidence_ref_ids: [`${scopeType}_ref_1`],
+				context_ids: [`${scopeType}_ctx_1`],
+				source_object_ids: ['unit_measure'],
+				warnings: []
+			}
+		],
+		relations: [
+			{
+				relation_id: `${scopeType}_relation_1`,
+				relation_type: 'compares',
+				subject: scopeType === 'objective' ? 'HT-SLM' : 'scan strategy',
+				predicate: 'compares',
+				object: scopeType === 'objective' ? 'as-built baseline' : 'hardness',
+				status: 'supported',
+				confidence: 0.8,
+				evidence_ref_ids: [`${scopeType}_ref_1`],
+				context_ids: [`${scopeType}_ctx_1`],
+				source_object_ids: ['unit_measure'],
+				warnings: []
+			}
+		],
+		evidence_refs: [
+			{
+				evidence_ref_id: `${scopeType}_ref_1`,
+				source_kind: 'table',
+				document_id: documentId,
+				label: 'Table 2',
+				locator: { source_ref: 'Table 2', page: 3 },
+				fact_ids: ['unit_measure'],
+				anchor_ids: ['anc_1'],
+				confidence: 0.92,
+				traceability_status: 'resolved',
+				quote: scopeType === 'objective' ? 'Yield strength reached 560 MPa.' : '215 HV',
+				href: null
+			}
+		],
+		contexts: [
+			{
+				context_id: `${scopeType}_ctx_1`,
+				label: scopeType === 'objective' ? 'Objective scope' : 'Material scope',
+				material_scope: ['316L stainless steel'],
+				process_context: { process_families: ['LPBF'] },
+				test_condition: {},
+				property_scope: scopeType === 'objective' ? ['yield strength'] : ['hardness'],
+				limitations: []
+			}
+		],
+		warnings: [],
+		summary: {
+			claim_count: 1,
+			relation_count: 1,
+			evidence_ref_count: 1,
+			context_count: 1
+		}
 	};
 }
 
@@ -663,6 +769,7 @@ function materialProfile() {
 			]
 		},
 		comparable_groups: [],
+		understanding: understanding('material'),
 		evidence_links: {},
 		warnings: []
 	};
@@ -738,6 +845,31 @@ function documentContent() {
 				text_unit_ids: [],
 				page: 3,
 				bbox: null
+			}
+		],
+		warnings: []
+	};
+}
+
+function documentMarkdown() {
+	return {
+		collection_id: collectionId,
+		document_id: documentId,
+		title: 'Paper A',
+		source_filename: 'paper-a.pdf',
+		parser: 'docling',
+		markdown:
+			'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.',
+		source_map: [
+			{
+				markdown_anchor: 'block-abstract',
+				artifact_type: 'block',
+				artifact_id: 'abstract',
+				block_id: 'abstract',
+				block_type: 'paragraph',
+				page: 1,
+				heading_path: 'Abstract',
+				text_unit_ids: []
 			}
 		],
 		warnings: []
@@ -1061,7 +1193,8 @@ function objectiveView() {
 			summary: 'Heat-treated LPBF 316L is supported by tensile evidence.',
 			chain_payload: {},
 			confidence: 0.83
-		}
+		},
+		understanding: understanding('objective')
 	};
 }
 

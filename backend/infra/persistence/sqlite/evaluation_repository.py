@@ -17,6 +17,8 @@ from domain.evaluation import (
     EvaluationPredictionSnapshot,
     EvaluationRun,
     EvaluationScore,
+    ResearchUnderstandingCuration,
+    ResearchUnderstandingFeedback,
 )
 
 
@@ -437,6 +439,196 @@ class SqliteEvaluationRepository:
             ).fetchall()
             return tuple(self._evaluation_run_from_row(connection, row) for row in rows)
 
+    def upsert_research_understanding_feedback(
+        self,
+        feedback: ResearchUnderstandingFeedback,
+    ) -> ResearchUnderstandingFeedback:
+        self._ensure_schema()
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO research_understanding_feedback (
+                    feedback_id,
+                    collection_id,
+                    scope_type,
+                    scope_id,
+                    claim_id,
+                    review_status,
+                    issue_type,
+                    note,
+                    reviewer,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(feedback_id) DO UPDATE SET
+                    collection_id = excluded.collection_id,
+                    scope_type = excluded.scope_type,
+                    scope_id = excluded.scope_id,
+                    claim_id = excluded.claim_id,
+                    review_status = excluded.review_status,
+                    issue_type = excluded.issue_type,
+                    note = excluded.note,
+                    reviewer = excluded.reviewer,
+                    created_at = excluded.created_at
+                """,
+                (
+                    feedback.feedback_id,
+                    feedback.collection_id,
+                    feedback.scope_type,
+                    feedback.scope_id,
+                    feedback.claim_id,
+                    feedback.review_status,
+                    feedback.issue_type,
+                    feedback.note,
+                    feedback.reviewer,
+                    feedback.created_at,
+                ),
+            )
+        return feedback
+
+    def list_research_understanding_feedback(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingFeedback, ...]:
+        self._ensure_schema()
+        filters = ["collection_id = ?"]
+        params: list[str] = [collection_id]
+        if scope_type:
+            filters.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id:
+            filters.append("scope_id = ?")
+            params.append(scope_id)
+        if claim_id:
+            filters.append("claim_id = ?")
+            params.append(claim_id)
+        where_clause = " AND ".join(filters)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    feedback_id,
+                    collection_id,
+                    scope_type,
+                    scope_id,
+                    claim_id,
+                    review_status,
+                    issue_type,
+                    note,
+                    reviewer,
+                    created_at
+                FROM research_understanding_feedback
+                WHERE {where_clause}
+                ORDER BY created_at DESC, feedback_id DESC
+                """,
+                tuple(params),
+            ).fetchall()
+        return tuple(self._feedback_from_row(row) for row in rows)
+
+    def upsert_research_understanding_curation(
+        self,
+        curation: ResearchUnderstandingCuration,
+    ) -> ResearchUnderstandingCuration:
+        self._ensure_schema()
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO research_understanding_curations (
+                    curation_id,
+                    collection_id,
+                    scope_type,
+                    scope_id,
+                    claim_id,
+                    curated_claim_type,
+                    curated_status,
+                    curated_statement,
+                    curated_evidence_ref_ids_json,
+                    curated_context_ids_json,
+                    note,
+                    reviewer,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(curation_id) DO UPDATE SET
+                    collection_id = excluded.collection_id,
+                    scope_type = excluded.scope_type,
+                    scope_id = excluded.scope_id,
+                    claim_id = excluded.claim_id,
+                    curated_claim_type = excluded.curated_claim_type,
+                    curated_status = excluded.curated_status,
+                    curated_statement = excluded.curated_statement,
+                    curated_evidence_ref_ids_json = excluded.curated_evidence_ref_ids_json,
+                    curated_context_ids_json = excluded.curated_context_ids_json,
+                    note = excluded.note,
+                    reviewer = excluded.reviewer,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    curation.curation_id,
+                    curation.collection_id,
+                    curation.scope_type,
+                    curation.scope_id,
+                    curation.claim_id,
+                    curation.curated_claim_type,
+                    curation.curated_status,
+                    curation.curated_statement,
+                    _dump_json(curation.curated_evidence_ref_ids),
+                    _dump_json(curation.curated_context_ids),
+                    curation.note,
+                    curation.reviewer,
+                    curation.updated_at,
+                ),
+            )
+        return curation
+
+    def list_research_understanding_curations(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingCuration, ...]:
+        self._ensure_schema()
+        filters = ["collection_id = ?"]
+        params: list[str] = [collection_id]
+        if scope_type:
+            filters.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id:
+            filters.append("scope_id = ?")
+            params.append(scope_id)
+        if claim_id:
+            filters.append("claim_id = ?")
+            params.append(claim_id)
+        where_clause = " AND ".join(filters)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    curation_id,
+                    collection_id,
+                    scope_type,
+                    scope_id,
+                    claim_id,
+                    curated_claim_type,
+                    curated_status,
+                    curated_statement,
+                    curated_evidence_ref_ids_json,
+                    curated_context_ids_json,
+                    note,
+                    reviewer,
+                    updated_at
+                FROM research_understanding_curations
+                WHERE {where_clause}
+                ORDER BY updated_at DESC, curation_id DESC
+                """,
+                tuple(params),
+            ).fetchall()
+        return tuple(self._curation_from_row(row) for row in rows)
+
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.db_path)
@@ -564,6 +756,53 @@ class SqliteEvaluationRepository:
 
                 CREATE INDEX IF NOT EXISTS idx_evaluation_failures_family
                 ON evaluation_failures(evaluation_run_id, family, failure_type);
+
+                CREATE TABLE IF NOT EXISTS research_understanding_feedback (
+                    feedback_id TEXT PRIMARY KEY,
+                    collection_id TEXT NOT NULL,
+                    scope_type TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    claim_id TEXT NOT NULL,
+                    review_status TEXT NOT NULL,
+                    issue_type TEXT NOT NULL,
+                    note TEXT,
+                    reviewer TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_research_understanding_feedback_scope
+                ON research_understanding_feedback(
+                    collection_id,
+                    scope_type,
+                    scope_id,
+                    claim_id,
+                    created_at
+                );
+
+                CREATE TABLE IF NOT EXISTS research_understanding_curations (
+                    curation_id TEXT PRIMARY KEY,
+                    collection_id TEXT NOT NULL,
+                    scope_type TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    claim_id TEXT NOT NULL,
+                    curated_claim_type TEXT NOT NULL,
+                    curated_status TEXT NOT NULL,
+                    curated_statement TEXT NOT NULL,
+                    curated_evidence_ref_ids_json TEXT NOT NULL,
+                    curated_context_ids_json TEXT NOT NULL,
+                    note TEXT,
+                    reviewer TEXT,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_research_understanding_curations_scope
+                ON research_understanding_curations(
+                    collection_id,
+                    scope_type,
+                    scope_id,
+                    claim_id,
+                    updated_at
+                );
                 """
             )
 
@@ -681,6 +920,44 @@ class SqliteEvaluationRepository:
                     }
                     for failure in failures
                 ],
+            }
+        )
+
+    def _feedback_from_row(self, row: sqlite3.Row) -> ResearchUnderstandingFeedback:
+        return ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": row["feedback_id"],
+                "collection_id": row["collection_id"],
+                "scope_type": row["scope_type"],
+                "scope_id": row["scope_id"],
+                "claim_id": row["claim_id"],
+                "review_status": row["review_status"],
+                "issue_type": row["issue_type"],
+                "note": row["note"],
+                "reviewer": row["reviewer"],
+                "created_at": row["created_at"],
+            }
+        )
+
+    def _curation_from_row(self, row: sqlite3.Row) -> ResearchUnderstandingCuration:
+        return ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": row["curation_id"],
+                "collection_id": row["collection_id"],
+                "scope_type": row["scope_type"],
+                "scope_id": row["scope_id"],
+                "claim_id": row["claim_id"],
+                "curated_claim_type": row["curated_claim_type"],
+                "curated_status": row["curated_status"],
+                "curated_statement": row["curated_statement"],
+                "curated_evidence_ref_ids": (
+                    _load_json(row["curated_evidence_ref_ids_json"]) or []
+                ),
+                "curated_context_ids": _load_json(row["curated_context_ids_json"])
+                or [],
+                "note": row["note"],
+                "reviewer": row["reviewer"],
+                "updated_at": row["updated_at"],
             }
         )
 

@@ -21,17 +21,16 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
-    MaterialReportArtifact,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
-    ObjectiveReportArtifact,
     PaperSkim,
     PairwiseComparisonRelation,
     SampleVariant,
     ResearchObjective,
+    ResearchUnderstanding,
     StructureFeature,
     TestCondition,
 )
@@ -670,57 +669,7 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
 _FACT_REPLACE_TABLES = (*_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
 _ALL_TABLES = (*_OBJECTIVE_TABLES, *_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
 _STATUS_TABLE = "core_fact_collection_status"
-_OBJECTIVE_REPORT_TABLE = _TableSpec(
-    table_name="core_objective_report_artifacts",
-    attr_name="objective_report_artifacts",
-    record_cls=ObjectiveReportArtifact,
-    id_column="objective_id",
-    columns=(
-        "report_id",
-        "objective_id",
-        "status",
-        "stage",
-        "message",
-        "title",
-        "language",
-        "model",
-        "data_version",
-        "markdown",
-        "warnings",
-        "source_refs",
-        "created_at",
-        "updated_at",
-        "generated_at",
-    ),
-    json_columns=frozenset({"warnings", "source_refs"}),
-    index_columns=("objective_id", "status"),
-)
-_MATERIAL_REPORT_TABLE = _TableSpec(
-    table_name="core_material_report_artifacts",
-    attr_name="material_report_artifacts",
-    record_cls=MaterialReportArtifact,
-    id_column="material_id",
-    columns=(
-        "report_id",
-        "material_id",
-        "status",
-        "stage",
-        "message",
-        "title",
-        "language",
-        "model",
-        "data_version",
-        "markdown",
-        "warnings",
-        "source_refs",
-        "evidence_appendix",
-        "created_at",
-        "updated_at",
-        "generated_at",
-    ),
-    json_columns=frozenset({"warnings", "source_refs", "evidence_appendix"}),
-    index_columns=("material_id", "status"),
-)
+_RESEARCH_UNDERSTANDING_TABLE = "core_research_understanding_artifacts"
 
 
 class SqliteCoreFactRepository:
@@ -858,89 +807,123 @@ class SqliteCoreFactRepository:
             status = self._read_status(connection, collection_id, records_by_attr)
         return CoreFactSet(**status, **records_by_attr)
 
-    def upsert_objective_report_artifact(
+    def replace_collection_research_understandings(
         self,
         collection_id: str,
-        artifact: ObjectiveReportArtifact,
-    ) -> None:
-        self._upsert_report_artifact(collection_id, _OBJECTIVE_REPORT_TABLE, artifact)
-
-    def read_objective_report_artifact(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ObjectiveReportArtifact | None:
-        self._ensure_schema()
-        with self._connection() as connection:
-            row = connection.execute(
-                f"""
-                SELECT {", ".join(_OBJECTIVE_REPORT_TABLE.columns)}
-                FROM {_OBJECTIVE_REPORT_TABLE.table_name}
-                WHERE collection_id = ? AND objective_id = ?
-                """,
-                (collection_id, objective_id),
-            ).fetchone()
-        if row is None:
-            return None
-        return ObjectiveReportArtifact.from_mapping(
-            self._payload_from_row(_OBJECTIVE_REPORT_TABLE, row)
-        )
-
-    def upsert_material_report_artifact(
-        self,
-        collection_id: str,
-        artifact: MaterialReportArtifact,
-    ) -> None:
-        self._upsert_report_artifact(collection_id, _MATERIAL_REPORT_TABLE, artifact)
-
-    def read_material_report_artifact(
-        self,
-        collection_id: str,
-        material_id: str,
-    ) -> MaterialReportArtifact | None:
-        self._ensure_schema()
-        with self._connection() as connection:
-            row = connection.execute(
-                f"""
-                SELECT {", ".join(_MATERIAL_REPORT_TABLE.columns)}
-                FROM {_MATERIAL_REPORT_TABLE.table_name}
-                WHERE collection_id = ? AND material_id = ?
-                """,
-                (collection_id, material_id),
-            ).fetchone()
-        if row is None:
-            return None
-        return MaterialReportArtifact.from_mapping(
-            self._payload_from_row(_MATERIAL_REPORT_TABLE, row)
-        )
-
-    def _upsert_report_artifact(
-        self,
-        collection_id: str,
-        spec: _TableSpec,
-        artifact: Any,
+        understandings: tuple[ResearchUnderstanding, ...],
     ) -> None:
         self._ensure_schema()
         with self._connection() as connection:
-            columns = self._storage_columns(spec)
-            placeholders = ", ".join("?" for _ in columns)
-            update_columns = [
-                column
-                for column in columns
-                if column not in {"collection_id", spec.id_column}
-            ]
-            updates = ", ".join(
-                f"{column} = excluded.{column}" for column in update_columns
-            )
             connection.execute(
-                f"""
-                INSERT INTO {spec.table_name} ({", ".join(columns)})
-                VALUES ({placeholders})
-                ON CONFLICT(collection_id, {spec.id_column})
-                DO UPDATE SET {updates}
-                """,
-                self._record_values(spec, collection_id, artifact),
+                f"DELETE FROM {_RESEARCH_UNDERSTANDING_TABLE} WHERE collection_id = ?",
+                (collection_id,),
             )
+            for understanding in understandings:
+                self._upsert_research_understanding_row(
+                    connection,
+                    collection_id,
+                    understanding,
+                )
+
+    def upsert_research_understanding(
+        self,
+        collection_id: str,
+        understanding: ResearchUnderstanding,
+    ) -> None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            self._upsert_research_understanding_row(
+                connection,
+                collection_id,
+                understanding,
+            )
+
+    def read_research_understanding(
+        self,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> ResearchUnderstanding | None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
+                SELECT payload
+                FROM {_RESEARCH_UNDERSTANDING_TABLE}
+                WHERE collection_id = ? AND scope_type = ? AND scope_id = ?
+                """,
+                (collection_id, scope_type, scope_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return ResearchUnderstanding.from_mapping(self._load_json(row["payload"]))
+
+    def list_research_understandings(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+    ) -> tuple[ResearchUnderstanding, ...]:
+        self._ensure_schema()
+        params: tuple[str, ...]
+        where_clause = "collection_id = ?"
+        if scope_type:
+            where_clause = "collection_id = ? AND scope_type = ?"
+            params = (collection_id, scope_type)
+        else:
+            params = (collection_id,)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT payload
+                FROM {_RESEARCH_UNDERSTANDING_TABLE}
+                WHERE {where_clause}
+                ORDER BY scope_type ASC, scope_id ASC
+                """,
+                params,
+            ).fetchall()
+        return tuple(
+            ResearchUnderstanding.from_mapping(self._load_json(row["payload"]))
+            for row in rows
+        )
+
+    def _upsert_research_understanding_row(
+        self,
+        connection: sqlite3.Connection,
+        collection_id: str,
+        understanding: ResearchUnderstanding,
+    ) -> None:
+        payload = understanding.to_record()
+        scope = understanding.scope
+        connection.execute(
+            f"""
+            INSERT INTO {_RESEARCH_UNDERSTANDING_TABLE} (
+                collection_id,
+                scope_type,
+                scope_id,
+                schema_version,
+                state,
+                payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(collection_id, scope_type, scope_id)
+            DO UPDATE SET
+                schema_version = excluded.schema_version,
+                state = excluded.state,
+                payload = excluded.payload
+            """,
+            (
+                collection_id,
+                scope.scope_type,
+                understanding.scope_id,
+                understanding.schema_version,
+                understanding.state,
+                json.dumps(
+                    self._normalize_json_value(payload),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            ),
+        )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -962,10 +945,7 @@ class SqliteCoreFactRepository:
             for spec in _ALL_TABLES:
                 self._create_table(connection, spec)
                 self._create_indexes(connection, spec)
-            self._create_table(connection, _OBJECTIVE_REPORT_TABLE)
-            self._create_indexes(connection, _OBJECTIVE_REPORT_TABLE)
-            self._create_table(connection, _MATERIAL_REPORT_TABLE)
-            self._create_indexes(connection, _MATERIAL_REPORT_TABLE)
+            self._create_research_understanding_table(connection)
 
     def _create_status_table(self, connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -1124,6 +1104,27 @@ class SqliteCoreFactRepository:
                 ON {spec.table_name}(collection_id, {column})
                 """
             )
+
+    def _create_research_understanding_table(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {_RESEARCH_UNDERSTANDING_TABLE} (
+                collection_id TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                state TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(collection_id, scope_type, scope_id)
+            )
+            """
+        )
+        connection.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_{_RESEARCH_UNDERSTANDING_TABLE}_scope_type
+            ON {_RESEARCH_UNDERSTANDING_TABLE}(collection_id, scope_type)
+            """
+        )
 
     def _column_definition(self, spec: _TableSpec, column: str) -> str:
         if column == "collection_id" or column == spec.id_column:

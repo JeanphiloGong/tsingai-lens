@@ -18,11 +18,10 @@ from domain.core.research_objective import (
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
-    ObjectiveReportArtifact,
-    MaterialReportArtifact,
     PaperSkim,
     ResearchObjective,
 )
+from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
     SourceArtifactSet,
     SourceBlock,
@@ -39,6 +38,8 @@ from domain.evaluation import (
     EvaluationGoldSet,
     EvaluationPredictionSnapshot,
     EvaluationRun,
+    ResearchUnderstandingCuration,
+    ResearchUnderstandingFeedback,
 )
 
 
@@ -215,29 +216,30 @@ class CoreFactRepository(Protocol):
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...
 
-    def upsert_objective_report_artifact(
+    def replace_collection_research_understandings(
         self,
         collection_id: str,
-        artifact: ObjectiveReportArtifact,
+        understandings: tuple[ResearchUnderstanding, ...],
     ) -> None: ...
 
-    def read_objective_report_artifact(
+    def upsert_research_understanding(
         self,
         collection_id: str,
-        objective_id: str,
-    ) -> ObjectiveReportArtifact | None: ...
-
-    def upsert_material_report_artifact(
-        self,
-        collection_id: str,
-        artifact: MaterialReportArtifact,
+        understanding: ResearchUnderstanding,
     ) -> None: ...
 
-    def read_material_report_artifact(
+    def read_research_understanding(
         self,
         collection_id: str,
-        material_id: str,
-    ) -> MaterialReportArtifact | None: ...
+        scope_type: str,
+        scope_id: str,
+    ) -> ResearchUnderstanding | None: ...
+
+    def list_research_understandings(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+    ) -> tuple[ResearchUnderstanding, ...]: ...
 
 
 class EvaluationRepository(Protocol):
@@ -268,3 +270,29 @@ class EvaluationRepository(Protocol):
     def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None: ...
 
     def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]: ...
+
+    def upsert_research_understanding_feedback(
+        self,
+        feedback: ResearchUnderstandingFeedback,
+    ) -> ResearchUnderstandingFeedback: ...
+
+    def list_research_understanding_feedback(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
+
+    def upsert_research_understanding_curation(
+        self,
+        curation: ResearchUnderstandingCuration,
+    ) -> ResearchUnderstandingCuration: ...
+
+    def list_research_understanding_curations(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingCuration, ...]: ...

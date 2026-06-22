@@ -10,11 +10,12 @@ from controllers.core import (
     documents,
     evidence,
     research_objectives,
+    research_understanding_feedback,
     research_view,
     results,
     workspace,
 )
-from controllers.derived import graph, material_review_reports, reports
+from controllers.derived import graph
 from controllers.goal import intake as goals
 from controllers.goal import sessions as goal_sessions
 from controllers.source import collections, references, tasks
@@ -148,8 +149,6 @@ def create_app() -> FastAPI:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.include_router(auth.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(reports.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(material_review_reports.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(references.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
@@ -160,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)

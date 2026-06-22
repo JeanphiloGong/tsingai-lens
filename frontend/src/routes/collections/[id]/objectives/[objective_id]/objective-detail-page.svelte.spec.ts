@@ -57,6 +57,10 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function requestPaths() {
+	return fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request));
+}
+
 function objectivePayload() {
 	return {
 		collection_id: 'col_123',
@@ -329,487 +333,84 @@ function objectivePayload() {
 			},
 			confidence: 0.83
 		},
-		conclusion_package: {
-			schema_version: 'objective_conclusion_package.v1',
-			title: 'How does heat treatment affect LPBF 316L tensile strength?',
-			objective: {
+		understanding: {
+			schema_version: 'research_understanding.v1',
+			state: 'ready',
+			scope: {
+				scope_type: 'objective',
+				collection_id: 'col_123',
 				objective_id: 'obj_1',
-				question: 'How does heat treatment affect LPBF 316L tensile strength?',
-				material_scope: ['316L stainless steel'],
-				process_axes: ['heat treatment'],
-				property_axes: ['yield strength']
+				material_id: null,
+				document_id: null,
+				title: 'How does heat treatment affect LPBF 316L tensile strength?'
 			},
-			status: 'ready',
-			narrative: {
-				status: 'ready',
-				sections: [
-					{
-						section_id: 'answer',
-						title: 'Answer',
-						body:
-							'For LPBF 316L, the current evidence package evaluates how heat treatment affects yield strength. The strongest contribution is LPBF 316L heat treatment study because it directly contributes heat treatment evidence tied to yield strength.',
-						claims: [],
-						evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
-						source_refs: [
-							{
-								evidence_unit_id: 'unit_measure',
-								document_id: 'doc_1',
-								source_kind: 'table',
-								source_ref: 'table-2',
-								evidence_id: 'ev_1',
-								anchor_id: 'anc_1',
-								page: 5,
-								display_label: 'P001 · Table 2 · p.5'
-							}
-						]
-					},
-					{
-						section_id: 'key_evidence',
-						title: 'Key evidence',
-						body:
-							'The key evidence table contains 2 measurement rows. Across those rows, yield strength range 540-560 MPa.',
-						claims: [
-							{
-								claim:
-									'yield strength spans 540 MPa to 560 MPa across HT-SLM-2 and HT-SLM.',
-								evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
-								source_refs: [
-									{
-										evidence_unit_id: 'unit_measure',
-										document_id: 'doc_1',
-										source_kind: 'table',
-										source_ref: 'table-2',
-										evidence_id: 'ev_1',
-										anchor_id: 'anc_1',
-										page: 5,
-										display_label: 'P001 · Table 2 · p.5'
-									}
-								],
-								strength: 'measured'
-							}
-						],
-						evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
-						source_refs: [
-							{
-								evidence_unit_id: 'unit_measure',
-								document_id: 'doc_1',
-								source_kind: 'table',
-								source_ref: 'table-2',
-								evidence_id: 'ev_1',
-								anchor_id: 'anc_1',
-								page: 5
-							}
-						]
-					},
-					{
-						section_id: 'limitations',
-						title: 'Limitations and uncertainties',
-						body:
-							'Some measurements do not have complete sample and process context, so strict comparison remains limited.',
-						claims: [],
-						evidence_unit_ids: ['unit_measure', 'unit_measure_secondary'],
-						source_refs: [
-							{
-								evidence_unit_id: 'unit_measure',
-								document_id: 'doc_1',
-								source_kind: 'table',
-								source_ref: 'table-2',
-								page: 5,
-								display_label: 'P001 · Table 2 · p.5'
-							}
-						]
-					}
-				]
-			},
-			paper_contributions: [
+			claims: [
 				{
-					document_id: 'doc_1',
-					title: 'LPBF 316L heat treatment study',
-					source_filename: 'paper-a.pdf',
-					paper_role: 'primary_experiment',
-					relevance: 'high',
-					background: 'Reports tensile testing of as-built and heat-treated LPBF 316L.',
-					changed_variables: ['heat treatment'],
-					measured_property_scope: ['yield strength'],
-					evidence_unit_count: 11,
-					evidence_unit_ids: ['unit_measure', 'unit_condition', 'unit_obs']
+					claim_id: 'claim_heat_treatment_strength',
+					claim_type: 'finding',
+					statement: 'Heat treatment changes LPBF 316L tensile response.',
+					status: 'supported',
+					confidence: 0.9,
+					strength: 'moderate',
+					evidence_ref_ids: ['evref_table_2'],
+					context_ids: ['ctx_objective_scope'],
+					source_object_ids: ['unit_measure'],
+					warnings: []
 				}
 			],
-			primary_evidence_tables: [
+			relations: [
 				{
-					table_id: 'measurement-results',
-					title: 'Measurement results',
-					rows: [
-						{
-							evidence_unit_id: 'unit_measure',
-							document_id: 'doc_1',
-							property: 'yield strength',
-							sample_context: {
-								sample: 'HT-SLM'
-							},
-							process_context: {
-								process: 'LPBF',
-								heat_treatment: 'annealed'
-							},
-							test_condition: {
-								method: 'tensile test'
-							},
-							value: 560,
-							source_value_text: '560 MPa',
-							unit: 'MPa',
-							resolution_status: 'unresolved_condition',
-							source_refs: [
-								{
-									document_id: 'doc_1',
-									source_kind: 'table',
-									source_ref: 'table-2',
-									evidence_id: 'ev_1',
-									anchor_id: 'anc_1',
-									page: 5
-								}
-							]
-						},
-						{
-							evidence_unit_id: 'unit_measure_secondary',
-							document_id: 'doc_1',
-							property: 'yield strength',
-							sample_context: {
-								sample: 'HT-SLM-2'
-							},
-							process_context: {
-								process: 'LPBF',
-								heat_treatment: 'annealed'
-							},
-							test_condition: {
-								method: 'tensile test'
-							},
-							value: 540,
-							source_value_text: '540 MPa',
-							unit: 'MPa',
-							resolution_status: 'unresolved_condition',
-							source_refs: []
-						}
-					],
-					measurement_value_ranges: [
-						{
-							property_normalized: 'yield strength',
-							min: {
-								evidence_unit_id: 'unit_measure_secondary',
-								value: 540,
-								unit: 'MPa',
-								sample_context: {
-									sample: 'HT-SLM-2'
-								},
-								process_context: {
-									process: 'LPBF'
-								},
-								document_id: 'doc_1',
-								source_refs: []
-							},
-							max: {
-								evidence_unit_id: 'unit_measure',
-								value: 560,
-								unit: 'MPa',
-								sample_context: {
-									sample: 'HT-SLM'
-								},
-								process_context: {
-									process: 'LPBF'
-								},
-								document_id: 'doc_1',
-								source_refs: []
-							},
-							unit: 'MPa',
-							count: 2
-						}
-					]
+					relation_id: 'rel_heat_treatment_strength',
+					relation_type: 'increases',
+					subject: 'sample: HT-SLM',
+					predicate: 'increase',
+					object: 'sample: as-built',
+					status: 'supported',
+					confidence: 0.79,
+					evidence_ref_ids: ['evref_table_2'],
+					context_ids: ['ctx_objective_scope'],
+					source_object_ids: ['unit_compare'],
+					warnings: []
 				}
 			],
-			controlled_comparisons: [
+			evidence_refs: [
 				{
-					evidence_unit_id: 'unit_compare',
-					document_id: 'doc_1',
-					property: 'yield strength',
-					comparison_axis: 'heat treatment',
-					direction: 'increase',
-					summary: 'Heat-treated samples exceeded the as-built baseline.',
-					sample_context: {
-						sample: 'HT-SLM'
-					},
-					process_context: {
-						heat_treatment: 'annealed'
-					},
-					baseline_context: {
-						sample_context: {
-							sample: 'as-built'
-						}
-					},
-					source_refs: [],
-					validity: 'controlled'
-				}
-			],
-			mechanism_chain: {
-				steps: [
-					{
-						step_role: 'process_to_microstructure',
-						label: 'Heat treatment changes cellular substructure.'
-					},
-					{
-						step_role: 'microstructure_to_property',
-						label: 'Microstructure changes affect the tensile response.'
-					}
-				],
-				evidence: [
-					{
-						evidence_unit_id: 'unit_interpretation',
-						document_id: 'doc_1',
-						unit_kind: 'interpretation',
-						property: 'strength mechanism',
-						summary:
-							'Annealing changes the cellular substructure, which the authors link to the tensile response.',
-						source_refs: []
-					}
-				],
-				evidence_unit_ids: ['unit_interpretation']
-			},
-			conclusions: [
-				{
-					claim:
-						'Heat-treated LPBF 316L is supported by tensile and microstructure evidence.',
-					evidence_unit_ids: ['unit_measure', 'unit_obs', 'unit_interpretation'],
-					strength: 'measured'
-				}
-			],
-			limitations: [
-				{
-					code: 'sample_process_context_incomplete',
-					message: 'Some measurements do not have complete sample and process context.',
-					evidence_unit_ids: ['unit_measure', 'unit_measure_secondary']
-				}
-			],
-			source_refs: [
-				{
-					evidence_unit_id: 'unit_measure',
-					document_id: 'doc_1',
+					evidence_ref_id: 'evref_table_2',
 					source_kind: 'table',
-					source_ref: 'table-2',
-					page: 5,
-					display_label: 'P001 · Table 2 · p.5'
-				}
-			],
-			expert_report: {
-				schema_version: 'objective_expert_report.v1',
-				status: 'ready',
-				headline_conclusion:
-					'Expert report: heat treatment changes LPBF 316L tensile response, with the current evidence bounded by 540-560 MPa yield-strength measurements.',
-				scientific_context:
-					'Expert context: this objective compares as-built and heat-treated LPBF 316L under tensile testing, then ties the response to microstructure observations.',
-				key_findings: [
-					{
-						finding_id: 'finding-001',
-						statement:
-							'Expert finding: yield strength is supported by two heat-treated measurements spanning 540-560 MPa.',
-						strength: 'measured',
-						evidence_unit_ids: ['unit_measure', 'unit_measure_secondary'],
-						source_refs: [
-							{
-								evidence_unit_id: 'unit_measure',
-								document_id: 'doc_1',
-								source_kind: 'table',
-								source_ref: 'table-2',
-								evidence_id: 'ev_1',
-								anchor_id: 'anc_1',
-								page: 5,
-								display_label: 'P001 · Table 2 · p.5'
-							}
-						]
-					}
-				],
-				evidence_matrix: {
-					relevant_paper_count: 1,
-					measurement_result_count: 2,
-					measurement_property_count: 1,
-					controlled_comparison_count: 1,
-					mechanism_evidence_count: 1,
-					limitation_count: 1,
-					source_ref_count: 1,
-					measurement_value_ranges: [
-						{
-							property_normalized: 'yield strength',
-							min: {
-								evidence_unit_id: 'unit_measure_secondary',
-								value: 540,
-								unit: 'MPa',
-								sample_context: {
-									sample: 'HT-SLM-2'
-								},
-								process_context: {
-									process: 'LPBF'
-								},
-								document_id: 'doc_1',
-								source_refs: []
-							},
-							max: {
-								evidence_unit_id: 'unit_measure',
-								value: 560,
-								unit: 'MPa',
-								sample_context: {
-									sample: 'HT-SLM'
-								},
-								process_context: {
-									process: 'LPBF'
-								},
-								document_id: 'doc_1',
-								source_refs: []
-							},
-							unit: 'MPa',
-							count: 2
-						}
-					]
-				},
-				paper_contribution_map: [
-					{
-						document_id: 'doc_1',
-						paper_label: 'P001',
-						display_title: 'P001 - LPBF 316L heat treatment study',
-						paper_role: 'primary_experiment',
-						relevance: 'high',
-						contribution_summary:
-							'Expert contribution: P001 provides the tensile measurements, comparison evidence, and microstructure interpretation for this objective.',
-						changed_variables: ['heat treatment'],
-						measured_property_scope: ['yield strength'],
-						evidence_unit_count: 11,
-						evidence_unit_ids: ['unit_measure', 'unit_condition', 'unit_obs'],
-						source_refs: [
-							{
-								evidence_unit_id: 'unit_measure',
-								document_id: 'doc_1',
-								source_kind: 'table',
-								source_ref: 'table-2',
-								page: 5,
-								display_label: 'P001 · Table 2 · p.5'
-							}
-						]
-					}
-				],
-				controlled_comparisons: [
-					{
-						comparison_id: 'comparison-001',
-						evidence_unit_id: 'unit_compare',
-						document_id: 'doc_1',
-						property: 'yield strength',
-						comparison_axis: 'heat treatment',
-						direction: 'increase',
-						validity: 'controlled',
-						summary:
-							'Expert comparison: heat-treated samples exceed the as-built baseline for yield strength.',
-						sample_context: {
-							sample: 'HT-SLM'
-						},
-						process_context: {
-							heat_treatment: 'annealed'
-						},
-						baseline_context: {
-							sample_context: {
-								sample: 'as-built'
-							}
-						},
-						source_refs: []
-					}
-				],
-				mechanism_chain: {
-					steps: [
-						{
-							step_role: 'process_to_microstructure',
-							label: 'Expert mechanism step: heat treatment changes cellular substructure.'
-						},
-						{
-							step_role: 'microstructure_to_property',
-							label: 'Expert mechanism step: microstructure changes alter tensile response.'
-						}
-					],
-					evidence: [
-						{
-							evidence_unit_id: 'unit_interpretation',
-							document_id: 'doc_1',
-							unit_kind: 'interpretation',
-							property: 'strength mechanism',
-							summary:
-								'Expert mechanism evidence: annealing changes cellular substructure and the authors connect it to tensile behavior.',
-							sample_context: {},
-							process_context: {
-								heat_treatment: 'annealed'
-							},
-							source_refs: []
-						}
-					],
-					evidence_unit_ids: ['unit_interpretation']
-				},
-				limitations: [
-					{
-						code: 'sample_process_context_incomplete',
-						message:
-							'Expert limitation: one measurement remains partially resolved, so the comparison should stay source-bounded.',
-						evidence_unit_ids: ['unit_measure_secondary'],
-						source_refs: []
-					}
-				],
-				source_traceback: [
-					{
-						evidence_unit_id: 'unit_measure',
-						document_id: 'doc_1',
-						source_kind: 'table',
+					document_id: 'doc_1',
+					label: 'P001 · Table 2 · p.5',
+					locator: {
 						source_ref: 'table-2',
-						page: 5,
-						display_label: 'P001 · Table 2 · p.5'
-					}
-				],
-				traceability: {
-					status: 'ready',
-					traceable_claim_count: 1,
-					unsupported_claim_count: 0
-				}
-			}
-		},
-		objective_report: {
-			collection_id: 'col_123',
-			report_id: 'orp_1',
-			objective_id: 'obj_1',
-			status: 'ready',
-			stage: 'ready',
-			message: 'Objective report generated.',
-			title: 'Research objective report',
-			language: 'zh',
-			model: 'test-model',
-			data_version: 'v1',
-			markdown:
-				'# 研究目标\n\n' +
-				'How does heat treatment affect LPBF 316L tensile strength?\n\n' +
-				'## 结论摘要\n\n' +
-				'Heat treatment changes LPBF 316L tensile response; yield strength is bounded by 540-560 MPa in the persisted report.\n\n' +
-				'## 文献贡献\n\n' +
-				'- P001 provides tensile measurements, comparison evidence, and microstructure interpretation.\n\n' +
-				'1. Heat treatment is the controlled process variable.\n' +
-				'2. Tensile testing is the target property path.\n\n' +
-				'## 支撑数据\n\n' +
-				'| Sample | Yield strength | Source |\n' +
-				'| --- | --- | --- |\n' +
-				'| HT-SLM | 560 MPa | P001 Table 2 page 5 |\n' +
-				'| HT-SLM-2 | 540 MPa | P001 Table 2 page 5 |\n\n' +
-				'The report cites P001 Table 2 page 5 for the 560 MPa measurement.',
-			warnings: [],
-			source_refs: [
-				{
-					document_id: 'doc_1',
-					source_kind: 'table',
-					source_ref: 'table-2',
-					page: 5,
-					display_label: 'P001 · Table 2 · p.5'
+						page: 5
+					},
+					fact_ids: ['unit_measure'],
+					anchor_ids: ['anc_1'],
+					confidence: 0.92,
+					traceability_status: 'traceable',
+					quote: null,
+					href: null
 				}
 			],
-			created_at: '2026-05-19T00:00:00+00:00',
-			updated_at: '2026-05-19T00:00:01+00:00',
-			generated_at: '2026-05-19T00:00:01+00:00'
+			contexts: [
+				{
+					context_id: 'ctx_objective_scope',
+					label: 'Objective scope',
+					material_scope: ['316L stainless steel'],
+					process_context: {
+						variable_process_axes: ['heat treatment']
+					},
+					test_condition: {},
+					property_scope: ['yield strength'],
+					limitations: []
+				}
+			],
+			warnings: [],
+			summary: {
+				claim_count: 1,
+				relation_count: 1,
+				evidence_ref_count: 1,
+				context_count: 1
+			}
 		}
 	};
 }
@@ -827,12 +428,15 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			if (path === '/api/v1/collections/col_123/objectives/obj_1/research-view') {
 				return jsonResponse(objectivePayload());
 			}
+			if (path === '/api/v1/collections/col_123/research-understanding/curations') {
+				return jsonResponse({ collection_id: 'col_123', items: [] });
+			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
 		});
 	});
 
-	it('renders the persisted objective report as the primary view and keeps evidence in audit', async () => {
+	it('renders research understanding as the primary view and keeps evidence in audit', async () => {
 		render(Page);
 
 		await expect
@@ -843,87 +447,29 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research objective report' }))
+			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('heading', { name: '结论摘要' })).toBeInTheDocument();
 		await expect
 			.element(
-				browserPage.getByText(
-					'Heat treatment changes LPBF 316L tensile response; yield strength is bounded by 540-560 MPa in the persisted report.'
-				)
+				browserPage
+					.getByRole('region', { name: 'Claims' })
+					.getByText('Heat treatment changes LPBF 316L tensile response.')
 			)
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('P001 · Table 2 · p.5').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('sample: HT-SLM').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('sample: as-built').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('P001 provides tensile measurements, comparison evidence, and microstructure interpretation.'))
+			.element(browserPage.getByText('Evidence audit and diagnostics'))
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Heat treatment is the controlled process variable.'))
-			.toBeInTheDocument();
-		await expect.poll(() => document.querySelector('.objective-report-table')?.textContent ?? '').toContain('Sample');
-		await expect.poll(() => document.querySelector('.objective-report-table')?.textContent ?? '').toContain('HT-SLM');
-		await expect.poll(() => document.querySelector('.objective-report-table')?.textContent ?? '').toContain('560 MPa');
-		await expect
-			.element(browserPage.getByText('Expert report: heat treatment changes LPBF 316L tensile response'))
-			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Evidence audit and diagnostics')).toBeInTheDocument();
 		await browserPage.getByText('Evidence audit and diagnostics').click();
-		await expect.element(browserPage.getByText('LPBF 316L heat treatment study').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('LPBF 316L heat treatment study').first())
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: /Yield strength reached 560 MPa/ }))
 			.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-		).toEqual(['/api/v1/collections/col_123/objectives/obj_1/research-view']);
-	});
-
-	it('requests objective report generation when no persisted report is available', async () => {
-		const payload: any = objectivePayload();
-		payload.objective_report = null;
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-
-			if (path === '/api/v1/collections/col_123/objectives/obj_1/research-view') {
-				return jsonResponse(payload);
-			}
-
-			if (path === '/api/v1/collections/col_123/objectives/obj_1/report' && init?.method === 'POST') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					report_id: 'orp_generating',
-					objective_id: 'obj_1',
-					status: 'generating',
-					stage: 'requested',
-					message: 'Objective report generation started.',
-					title: 'Research objective report',
-					language: 'zh',
-					model: 'test-model',
-					data_version: 'v2',
-					markdown: null,
-					warnings: [],
-					source_refs: [],
-					created_at: '2026-05-19T00:00:00+00:00',
-					updated_at: '2026-05-19T00:00:00+00:00',
-					generated_at: null
-				});
-			}
-
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
-		});
-
-		render(Page);
-
-		await expect.element(browserPage.getByRole('heading', { name: 'Report has not been generated' })).toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Generate report' }).click();
-		await expect.element(browserPage.getByText('Objective report generation started.')).toBeInTheDocument();
-
-		const reportRequest = fetchMock.mock.calls.find(
-			([input]) => requestPath(input as string | URL | Request) === '/api/v1/collections/col_123/objectives/obj_1/report'
-		);
-		expect(reportRequest?.[1]?.method).toBe('POST');
-		expect(JSON.parse(String(reportRequest?.[1]?.body))).toEqual({
-			language: 'zh',
-			force_regenerate: false
-		});
+		expect(requestPaths()).toContain('/api/v1/collections/col_123/objectives/obj_1/research-view');
 	});
 
 	it('filters evidence units by kind and updates the inspector', async () => {

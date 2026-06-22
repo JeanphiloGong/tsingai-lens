@@ -24,7 +24,7 @@ Current backend docs already establish that:
 - `workspace` is the primary collection-facing entry surface
 - `document_profiles`, the paper-facts family, `evidence_cards`, and the
   comparable-result substrate are the intended backbone
-- graph and reports are secondary derived surfaces rather than the default
+- graph is a secondary derived surface rather than the default
   center of the workflow
 
 The main architecture correction is therefore not to weaken the Core. It is to
@@ -149,7 +149,6 @@ These are views or downstream capabilities derived from the Core.
 Examples:
 
 - graph
-- reports
 - export
 
 Boundary rules:
@@ -216,8 +215,8 @@ The active child execution plan for this freeze is:
 - the current `goals/intake` surface is easy to misread as the full Goal
   layer, even though it is only the briefing side
 - a true Goal Consumer / Decision Layer over Core outputs does not exist yet
-- graph and reports are not yet documented everywhere as derived
-  Core consumers consistently enough
+- graph is not yet documented everywhere as a derived Core consumer
+  consistently enough
 
 ## Package Direction
 
@@ -234,9 +233,8 @@ Near-term implications:
 - keep `application/documents/`, `application/evidence/`,
   `application/comparisons/`, and `application/workspace/` as the Core-owned
   artifact path
-- keep `application/graph/` and `application/reports/` as derived or downstream
-  consumers rather than
-  alternate fact sources
+- keep `application/graph/` as a derived or downstream consumer rather than an
+  alternate fact source
 
 Controller implications:
 
@@ -255,7 +253,7 @@ Controller implications:
    goal seeding converge on one collection handoff shape.
 3. Keep Goal Brief / Intake intentionally thin and explicit.
 4. Add a true Goal Consumer / Decision layer over Core outputs.
-5. Keep graph and report semantics downstream of the Core.
+5. Keep graph semantics downstream of the Core.
 
 ## Verification
 
@@ -265,7 +263,7 @@ Controller implications:
   directly
 - Core remains the only producer of stable research fact objects
 - Goal Consumer outputs remain traceable back to Core artifacts
-- graph and reports behave as derived or downstream views rather
+- graph behaves as a derived or downstream view rather
   than as primary fact definitions
 
 ## Risks

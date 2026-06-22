@@ -93,30 +93,8 @@ def _objective_detail_payload(collection_id: str = "col-1") -> dict:
         "evidence_routes": [],
         "evidence_units": [],
         "logic_chain": None,
-        "objective_report": None,
         "existing_comparison_rows": [],
         "warnings": [],
-    }
-
-
-def _objective_report_payload(collection_id: str = "col-1") -> dict:
-    return {
-        "collection_id": collection_id,
-        "report_id": "orp-1",
-        "objective_id": "obj-1",
-        "status": "generating",
-        "stage": "requested",
-        "message": "Objective report generation started.",
-        "title": "How does heat treatment affect corrosion resistance of LPBF 316L?",
-        "language": "zh",
-        "model": "test-model",
-        "data_version": "v1",
-        "markdown": None,
-        "warnings": [],
-        "source_refs": [],
-        "created_at": "2026-05-19T00:00:00+00:00",
-        "updated_at": "2026-05-19T00:00:00+00:00",
-        "generated_at": None,
     }
 
 
@@ -130,39 +108,6 @@ class FakeObjectiveService:
         objective_id: str,  # noqa: ARG002
     ) -> dict:
         return _objective_detail_payload(collection_id)
-
-    def request_objective_report(
-        self,
-        collection_id: str,
-        objective_id: str,  # noqa: ARG002
-        *,
-        language: str = "zh",  # noqa: ARG002
-        force_regenerate: bool = False,  # noqa: ARG002
-    ) -> dict:
-        return _objective_report_payload(collection_id)
-
-    def get_objective_report_status(
-        self,
-        collection_id: str,
-        objective_id: str,  # noqa: ARG002
-    ) -> dict:
-        return {
-            **_objective_report_payload(collection_id),
-            "status": "ready",
-            "stage": "ready",
-            "markdown": "# 研究目标\n\n报告正文。",
-            "generated_at": "2026-05-19T00:00:01+00:00",
-        }
-
-    def generate_objective_report(
-        self,
-        collection_id: str,  # noqa: ARG002
-        objective_id: str,  # noqa: ARG002
-        *,
-        language: str = "zh",  # noqa: ARG002
-        force_regenerate: bool = False,  # noqa: ARG002
-    ) -> dict:
-        return self.get_objective_report_status(collection_id, objective_id)
 
 
 class NotReadyObjectiveService:
@@ -182,16 +127,6 @@ class MissingObjectiveService(FakeObjectiveService):
         self,
         collection_id: str,
         objective_id: str,
-    ) -> dict:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
-
-    def request_objective_report(
-        self,
-        collection_id: str,
-        objective_id: str,
-        *,
-        language: str = "zh",  # noqa: ARG002
-        force_regenerate: bool = False,  # noqa: ARG002
     ) -> dict:
         raise ResearchObjectiveNotFoundError(collection_id, objective_id)
 
@@ -243,40 +178,6 @@ def test_objective_routes_run_service_in_threadpool(monkeypatch):
         ("list_objective_workspaces", ("col-1",), {}),
         ("get_objective_research_view", ("col-1", "obj-1"), {}),
     ]
-
-
-def test_objective_report_routes_request_and_read_report(monkeypatch):
-    background_tasks = []
-
-    class FakeBackgroundTasks:
-        def add_task(self, func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-            background_tasks.append((func, args, kwargs))
-
-    monkeypatch.setattr(
-        objective_controller,
-        "research_objective_service",
-        FakeObjectiveService(),
-    )
-    request = objective_controller.ObjectiveReportRequest(language="zh")
-
-    created = asyncio.run(
-        objective_controller.create_collection_objective_report(
-            "col-1",
-            "obj-1",
-            request,
-            FakeBackgroundTasks(),
-        )
-    )
-    fetched = asyncio.run(
-        objective_controller.get_collection_objective_report("col-1", "obj-1")
-    )
-
-    assert created.status == "generating"
-    assert created.markdown is None
-    assert fetched.status == "ready"
-    assert fetched.markdown == "# 研究目标\n\n报告正文。"
-    assert len(background_tasks) == 1
-    assert background_tasks[0][1] == ("col-1", "obj-1", request)
 
 
 def test_objective_route_returns_409_when_not_ready(monkeypatch):

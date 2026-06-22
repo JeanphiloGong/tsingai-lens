@@ -32,7 +32,7 @@ Inside it, business responsibilities are now grouped as:
   Collection-bound Core/Goal quality evaluation over existing artifacts,
   gold answers, prediction snapshots, summary scores, and failure records
 - [`derived/README.md`](derived/README.md)
-  Graph and report views derived from Core or Source artifacts
+  Graph views derived from Core artifacts
 
 ## Related Docs
 

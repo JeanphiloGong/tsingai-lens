@@ -1,13 +1,13 @@
 # TsingAI-Lens Backend
 
 FastAPI backend for collection ingestion, indexing orchestration, workspace
-assembly, evidence/comparison browsing, graph/report browsing, and the
-browser-facing API contract.
+assembly, evidence/comparison browsing, graph browsing, and the browser-facing
+API contract.
 
 ## Module Purpose
 
 The backend owns collection-oriented ingestion, indexing orchestration,
-workspace state, artifact generation, report retrieval, and the
+workspace state, artifact generation, evidence/comparison retrieval, and the
 browser-facing API contract.
 
 This file is the backend module entry page. Formal backend source-of-truth docs

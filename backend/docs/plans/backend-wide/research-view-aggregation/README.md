@@ -49,8 +49,9 @@ Excluded:
    [`implementation-plan.md`](implementation-plan.md)
 4. For the current six-paper 316L repair wave, use
    [`material-profile-aggregation-repair-plan.md`](material-profile-aggregation-repair-plan.md)
-5. For the material page report direction, use
-   [`material-report-markdown-document-plan.md`](material-report-markdown-document-plan.md)
+5. For the current material page synthesis direction, use the ResearchUnderstanding
+   contract in [`../../../specs/api.md`](../../../specs/api.md) and the
+   collection-build pipeline implementation.
 
 ## Ownership
 

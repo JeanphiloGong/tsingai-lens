@@ -4,14 +4,14 @@
 
 TsingAI-Lens is a collection-oriented literature intelligence system for
 ingesting papers, producing document profiles, a paper-facts layer, derived
-evidence cards, derived comparison rows, retained graph/report artifacts, and
+evidence cards, derived comparison rows, retained graph artifacts, and
 conditional protocol outputs, and exposing those results through a
 browser-facing API and frontend.
 
 ## Primary Modules
 
 - `backend/`
-  Owns ingestion, indexing orchestration, protocol extraction, graph and report
+  Owns ingestion, indexing orchestration, protocol extraction, graph
   retrieval, and the backend HTTP contract.
 - `frontend/`
   Owns the browser application and same-origin interaction with the backend.
@@ -27,7 +27,7 @@ browser-facing API and frontend.
 4. Wait for document profiling, paper-facts extraction, derived evidence and
    comparison views, and retained downstream artifacts to be generated.
 5. Browse workspace, single-paper facts, evidence, comparison, graph,
-   protocol, and report outputs through the frontend or API.
+   protocol, and research-understanding outputs through the frontend or API.
 
 ## Current Product Direction
 
@@ -49,7 +49,7 @@ for the shared boundary and object model.
 
 - `backend/controllers/`
   Current HTTP route surface for collections, tasks, workspace, graph,
-  protocol, and reports.
+  protocol, research objectives, and research views.
 - `backend/application/`
   Use-case orchestration layer with active business-domain packages for
   collections, indexing, workspace, documents, evidence, comparisons, and

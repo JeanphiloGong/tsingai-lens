@@ -89,7 +89,7 @@ This plan does not cover:
 
 - redesign of Goal intake or collection creation
 - protocol branch redesign
-- graph/report route-family renaming
+- graph route-family renaming or report retirement
 - parser or extraction algorithm changes
 - adding compatibility routes, aliases, wrappers, or dual-path payload fields
 

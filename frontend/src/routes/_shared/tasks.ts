@@ -17,6 +17,8 @@ export type TaskStage =
   | 'objective_logic_chains_started'
   | 'paper_facts_started'
   | 'comparison_rows_started'
+  | 'research_understandings_started'
+  | 'research_understandings_completed'
   | 'artifacts_ready'
   | 'failed';
 

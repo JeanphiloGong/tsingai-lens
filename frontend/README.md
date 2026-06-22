@@ -1,7 +1,7 @@
 # TsingAI-Lens Frontend
 
 The frontend is a SvelteKit browser application for collection creation,
-workspace browsing, file upload, task polling, graph export, and report access
+workspace browsing, file upload, task polling, graph export, and evidence access
 through the same-origin `/api/*` and `/api/v1/*` contract.
 
 This file is the frontend module entry page. Formal frontend docs live in

@@ -16,9 +16,7 @@
 - `results` 是核心产品对象资源
 - `documents` 是来源核验资源
 - `evidence/cards` 是支撑型资源，主要服务于 result/document/comparison drilldown
-- `graph/*`、`reports/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
-- `materials/{material_id}/review-report*` 是基于 material research-view 的
-  AI-assisted review draft 生成能力，不是 raw 数据导出
+- `graph/*` 当前是消费 Core artifact 的派生视图，不再定义独立研究事实模型
 - 当前没有单独公开的 `query/search` 产品接口
 - `goals/*` 当前只表示 Goal Brief / Intake，不是完整 Goal Consumer / Decision Layer
 - `goal-sessions/*` 是绑定 collection 的 AI research copilot 会话层，必须区分
@@ -197,7 +195,7 @@ message 返回必须包含：
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
 - `task_type` 对外固定为 `build`
 - `current_stage` 对外应使用：
-  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | paper_facts_started | comparison_rows_started | artifacts_ready | failed`
+  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | research_objectives_started | objective_paper_skim_started | objective_discovery_started | objective_paper_framing_started | objective_evidence_routing_started | objective_evidence_units_started | objective_logic_chains_started | paper_facts_started | comparison_rows_started | research_understandings_started | research_understandings_completed | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
 - Source 结构产物当前包括
@@ -338,17 +336,9 @@ message 返回必须包含：
 
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/report`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/report`
 
 这是 objective-first 工作区的主读取合同。接口只读取已经落库的 Core
 research-objective records，不在 GET 请求中触发 LLM 构建。
-
-Objective report 是显式生成的持久化 Markdown artifact：
-
-- `POST .../report` 只负责请求/排队生成，并返回 artifact 当前状态
-- `GET .../report` 只读取已持久化 artifact 状态和 markdown
-- `GET .../research-view` 可附带 `objective_report`，但不触发 LLM 调用
 
 Objective list 最小返回结构：
 
@@ -369,8 +359,7 @@ Objective research-view 最小返回结构：
 - `evidence_routes`
 - `evidence_units`
 - `logic_chain`
-- `conclusion_package`
-- `objective_report`
+- `understanding`
 - `existing_comparison_rows`
 - `warnings`
 
@@ -401,8 +390,10 @@ Objective research-view 最小返回结构：
 - `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
 - `evidence_routes`、`evidence_units`、`logic_chain`
   在下游 builder 未完成时可以为空，但字段必须保留
-- `objective_report` 在尚未显式生成时报 `null`；生成中可返回
-  `status=generating` 且 `markdown=null`；生成完成后返回持久化 Markdown
+- `understanding` 是 collection build 持久化的 Core research understanding
+  artifact，由 objective evidence units、logic chain、evidence refs 和 context
+  直接确定性投影，用于前端展示 Claim / Relation / Evidence / Context
+  工作区；GET 请求只读取已持久化 artifact，不触发新的 LLM 调用或重建
 - `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
   research-view 的事实来源
 
@@ -417,8 +408,6 @@ Objective research-view 最小返回结构：
 - `GET /api/v1/collections/{collection_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/materials`
 - `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
-- `POST /api/v1/collections/{collection_id}/materials/{material_id}/report`
-- `GET /api/v1/collections/{collection_id}/materials/{material_id}/report`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
@@ -486,7 +475,7 @@ Collection material profile 最小返回结构：
 - `comparison_groups`
 - `condition_series`
 - `evidence_refs`
-- `report_package`
+- `understanding`
 - `debug_links`
 - `warnings`
 
@@ -523,6 +512,70 @@ Document material profile 最小返回结构：
 empty | processing | partial | ready | failed
 ```
 
+`understanding` 最小结构：
+
+- `schema_version`：当前为 `research_understanding.v1`
+- `state`：`empty | partial | ready | limited`
+- `scope`：包含 `scope_type`、`collection_id`，并按范围补充
+  `objective_id`、`material_id`、`document_id` 和 `title`
+- `claims`：系统认为成立、受限或冲突的结论；每条至少包含
+  `claim_id`、`claim_type`、`statement`、`status`、`evidence_ref_ids`、
+  `context_ids` 和 `source_object_ids`
+- `relations`：claim 或条件之间的关系；每条至少包含
+  `relation_id`、`relation_type`、`subject`、`predicate`、`object`、
+  `status`、`evidence_ref_ids` 和 `context_ids`
+- `evidence_refs`：可跳回来源文献、表格、文本窗口或 fact 的证据引用；每条至少包含
+  `evidence_ref_id`、`source_kind`、`document_id`、`label`、`locator`、
+  `fact_ids`、`anchor_ids` 和 `traceability_status`
+- `contexts`：结论成立的材料、工艺、测试条件、性能范围和局限
+- `warnings`
+- `summary`：`claim_count`、`relation_count`、`evidence_ref_count`、
+  `context_count`
+
+Research understanding 专家反馈资源：
+
+- `POST /api/v1/collections/{collection_id}/research-understanding/feedback`
+- `GET /api/v1/collections/{collection_id}/research-understanding/feedback`
+- `POST /api/v1/collections/{collection_id}/research-understanding/curations`
+- `GET /api/v1/collections/{collection_id}/research-understanding/curations`
+
+`POST` 请求体：
+
+- `scope_type`：`objective`、`material`、`document` 或 collection scope
+- `scope_id`：对应 scope 的稳定 id
+- `claim_id`：被复核的 claim id
+- `review_status`：`correct | partial | incorrect | unclear`
+- `issue_type`：
+  `none | evidence_not_grounded | missing_evidence | wrong_context |
+  wrong_relation | overclaim | unclear_statement | other`
+- `note`：可选专家备注，最多 2000 字符
+- `reviewer`：可选复核人标识，最多 120 字符
+
+`GET` 支持可选 query filter：`scope_type`、`scope_id`、`claim_id`。
+返回 `collection_id` 和 `items`，每条 item 包含
+`feedback_id`、scope、`claim_id`、`review_status`、`issue_type`、`note`、
+`reviewer` 和 `created_at`。该资源用于沉淀专家评价数据，不改变
+`understanding` artifact 本身。
+
+`curations` 用于保存专家校正后的 claim 副本，不覆盖系统生成的
+`understanding` artifact。`POST` 请求体包含：
+
+- `scope_type`、`scope_id`、`claim_id`
+- `curated_claim_type`：
+  `finding | measurement | comparison | mechanism | limitation | context`
+- `curated_status`：`supported | limited | conflicted | unsupported`
+- `curated_statement`：专家校正后的 claim 表述，最多 4000 字符
+- `curated_evidence_ref_ids`：专家认可绑定的 evidence ref id 列表
+- `curated_context_ids`：专家认可绑定的 context id 列表
+- `note`：可选校正备注，最多 2000 字符
+- `reviewer`：可选校正人标识，最多 120 字符
+
+`GET /curations` 支持可选 query filter：`scope_type`、`scope_id`、
+`claim_id`。返回 `collection_id` 和 `items`，每条 item 包含 `curation_id`、
+scope、`claim_id`、专家校正字段、`note`、`reviewer` 和 `updated_at`。同一
+collection/scope/claim 的 curation 使用稳定 id 覆盖更新，便于后续把系统 claim
+与专家 curation 对齐评价。
+
 语义要求：
 
 - `paper_coverage` 每篇文献一行，表达样品数、工艺参数数、measurement 数、
@@ -530,73 +583,11 @@ empty | processing | partial | ready | failed
 - `materials` 是 collection 的主材料入口；`comparison_groups` 是材料档案内
   的分析模块和高级调试入口，不是顶级主导航对象
 - collection material profile 可以跨文献聚合别名、样品、工艺范围、性能摘要、
-  比较组和 `report_package`
-- `report_package` 是材料详情页的主报告数据包，最小包含：
-  - `schema_version`
-  - `status`
-  - `title`
-  - `material_id`
-  - `canonical_name`
-  - `summary`
-  - `executive_summary`
-  - `material_scope`
-  - `paper_contributions`
-  - `key_findings`
-  - `representative_states`
-  - `thematic_sections`
-  - `material_state_chains`
-  - `limitations`
-  - `evidence_appendix`
-  - `document`
-  - `source_refs`
-- `report_package.document` 是材料详情页优先消费的 Markdown 报告文档，最小包含：
-  - `schema_version`，当前为 `material_report_document.v1`
-  - `status`
-  - `title`
-  - `markdown`
-  - `citations`
-  - `outline`
-  - `warnings`
-  - `evidence_appendix`
-- `document.markdown` 是 reader-facing 报告正文，必须用类似 `[E001]` 的 citation
-  token 标注可追溯结论；`document.citations` 是 citation ID 到
-  `EvidenceReference` 的映射，前端用它打开 source traceback
-- 当前 `document.markdown` 可以由后端确定性 composer 从已有
-  `report_package` evidence 生成；LLM writer 必须由显式
-  `POST .../materials/{material_id}/report` 生成动作产出持久化/可读取 artifact，
-  `GET .../research-view` 不得触发 LLM 调用
-- Material report 是材料详情页的 LLM 结论报告 artifact：
-  - `POST .../report` 只负责请求/排队生成，并返回当前 artifact 状态
-  - `GET .../report` 只读取已持久化 artifact 状态和 markdown
-  - 状态和 objective report 一致，使用
-    `generating | ready | ready_with_warnings | failed`
-  - 尚未显式生成时报 `404 material_report_not_found`
-  - 报告上下文来自当前 material `report_package`、representative states、
-    paper contributions、evidence appendix 和 source refs
-  - 生成器按章节写作，LLM 只改写 grounded section，不允许凭空新增样品、
-    数值、论文、机制、比较或 source reference
-- `material_state_chains` / `representative_states`
-  是按材料状态组织的精选科研链路，不是完整 `sample_matrix.rows` 的逐行镜像；
-  完整样品/条件行必须继续由 `sample_matrix` 和 `evidence_appendix` 承载
-- 每条代表性材料状态链路至少表达：
-  - `sample_id` / `sample_label`
-  - `material` / `material_state`
-  - `preparation_context`
-  - `test_conditions`
-  - `performance_results`
-  - `source_evidence`
-  - `comparability_boundary`
-  - `confidence`
-  - `unresolved_fields`
-- `key_findings` 是报告级关键发现，每条 finding 必须保留支撑
-  `evidence_refs`
-- `thematic_sections` 是报告级主题章节，例如致密化/孔隙、强度/塑性/硬度、
-  织构/模型预测、腐蚀/疲劳未闭合链路；章节可以引用多个代表状态和证据
-- `evidence_appendix` 至少表达完整 `sample_matrix` 行数、property 数、
-  evidence 数和 source table 数；前端应把它作为核验入口，而不是把所有行渲染成
-  主报告卡片
-- `report_package.status` 为 `partial` 时表示仍可展示已解析链路，但前端必须同时
-  展示 `limitations`、`comparability_boundary` 或 `unresolved_fields`
+  比较组和 research understanding
+- collection material profile 可以附带 `understanding`，其语义与 objective
+  research-view 中的 `understanding` 一致，但 scope 固定为 `material`；
+  该字段同样只读取 collection build 已持久化 artifact，旧 collection 缺失时
+  可以为 `null`
 - document material profile 只表达单篇文献内一个材料的事实，不做跨文献合并
 - `sample_matrix.rows` 应优先是一行一个真实 sample / variant
 - generic material/process mention 不应成为主矩阵样品行
@@ -612,138 +603,6 @@ empty | processing | partial | ready | failed
 - paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
 - document research-view 指向不存在文档：`404 research_view_document_not_found`
 - material profile 指向不存在材料：`404 research_view_material_not_found`
-
-### Material Review Reports
-
-- `POST /api/v1/collections/{collection_id}/materials/{material_id}/review-report`
-- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report`
-- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.md`
-- `GET /api/v1/collections/{collection_id}/materials/{material_id}/review-report.pdf`
-
-这是材料档案的高价值输出能力：后端先读取 collection material profile
-research-view，整理为 `MaterialReviewContextPack`，再进入分阶段综述生成流水线。
-流水线会生成写作数据包、提纲、分节上下文、分节草稿、证据绑定结果、审核记录、
-修订记录和最终 Markdown，然后校验证据引用并渲染 PDF。
-
-产品定位是 AI-assisted review draft，不是正式发表论文，也不是普通导出。
-PDF/Markdown 内必须保留说明：
-
-```text
-本文件为基于当前文献集合生成的 AI 辅助综述论文草稿，正式学术使用前需人工审阅。
-```
-
-生成请求体：
-
-```json
-{
-  "language": "zh",
-  "report_type": "review_draft",
-  "include_appendix": true,
-  "force_regenerate": false
-}
-```
-
-字段语义：
-
-- `language`
-  当前支持 `zh | en`，默认 `zh`
-- `report_type`
-  当前仅支持 `review_draft`
-- `include_appendix`
-  是否把 evidence table 放入 AI 上下文和报告附录
-- `force_regenerate`
-  是否忽略已有报告并重新生成
-
-`POST` 返回最小结构：
-
-- `report_id`
-- `collection_id`
-- `material_id`
-- `status`
-- `stage`
-- `message`
-- `title`
-- `language`
-- `report_type`
-- `include_appendix`
-- `readiness`
-- `readiness_reason`
-- `data_version`
-- `warnings`
-- `created_at`
-- `updated_at`
-- `generated_at`
-- `pdf_url`
-- `markdown_url`
-
-`status` 使用：
-
-```text
-generating | ready | ready_with_warnings | failed
-```
-
-`readiness` 使用：
-
-```text
-strong | usable | preliminary | insufficient
-```
-
-`stage` 使用更细的生成阶段。`status` 仍保持稳定的对外任务状态：
-
-```text
-requested
-building_data_pack
-planning_outline
-selecting_section_contexts
-writing_sections
-binding_evidence
-reviewing
-revising
-integrating
-rendering_pdf
-ready
-ready_with_warnings
-failed
-```
-
-生成流程：
-
-1. 读取 material research-view。
-2. 构造 `MaterialReviewContextPack`，只包含综述写作需要的材料、文献范围、
-   样品-工艺矩阵、性能矩阵、comparison clusters、trend findings、
-   conflicts、research gaps、evidence table 和 limitations。
-3. 构造确定性的 `data_pack.json`，计算样品数、工艺参数空间、性能范围、
-   极值样品、样品级对比、趋势候选和质量 flags。
-4. 生成 `outline.json`，单篇或少量文献时使用证据边界章节，不生成实质性的
-   跨文献一致性结论章节。
-5. 生成 `section_contexts.json`，每个章节只接收该章节需要的数据子集。
-6. 分章节调用 AI 写作，写出 `sections.json`；结果章节必须包含样品、数值和
-   evidence id。
-7. 写出 `bound_claims.json` 和 `review_notes.json`，检查证据 ID、样品 ID、
-   数值、泛泛表述、单篇文献过度外推和缺失核心数据。
-8. 对失败章节最多执行两轮自动修订，写出 `revisions.json`；无法修复时使用
-   确定性的证据绑定段落兜底，并把问题保留为 warning。
-9. 整合最终 Markdown，追加确定性附录，包括样品-工艺矩阵、样品-性能矩阵、
-   evidence table 和必要的 reviewer warnings。
-10. 校验 Markdown 中的 evidence id，写出 Markdown 和 PDF。
-
-证据约束：
-
-- AI 输入不应直接暴露 raw JSON、长 result id、hash id、抽取日志或 debug 信息
-- 后端会把 evidence refs 映射为 `E01`、`E02` 这类报告内证据 ID
-- Markdown 中出现不存在的 evidence id 时，报告状态应为
-  `ready_with_warnings`
-- 结论章节缺少 evidence citation 时，报告状态应为
-  `ready_with_warnings`
-- 机制解释必须区分数据直接支持、趋势观察、机制性假设和研究空白
-
-错误语义：
-
-- collection 不存在：`404`
-- material profile 指向不存在材料：`404 research_view_material_not_found`
-- paper facts 尚未生成且 collection 非空：`409 research_view_not_ready`
-- 报告尚未生成：`404 material_review_report_not_found`
-- Markdown/PDF 尚未就绪：`409 material_review_report_not_ready`
 
 ### Documents
 
@@ -1305,14 +1164,11 @@ comparison 对 traceback 的依赖约定：
 - comparison row 的主 drilldown 应进入 `results/{result_id}`，而不是把 row
   自己当成最终事实页
 
-### Graph、Reports 次级界面
+### Graph 次级界面
 
 - `GET /api/v1/collections/{collection_id}/graph`
 - `GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`
 - `GET /api/v1/collections/{collection_id}/graphml`
-- `GET /api/v1/collections/{collection_id}/reports/communities`
-- `GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`
-- `GET /api/v1/collections/{collection_id}/reports/patterns`
 
 这些接口可以保留，但不是 Lens v1 新界面的主验收面。
 
@@ -1362,18 +1218,6 @@ Graph 语义约束：
 - `graph_not_ready.detail.missing_artifacts` 应返回缺失的 graph 语义输入文件名，
   而不是要求旧的 graph cache 文件
 
-Reports 语义约束：
-
-- `/reports/communities` 与 `/reports/communities/{community_id}`
-  当前是兼容路径名，语义底座已经改为 Core-derived pattern grouping
-- 这里的 `community_id` 应被解释为当前 pattern group 标识，不是
-  GraphRAG community 拓扑 id
-- report detail 里的 `entities`、`relationships`、`documents`
-  都应被视为从 document / evidence / comparison Core artifact
-  派生出的二级投影，而不是旧 entity graph 的直接透出
-- `/reports/patterns` 与上述 report 路由属于同一组 Core-derived
-  派生视图，只是命名更直接
-
 ## 错误合同
 
 - `400` 请求参数错误
@@ -1410,7 +1254,7 @@ readiness 类错误至少应包含：
 - `results` 是主 drilldown 对象，不应直接用 raw `comparable-results` retrieval payload 代替
 - goal-first 响应只用于 Goal Brief / Intake 与 collection handoff，主展示仍必须消费 Core 资源
 - `evidence` 是支撑型阅读流，不应重新上升为主导航中心
-- graph 与 reports 是从 Core artifact 派生出的次级视图，不能反向充当 document/result/comparison 的事实来源
+- graph 是从 Core artifact 派生出的次级视图，不能反向充当 document/result/comparison 的事实来源
 - query 的 runtime 选项是次级搜索接口参数，不应被提升成主界面信息架构或主业务对象语义
 
 ## 相关文档

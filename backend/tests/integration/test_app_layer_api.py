@@ -578,14 +578,8 @@ def app_client(monkeypatch, tmp_path):
     from controllers.derived import graph as graph_controller
     from controllers.source import tasks as tasks_controller
     from controllers.core import workspace as workspace_controller
-    from controllers.schemas.derived.report import (
-        ReportCommunityDetailResponse,
-        ReportCommunityListResponse,
-        ReportPatternsResponse,
-    )
     import application.derived.graph_service as graph_service_module
     import application.pipeline.collection_build.service as task_runner_module
-    import application.derived.report_service as report_service_module
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
     from application.core.comparison_service import ComparisonService
@@ -667,52 +661,6 @@ def app_client(monkeypatch, tmp_path):
         )
         return [DummyWorkflowOutput()]
 
-    def fake_list_community_reports(  # noqa: ANN001
-        collection_id, level, limit, offset, min_size, sort
-    ):
-        return ReportCommunityListResponse(
-            collection_id=collection_id,
-            level=level,
-            total=0,
-            count=0,
-            items=[],
-        )
-
-    def fake_get_community_report_detail(  # noqa: ANN001
-        collection_id, community_id, level, entity_limit, relationship_limit, document_limit
-    ):
-        parsed_community_id = int(community_id) if str(community_id).isdigit() else None
-        return ReportCommunityDetailResponse(
-            collection_id=collection_id,
-            community_id=parsed_community_id,
-            human_readable_id=parsed_community_id,
-            level=level,
-            parent=None,
-            children=None,
-            title=None,
-            summary=None,
-            findings=None,
-            rating=None,
-            size=None,
-            document_count=0,
-            text_unit_count=0,
-            entities=[],
-            relationships=[],
-            documents=[],
-        )
-
-    def fake_list_patterns(collection_id, level, limit, sort):  # noqa: ANN001
-        return ReportPatternsResponse(
-            collection_id=collection_id,
-            level=level,
-            total_communities=0,
-            total_entities=0,
-            total_relationships=0,
-            total_documents=0,
-            count=0,
-            items=[],
-        )
-
     monkeypatch.setattr(collections_controller, "collection_service", collection_service)
     monkeypatch.setattr(goals_controller, "goal_service", goal_service)
     monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
@@ -744,18 +692,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(research_view_controller, "research_view_service", research_view_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(
-        report_service_module,
-        "list_community_reports",
-        fake_list_community_reports,
-    )
-    monkeypatch.setattr(
-        report_service_module,
-        "get_community_report_detail",
-        fake_get_community_report_detail,
-    )
-    monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
-
     client = TestClient(create_app())
     login_response = client.post(
         f"{API_V1_PREFIX}/auth/login",
@@ -1476,30 +1412,3 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
-
-
-def test_reports_routes_are_exposed(app_client):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Reports Collection"},
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    reports_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/reports/communities"
-    )
-    assert reports_resp.status_code == 200
-    assert reports_resp.json()["collection_id"] == collection_id
-
-    detail_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/reports/communities/42"
-    )
-    assert detail_resp.status_code == 200
-    assert detail_resp.json()["community_id"] == 42
-
-    patterns_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/reports/patterns"
-    )
-    assert patterns_resp.status_code == 200
-    assert patterns_resp.json()["collection_id"] == collection_id

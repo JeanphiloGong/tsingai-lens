@@ -28,6 +28,7 @@ DOCUMENT_PROFILES: Final = "document_profiles"
 RESEARCH_OBJECTIVES: Final = "research_objectives"
 PAPER_FACTS: Final = "paper_facts"
 COMPARISON_ROWS: Final = "comparison_rows"
+RESEARCH_UNDERSTANDINGS: Final = "research_understandings"
 FINALIZE: Final = "finalize"
 
 
@@ -82,6 +83,14 @@ COLLECTION_BUILD_NODE_DEFINITIONS: Final[tuple[CollectionBuildNodeDefinition, ..
         completed_stage="comparison_rows_started",
     ),
     CollectionBuildNodeDefinition(
+        node_id=RESEARCH_UNDERSTANDINGS,
+        depends_on=(COMPARISON_ROWS,),
+        progress_percent=92,
+        message="Persisted research understanding artifacts.",
+        running_stage="research_understandings_started",
+        completed_stage="research_understandings_completed",
+    ),
+    CollectionBuildNodeDefinition(
         node_id=ARTIFACT_REGISTRY,
         depends_on=(SOURCE_ARTIFACTS,),
         progress_percent=98,
@@ -101,6 +110,7 @@ COLLECTION_BUILD_NODE_DEFINITIONS: Final[tuple[CollectionBuildNodeDefinition, ..
             RESEARCH_OBJECTIVES,
             PAPER_FACTS,
             COMPARISON_ROWS,
+            RESEARCH_UNDERSTANDINGS,
         ),
     ),
 )

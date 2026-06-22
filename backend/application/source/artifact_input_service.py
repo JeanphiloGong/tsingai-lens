@@ -62,6 +62,15 @@ def load_tables_artifact(
     return _records(table.to_record() for table in artifacts.tables)
 
 
+def load_document_tree(
+    collection_id: str,
+    document_id: str,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+) -> SourceRecord:
+    repository = source_artifact_repository or build_source_artifact_repository()
+    return repository.read_document_tree(collection_id, document_id).to_record()
+
+
 def _load_source_artifacts(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository | None = None,

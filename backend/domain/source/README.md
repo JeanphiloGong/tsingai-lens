@@ -14,6 +14,7 @@ inspect and cite:
 - `SourceTableRow`
 - `SourceTableCell`
 - `SourceFigure`
+- `SourceDocumentTree`
 - `SourceArtifactSet`
 
 The domain layer owns semantics such as heading paths, caption proximity,
@@ -22,6 +23,13 @@ table ids.
 
 `SourceArtifactSet` is the collection-level aggregate passed to Source artifact
 repositories when a build replaces a collection's document-structure handoff.
+`SourceDocumentTree` is a per-document projection over those same artifacts. It
+groups headings, paragraphs, tables, figures, captions, and reference-list
+entries into parent/child section nodes for downstream Core consumers.
+Reference-list entries remain citation metadata for the current document; if a
+cited paper is crawled and parsed later, it should become its own
+`SourceDocumentTree` and be linked by reference metadata rather than embedded as
+content inside the citing document tree.
 
 ## Boundaries
 

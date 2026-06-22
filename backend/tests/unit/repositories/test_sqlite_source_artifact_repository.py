@@ -256,3 +256,140 @@ def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_pa
     repository.replace_collection_references("col_refs", SourceReferenceSet())
     assert repository.read_collection_references("col_refs") == SourceReferenceSet()
     assert repository.read_collection_artifacts("col_refs").documents[0].document_id == "doc-1"
+
+
+def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_path):
+    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    repository.replace_collection_artifacts(
+        "col_tree",
+        SourceArtifactSet(
+            documents=(
+                SourceDocument(
+                    document_id="doc-1",
+                    human_readable_id=0,
+                    title="Paper",
+                    text="Methods\nResult paragraph",
+                    text_unit_ids=("tu-1",),
+                ),
+                SourceDocument(
+                    document_id="doc-2",
+                    human_readable_id=1,
+                    title="Other Paper",
+                    text="Other text",
+                ),
+            ),
+            text_units=(
+                SourceTextUnit(
+                    text_unit_id="tu-1",
+                    human_readable_id=0,
+                    text="Result paragraph",
+                    n_tokens=2,
+                    document_ids=("doc-1",),
+                ),
+            ),
+            blocks=(
+                SourceBlock(
+                    block_id="blk-heading",
+                    document_id="doc-1",
+                    block_type="heading",
+                    text="Methods",
+                    block_order=1,
+                    heading_path="Methods",
+                    heading_level=1,
+                ),
+                SourceBlock(
+                    block_id="blk-body",
+                    document_id="doc-1",
+                    block_type="paragraph",
+                    text="Result paragraph",
+                    block_order=2,
+                    text_unit_ids=("tu-1",),
+                    heading_path="Methods",
+                    page=2,
+                ),
+                SourceBlock(
+                    block_id="blk-other",
+                    document_id="doc-2",
+                    block_type="paragraph",
+                    text="Other paragraph",
+                    block_order=1,
+                ),
+            ),
+            tables=(
+                SourceTable(
+                    table_id="tbl-1",
+                    document_id="doc-1",
+                    table_order=1,
+                    caption_text="Table 1",
+                    caption_block_id=None,
+                    page=2,
+                    bbox=None,
+                    heading_path="Methods",
+                    column_headers=("Sample", "Value"),
+                    table_matrix=(("Sample", "Value"), ("A", "1")),
+                ),
+            ),
+            figures=(
+                SourceFigure(
+                    figure_id="fig-1",
+                    document_id="doc-1",
+                    figure_order=1,
+                    figure_label="Figure 1",
+                    caption_text="Figure 1 caption",
+                    caption_block_id=None,
+                    page=3,
+                    bbox=None,
+                    heading_path="Methods",
+                    image_path=None,
+                    image_mime_type=None,
+                    image_width=None,
+                    image_height=None,
+                    asset_sha256=None,
+                ),
+            ),
+        ),
+    )
+    repository.replace_collection_references(
+        "col_tree",
+        SourceReferenceSet(
+            entries=(
+                SourceReferenceEntry(
+                    reference_id="ref-1",
+                    document_id="doc-1",
+                    raw_reference="Smith A. Related paper. 2024.",
+                    title="Related paper",
+                    year=2024,
+                ),
+                SourceReferenceEntry(
+                    reference_id="ref-2",
+                    document_id="doc-2",
+                    raw_reference="Other reference.",
+                ),
+            )
+        ),
+    )
+
+    tree = repository.read_document_tree("col_tree", "doc-1")
+
+    assert tree.document_id == "doc-1"
+    assert tree.collection_id == "col_tree"
+    assert tree.root.title == "Paper"
+    assert tree.node_for_source_ref("block", "blk-body") is not None
+    assert tree.node_for_source_ref("table", "tbl-1") is not None
+    assert tree.node_for_source_ref("figure", "fig-1") is not None
+    assert tree.node_for_source_ref("block", "blk-other") is None
+    assert set(tree.reference_records) == {"ref-1"}
+    reference_node = tree.node_for_source_ref("reference", "ref-1")
+    assert reference_node is not None
+    assert reference_node.text == "Smith A. Related paper. 2024."
+
+
+def test_sqlite_source_artifact_repository_raises_for_missing_document_tree(tmp_path):
+    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+
+    try:
+        repository.read_document_tree("missing_col", "missing_doc")
+    except FileNotFoundError as exc:
+        assert "missing_col/missing_doc" in str(exc)
+    else:
+        raise AssertionError("expected missing source document to raise")

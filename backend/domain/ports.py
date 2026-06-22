@@ -26,6 +26,7 @@ from domain.source import (
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
+    SourceDocumentTree,
     SourceFigure,
     SourceReferenceSet,
     SourceTable,
@@ -129,6 +130,12 @@ class SourceArtifactRepository(Protocol):
     ) -> None: ...
 
     def read_collection_artifacts(self, collection_id: str) -> SourceArtifactSet: ...
+
+    def read_document_tree(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SourceDocumentTree: ...
 
     def replace_collection_references(
         self,

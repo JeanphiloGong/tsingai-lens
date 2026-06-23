@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from application.source.collection_service import CollectionService
 from domain.ports import SourceArtifactRepository
 from domain.source import (
     SourceArtifactSet,
-    SourceBlock,
     SourceDocument,
+    SourceDocumentNode,
+    SourceDocumentTree,
     SourceFigure,
     SourceTable,
     render_markdown_table,
@@ -57,15 +58,16 @@ class DocumentMarkdownService:
         self.collection_service.get_collection(collection_id)
         artifacts = self._load_source_artifacts(collection_id)
         document = self._find_document(artifacts, collection_id, document_id)
-        blocks = self._document_blocks(artifacts, document_id)
-        tables = self._document_tables(artifacts, document_id)
-        figures = self._document_figures(artifacts, document_id)
+        document_tree = self.source_artifact_repository.read_document_tree(
+            collection_id,
+            document_id,
+        )
 
-        markdown, source_map, warnings = self._project_markdown(
+        markdown, source_map, warnings = self._project_markdown_from_tree(
             document=document,
-            blocks=blocks,
-            tables=tables,
-            figures=figures,
+            document_tree=document_tree,
+            tables_by_id=self._document_tables_by_id(artifacts, document_id),
+            figures_by_id=self._document_figures_by_id(artifacts, document_id),
         )
 
         if not markdown.strip():
@@ -101,62 +103,39 @@ class DocumentMarkdownService:
                 return document
         raise SourceDocumentNotFoundError(collection_id, document_id)
 
-    def _document_blocks(
+    def _document_tables_by_id(
         self,
         artifacts: SourceArtifactSet,
         document_id: str,
-    ) -> list[SourceBlock]:
-        return sorted(
-            [
-                block
-                for block in artifacts.blocks
-                if str(block.document_id) == str(document_id)
-                and self._normalize_text(block.text)
-            ],
-            key=lambda block: block.block_order,
-        )
+    ) -> dict[str, SourceTable]:
+        return {
+            table.table_id: table
+            for table in artifacts.tables
+            if str(table.document_id) == str(document_id)
+        }
 
-    def _document_tables(
+    def _document_figures_by_id(
         self,
         artifacts: SourceArtifactSet,
         document_id: str,
-    ) -> list[SourceTable]:
-        return sorted(
-            [
-                table
-                for table in artifacts.tables
-                if str(table.document_id) == str(document_id)
-            ],
-            key=lambda table: table.table_order,
-        )
+    ) -> dict[str, SourceFigure]:
+        return {
+            figure.figure_id: figure
+            for figure in artifacts.figures
+            if str(figure.document_id) == str(document_id)
+        }
 
-    def _document_figures(
-        self,
-        artifacts: SourceArtifactSet,
-        document_id: str,
-    ) -> list[SourceFigure]:
-        return sorted(
-            [
-                figure
-                for figure in artifacts.figures
-                if str(figure.document_id) == str(document_id)
-            ],
-            key=lambda figure: figure.figure_order,
-        )
-
-    def _project_markdown(
+    def _project_markdown_from_tree(
         self,
         *,
         document: SourceDocument,
-        blocks: list[SourceBlock],
-        tables: list[SourceTable],
-        figures: list[SourceFigure],
+        document_tree: SourceDocumentTree,
+        tables_by_id: Mapping[str, SourceTable],
+        figures_by_id: Mapping[str, SourceFigure],
     ) -> tuple[str, list[dict[str, Any]], list[str]]:
         parts: list[str] = []
         source_map: list[dict[str, Any]] = []
         warnings: list[str] = []
-        used_tables: set[str] = set()
-        used_figures: set[str] = set()
 
         title = self._normalize_text(document.title)
         if title:
@@ -171,95 +150,142 @@ class DocumentMarkdownService:
                 )
             )
 
-        tables_by_caption = self._group_tables_by_caption_block(tables)
-        figures_by_caption = self._group_figures_by_caption_block(figures)
-
-        for block in blocks:
-            text = self._normalize_text(block.text)
-            if not text:
-                continue
-            block_type = str(block.block_type or "paragraph").strip() or "paragraph"
-            if block_type == "title" and title and text.casefold() == title.casefold():
-                continue
-
-            rendered = self._render_block(block, text, has_document_title=bool(title))
-            if rendered:
-                parts.append(rendered)
-                source_map.append(
-                    self._source_map_entry(
-                        markdown_anchor=self._anchor("block", block.block_id),
-                        artifact_type="block",
-                        artifact_id=block.block_id,
-                        block_id=block.block_id,
-                        block_type=block_type,
-                        page=block.page,
-                        heading_path=block.heading_path,
-                        text_unit_ids=list(block.text_unit_ids),
-                    )
+        content_rendered = False
+        for child_id in document_tree.root.child_ids:
+            content_rendered = (
+                self._append_tree_node_markdown(
+                    node=document_tree.nodes[child_id],
+                    document_tree=document_tree,
+                    parts=parts,
+                    source_map=source_map,
+                    tables_by_id=tables_by_id,
+                    figures_by_id=figures_by_id,
+                    has_document_title=bool(title),
                 )
+                or content_rendered
+            )
 
-            for table in tables_by_caption.get(block.block_id, []):
-                table_markdown = self._render_table(table)
-                if table_markdown:
-                    parts.append(table_markdown)
-                    used_tables.add(table.table_id)
-                    source_map.append(self._table_source_map_entry(table))
-
-            for figure in figures_by_caption.get(block.block_id, []):
-                figure_markdown = self._render_figure(figure)
-                if figure_markdown:
-                    parts.append(figure_markdown)
-                    used_figures.add(figure.figure_id)
-                    source_map.append(self._figure_source_map_entry(figure))
-
-        if not blocks and self._normalize_text(document.text):
+        if not content_rendered and self._normalize_text(document.text):
             warnings.append("block_structure_missing")
             parts.extend(self._split_document_text(document.text))
 
-        unplaced_tables = [table for table in tables if table.table_id not in used_tables]
-        if unplaced_tables:
-            parts.append("## Tables")
-            for table in unplaced_tables:
-                if table.caption_text:
-                    parts.append(f"**Table.** {table.caption_text}")
-                table_markdown = self._render_table(table)
-                if table_markdown:
-                    parts.append(table_markdown)
-                    source_map.append(self._table_source_map_entry(table))
-
-        unplaced_figures = [
-            figure for figure in figures if figure.figure_id not in used_figures
-        ]
-        if unplaced_figures:
-            parts.append("## Figures")
-            for figure in unplaced_figures:
-                figure_markdown = self._render_figure(figure)
-                if figure_markdown:
-                    parts.append(figure_markdown)
-                    source_map.append(self._figure_source_map_entry(figure))
-
         return "\n\n".join(parts).strip(), source_map, warnings
 
-    def _render_block(
+    def _append_tree_node_markdown(
         self,
-        block: SourceBlock,
-        text: str,
         *,
+        node: SourceDocumentNode,
+        document_tree: SourceDocumentTree,
+        parts: list[str],
+        source_map: list[dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+        figures_by_id: Mapping[str, SourceFigure],
         has_document_title: bool,
-    ) -> str:
-        block_type = str(block.block_type or "paragraph").strip()
-        if block_type == "title":
-            return f"# {text}" if not has_document_title else f"## {text}"
-        if block_type == "heading":
-            level = self._markdown_heading_level(block.heading_level, has_document_title)
-            return f"{'#' * level} {text}"
-        if block_type == "list_item":
-            return f"- {text}"
-        if block_type == "figure_caption":
-            return f"**Figure.** {text}"
-        if block_type == "table_caption":
-            return f"**Table.** {text}"
-        return text
+    ) -> bool:
+        node_type = str(node.node_type or "").strip()
+        if node_type in {"section", "references_section"}:
+            rendered = self._render_section_node(node, has_document_title)
+            if rendered:
+                parts.append(rendered)
+                self._append_node_source_map(source_map, node, block_type="heading")
+            rendered_child = False
+            for child_id in node.child_ids:
+                rendered_child = (
+                    self._append_tree_node_markdown(
+                        node=document_tree.nodes[child_id],
+                        document_tree=document_tree,
+                        parts=parts,
+                        source_map=source_map,
+                        tables_by_id=tables_by_id,
+                        figures_by_id=figures_by_id,
+                        has_document_title=has_document_title,
+                    )
+                    or rendered_child
+                )
+            return bool(rendered) or rendered_child
+
+        if node_type in {"paragraph", "list_item"}:
+            text = self._normalize_text(node.text)
+            if not text:
+                return False
+            parts.append(f"- {text}" if node_type == "list_item" else text)
+            self._append_node_source_map(source_map, node, block_type=node_type)
+            return True
+
+        if node_type == "table":
+            table = tables_by_id.get(str(node.source_ref_id or ""))
+            if table is None:
+                return False
+            caption = self._normalize_text(table.caption_text)
+            if caption:
+                parts.append(f"**Table.** {caption}")
+            table_markdown = self._render_table(table)
+            if table_markdown:
+                parts.append(table_markdown)
+            if caption or table_markdown:
+                source_map.append(self._table_source_map_entry(table))
+                return True
+            return False
+
+        if node_type == "figure":
+            figure = figures_by_id.get(str(node.source_ref_id or ""))
+            if figure is None:
+                return False
+            figure_markdown = self._render_figure(figure)
+            if not figure_markdown:
+                return False
+            parts.append(figure_markdown)
+            source_map.append(self._figure_source_map_entry(figure))
+            return True
+
+        if node_type == "reference_entry":
+            text = self._normalize_text(node.text)
+            if not text:
+                return False
+            parts.append(text)
+            self._append_node_source_map(source_map, node)
+            return True
+
+        if node_type == "caption":
+            return False
+
+        return False
+
+    def _render_section_node(
+        self,
+        node: SourceDocumentNode,
+        has_document_title: bool,
+    ) -> str | None:
+        title = self._normalize_text(node.title)
+        if not title:
+            return None
+        level = self._markdown_heading_level(node.level, has_document_title)
+        return f"{'#' * level} {title}"
+
+    def _append_node_source_map(
+        self,
+        source_map: list[dict[str, Any]],
+        node: SourceDocumentNode,
+        *,
+        block_type: str | None = None,
+    ) -> None:
+        source_ref_kind = str(node.source_ref_kind or node.node_type or "").strip()
+        source_ref_id = str(node.source_ref_id or node.node_id).strip()
+        if not source_ref_id:
+            return
+        artifact_type = source_ref_kind or str(node.node_type)
+        source_map.append(
+            self._source_map_entry(
+                markdown_anchor=self._anchor(artifact_type, source_ref_id),
+                artifact_type=artifact_type,
+                artifact_id=source_ref_id,
+                block_id=source_ref_id if artifact_type == "block" else None,
+                block_type=block_type,
+                page=node.page_start,
+                heading_path=self._heading_path_text(node.heading_path),
+                text_unit_ids=list(node.text_unit_ids),
+            )
+        )
 
     def _render_table(self, table: SourceTable) -> str | None:
         return render_markdown_table(
@@ -287,28 +313,6 @@ class DocumentMarkdownService:
         if has_document_title:
             level += 1
         return max(1, min(level, 6))
-
-    def _group_tables_by_caption_block(
-        self,
-        tables: Iterable[SourceTable],
-    ) -> dict[str, list[SourceTable]]:
-        grouped: dict[str, list[SourceTable]] = {}
-        for table in tables:
-            if not table.caption_block_id:
-                continue
-            grouped.setdefault(table.caption_block_id, []).append(table)
-        return grouped
-
-    def _group_figures_by_caption_block(
-        self,
-        figures: Iterable[SourceFigure],
-    ) -> dict[str, list[SourceFigure]]:
-        grouped: dict[str, list[SourceFigure]] = {}
-        for figure in figures:
-            if not figure.caption_block_id:
-                continue
-            grouped.setdefault(figure.caption_block_id, []).append(figure)
-        return grouped
 
     def _split_document_text(self, text: str) -> list[str]:
         return [
@@ -370,6 +374,10 @@ class DocumentMarkdownService:
             if value:
                 return value
         return None
+
+    def _heading_path_text(self, heading_path: tuple[str, ...]) -> str | None:
+        text = " > ".join(part.strip() for part in heading_path if part.strip())
+        return text or None
 
     def _parser_name(self, document: SourceDocument) -> str | None:
         for key in ("source_parser", "parser", "parser_name"):

@@ -75,10 +75,48 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
                     "document_id": "paper-1",
                     "block_id": "blk-table-caption",
                     "block_type": "table_caption",
-                    "block_order": 5,
+                    "block_order": 6,
                     "heading_path": "Results",
                     "text": "Table 1. Conductivity summary.",
                     "page": 3,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-results-heading",
+                    "block_type": "heading",
+                    "block_order": 5,
+                    "heading_level": 1,
+                    "heading_path": "Results",
+                    "text": "Results",
+                    "page": 3,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-results",
+                    "block_type": "paragraph",
+                    "block_order": 8,
+                    "heading_path": "Results",
+                    "text": "Results section text appears before the table.",
+                    "page": 3,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-refs-heading",
+                    "block_type": "heading",
+                    "block_order": 10,
+                    "heading_level": 1,
+                    "heading_path": "References",
+                    "text": "References",
+                    "page": 10,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-ref",
+                    "block_type": "paragraph",
+                    "block_order": 11,
+                    "heading_path": "References",
+                    "text": "Reference text should appear in the paper reader.",
+                    "page": 10,
                 },
             ],
             tables=[
@@ -109,10 +147,23 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     assert "## Abstract" in payload["markdown"]
     assert "Conductivity improved to 12 mS/cm." in payload["markdown"]
     assert "- Annealed at 700 C." in payload["markdown"]
+    assert "## Results" in payload["markdown"]
+    assert "Results section text appears before the table." in payload["markdown"]
     assert "**Table.** Table 1. Conductivity summary." in payload["markdown"]
     assert "| Sample | Conductivity |" in payload["markdown"]
     assert "| A | 12 mS/cm |" in payload["markdown"]
+    assert "## References" in payload["markdown"]
+    assert "Reference text should appear in the paper reader." in payload["markdown"]
     assert payload["warnings"] == []
+    assert payload["markdown"].index("## Results") < payload["markdown"].index(
+        "Results section text appears before the table."
+    )
+    assert payload["markdown"].index("Results section text appears before the table.") < (
+        payload["markdown"].index("**Table.** Table 1. Conductivity summary.")
+    )
+    assert payload["markdown"].index("**Table.** Table 1. Conductivity summary.") < (
+        payload["markdown"].index("## References")
+    )
 
     source_map = {item["artifact_id"]: item for item in payload["source_map"]}
     assert source_map["blk-abstract"]["artifact_type"] == "block"

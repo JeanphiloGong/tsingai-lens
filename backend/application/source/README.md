@@ -17,6 +17,8 @@ runtime and then Core post-processing lives under
   Collection build task registry and stage persistence
 - `artifact_input_service.py`
   Normalized Source artifact loading for downstream consumers
+- `document_markdown_service.py`
+  Display Markdown projection built from the Source document tree
 - `artifact_registry_service.py`
   Collection artifact readiness and capability flags, including semantic/scope
   comparison artifacts persisted through the Core repository

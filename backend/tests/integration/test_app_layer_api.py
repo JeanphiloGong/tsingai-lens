@@ -585,6 +585,9 @@ def app_client(monkeypatch, tmp_path):
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.research_objective_service import (
+        ResearchObjectiveService,
+    )
     from application.core.research_view_aggregation_service import (
         ResearchViewAggregationService,
     )
@@ -623,13 +626,18 @@ def app_client(monkeypatch, tmp_path):
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
     )
+    research_objective_service = ResearchObjectiveService(
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
+    )
     runner = CollectionBuildPipelineService(
-        collection_service,
-        task_service,
-        artifact_registry,
-        document_profile_service,
-        paper_facts_service,
-        comparison_service,
+        collection_service=collection_service,
+        task_service=task_service,
+        artifact_registry_service=artifact_registry,
+        document_profile_service=document_profile_service,
+        research_objective_service=research_objective_service,
     )
     workspace_service = WorkspaceService(
         collection_service=collection_service,
@@ -732,19 +740,19 @@ def test_collection_task_flow(app_client):
     assert body["documents_ready"] is True
     assert body["document_profiles_generated"] is True
     assert body["document_profiles_ready"] is True
-    assert body["evidence_cards_generated"] is True
-    assert body["evidence_cards_ready"] is True
-    assert body["characterization_observations_generated"] is True
+    assert body["evidence_cards_generated"] is False
+    assert body["evidence_cards_ready"] is False
+    assert body["characterization_observations_generated"] is False
     assert body["characterization_observations_ready"] is False
-    assert body["structure_features_generated"] is True
+    assert body["structure_features_generated"] is False
     assert body["structure_features_ready"] is False
-    assert body["test_conditions_generated"] is True
-    assert body["test_conditions_ready"] is True
-    assert body["baseline_references_generated"] is True
+    assert body["test_conditions_generated"] is False
+    assert body["test_conditions_ready"] is False
+    assert body["baseline_references_generated"] is False
     assert body["baseline_references_ready"] is False
-    assert body["sample_variants_generated"] is True
+    assert body["sample_variants_generated"] is False
     assert body["sample_variants_ready"] is False
-    assert body["measurement_results_generated"] is True
+    assert body["measurement_results_generated"] is False
     assert body["measurement_results_ready"] is False
     assert body["comparable_results_generated"] is False
     assert body["comparable_results_ready"] is False
@@ -781,10 +789,7 @@ def test_collection_task_flow(app_client):
     assert profiles_body["items"][0]["doc_type"] == "experimental"
 
     evidence = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards")
-    assert evidence.status_code == 200
-    evidence_body = evidence.json()
-    assert evidence_body["count"] == 0
-    assert evidence_body["items"] == []
+    assert evidence.status_code == 409
 
     comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
     assert comparisons.status_code == 409

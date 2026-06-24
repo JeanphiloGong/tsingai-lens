@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { errorMessage, getApiErrorCode } from '../../../_shared/api';
 	import { t } from '../../../_shared/i18n';
 	import {
+		createConfirmedGoalFromObjective,
 		fetchCollectionObjectives,
 		getResearchViewStateTone,
+		runGoalAnalysis,
 		type ObjectiveList,
 		type ObjectiveListItem
 	} from '../../../_shared/researchView';
@@ -15,6 +18,8 @@
 	let objectivesNotReady = false;
 	let loading = false;
 	let loadedCollectionId = '';
+	let analyzingObjectiveId = '';
+	let analysisError = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectives = objectiveList?.objectives ?? [];
@@ -37,6 +42,7 @@
 		loading = true;
 		objectivesError = '';
 		objectivesNotReady = false;
+		analysisError = '';
 		try {
 			objectiveList = await fetchCollectionObjectives(collectionId);
 		} catch (err) {
@@ -61,6 +67,25 @@
 
 	function confidenceLabel(value: number) {
 		return value > 0 ? `${Math.round(value * 100)}%` : $t('research.emptyValue');
+	}
+
+	async function confirmAndAnalyze(objective: ObjectiveListItem) {
+		analyzingObjectiveId = objective.objective_id;
+		analysisError = '';
+		try {
+			const goal = await createConfirmedGoalFromObjective(collectionId, objective);
+			await runGoalAnalysis(collectionId, goal.goal_id);
+			await goto(
+				resolve('/collections/[id]/goals/[goal_id]', {
+					id: collectionId,
+					goal_id: goal.goal_id
+				})
+			);
+		} catch (err) {
+			analysisError = errorMessage(err);
+		} finally {
+			analyzingObjectiveId = '';
+		}
 	}
 </script>
 
@@ -108,6 +133,11 @@
 		<section class="objectives-state-card objectives-state-card--error" role="alert">
 			<h3>{$t('research.objectives.errorTitle')}</h3>
 			<p>{objectivesError}</p>
+		</section>
+	{:else if analysisError}
+		<section class="objectives-state-card objectives-state-card--error" role="alert">
+			<h3>{$t('research.objectives.analysisErrorTitle')}</h3>
+			<p>{analysisError}</p>
 		</section>
 	{:else if !objectives.length}
 		<section class="objectives-state-card">
@@ -182,8 +212,18 @@
 					</dl>
 
 					<div class="objective-card__actions">
-						<a
+						<button
 							class="btn btn--primary btn--small"
+							type="button"
+							disabled={Boolean(analyzingObjectiveId)}
+							on:click={() => confirmAndAnalyze(objective)}
+						>
+							{analyzingObjectiveId === objective.objective_id
+								? $t('research.objectives.analyzing')
+								: $t('research.objectives.confirmAndAnalyze')}
+						</button>
+						<a
+							class="btn btn--ghost btn--small"
 							href={resolve('/collections/[id]/objectives/[objective_id]', {
 								id: collectionId,
 								objective_id: objective.objective_id

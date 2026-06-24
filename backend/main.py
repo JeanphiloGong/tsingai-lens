@@ -7,8 +7,10 @@ from controllers import auth
 from controllers.core import (
     comparable_results,
     comparisons,
+    confirmed_goals,
     documents,
     evidence,
+    goal_analysis,
     research_objectives,
     research_understanding_feedback,
     research_view,
@@ -158,6 +160,8 @@ def create_app() -> FastAPI:
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(confirmed_goals.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(goal_analysis.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)

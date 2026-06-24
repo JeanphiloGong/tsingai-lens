@@ -165,19 +165,19 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert artifacts["documents_ready"] is True
     assert artifacts["document_profiles_generated"] is True
     assert artifacts["document_profiles_ready"] is True
-    assert artifacts["evidence_cards_generated"] is True
-    assert artifacts["evidence_cards_ready"] is True
-    assert artifacts["characterization_observations_generated"] is True
+    assert artifacts["evidence_cards_generated"] is False
+    assert artifacts["evidence_cards_ready"] is False
+    assert artifacts["characterization_observations_generated"] is False
     assert artifacts["characterization_observations_ready"] is False
-    assert artifacts["structure_features_generated"] is True
+    assert artifacts["structure_features_generated"] is False
     assert artifacts["structure_features_ready"] is False
-    assert artifacts["test_conditions_generated"] is True
-    assert artifacts["test_conditions_ready"] is True
-    assert artifacts["baseline_references_generated"] is True
+    assert artifacts["test_conditions_generated"] is False
+    assert artifacts["test_conditions_ready"] is False
+    assert artifacts["baseline_references_generated"] is False
     assert artifacts["baseline_references_ready"] is False
-    assert artifacts["sample_variants_generated"] is True
+    assert artifacts["sample_variants_generated"] is False
     assert artifacts["sample_variants_ready"] is False
-    assert artifacts["measurement_results_generated"] is True
+    assert artifacts["measurement_results_generated"] is False
     assert artifacts["measurement_results_ready"] is False
     assert artifacts["comparable_results_generated"] is False
     assert artifacts["comparable_results_ready"] is False
@@ -315,14 +315,20 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
     )
     assert any(
         "Build task progress" in record.message
-        and "stage=objective_evidence_routing_started" in record.message
-        and "progress_percent=75" in record.message
+        and "stage=document_profiles_completed" in record.message
+        and "progress_percent=70" in record.message
         for record in caplog.records
     )
     assert any(
         "Build task progress" in record.message
-        and "stage=paper_facts_started" in record.message
-        and "progress_percent=80" in record.message
+        and "stage=objective_candidates_started" in record.message
+        and "progress_percent=71" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "Build task progress" in record.message
+        and "stage=objective_candidates_completed" in record.message
+        and "progress_percent=71" in record.message
         for record in caplog.records
     )
     assert any(

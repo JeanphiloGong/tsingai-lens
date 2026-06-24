@@ -355,7 +355,12 @@
 	function scopeId(currentUnderstanding: ResearchUnderstanding | null) {
 		const scope = currentUnderstanding?.scope;
 		return (
-			scope?.objective_id || scope?.material_id || scope?.document_id || scope?.collection_id || ''
+			scope?.goal_id ||
+			scope?.objective_id ||
+			scope?.material_id ||
+			scope?.document_id ||
+			scope?.collection_id ||
+			''
 		);
 	}
 

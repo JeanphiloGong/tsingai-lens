@@ -443,7 +443,10 @@ const translations: Record<Language, Translations> = {
 				processAxes: 'Process axes',
 				propertyAxes: 'Property axes',
 				noIntent: 'No comparison intent returned.',
-				openWorkspace: 'Open objective workspace'
+				openWorkspace: 'Open objective workspace',
+				confirmAndAnalyze: 'Confirm and analyze',
+				analyzing: 'Analyzing...',
+				analysisErrorTitle: 'Goal analysis failed'
 			},
 			objectiveWorkspace: {
 				title: 'Objective workspace',
@@ -785,6 +788,9 @@ const translations: Record<Language, Translations> = {
 					tip: 'Tip',
 					tipBody: 'Click a performance value or evidence anchor to inspect the source context.'
 				}
+			},
+			goalWorkspace: {
+				eyebrow: 'Confirmed goal'
 			},
 			paperMaterials: {
 				title: 'Materials in this paper'
@@ -2150,7 +2156,9 @@ const translations: Record<Language, Translations> = {
 				source_artifacts_started: 'Source Artifacts Started',
 				source_artifacts_completed: 'Source Artifacts Completed',
 				document_profiles_started: 'Document Profiles Started',
-				research_objectives_started: 'Research Objectives Started',
+				document_profiles_completed: 'Document Profiles Completed',
+				objective_candidates_started: 'Objective Candidates Started',
+				objective_candidates_completed: 'Objective Candidates Completed',
 				objective_paper_skim_started: 'Scanning Papers',
 				objective_discovery_started: 'Discovering Objectives',
 				objective_paper_framing_started: 'Framing Objective Papers',
@@ -2975,7 +2983,10 @@ const translations: Record<Language, Translations> = {
 				processAxes: '工艺轴',
 				propertyAxes: '性能轴',
 				noIntent: '接口未返回比较意图。',
-				openWorkspace: '打开目标工作区'
+				openWorkspace: '打开目标工作区',
+				confirmAndAnalyze: '确认并分析',
+				analyzing: '分析中...',
+				analysisErrorTitle: '目标分析失败'
 			},
 			objectiveWorkspace: {
 				title: '目标工作区',
@@ -3300,6 +3311,9 @@ const translations: Record<Language, Translations> = {
 					tip: '提示',
 					tipBody: '点击表格中的性能值或证据锚点，可查看来源上下文。'
 				}
+			},
+			goalWorkspace: {
+				eyebrow: '已确认目标'
 			},
 			paperMaterials: {
 				title: '本文献中的材料'
@@ -4602,7 +4616,9 @@ const translations: Record<Language, Translations> = {
 				source_artifacts_started: '源产物生成中',
 				source_artifacts_completed: '源产物已完成',
 				document_profiles_started: '文档画像生成中',
-				research_objectives_started: '研究目标抽取开始',
+				document_profiles_completed: '文档画像已完成',
+				objective_candidates_started: '候选研究目标生成中',
+				objective_candidates_completed: '候选研究目标已生成',
 				objective_paper_skim_started: '扫描文献目标',
 				objective_discovery_started: '合并研究目标',
 				objective_paper_framing_started: '判断文献与目标关系',

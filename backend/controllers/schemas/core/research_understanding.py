@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 UnderstandingState = Literal["empty", "partial", "ready", "limited"]
-UnderstandingScopeType = Literal["collection", "material", "objective", "document"]
+UnderstandingScopeType = Literal["collection", "material", "objective", "goal", "document"]
 ClaimStatus = Literal["supported", "limited", "conflicted", "unsupported"]
 ClaimType = Literal[
     "finding",
@@ -42,8 +42,12 @@ ResearchUnderstandingFeedbackIssueType = Literal[
 class ResearchUnderstandingScopeResponse(BaseModel):
     """Scope bound to one research-understanding projection."""
 
-    scope_type: str = Field(..., description="collection, material, objective, or document")
+    scope_type: str = Field(
+        ...,
+        description="collection, material, objective, goal, or document",
+    )
     collection_id: str = Field(..., description="Collection ID")
+    goal_id: str | None = Field(default=None, description="Optional confirmed goal scope")
     material_id: str | None = Field(default=None, description="Optional material scope")
     objective_id: str | None = Field(default=None, description="Optional objective scope")
     document_id: str | None = Field(default=None, description="Optional document scope")

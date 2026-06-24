@@ -12,12 +12,33 @@ class ResearchUnderstandingService:
         self,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
+        return self._build_goal_or_objective_understanding(
+            payload,
+            scope_type="objective",
+        )
+
+    def build_goal_understanding(
+        self,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return self._build_goal_or_objective_understanding(
+            payload,
+            scope_type="goal",
+        )
+
+    def _build_goal_or_objective_understanding(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        scope_type: str,
+    ) -> dict[str, Any]:
         objective = _mapping(payload.get("objective"))
         context = _mapping(payload.get("objective_context"))
         collection_id = _text(payload.get("collection_id"))
         objective_id = _text(objective.get("objective_id")) or _text(
             context.get("objective_id")
         )
+        goal_id = _text(payload.get("goal_id"))
         question = _text(objective.get("question")) or _text(context.get("question"))
         evidence_units = _mapping_list(payload.get("evidence_units"))
         evidence_refs = self._evidence_refs_from_evidence_units(evidence_units)
@@ -40,9 +61,10 @@ class ResearchUnderstandingService:
             {
                 "state": state,
                 "scope": {
-                    "scope_type": "objective",
+                    "scope_type": scope_type,
                     "collection_id": collection_id,
-                    "objective_id": objective_id,
+                    "goal_id": goal_id if scope_type == "goal" else None,
+                    "objective_id": objective_id if scope_type != "goal" else None,
                     "title": question,
                 },
                 "claims": claims,

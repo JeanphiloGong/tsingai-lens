@@ -25,10 +25,7 @@ FILES_REGISTERED: Final = "files_registered"
 SOURCE_ARTIFACTS: Final = "source_artifacts"
 ARTIFACT_REGISTRY: Final = "artifact_registry"
 DOCUMENT_PROFILES: Final = "document_profiles"
-RESEARCH_OBJECTIVES: Final = "research_objectives"
-PAPER_FACTS: Final = "paper_facts"
-COMPARISON_ROWS: Final = "comparison_rows"
-RESEARCH_UNDERSTANDINGS: Final = "research_understandings"
+OBJECTIVE_CANDIDATES: Final = "objective_candidates"
 FINALIZE: Final = "finalize"
 
 
@@ -56,39 +53,15 @@ COLLECTION_BUILD_NODE_DEFINITIONS: Final[tuple[CollectionBuildNodeDefinition, ..
         progress_percent=70,
         message="Built document profiles.",
         running_stage="document_profiles_started",
-        completed_stage="document_profiles_started",
+        completed_stage="document_profiles_completed",
     ),
     CollectionBuildNodeDefinition(
-        node_id=RESEARCH_OBJECTIVES,
+        node_id=OBJECTIVE_CANDIDATES,
         depends_on=(DOCUMENT_PROFILES,),
         progress_percent=71,
-        message="Built research objectives.",
-        running_stage="research_objectives_started",
-        completed_stage="research_objectives_started",
-    ),
-    CollectionBuildNodeDefinition(
-        node_id=PAPER_FACTS,
-        depends_on=(RESEARCH_OBJECTIVES,),
-        progress_percent=80,
-        message="Projected extracted evidence into paper facts.",
-        running_stage="paper_facts_started",
-        completed_stage="paper_facts_started",
-    ),
-    CollectionBuildNodeDefinition(
-        node_id=COMPARISON_ROWS,
-        depends_on=(PAPER_FACTS,),
-        progress_percent=88,
-        message="Generated collection comparison rows.",
-        running_stage="comparison_rows_started",
-        completed_stage="comparison_rows_started",
-    ),
-    CollectionBuildNodeDefinition(
-        node_id=RESEARCH_UNDERSTANDINGS,
-        depends_on=(COMPARISON_ROWS,),
-        progress_percent=92,
-        message="Persisted research understanding artifacts.",
-        running_stage="research_understandings_started",
-        completed_stage="research_understandings_completed",
+        message="Built research objective candidates.",
+        running_stage="objective_candidates_started",
+        completed_stage="objective_candidates_completed",
     ),
     CollectionBuildNodeDefinition(
         node_id=ARTIFACT_REGISTRY,
@@ -107,10 +80,7 @@ COLLECTION_BUILD_NODE_DEFINITIONS: Final[tuple[CollectionBuildNodeDefinition, ..
         completed_stage="artifacts_ready",
         wait_for=(
             DOCUMENT_PROFILES,
-            RESEARCH_OBJECTIVES,
-            PAPER_FACTS,
-            COMPARISON_ROWS,
-            RESEARCH_UNDERSTANDINGS,
+            OBJECTIVE_CANDIDATES,
         ),
     ),
 )

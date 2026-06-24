@@ -195,7 +195,7 @@ message 返回必须包含：
 - collection 页面如果要展示任务历史，应走 collection 维度的 tasks 接口
 - `task_type` 对外固定为 `build`
 - `current_stage` 对外应使用：
-  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | research_objectives_started | objective_paper_skim_started | objective_discovery_started | objective_paper_framing_started | objective_evidence_routing_started | objective_evidence_units_started | objective_logic_chains_started | paper_facts_started | comparison_rows_started | research_understandings_started | research_understandings_completed | artifacts_ready | failed`
+  `queued | files_registered | source_artifacts_started | source_artifacts_completed | document_profiles_started | document_profiles_completed | objective_candidates_started | objective_candidates_completed | objective_paper_skim_started | objective_discovery_started | objective_paper_framing_started | objective_evidence_routing_started | objective_evidence_units_started | objective_logic_chains_started | paper_facts_started | comparison_rows_started | research_understandings_started | research_understandings_completed | artifacts_ready | failed`
 - `graphrag_index_started`、`graphrag_index_completed`
   已退役，不再属于公开或内部活动合同
 - Source 结构产物当前包括
@@ -336,9 +336,19 @@ message 返回必须包含：
 
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
+- `POST /api/v1/collections/{collection_id}/goals`
+- `GET /api/v1/collections/{collection_id}/goals`
+- `GET /api/v1/collections/{collection_id}/goals/{goal_id}`
+- `POST /api/v1/collections/{collection_id}/goals/{goal_id}/analysis`
+- `GET /api/v1/collections/{collection_id}/goals/{goal_id}/analysis`
 
-这是 objective-first 工作区的主读取合同。接口只读取已经落库的 Core
-research-objective records，不在 GET 请求中触发 LLM 构建。
+这是 objective-first / confirmed-goal 工作区的主读取合同。collection build
+默认只生成 lightweight objective candidates；深度证据路由、证据单元、
+logic chain 和 research-understanding 投影必须在用户确认 goal 后，通过
+confirmed-goal analysis 运行。
+
+Objective 接口只读取已经落库的 Core research-objective records，不在 GET
+请求中触发 LLM 构建。
 
 Objective list 最小返回结构：
 
@@ -383,7 +393,11 @@ Objective research-view 最小返回结构：
 
 语义要求：
 
-- objective 是主资源身份；material 只作为 scope/facet 展示
+- objective candidate 是系统推荐的候选研究问题；confirmed goal 是用户或
+  benchmark 确认后的深度分析输入
+- goal analysis 输出的 `understanding.scope.scope_type` 为 `goal`，并使用
+  `goal_id` 作为人工标注、纠错和后续 AI grounding 的稳定 scope id
+- objective 是候选资源身份；material 只作为 scope/facet 展示
 - `/materials` 不返回 objective records
 - `paper_frames` 来自 `ObjectivePaperFrame`，并补充 document title 与
   source filename
@@ -394,6 +408,9 @@ Objective research-view 最小返回结构：
   artifact，由 objective evidence units、logic chain、evidence refs 和 context
   直接确定性投影，用于前端展示 Claim / Relation / Evidence / Context
   工作区；GET 请求只读取已持久化 artifact，不触发新的 LLM 调用或重建
+- confirmed goal analysis 的 `POST` 是显式深度分析入口；失败只更新该
+  `goal_id` 的 `status=failed` 和 `analysis_error`，不应让 collection build
+  整体失败
 - `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
   research-view 的事实来源
 

@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 from application.pipeline.collection_build.context import CollectionBuildContext
 from application.pipeline.collection_build.definitions import (
+    COLLECTION_BUILD_NODE_DEFINITIONS,
     CollectionBuildNodeDefinition,
+    DOCUMENT_PROFILES,
+    FINALIZE,
+    OBJECTIVE_CANDIDATES,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
 
@@ -258,3 +262,19 @@ def test_collection_build_pipeline_runner_rejects_wait_for_before_terminal():
         assert str(exc) == "node finalize wait_for is not terminal: document_profiles"
     else:
         raise AssertionError("runner should reject non-terminal wait_for nodes")
+
+
+def test_default_collection_build_pipeline_stops_after_objective_candidates():
+    node_ids = tuple(definition.node_id for definition in COLLECTION_BUILD_NODE_DEFINITIONS)
+    finalize = next(
+        definition
+        for definition in COLLECTION_BUILD_NODE_DEFINITIONS
+        if definition.node_id == FINALIZE
+    )
+
+    assert OBJECTIVE_CANDIDATES in node_ids
+    assert "research_objectives" not in node_ids
+    assert "paper_facts" not in node_ids
+    assert "comparison_rows" not in node_ids
+    assert "research_understandings" not in node_ids
+    assert finalize.wait_for == (DOCUMENT_PROFILES, OBJECTIVE_CANDIDATES)

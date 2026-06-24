@@ -151,6 +151,20 @@ function understandingFixture(): ResearchUnderstanding {
 	};
 }
 
+function goalUnderstandingFixture(): ResearchUnderstanding {
+	const fixture = understandingFixture();
+	return {
+		...fixture,
+		scope: {
+			...fixture.scope,
+			scope_type: 'goal',
+			goal_id: 'goal_1',
+			objective_id: null,
+			title: 'Confirmed heat-treatment goal'
+		}
+	};
+}
+
 describe('ResearchUnderstandingWorkbench', () => {
 	beforeEach(() => {
 		fetchMock.mockReset();
@@ -286,6 +300,34 @@ describe('ResearchUnderstandingWorkbench', () => {
 			issue_type: 'evidence_not_grounded',
 			note: 'Mechanism claim needs direct microstructure evidence.',
 			reviewer: 'materials-expert'
+		});
+	});
+
+	it('submits feedback against the confirmed goal scope id', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
+		const claimDetail = browserPage.getByLabelText('Claim detail');
+		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
+		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
+
+		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
+		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+				(init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(feedbackPostCall).toBeTruthy();
+		const [, init] = feedbackPostCall!;
+		expect(JSON.parse(String(init.body))).toMatchObject({
+			scope_type: 'goal',
+			scope_id: 'goal_1',
+			claim_id: 'claim_mechanism_limited',
+			review_status: 'incorrect'
 		});
 	});
 

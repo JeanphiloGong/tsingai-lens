@@ -13,6 +13,7 @@ from domain.core.comparison import (
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
+    ConfirmedGoal,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
@@ -247,6 +248,16 @@ class CoreFactRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
     ) -> tuple[ResearchUnderstanding, ...]: ...
+
+    def upsert_confirmed_goal(self, goal: ConfirmedGoal) -> ConfirmedGoal: ...
+
+    def read_confirmed_goal(
+        self,
+        collection_id: str,
+        goal_id: str,
+    ) -> ConfirmedGoal | None: ...
+
+    def list_confirmed_goals(self, collection_id: str) -> tuple[ConfirmedGoal, ...]: ...
 
 
 class EvaluationRepository(Protocol):

@@ -58,6 +58,12 @@ EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
 LOGIC_CHAIN_SCOPE_VALUES: Final[frozenset[str]] = frozenset(
     {"objective", "paper", "cross_paper"}
 )
+CONFIRMED_GOAL_SOURCE_TYPES: Final[frozenset[str]] = frozenset(
+    {"user_input", "objective_candidate", "benchmark"}
+)
+CONFIRMED_GOAL_STATUSES: Final[frozenset[str]] = frozenset(
+    {"pending", "running", "ready", "failed"}
+)
 _QUESTION_SIGNAL_TERMS: Final[tuple[str, ...]] = (
     "how ",
     "what ",
@@ -191,6 +197,71 @@ class ResearchObjective:
             "excluded_document_ids": list(self.excluded_document_ids),
             "confidence": self.confidence,
             "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ConfirmedGoal:
+    goal_id: str
+    collection_id: str
+    question: str
+    source_type: str
+    material_hints: tuple[str, ...]
+    process_hints: tuple[str, ...]
+    property_hints: tuple[str, ...]
+    source_objective_id: str | None
+    status: str
+    analysis_error: str | None
+    created_at: str | None
+    updated_at: str | None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ConfirmedGoal":
+        collection_id = _normalize_text(payload.get("collection_id")) or ""
+        question = _normalize_text(payload.get("question")) or ""
+        source_objective_id = _normalize_text(payload.get("source_objective_id"))
+        goal_id = _normalize_text(payload.get("goal_id")) or build_confirmed_goal_id(
+            collection_id,
+            question,
+            source_objective_id,
+        )
+        return cls(
+            goal_id=goal_id,
+            collection_id=collection_id,
+            question=question,
+            source_type=_normalize_choice(
+                payload.get("source_type"),
+                allowed=CONFIRMED_GOAL_SOURCE_TYPES,
+                default="user_input",
+            ),
+            material_hints=normalize_objective_terms(payload.get("material_hints")),
+            process_hints=normalize_objective_terms(payload.get("process_hints")),
+            property_hints=normalize_objective_terms(payload.get("property_hints")),
+            source_objective_id=source_objective_id,
+            status=_normalize_choice(
+                payload.get("status"),
+                allowed=CONFIRMED_GOAL_STATUSES,
+                default="pending",
+            ),
+            analysis_error=_normalize_text(payload.get("analysis_error")),
+            created_at=_normalize_text(payload.get("created_at")),
+            updated_at=_normalize_text(payload.get("updated_at")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "goal_id": self.goal_id,
+            "collection_id": self.collection_id,
+            "question": self.question,
+            "source_type": self.source_type,
+            "material_hints": list(self.material_hints),
+            "process_hints": list(self.process_hints),
+            "property_hints": list(self.property_hints),
+            "source_objective_id": self.source_objective_id,
+            "status": self.status,
+            "analysis_error": self.analysis_error,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
 
 
@@ -553,6 +624,14 @@ def build_research_objective_id(question: str) -> str:
     return f"obj_{slug[:72].strip('-')}_{digest}"
 
 
+def build_confirmed_goal_id(
+    collection_id: str,
+    question: str,
+    source_objective_id: str | None = None,
+) -> str:
+    return _build_scoped_id("goal", collection_id, question, source_objective_id)
+
+
 def normalize_objective_terms(value: Any) -> tuple[str, ...]:
     if _is_missing(value):
         return ()
@@ -671,6 +750,9 @@ def _is_missing(value: Any) -> bool:
 
 
 __all__ = [
+    "CONFIRMED_GOAL_SOURCE_TYPES",
+    "CONFIRMED_GOAL_STATUSES",
+    "ConfirmedGoal",
     "EVIDENCE_RESOLUTION_STATUS_VALUES",
     "EVIDENCE_ROUTE_ROLE_VALUES",
     "EVIDENCE_UNIT_KIND_VALUES",
@@ -685,6 +767,7 @@ __all__ = [
     "PaperSkim",
     "ResearchObjective",
     "SOURCE_KIND_VALUES",
+    "build_confirmed_goal_id",
     "build_research_objective_id",
     "is_question_shaped_objective",
     "normalize_objective_confidence",

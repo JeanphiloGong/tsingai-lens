@@ -8,34 +8,25 @@ from typing import Any
 from config import CONFIG_DIR
 from infra.source.config.pipeline_mode import IndexingMethod
 
-from application.core.comparison_service import ComparisonService
-from application.core.research_view_aggregation_service import ResearchViewAggregationService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
-from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
 from application.pipeline.collection_build.context import CollectionBuildContext
 from application.pipeline.collection_build.definitions import (
     ARTIFACT_REGISTRY,
-    COMPARISON_ROWS,
     DOCUMENT_PROFILES,
     FILES_REGISTERED,
     FINALIZE,
-    PAPER_FACTS,
-    RESEARCH_OBJECTIVES,
-    RESEARCH_UNDERSTANDINGS,
+    OBJECTIVE_CANDIDATES,
     SOURCE_ARTIFACTS,
 )
 from application.pipeline.collection_build.nodes import (
     artifact_registry,
-    comparison_rows,
     document_profiles,
     files_registered,
     finalize,
-    paper_facts,
-    research_objectives,
-    research_understandings,
+    objective_candidates,
     source_artifacts,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
@@ -79,10 +70,7 @@ class CollectionBuildPipelineService:
         task_service: TaskService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
-        paper_facts_service: PaperFactsService | None = None,
-        comparison_service: ComparisonService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
-        research_view_aggregation_service: ResearchViewAggregationService | None = None,
     ) -> None:
         self.collection_service = collection_service or CollectionService()
         self.task_service = task_service or TaskService()
@@ -92,27 +80,11 @@ class CollectionBuildPipelineService:
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
         )
-        self.paper_facts_service = paper_facts_service or PaperFactsService(
-            collection_service=self.collection_service,
-            document_profile_service=self.document_profile_service,
-        )
         self.research_objective_service = (
             research_objective_service
             or ResearchObjectiveService(
                 collection_service=self.collection_service,
                 document_profile_service=self.document_profile_service,
-            )
-        )
-        self.comparison_service = comparison_service or ComparisonService(
-            collection_service=self.collection_service,
-        )
-        self.research_view_aggregation_service = (
-            research_view_aggregation_service
-            or ResearchViewAggregationService(
-                collection_service=self.collection_service,
-                document_profile_service=self.document_profile_service,
-                paper_facts_service=self.paper_facts_service,
-                comparison_service=self.comparison_service,
             )
         )
 
@@ -201,9 +173,6 @@ class CollectionBuildPipelineService:
                     "build_source_artifacts": self._resolve_build_source_artifacts(),
                     "document_profile_service": self.document_profile_service,
                     "research_objective_service": self.research_objective_service,
-                    "paper_facts_service": self.paper_facts_service,
-                    "comparison_service": self.comparison_service,
-                    "research_view_aggregation_service": self.research_view_aggregation_service,
                     "objective_progress_callback": self._build_objective_progress_callback(
                         task_id,
                         collection_id,
@@ -275,10 +244,7 @@ class CollectionBuildPipelineService:
                 SOURCE_ARTIFACTS: source_artifacts.run,
                 ARTIFACT_REGISTRY: artifact_registry.run,
                 DOCUMENT_PROFILES: document_profiles.run,
-                RESEARCH_OBJECTIVES: research_objectives.run,
-                PAPER_FACTS: paper_facts.run,
-                COMPARISON_ROWS: comparison_rows.run,
-                RESEARCH_UNDERSTANDINGS: research_understandings.run,
+                OBJECTIVE_CANDIDATES: objective_candidates.run,
                 FINALIZE: finalize.run,
             }
         )

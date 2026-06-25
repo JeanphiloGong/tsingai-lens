@@ -1445,6 +1445,7 @@
 			grid-template-columns: 120px minmax(0, 1fr);
 			height: auto;
 			min-height: 64px;
+			overflow: hidden;
 			padding: 12px 16px;
 		}
 
@@ -1452,6 +1453,20 @@
 		.top-actions {
 			grid-column: 1 / -1;
 			width: 100%;
+		}
+
+		.top-actions {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 8px;
+		}
+
+		.top-actions button {
+			width: 100%;
+			min-width: 0;
+			padding-inline: 10px;
+			white-space: normal;
+			line-height: 18px;
 		}
 
 		.workbench-main {

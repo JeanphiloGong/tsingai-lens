@@ -1601,10 +1601,86 @@
 	@media (max-width: 1024px) {
 		.paper-reader-grid {
 			grid-template-columns: 1fr;
+			grid-template-rows: auto minmax(0, 1fr);
 		}
 
 		.thumbnail-rail {
+			width: 100%;
+			height: auto;
+			min-height: 0;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: 10px;
+			padding: 8px;
+			overflow: hidden;
+		}
+
+		.thumbnail-tabs {
+			width: 96px;
+			margin-bottom: 0;
+		}
+
+		.page-thumbnails,
+		.outline-list {
+			display: flex;
+			gap: 10px;
+			overflow-x: auto;
+			padding-bottom: 2px;
+			scrollbar-width: none;
+		}
+
+		.page-thumbnails::-webkit-scrollbar,
+		.outline-list::-webkit-scrollbar {
 			display: none;
+		}
+
+		.page-thumbnail {
+			flex: 0 0 72px;
+			width: 72px;
+		}
+
+		.thumbnail-paper {
+			width: 64px;
+			height: 78px;
+			gap: 6px;
+			padding: 10px 9px;
+		}
+
+		.rail-bottom {
+			display: none;
+		}
+
+		.pdf-header {
+			height: auto;
+			min-height: 92px;
+			padding: 18px 16px 10px;
+		}
+
+		.pdf-header h1,
+		.paper-meta {
+			max-width: 100%;
+		}
+
+		.paper-meta {
+			flex-wrap: wrap;
+			overflow: visible;
+			white-space: normal;
+		}
+
+		.pdf-toolbar {
+			min-height: 52px;
+			overflow-x: auto;
+			overflow-y: hidden;
+			padding: 0 12px;
+			scrollbar-width: none;
+		}
+
+		.pdf-toolbar::-webkit-scrollbar {
+			display: none;
+		}
+
+		.pdf-toolbar > * {
+			flex: 0 0 auto;
 		}
 	}
 </style>

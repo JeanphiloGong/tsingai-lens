@@ -122,6 +122,93 @@ test.describe('page interaction audit', () => {
 		);
 		expect(objectiveRequests).toEqual([]);
 	});
+
+	test('mobile app chrome keeps controls inside the viewport', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/');
+
+		await expect(page.getByRole('banner')).toBeVisible();
+		expect(await visibleElementsFitViewport(page, 'header.site-header')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.global-search')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.header-actions')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.header-actions button')).toBe(true);
+	});
+
+	test('mobile document reader exposes app and PDF controls without clipping', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`/collections/${collectionId}/documents/${documentId}?page=2`);
+
+		await expect(page.getByText('Source view is ready')).toBeVisible();
+		expect(await visibleElementsFitViewport(page, '.workbench-appbar')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.top-actions')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.top-actions button')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.pdf-toolbar')).toBe(true);
+		await expect(page.getByRole('button', { name: 'Export' })).toBeVisible();
+		await expect(page.getByLabel('Zoom', { exact: true })).toBeVisible();
+	});
+
+	test('comparison matrix is readable and horizontally scrollable on mobile', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`/collections/${collectionId}/comparisons`);
+
+		await expect(
+			page.getByRole('heading', { name: 'Anneal temperature vs conductivity' })
+		).toBeVisible();
+		const wrapper = page.locator('.research-matrix-table-wrapper');
+		await expect(wrapper).toBeVisible();
+		const scrollInfo = await wrapper.evaluate((element) => ({
+			clientWidth: element.clientWidth,
+			scrollWidth: element.scrollWidth,
+			overflowX: getComputedStyle(element).overflowX
+		}));
+		expect(scrollInfo.scrollWidth).toBeGreaterThan(scrollInfo.clientWidth);
+		expect(['auto', 'scroll']).toContain(scrollInfo.overflowX);
+		expect(await visibleElementsFitViewport(page, '.research-matrix-panel')).toBe(true);
+	});
+
+	test('mobile graph fit keeps nodes inside the visible canvas', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`/collections/${collectionId}/graph`);
+
+		await expect(page.getByText('Graph built').first()).toBeVisible();
+		const graphBounds = await page.locator('.graph-cytoscape').evaluate((element) => {
+			const canvases = Array.from(element.querySelectorAll<HTMLCanvasElement>('canvas'));
+			let left = Number.POSITIVE_INFINITY;
+			let right = Number.NEGATIVE_INFINITY;
+			let coloredPixels = 0;
+			for (const canvas of canvases) {
+				const context = canvas.getContext('2d', { willReadFrequently: true });
+				if (!context) continue;
+				const { width, height } = canvas;
+				const data = context.getImageData(0, 0, width, height).data;
+				for (let y = 0; y < height; y += 2) {
+					for (let x = 0; x < width; x += 2) {
+						const index = (y * width + x) * 4;
+						const red = data[index];
+						const green = data[index + 1];
+						const blue = data[index + 2];
+						const alpha = data[index + 3];
+						const isStrongNodeColor =
+							alpha > 120 &&
+							((blue > 150 && red < 120 && green < 180) || (red > 90 && blue > 150 && green < 150));
+						if (!isStrongNodeColor) continue;
+						coloredPixels += 1;
+						left = Math.min(left, x);
+						right = Math.max(right, x);
+					}
+				}
+			}
+			return {
+				width: element.getBoundingClientRect().width,
+				coloredPixels,
+				left,
+				right
+			};
+		});
+		expect(graphBounds.coloredPixels).toBeGreaterThan(0);
+		expect(graphBounds.left).toBeGreaterThanOrEqual(12);
+		expect(graphBounds.right).toBeLessThanOrEqual(graphBounds.width - 12);
+	});
 });
 
 async function checkMaterialsMoreNavigation(
@@ -173,6 +260,22 @@ async function isElementBottomExposed(page: Page, selector: string) {
 	}, selector);
 }
 
+async function visibleElementsFitViewport(page: Page, selector: string) {
+	return page.evaluate((targetSelector) => {
+		const viewportWidth = window.innerWidth;
+		return Array.from(document.querySelectorAll<HTMLElement>(targetSelector))
+			.filter((element) => {
+				const rect = element.getBoundingClientRect();
+				const style = getComputedStyle(element);
+				return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+			})
+			.every((element) => {
+				const rect = element.getBoundingClientRect();
+				return rect.left >= -1 && rect.right <= viewportWidth + 1;
+			});
+	}, selector);
+}
+
 async function checkViewport(
 	page: Page,
 	path: string,
@@ -181,7 +284,12 @@ async function checkViewport(
 ) {
 	await page.setViewportSize(viewport);
 	await page.goto(path);
-	await expect(page.getByText(readyText).first()).toBeVisible();
+	const heading = page.getByRole('heading', { name: readyText }).first();
+	if ((await heading.count()) > 0) {
+		await expect(heading).toBeVisible();
+	} else {
+		await expect(page.getByText(readyText).first()).toBeVisible();
+	}
 	await waitForVisualReady(page, path);
 	await expectVisibleInteractionsHaveNames(page);
 	await expectNoHorizontalOverflow(page);
@@ -325,6 +433,9 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/materials/${materialId}/research-view`) {
 			return route.fulfill(json(materialProfile()));
+		}
+		if (path === `/api/v1/collections/${collectionId}/research-understanding/curations`) {
+			return route.fulfill(json({ collection_id: collectionId, items: [] }));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
 			return route.fulfill(json(objectives()));

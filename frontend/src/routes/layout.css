@@ -2568,11 +2568,16 @@ textarea {
   }
 
   .header-actions {
+    min-width: 0;
     justify-content: flex-start;
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-bottom: 2px;
   }
 
   .global-search {
     width: 100%;
+    max-width: 100%;
   }
 
   .page {
@@ -2641,6 +2646,11 @@ textarea {
     padding: 12px 12px 64px;
   }
 
+  .site-header {
+    overflow: hidden;
+    padding: 12px;
+  }
+
   .header-left {
     align-items: flex-start;
     flex-direction: column;
@@ -2650,6 +2660,30 @@ textarea {
   .header-breadcrumb {
     width: 100%;
     overflow-x: auto;
+  }
+
+  .brand {
+    max-width: 100%;
+  }
+
+  .header-action {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding-inline: 10px;
+  }
+
+  .theme-state,
+  .session-summary__name {
+    display: none;
+  }
+
+  .session-summary {
+    flex: 0 0 auto;
+  }
+
+  .icon-button,
+  .avatar-placeholder {
+    flex: 0 0 40px;
   }
 
   .global-search__kbd {
@@ -2685,6 +2719,11 @@ textarea {
   .overview-card,
   .readiness-card {
     padding: 18px;
+  }
+
+  .pipeline-card,
+  #status-card {
+    display: none;
   }
 }
 

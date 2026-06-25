@@ -150,6 +150,10 @@
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
+		if (isNarrowGraphCanvas()) {
+			fitVisibleGraph(visible, animate);
+			return;
+		}
 		if (viewMode === 'material_centric') {
 			fitVisibleGraph(visible, animate);
 			return;
@@ -163,15 +167,16 @@
 
 	function fitVisibleGraph(visible: CollectionReturnValue, animate = true) {
 		if (!cy) return;
+		const padding = graphFitPadding();
 		if (animate) {
 			cy.animate({
-				fit: { eles: visible, padding: graphPadding },
+				fit: { eles: visible, padding },
 				duration: graphAnimationDuration,
 				easing: 'ease-out-cubic'
 			});
 			return;
 		}
-		cy.fit(visible, graphPadding);
+		cy.fit(visible, padding);
 	}
 
 	function fitLogicChainGraph(visible: CollectionReturnValue, animate = true) {
@@ -196,6 +201,17 @@
 		}
 		cy.center(target);
 		cy.zoom(zoom);
+	}
+
+	function graphFitPadding() {
+		if (!graphContainer) return graphPadding;
+		if (graphContainer.clientWidth < 520) return 36;
+		if (graphContainer.clientWidth < 760) return 48;
+		return graphPadding;
+	}
+
+	function isNarrowGraphCanvas() {
+		return Boolean(graphContainer && graphContainer.clientWidth < 560);
 	}
 
 	function centerGraph() {
@@ -2271,10 +2287,21 @@
 
 		.graph-canvas-actions {
 			justify-content: flex-start;
+			overflow-x: auto;
+			padding-bottom: 2px;
+			scrollbar-width: none;
+		}
+
+		.graph-canvas-actions::-webkit-scrollbar {
+			display: none;
+		}
+
+		.graph-canvas-actions > * {
+			flex: 0 0 auto;
 		}
 
 		.graph-canvas-stage {
-			min-height: 420px;
+			min-height: 360px;
 		}
 
 		.graph-detail-stat-grid {

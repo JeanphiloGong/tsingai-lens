@@ -179,6 +179,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
 			if (path.endsWith('/research-understanding/curations')) {
 				return Promise.resolve(
 					jsonResponse({
@@ -422,5 +425,84 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(claimDetail.getByLabelText('Curation note'))
 			.toHaveValue('Existing expert note.');
+		await expect
+			.element(claimDetail.getByText('Applied expert curation'))
+			.toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('Existing expert curation: mechanism evidence remains limited.'))
+			.toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Original classification')).toBeInTheDocument();
+	});
+
+	it('loads existing expert feedback into the selected claim review history', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						items: [
+							{
+								feedback_id: 'ruf_existing',
+								collection_id: 'col_123',
+								scope_type: 'objective',
+								scope_id: 'obj_1',
+								claim_id: 'claim_mechanism_limited',
+								review_status: 'incorrect',
+								issue_type: 'evidence_not_grounded',
+								note: 'Existing feedback: mechanism claim needs direct evidence.',
+								reviewer: 'materials-expert',
+								created_at: '2026-06-18T09:00:00+00:00'
+							}
+						]
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
+		const claimDetail = browserPage.getByLabelText('Claim detail');
+
+		await expect.element(claimDetail.getByText('Feedback history')).toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('Existing feedback: mechanism claim needs direct evidence.'))
+			.toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Incorrect · Evidence does not support it')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('materials-expert · 2026-06-18T09:00:00+00:00')).toBeInTheDocument();
+	});
+
+	it('filters the claim list to the review queue', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Needs review 2' }).click();
+
+		await expect.element(browserPage.getByText('2 of 3')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Annealing may reduce cellular substructure.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Strength trends conflict across reported heat treatments.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Heat treatment changes LPBF 316L tensile response.').first())
+			.not.toBeInTheDocument();
 	});
 });

@@ -94,6 +94,36 @@ class FakeResearchUnderstandingFeedbackService:
         self.curations_listed = kwargs
         return self.curations
 
+    def export_gold_draft(self, **kwargs):  # noqa: ANN003
+        self.exported = kwargs
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "gold_id": "gold_col-1_obj-1_research_understanding",
+            "target_layer": "core",
+            "metric_profile": "research_understanding_v1",
+            "item_count": 1,
+            "items": [
+                {
+                    "gold_item_id": "gold_claim-1",
+                    "document_id": "",
+                    "family": "research_understanding_claims",
+                    "item_key": "objective:obj-1:claim-1",
+                    "payload": {
+                        "claim_id": "claim-1",
+                        "claim_type": "mechanism",
+                        "status": "limited",
+                        "statement": (
+                            "Nitrogen improves strength with limited mechanism evidence."
+                        ),
+                    },
+                    "evidence_refs": [{"evidence_ref_id": "ev-1"}],
+                    "metadata": {"curation_id": "ruc-existing"},
+                }
+            ],
+        }
+
 
 def test_research_understanding_feedback_route_records_contract_payload(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
@@ -237,4 +267,33 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
         "scope_type": "objective",
         "scope_id": "obj-1",
         "claim_id": "claim-1",
+    }
+
+
+def test_research_understanding_gold_draft_route_exports_curations(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_gold_draft(
+            "col-1",
+            scope_type="objective",
+            scope_id="obj-1",
+        )
+    )
+
+    assert response.collection_id == "col-1"
+    assert response.scope_type == "objective"
+    assert response.scope_id == "obj-1"
+    assert response.item_count == 1
+    assert response.items[0].family == "research_understanding_claims"
+    assert response.items[0].payload["claim_type"] == "mechanism"
+    assert service.exported == {
+        "collection_id": "col-1",
+        "scope_type": "objective",
+        "scope_id": "obj-1",
     }

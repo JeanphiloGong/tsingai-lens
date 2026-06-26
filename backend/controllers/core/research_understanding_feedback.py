@@ -11,6 +11,7 @@ from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingFeedbackCreateRequest,
     ResearchUnderstandingFeedbackListResponse,
     ResearchUnderstandingFeedbackResponse,
+    ResearchUnderstandingGoldDraftResponse,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
 
@@ -125,3 +126,22 @@ def _curation_response(
     curation: ResearchUnderstandingCuration,
 ) -> ResearchUnderstandingCurationResponse:
     return ResearchUnderstandingCurationResponse(**curation.to_record())
+
+
+@router.get(
+    "/{collection_id}/research-understanding/gold-draft",
+    response_model=ResearchUnderstandingGoldDraftResponse,
+    summary="导出 research understanding 专家校正 gold 草稿",
+)
+async def export_research_understanding_gold_draft(
+    collection_id: str,
+    scope_type: str = Query(..., max_length=32),
+    scope_id: str = Query(..., min_length=1, max_length=160),
+) -> ResearchUnderstandingGoldDraftResponse:
+    draft = await run_in_threadpool(
+        feedback_service.export_gold_draft,
+        collection_id=collection_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    return ResearchUnderstandingGoldDraftResponse(**draft)

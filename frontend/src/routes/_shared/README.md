@@ -27,8 +27,10 @@ This node owns browser-side helpers that are shared across frontend routes.
   profiles, research understandings, research objectives, objective paper
   frames, paper coverage, sample matrices, comparable groups, condition series,
   evidence-backed values, and expert feedback/curation requests for
-  research-understanding claims. Claim curations are read back by scope so the
-  workbench can show saved expert corrections after refresh.
+  research-understanding claims. Claim feedback and curations are read back by
+  scope so the workbench can show saved expert review history and expert
+  corrections after refresh. The same helper also reads curation-derived gold
+  drafts for evaluation handoff.
 - `goalSessions.ts`
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references

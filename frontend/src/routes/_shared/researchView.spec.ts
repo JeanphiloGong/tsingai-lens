@@ -11,6 +11,8 @@ vi.mock('./api', () => ({
 const {
 	createResearchUnderstandingCuration,
 	createResearchUnderstandingFeedback,
+	exportResearchUnderstandingGoldDraft,
+	fetchResearchUnderstandingFeedback,
 	fetchResearchUnderstandingCurations,
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
@@ -267,6 +269,37 @@ describe('research view shared helpers', () => {
 		expect(feedback.feedback_id).toBe('ruf_1');
 	});
 
+	it('lists research understanding feedback through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			items: [
+				{
+					feedback_id: 'ruf_1',
+					collection_id: 'col_123',
+					scope_type: 'objective',
+					scope_id: 'obj_1',
+					claim_id: 'claim_1',
+					review_status: 'incorrect',
+					issue_type: 'evidence_not_grounded',
+					note: 'The claim cites the wrong table.',
+					reviewer: 'materials-expert',
+					created_at: '2026-06-18T09:00:00+00:00'
+				}
+			]
+		});
+
+		const feedback = await fetchResearchUnderstandingFeedback('col_123', {
+			scope_type: 'objective',
+			scope_id: 'obj_1'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/feedback?scope_type=objective&scope_id=obj_1'
+		);
+		expect(feedback[0].feedback_id).toBe('ruf_1');
+		expect(feedback[0].review_status).toBe('incorrect');
+	});
+
 	it('posts expert claim curation through the same-origin collection contract', async () => {
 		requestJson.mockResolvedValueOnce({
 			curation_id: 'ruc_1',
@@ -350,6 +383,40 @@ describe('research view shared helpers', () => {
 		);
 		expect(curations[0].curation_id).toBe('ruc_1');
 		expect(curations[0].curated_status).toBe('limited');
+	});
+
+	it('exports research understanding curation gold drafts through the same-origin contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			gold_id: 'gold_col_123_objective_obj_1_research_understanding',
+			target_layer: 'core',
+			metric_profile: 'research_understanding_v1',
+			item_count: 1,
+			items: [
+				{
+					gold_item_id: 'gold_claim_1',
+					document_id: '',
+					family: 'research_understanding_claims',
+					item_key: 'objective:obj_1:claim_1',
+					payload: { claim_id: 'claim_1', claim_type: 'mechanism' },
+					evidence_refs: [{ evidence_ref_id: 'ev_1' }],
+					metadata: { curation_id: 'ruc_1' }
+				}
+			]
+		});
+
+		const draft = await exportResearchUnderstandingGoldDraft('col_123', {
+			scope_type: 'objective',
+			scope_id: 'obj_1'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/gold-draft?scope_type=objective&scope_id=obj_1'
+		);
+		expect(draft.item_count).toBe(1);
+		expect(draft.items[0].family).toBe('research_understanding_claims');
 	});
 
 	it('shortens long internal identifiers for display fallback', () => {

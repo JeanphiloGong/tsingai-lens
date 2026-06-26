@@ -555,6 +555,7 @@ Research understanding 专家反馈资源：
 - `GET /api/v1/collections/{collection_id}/research-understanding/feedback`
 - `POST /api/v1/collections/{collection_id}/research-understanding/curations`
 - `GET /api/v1/collections/{collection_id}/research-understanding/curations`
+- `GET /api/v1/collections/{collection_id}/research-understanding/gold-draft`
 
 `POST` 请求体：
 
@@ -592,6 +593,23 @@ Research understanding 专家反馈资源：
 scope、`claim_id`、专家校正字段、`note`、`reviewer` 和 `updated_at`。同一
 collection/scope/claim 的 curation 使用稳定 id 覆盖更新，便于后续把系统 claim
 与专家 curation 对齐评价。
+
+`GET /gold-draft` 需要 query：`scope_type` 和 `scope_id`。返回从该 scope 下
+专家 curation 派生的只读 gold 草稿：
+
+- `gold_id`
+- `target_layer`，当前为 `core`
+- `metric_profile`，当前为 `research_understanding_v1`
+- `item_count`
+- `items`
+
+每个 item 使用 `family=research_understanding_claims`，并包含 `gold_item_id`、
+`item_key`、`payload`、`evidence_refs` 和 `metadata`。该接口不注册正式
+gold set，只用于把专家校正数据导出给评价流程或人工审查。
+
+前端 workbench 应读取 `feedback` 和 `curations` 并叠加到 claim 视图：curation
+可作为当前显示的专家校正副本，feedback 作为复核历史展示；两者都不修改原始
+`understanding` artifact。
 
 语义要求：
 

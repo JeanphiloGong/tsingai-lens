@@ -125,6 +125,11 @@ export type ResearchUnderstandingFeedback = ResearchUnderstandingFeedbackCreate 
 	collection_id: string;
 	created_at: string;
 };
+export type ResearchUnderstandingFeedbackFilters = {
+	scope_type?: string;
+	scope_id?: string;
+	claim_id?: string;
+};
 export type ResearchUnderstandingCurationCreate = {
 	scope_type: string;
 	scope_id: string;
@@ -146,6 +151,29 @@ export type ResearchUnderstandingCurationFilters = {
 	scope_type?: string;
 	scope_id?: string;
 	claim_id?: string;
+};
+export type ResearchUnderstandingGoldDraftItem = {
+	gold_item_id: string;
+	document_id: string;
+	family: string;
+	item_key: string;
+	payload: Record<string, unknown>;
+	evidence_refs: Record<string, unknown>[];
+	metadata: Record<string, unknown>;
+};
+export type ResearchUnderstandingGoldDraft = {
+	collection_id: string;
+	scope_type: string;
+	scope_id: string;
+	gold_id: string;
+	target_layer: string;
+	metric_profile: string;
+	item_count: number;
+	items: ResearchUnderstandingGoldDraftItem[];
+};
+export type ResearchUnderstandingGoldDraftFilters = {
+	scope_type: string;
+	scope_id: string;
 };
 
 export type EvidenceBackedValue = {
@@ -1923,6 +1951,22 @@ export async function createResearchUnderstandingFeedback(
 	}) as Promise<ResearchUnderstandingFeedback>;
 }
 
+export async function fetchResearchUnderstandingFeedback(
+	collectionId: string,
+	filters: ResearchUnderstandingFeedbackFilters = {}
+): Promise<ResearchUnderstandingFeedback[]> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	if (filters.scope_type) params.set('scope_type', filters.scope_type);
+	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.claim_id) params.set('claim_id', filters.claim_id);
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	const data = (await requestJson(
+		`/collections/${encodedCollection}/research-understanding/feedback${suffix}`
+	)) as { items?: ResearchUnderstandingFeedback[] };
+	return Array.isArray(data.items) ? data.items : [];
+}
+
 export async function createResearchUnderstandingCuration(
 	collectionId: string,
 	payload: ResearchUnderstandingCurationCreate
@@ -1948,6 +1992,19 @@ export async function fetchResearchUnderstandingCurations(
 		`/collections/${encodedCollection}/research-understanding/curations${suffix}`
 	)) as { items?: ResearchUnderstandingCuration[] };
 	return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function exportResearchUnderstandingGoldDraft(
+	collectionId: string,
+	filters: ResearchUnderstandingGoldDraftFilters
+): Promise<ResearchUnderstandingGoldDraft> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	params.set('scope_id', filters.scope_id);
+	return requestJson(
+		`/collections/${encodedCollection}/research-understanding/gold-draft?${params.toString()}`
+	) as Promise<ResearchUnderstandingGoldDraft>;
 }
 
 export async function fetchDocumentMaterials(

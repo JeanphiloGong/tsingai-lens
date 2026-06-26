@@ -449,6 +449,9 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			if (path === '/api/v1/collections/col_123/research-understanding/curations') {
 				return jsonResponse({ collection_id: 'col_123', items: [] });
 			}
+			if (path === '/api/v1/collections/col_123/research-understanding/feedback') {
+				return jsonResponse({ collection_id: 'col_123', items: [] });
+			}
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
 		});
 	});

@@ -69,6 +69,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			if (path.endsWith('/research-understanding/curations')) {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
+			if (path.endsWith('/research-understanding/feedback')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
 			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
 				return Promise.resolve(
 					jsonResponse({

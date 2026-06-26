@@ -4,6 +4,7 @@
 	import {
 		createResearchUnderstandingCuration,
 		createResearchUnderstandingFeedback,
+		fetchResearchUnderstandingFeedback,
 		fetchResearchUnderstandingCurations,
 		formatShortIdentifier,
 		type ResearchUnderstanding,
@@ -12,6 +13,7 @@
 		type ResearchUnderstandingCuration,
 		type ResearchUnderstandingEvidenceRef,
 		type ResearchUnderstandingFeedbackIssueType,
+		type ResearchUnderstandingFeedback,
 		type ResearchUnderstandingFeedbackStatus,
 		type ResearchUnderstandingRelation
 	} from '../../../_shared/researchView';
@@ -66,6 +68,10 @@
 	let curationsByClaimId = new Map<string, ResearchUnderstandingCuration>();
 	let loadedCurationScopeKey = '';
 	let lastCurationClaimId = '';
+	let feedbackByClaimId = new Map<string, ResearchUnderstandingFeedback[]>();
+	let loadedFeedbackScopeKey = '';
+	let feedbackLoadError = '';
+	let reviewQueueOnly = false;
 	let feedbackStatus: ResearchUnderstandingFeedbackStatus = 'correct';
 	let feedbackIssue: ResearchUnderstandingFeedbackIssueType = 'none';
 	let feedbackNote = '';
@@ -82,10 +88,16 @@
 		(understanding?.contexts ?? []).map((context) => [context.context_id, context])
 	);
 	$: claims = understanding?.claims ?? [];
+	$: reviewQueueClaimIds = new Set(
+		claims
+			.filter((claim) => shouldReviewClaim(claim, feedbackByClaimId))
+			.map((claim) => claim.claim_id)
+	);
 	$: filteredClaims = claims.filter(
 		(claim) =>
 			(selectedClaimType === 'all' || claim.claim_type === selectedClaimType) &&
-			(selectedClaimStatus === 'all' || claim.status === selectedClaimStatus)
+			(selectedClaimStatus === 'all' || claim.status === selectedClaimStatus) &&
+			(!reviewQueueOnly || reviewQueueClaimIds.has(claim.claim_id))
 	);
 	$: claimTypeCounts = countClaimsBy(claims, 'claim_type');
 	$: claimStatusCounts = countClaimsBy(claims, 'status');
@@ -101,14 +113,24 @@
 	}
 	$: selectedClaim =
 		filteredClaims.find((claim) => claim.claim_id === selectedClaimId) ?? filteredClaims[0] ?? null;
-	$: selectedEvidenceRefs = selectedClaim ? evidenceRefsForIds(selectedClaim.evidence_ref_ids) : [];
-	$: selectedContextRefs = selectedClaim ? contextRefsForIds(selectedClaim.context_ids) : [];
+	$: selectedScopeId = scopeId(understanding);
+	$: selectedCuration = selectedClaim ? curationsByClaimId.get(selectedClaim.claim_id) : null;
+	$: selectedFeedback = selectedClaim ? (feedbackByClaimId.get(selectedClaim.claim_id) ?? []) : [];
+	$: displayClaim = selectedClaim
+		? {
+				claim_type: selectedCuration?.curated_claim_type ?? selectedClaim.claim_type,
+				status: selectedCuration?.curated_status ?? selectedClaim.status,
+				statement: selectedCuration?.curated_statement ?? selectedClaim.statement,
+				evidence_ref_ids: selectedCuration?.curated_evidence_ref_ids ?? selectedClaim.evidence_ref_ids,
+				context_ids: selectedCuration?.curated_context_ids ?? selectedClaim.context_ids
+			}
+		: null;
+	$: selectedEvidenceRefs = displayClaim ? evidenceRefsForIds(displayClaim.evidence_ref_ids) : [];
+	$: selectedContextRefs = displayClaim ? contextRefsForIds(displayClaim.context_ids) : [];
 	$: selectedRelations = selectedClaim
 		? relatedRelationsForClaim(selectedClaim, understanding?.relations ?? [])
 		: [];
-	$: selectedEvidenceIdSet = new Set(selectedClaim?.evidence_ref_ids ?? []);
-	$: selectedScopeId = scopeId(understanding);
-	$: selectedCuration = selectedClaim ? curationsByClaimId.get(selectedClaim.claim_id) : null;
+	$: selectedEvidenceIdSet = new Set(displayClaim?.evidence_ref_ids ?? []);
 	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
 		lastCurationClaimId = selectedClaim?.claim_id ?? '';
 		resetCurationForm();
@@ -121,6 +143,9 @@
 			: '';
 	$: if (curationScopeKey && curationScopeKey !== loadedCurationScopeKey) {
 		void loadCurationsForScope(curationScopeKey);
+	}
+	$: if (curationScopeKey && curationScopeKey !== loadedFeedbackScopeKey) {
+		void loadFeedbackForScope(curationScopeKey);
 	}
 	$: if ((selectedClaim?.claim_id ?? '') !== lastFeedbackClaimId) {
 		lastFeedbackClaimId = selectedClaim?.claim_id ?? '';
@@ -278,10 +303,6 @@
 		return listLabel(labels.slice(0, 4));
 	}
 
-	function visibleClaims(currentUnderstanding: ResearchUnderstanding) {
-		return currentUnderstanding.claims.slice(0, 6);
-	}
-
 	function visibleRelations(currentUnderstanding: ResearchUnderstanding) {
 		return currentUnderstanding.relations.slice(0, 4);
 	}
@@ -290,8 +311,20 @@
 		return currentUnderstanding.evidence_refs.slice(0, 5);
 	}
 
-	function claimEvidenceLabels(claim: ResearchUnderstandingClaim) {
-		return evidenceLabelsForIds(claim.evidence_ref_ids);
+	function shouldReviewClaim(
+		claim: ResearchUnderstandingClaim,
+		currentFeedbackByClaimId: Map<string, ResearchUnderstandingFeedback[]>
+	) {
+		const feedback = currentFeedbackByClaimId.get(claim.claim_id) ?? [];
+		return (
+			claim.status === 'limited' ||
+			claim.status === 'conflicted' ||
+			claim.status === 'unsupported' ||
+			(claim.confidence !== null && claim.confidence < 0.7) ||
+			claim.warnings.length > 0 ||
+			claim.evidence_ref_ids.length === 0 ||
+			feedback.some((item) => item.review_status !== 'correct' || item.issue_type !== 'none')
+		);
 	}
 
 	function relationEvidenceLabels(relation: ResearchUnderstandingRelation) {
@@ -389,6 +422,25 @@
 		}
 	}
 
+	async function loadFeedbackForScope(scopeKey: string) {
+		if (!understanding || !collectionId || !selectedScopeId) return;
+		loadedFeedbackScopeKey = scopeKey;
+		feedbackLoadError = '';
+		try {
+			const feedback = await fetchResearchUnderstandingFeedback(collectionId, {
+				scope_type: understanding.scope.scope_type,
+				scope_id: selectedScopeId
+			});
+			const next = new Map<string, ResearchUnderstandingFeedback[]>();
+			for (const item of feedback) {
+				next.set(item.claim_id, [...(next.get(item.claim_id) ?? []), item]);
+			}
+			feedbackByClaimId = next;
+		} catch (error) {
+			feedbackLoadError = error instanceof Error ? error.message : $t('error.unexpected');
+		}
+	}
+
 	async function submitClaimFeedback() {
 		if (!understanding || !selectedClaim || !collectionId || !selectedScopeId) return;
 		feedbackSubmitting = true;
@@ -407,6 +459,10 @@
 			feedbackMessage = $t('research.understanding.feedbackSaved', {
 				id: formatShortIdentifier(feedback.feedback_id)
 			});
+			feedbackByClaimId = new Map(feedbackByClaimId).set(feedback.claim_id, [
+				feedback,
+				...(feedbackByClaimId.get(feedback.claim_id) ?? [])
+			]);
 			feedbackNote = '';
 		} catch (error) {
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
@@ -523,6 +579,29 @@
 							{/each}
 						</div>
 					</div>
+					<div class="research-understanding-workbench__filter-group">
+						<span>{$t('research.understanding.reviewQueue')}</span>
+						<div class="research-understanding-workbench__segmented" role="list">
+							<button
+								type="button"
+								class:research-understanding-workbench__segment--active={reviewQueueOnly}
+								aria-pressed={reviewQueueOnly}
+								on:click={() => (reviewQueueOnly = !reviewQueueOnly)}
+							>
+								{$t('research.understanding.reviewQueueCount', {
+									count: reviewQueueClaimIds.size
+								})}
+							</button>
+						</div>
+					</div>
+					{#if curationLoadError || feedbackLoadError}
+						<p
+							class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+							role="alert"
+						>
+							{curationLoadError || feedbackLoadError}
+						</p>
+					{/if}
 				</div>
 			{/if}
 
@@ -541,7 +620,14 @@
 						</span>
 					</div>
 					{#each filteredClaims as claim (claim.claim_id)}
-						{@const labels = claimEvidenceLabels(claim)}
+						{@const curation = curationsByClaimId.get(claim.claim_id)}
+						{@const claimFeedback = feedbackByClaimId.get(claim.claim_id) ?? []}
+						{@const displayType = curation?.curated_claim_type ?? claim.claim_type}
+						{@const displayStatus = curation?.curated_status ?? claim.status}
+						{@const displayStatement = curation?.curated_statement ?? claim.statement}
+						{@const displayEvidenceIds = curation?.curated_evidence_ref_ids ?? claim.evidence_ref_ids}
+						{@const displayContextIds = curation?.curated_context_ids ?? claim.context_ids}
+						{@const labels = evidenceLabelsForIds(displayEvidenceIds)}
 						<button
 							type="button"
 							class="research-understanding-workbench__card research-understanding-workbench__card--claim"
@@ -551,13 +637,29 @@
 							on:click={() => (selectedClaimId = claim.claim_id)}
 						>
 							<div class="research-understanding-workbench__meta">
-								<span>{claimTypeLabel(claim.claim_type)}</span>
-								<span>{statusLabel(claim.status)}</span>
+								<span>{claimTypeLabel(displayType)}</span>
+								<span>{statusLabel(displayStatus)}</span>
 								{#if claim.confidence !== null}
 									<span>{confidenceLabel(claim.confidence)}</span>
 								{/if}
+								{#if curation}
+									<span>{$t('research.understanding.curatedBadge')}</span>
+								{/if}
+								{#if claimFeedback.length}
+									<span>
+										{$t('research.understanding.feedbackCount', {
+											count: claimFeedback.length
+										})}
+									</span>
+								{/if}
 							</div>
-							<p>{claim.statement}</p>
+							<p>{displayStatement}</p>
+							{#if curation && curation.curated_statement !== claim.statement}
+								<small>
+									{$t('research.understanding.originalClaimPrefix')}
+									{claim.statement}
+								</small>
+							{/if}
 							{#if labels.length}
 								<div class="research-understanding-workbench__chips">
 									{#each labels as label (`${claim.claim_id}-${label}`)}
@@ -565,10 +667,10 @@
 									{/each}
 								</div>
 							{/if}
-							{#if claim.context_ids.length}
+							{#if displayContextIds.length}
 								<small>
 									{$t('research.understanding.contextPrefix')}
-									{contextLabelForIds(claim.context_ids)}
+									{contextLabelForIds(displayContextIds)}
 								</small>
 							{/if}
 						</button>
@@ -624,16 +726,59 @@
 					{#if selectedClaim}
 						<article class="research-understanding-workbench__detail">
 							<div class="research-understanding-workbench__meta">
-								<span>{claimTypeLabel(selectedClaim.claim_type)}</span>
-								<span>{statusLabel(selectedClaim.status)}</span>
+								<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
+								<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
 								{#if selectedClaim.confidence !== null}
 									<span>{confidenceLabel(selectedClaim.confidence)}</span>
 								{/if}
 								{#if selectedClaim.strength}
 									<span>{selectedClaim.strength}</span>
 								{/if}
+								{#if selectedCuration}
+									<span>{$t('research.understanding.curatedBadge')}</span>
+								{/if}
+								{#if selectedFeedback.length}
+									<span>
+										{$t('research.understanding.feedbackCount', {
+											count: selectedFeedback.length
+										})}
+									</span>
+								{/if}
 							</div>
-							<p>{selectedClaim.statement}</p>
+							<p>{displayClaim?.statement ?? selectedClaim.statement}</p>
+
+							{#if selectedCuration}
+								<div class="research-understanding-workbench__detail-section">
+									<h5>{$t('research.understanding.curationApplied')}</h5>
+									<div class="research-understanding-workbench__context">
+										<div>
+											<span>{$t('research.understanding.originalClaim')}</span>
+											<p>{selectedClaim.statement}</p>
+										</div>
+										<div>
+											<span>{$t('research.understanding.originalClassification')}</span>
+											<p>
+												{claimTypeLabel(selectedClaim.claim_type)}
+												·
+												{statusLabel(selectedClaim.status)}
+											</p>
+										</div>
+										{#if selectedCuration.note}
+											<div>
+												<span>{$t('research.understanding.curationNote')}</span>
+												<p>{selectedCuration.note}</p>
+											</div>
+										{/if}
+										{#if selectedCuration.reviewer || selectedCuration.updated_at}
+											<small>
+												{[selectedCuration.reviewer, selectedCuration.updated_at]
+													.filter(Boolean)
+													.join(' · ')}
+											</small>
+										{/if}
+									</div>
+								</div>
+							{/if}
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.evidenceRefs')}</h5>
@@ -771,6 +916,33 @@
 									</p>
 								{/if}
 							</form>
+
+							<div class="research-understanding-workbench__detail-section">
+								<h5>{$t('research.understanding.feedbackHistory')}</h5>
+								{#each selectedFeedback as item (item.feedback_id)}
+									<div class="research-understanding-workbench__context">
+										<div>
+											<span>
+												{feedbackStatusLabel(item.review_status)}
+												·
+												{feedbackIssueLabel(item.issue_type)}
+											</span>
+											{#if item.note}
+												<p>{item.note}</p>
+											{:else}
+												<p>{$t('research.understanding.noFeedbackNote')}</p>
+											{/if}
+										</div>
+										{#if item.reviewer || item.created_at}
+											<small>{[item.reviewer, item.created_at].filter(Boolean).join(' · ')}</small>
+										{/if}
+									</div>
+								{:else}
+									<div class="research-understanding-workbench__empty">
+										{$t('research.understanding.noFeedback')}
+									</div>
+								{/each}
+							</div>
 
 							<form
 								class="research-understanding-workbench__feedback"

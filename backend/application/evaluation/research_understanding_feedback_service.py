@@ -135,6 +135,58 @@ class ResearchUnderstandingFeedbackService:
             claim_id=claim_id,
         )
 
+    def export_gold_draft(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> dict[str, object]:
+        curations = self.list_curations(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        items = [
+            {
+                "gold_item_id": "gold_" + curation.curation_id.removeprefix("ruc_"),
+                "document_id": "",
+                "family": "research_understanding_claims",
+                "item_key": ":".join(
+                    [curation.scope_type, curation.scope_id, curation.claim_id]
+                ),
+                "payload": {
+                    "claim_id": curation.claim_id,
+                    "claim_type": curation.curated_claim_type,
+                    "status": curation.curated_status,
+                    "statement": curation.curated_statement,
+                    "evidence_ref_ids": list(curation.curated_evidence_ref_ids),
+                    "context_ids": list(curation.curated_context_ids),
+                },
+                "evidence_refs": [
+                    {"evidence_ref_id": evidence_ref_id}
+                    for evidence_ref_id in curation.curated_evidence_ref_ids
+                ],
+                "metadata": {
+                    "curation_id": curation.curation_id,
+                    "reviewer": curation.reviewer,
+                    "note": curation.note,
+                    "updated_at": curation.updated_at,
+                },
+            }
+            for curation in curations
+        ]
+        return {
+            "collection_id": collection_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "gold_id": _gold_draft_id(collection_id, scope_type, scope_id),
+            "target_layer": "core",
+            "metric_profile": "research_understanding_v1",
+            "item_count": len(items),
+            "items": items,
+        }
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -148,3 +200,12 @@ def _feedback_id(*parts: object) -> str:
 def _curation_id(*parts: object) -> str:
     payload = "\x1f".join(str(part or "") for part in parts)
     return "ruc_" + sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _gold_draft_id(collection_id: str, scope_type: str, scope_id: str) -> str:
+    payload = "_".join(
+        part.strip().replace(" ", "_")
+        for part in (collection_id, scope_type, scope_id)
+        if part.strip()
+    )
+    return f"gold_{payload}_research_understanding"

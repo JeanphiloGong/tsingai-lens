@@ -214,3 +214,28 @@ class ResearchUnderstandingCurationListResponse(BaseModel):
 
     collection_id: str
     items: list[ResearchUnderstandingCurationResponse] = Field(default_factory=list)
+
+
+class ResearchUnderstandingGoldDraftItemResponse(BaseModel):
+    """Gold-item draft derived from expert-curated research-understanding claims."""
+
+    gold_item_id: str
+    document_id: str
+    family: str
+    item_key: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchUnderstandingGoldDraftResponse(BaseModel):
+    """Read-only gold-set draft exported from expert claim curations."""
+
+    collection_id: str
+    scope_type: str
+    scope_id: str
+    gold_id: str
+    target_layer: str
+    metric_profile: str
+    item_count: int
+    items: list[ResearchUnderstandingGoldDraftItemResponse] = Field(default_factory=list)

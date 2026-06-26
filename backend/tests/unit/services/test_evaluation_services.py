@@ -8,7 +8,11 @@ from application.evaluation.prediction_snapshot_service import (
     CoreArtifactsNotReadyForEvaluationError,
     EvaluationPredictionSnapshotService,
 )
+from application.evaluation.research_understanding_feedback_service import (
+    ResearchUnderstandingFeedbackService,
+)
 from domain.core import CoreFactSet, MeasurementResult, ObjectiveEvidenceUnit
+from domain.evaluation import ResearchUnderstandingCuration
 
 
 class FakeCollectionService:
@@ -87,6 +91,22 @@ class FakeEvaluationRepository:
     def upsert_evaluation_run(self, run) -> None:
         self.run = run
 
+    def list_research_understanding_curations(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ):
+        return tuple(
+            curation
+            for curation in getattr(self, "curations", ())
+            if curation.collection_id == collection_id
+            and (scope_type is None or curation.scope_type == scope_type)
+            and (scope_id is None or curation.scope_id == scope_id)
+            and (claim_id is None or curation.claim_id == claim_id)
+        )
+
 
 class FakeCoreFactRepository:
     backend_name = "fake"
@@ -162,6 +182,56 @@ def test_evaluation_gold_service_rejects_gold_item_outside_collection():
                 }
             ],
         )
+
+
+def test_research_understanding_feedback_service_exports_curation_gold_draft():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-abc123",
+                "collection_id": "col-gold",
+                "scope_type": "objective",
+                "scope_id": "obj-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "mechanism",
+                "curated_status": "limited",
+                "curated_statement": "Annealing mechanism evidence remains limited.",
+                "curated_evidence_ref_ids": ["ev-1", "ev-2"],
+                "curated_context_ids": ["ctx-1"],
+                "note": "Needs microstructure evidence.",
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(evaluation_repository=repository)
+
+    draft = service.export_gold_draft(
+        collection_id="col-gold",
+        scope_type="objective",
+        scope_id="obj-1",
+    )
+
+    assert draft["gold_id"] == "gold_col-gold_objective_obj-1_research_understanding"
+    assert draft["metric_profile"] == "research_understanding_v1"
+    assert draft["item_count"] == 1
+    item = draft["items"][0]
+    assert item["family"] == "research_understanding_claims"
+    assert item["item_key"] == "objective:obj-1:claim-1"
+    assert item["payload"] == {
+        "claim_id": "claim-1",
+        "claim_type": "mechanism",
+        "status": "limited",
+        "statement": "Annealing mechanism evidence remains limited.",
+        "evidence_ref_ids": ["ev-1", "ev-2"],
+        "context_ids": ["ctx-1"],
+    }
+    assert item["evidence_refs"] == [
+        {"evidence_ref_id": "ev-1"},
+        {"evidence_ref_id": "ev-2"},
+    ]
+    assert item["metadata"]["curation_id"] == "ruc-abc123"
 
 
 def test_prediction_snapshot_service_exports_objective_first_measurements():

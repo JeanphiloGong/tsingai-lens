@@ -44,6 +44,8 @@ _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
+_OBJECTIVE_ROUTE_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 1536
+_OBJECTIVE_EVIDENCE_UNIT_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 768
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
@@ -189,6 +191,8 @@ class CoreLLMStructuredExtractor:
         self,
         payload: dict[str, Any],
     ) -> StructuredObjectiveEvidenceRoutes:
+        if not isinstance(payload.get("current_source"), dict):
+            raise ValueError("objective evidence routing requires current_source")
         system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
@@ -330,6 +334,14 @@ class CoreLLMStructuredExtractor:
         if response_model is StructuredTableBatchMentions:
             request_kwargs["max_completion_tokens"] = (
                 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredObjectiveEvidenceRoutes:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_ROUTE_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredObjectiveEvidenceUnits:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_UNIT_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
             )
         completion = self.client.beta.chat.completions.parse(**request_kwargs)
         if not completion.choices:

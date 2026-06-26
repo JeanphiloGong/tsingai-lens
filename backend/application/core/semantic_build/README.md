@@ -7,8 +7,14 @@ artifacts.
   LLM-structured document typing and collection summaries
 - `research_objective_service.py`
   collection-level paper skim, research objective, objective context, evidence
-  route, evidence-unit, and logic-chain records; objective logic chains include
-  traceable measurement value ranges assembled from resolved measurement units
+  route, evidence-unit, and logic-chain records; objective evidence routing now
+  walks Source document trees as bounded current-source decisions instead of
+  sending large flat candidate batches to the model. Evidence-unit extraction
+  carries a bounded structured document state forward so later blocks and
+  tables can see prior sample, process, test, measurement, and open-join
+  context without putting prior raw text back into the prompt. Objective logic
+  chains include traceable measurement value ranges assembled from resolved
+  measurement units
 - `paper_facts_service.py`
   objective-aware semantic extraction for evidence anchors, method facts,
   variants, test conditions, baselines, and measurement results

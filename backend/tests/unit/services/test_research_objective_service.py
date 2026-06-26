@@ -34,7 +34,7 @@ from domain.core import (
     PaperSkim,
     ResearchObjective,
 )
-from domain.source import SourceArtifactSet
+from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
 from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
@@ -270,13 +270,14 @@ class _ObjectiveExtractor:
     ) -> StructuredObjectiveEvidenceRoutes:
         self.route_payloads.append(payload)
         objective = payload["objective"]
+        if not isinstance(payload.get("current_source"), dict):
+            raise ValueError("objective evidence routing requires current_source")
+        candidates = [payload["current_source"]]
         routes: list[StructuredObjectiveEvidenceRoute] = []
-        for candidate in payload["source_candidates"]:
+        for candidate in candidates:
             if candidate["frame_status"] == "excluded":
                 routes.append(
                     StructuredObjectiveEvidenceRoute(
-                        source_kind=candidate["source_kind"],
-                        source_ref=candidate["source_ref"],
                         role="low_value_or_irrelevant",
                         extractable=False,
                         reason="Excluded by objective paper frame.",
@@ -287,8 +288,6 @@ class _ObjectiveExtractor:
             if candidate["source_kind"] == "text_window":
                 routes.append(
                     StructuredObjectiveEvidenceRoute(
-                        source_kind="text_window",
-                        source_ref=candidate["source_ref"],
                         role="process_or_treatment",
                         extractable=True,
                         reason="Text window is in a relevant objective section.",
@@ -297,12 +296,19 @@ class _ObjectiveExtractor:
                 )
                 continue
             table_schema = candidate.get("table_schema") or {}
+            column_headers = (
+                table_schema.get("column_headers")
+                if isinstance(table_schema.get("column_headers"), list)
+                else candidate.get("column_headers")
+                if isinstance(candidate.get("column_headers"), list)
+                else []
+            )
             text = " ".join(
                 str(value or "")
                 for value in (
                     candidate.get("caption_text"),
                     candidate.get("heading_path"),
-                    " ".join(table_schema.get("column_headers") or []),
+                    " ".join(column_headers),
                 )
             ).lower()
             property_axes = [
@@ -317,23 +323,9 @@ class _ObjectiveExtractor:
             )
             routes.append(
                 StructuredObjectiveEvidenceRoute(
-                    source_kind="table",
-                    source_ref=candidate["source_ref"],
                     role=role,
                     extractable=True,
                     reason="Table is relevant for this objective.",
-                    table_schema=table_schema,
-                    column_roles={
-                        header: "target_property"
-                        for header in table_schema.get("column_headers", [])
-                        if any(axis in str(header).lower() for axis in property_axes)
-                    },
-                    join_keys={"sample_key": "sample"}
-                    if "sample" in text
-                    else {},
-                    join_plan={"join_on": "sample_key"}
-                    if "sample" in text
-                    else {},
                     confidence=0.82,
                 )
             )
@@ -1267,6 +1259,7 @@ def test_research_objective_service_skips_failed_objective_unit_route(
             objective_evidence_routes=(table_route, failing_text_route),
             blocks_by_document_id={"paper-1": [block]},
             tables_by_document_id={"paper-1": [table]},
+            document_trees_by_document_id={},
         )
 
     measurements = [unit for unit in units if unit.unit_kind == "measurement"]
@@ -1354,6 +1347,726 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
             "cell_text": "92.19",
         },
     ]
+
+
+def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods",
+            "role": "process_or_treatment",
+            "extractable": True,
+        }
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section",),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                text="The 316L samples used heat treatment at 650 C for 4 h.",
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="methods",
+                page_start=2,
+                page_end=2,
+            ),
+        },
+    )
+
+    payload = service._build_objective_route_source_payload(
+        route=route,
+        blocks=[],
+        tables=[],
+        document_tree=document_tree,
+    )
+
+    assert payload == {
+        "source_kind": "text_window",
+        "source_ref": "methods",
+        "document_id": "paper-1",
+        "page": 2,
+        "block_type": "paragraph",
+        "heading_path": "Methods",
+        "text": "The 316L samples used heat treatment at 650 C for 4 h.",
+    }
+
+
+def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods-node",
+            "role": "process_or_treatment",
+            "extractable": True,
+        }
+    )
+    block = SimpleNamespace(
+        block_id="block-methods",
+        page=2,
+        block_type="paragraph",
+        heading_path="Methods",
+        text="The 316L samples used heat treatment at 650 C for 4 h.",
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section",),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="block-methods",
+                page_start=2,
+                page_end=2,
+            ),
+        },
+    )
+
+    payload = service._build_objective_route_source_payload(
+        route=route,
+        blocks=[block],
+        tables=[],
+        document_tree=document_tree,
+    )
+
+    assert payload == {
+        "source_kind": "text_window",
+        "source_ref": "methods-node",
+        "document_id": "paper-1",
+        "page": 2,
+        "block_type": "paragraph",
+        "heading_path": "Methods",
+        "text": "The 316L samples used heat treatment at 650 C for 4 h.",
+    }
+
+
+def test_research_objective_evidence_units_carry_forward_document_state(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["heat treatment"],
+            "target_property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    method_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "confidence": 0.82,
+        }
+    )
+    result_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.86,
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="methods",
+            document_id="paper-1",
+            page=2,
+            block_type="paragraph",
+            heading_path="Methods",
+            text="S1 was aged at 650 C for 4 h.",
+        ),
+        SimpleNamespace(
+            block_id="results",
+            document_id="paper-1",
+            page=5,
+            block_type="paragraph",
+            heading_path="Results",
+            text="S1 reached a yield strength of 900 MPa.",
+        ),
+    ]
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section", "results-section"),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="methods",
+            ),
+            "results-section": SourceDocumentNode(
+                node_id="results-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("results-node",),
+                node_type="section",
+                order=200,
+                title="Results",
+                heading_path=("Results",),
+            ),
+            "results-node": SourceDocumentNode(
+                node_id="results-node",
+                document_id="paper-1",
+                parent_id="results-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=210,
+                heading_path=("Results",),
+                source_ref_kind="block",
+                source_ref_id="results",
+            ),
+        },
+    )
+
+    class StatefulUnitExtractor:
+        def __init__(self) -> None:
+            self.unit_payloads: list[dict[str, Any]] = []
+
+        def extract_objective_evidence_units(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveEvidenceUnits:
+            self.unit_payloads.append(payload)
+            source_ref = payload["evidence_route"]["source_ref"]
+            if source_ref == "methods":
+                return StructuredObjectiveEvidenceUnits(
+                    evidence_units=[
+                        StructuredObjectiveEvidenceUnit(
+                            unit_kind="process_context",
+                            sample_context={"sample": "S1"},
+                            process_context={"aging_temperature_c": 650},
+                            value_payload={"statement": "S1 aged at 650 C"},
+                            join_keys={"sample_key": "S1"},
+                            resolution_status="partial",
+                            confidence=0.82,
+                        )
+                    ]
+                )
+            state = payload["document_state"]
+            process_context = state["process_contexts"][0]["value"]
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized="yield strength",
+                        sample_context={"sample": "S1"},
+                        process_context=dict(process_context),
+                        value_payload={
+                            "value": 900,
+                            "source_value_text": "900 MPa",
+                        },
+                        unit="MPa",
+                        join_keys={"sample_key": "S1"},
+                        resolution_status="resolved",
+                        confidence=0.86,
+                    )
+                ]
+            )
+
+    extractor = StatefulUnitExtractor()
+
+    units = service._build_objective_evidence_units(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        objective_evidence_routes=(result_route, method_route),
+        blocks_by_document_id={"paper-1": blocks},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert [payload["evidence_route"]["source_ref"] for payload in extractor.unit_payloads] == [
+        "methods",
+        "results",
+    ]
+    assert extractor.unit_payloads[0]["tree_position"]["section_path"] == ["Methods"]
+    assert extractor.unit_payloads[1]["tree_position"]["section_path"] == ["Results"]
+    assert extractor.unit_payloads[0]["document_state"]["evidence_counts_by_kind"] == {}
+    assert extractor.unit_payloads[1]["document_state"]["evidence_counts_by_kind"] == {
+        "process_context": 1,
+    }
+    assert extractor.unit_payloads[1]["document_state"]["process_contexts"][0]["value"] == {
+        "aging_temperature_c": 650,
+    }
+    assert extractor.unit_payloads[0]["objective"] == {
+        "objective_id": "obj-heat",
+        "question": "How does heat treatment affect yield strength?",
+        "material_scope": ["316L stainless steel"],
+        "process_axes": ["heat treatment"],
+        "property_axes": ["yield strength"],
+        "comparison_intent": None,
+    }
+    assert "routing_hints" not in extractor.unit_payloads[0]["objective_context"]
+    assert set(extractor.unit_payloads[0]["paper_frame"]) == {
+        "frame_id",
+        "objective_id",
+        "document_id",
+        "relevance",
+        "paper_role",
+        "material_match",
+        "changed_variables",
+        "measured_property_scope",
+        "test_environment_scope",
+    }
+    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    assert len(measurements) == 1
+    assert measurements[0].process_context == {"aging_temperature_c": 650}
+
+
+def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "background": "x" * 1000,
+            "relevant_tables": ["table-1"],
+            "excluded_tables": ["table-2"],
+        }
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "long-results",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.86,
+        }
+    )
+    block = SimpleNamespace(
+        block_id="long-results",
+        document_id="paper-1",
+        page=4,
+        block_type="paragraph",
+        heading_path="Results",
+        text="Yield strength improved after heat treatment. " * 200,
+    )
+
+    class PayloadCaptureExtractor:
+        def __init__(self) -> None:
+            self.unit_payloads: list[dict[str, Any]] = []
+
+        def extract_objective_evidence_units(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveEvidenceUnits:
+            self.unit_payloads.append(payload)
+            return StructuredObjectiveEvidenceUnits()
+
+    extractor = PayloadCaptureExtractor()
+
+    service._build_objective_evidence_units(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    payload = extractor.unit_payloads[0]
+    assert len(payload["source"]["text"]) <= 1800
+    assert "background" not in payload["paper_frame"]
+    assert "relevant_tables" not in payload["paper_frame"]
+    assert "excluded_tables" not in payload["paper_frame"]
+
+
+def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["heat treatment"],
+            "target_property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    routes = (
+        ObjectiveEvidenceRoute.from_mapping(
+            {
+                "objective_id": "obj-heat",
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "discussion",
+                "role": "characterization",
+                "extractable": True,
+                "confidence": 0.84,
+            }
+        ),
+        ObjectiveEvidenceRoute.from_mapping(
+            {
+                "objective_id": "obj-heat",
+                "document_id": "paper-1",
+                "source_kind": "table",
+                "source_ref": "table-1",
+                "role": "current_experimental_evidence",
+                "extractable": True,
+                "column_roles": {
+                    "sample": "sample_id",
+                    "heat treatment": "process_variable",
+                    "yield strength (MPa)": "target_property",
+                },
+                "confidence": 0.88,
+            }
+        ),
+        ObjectiveEvidenceRoute.from_mapping(
+            {
+                "objective_id": "obj-heat",
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "methods",
+                "role": "process_or_treatment",
+                "extractable": True,
+                "confidence": 0.82,
+            }
+        ),
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="methods",
+            document_id="paper-1",
+            page=2,
+            block_type="paragraph",
+            heading_path="Methods",
+            text="S1 was heat treated at 650 C for 4 h.",
+        ),
+        SimpleNamespace(
+            block_id="discussion",
+            document_id="paper-1",
+            page=6,
+            block_type="paragraph",
+            heading_path="Discussion",
+            text="The strength improvement is attributed to the heat treatment.",
+        ),
+    ]
+    table = SimpleNamespace(
+        table_id="table-1",
+        document_id="paper-1",
+        page=5,
+        caption_text="Yield strength results",
+        heading_path="Results",
+        column_headers=["sample", "heat treatment", "yield strength (MPa)"],
+        table_matrix=[
+            ["sample", "heat treatment", "yield strength (MPa)"],
+            ["S1", "650 C for 4 h", "900"],
+        ],
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section", "results-section", "discussion-section"),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="methods",
+            ),
+            "results-section": SourceDocumentNode(
+                node_id="results-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("table-node",),
+                node_type="section",
+                order=200,
+                title="Results",
+                heading_path=("Results",),
+            ),
+            "table-node": SourceDocumentNode(
+                node_id="table-node",
+                document_id="paper-1",
+                parent_id="results-section",
+                child_ids=(),
+                node_type="table",
+                order=210,
+                heading_path=("Results",),
+                source_ref_kind="table",
+                source_ref_id="table-1",
+            ),
+            "discussion-section": SourceDocumentNode(
+                node_id="discussion-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("discussion-node",),
+                node_type="section",
+                order=300,
+                title="Discussion",
+                heading_path=("Discussion",),
+            ),
+            "discussion-node": SourceDocumentNode(
+                node_id="discussion-node",
+                document_id="paper-1",
+                parent_id="discussion-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=310,
+                heading_path=("Discussion",),
+                source_ref_kind="block",
+                source_ref_id="discussion",
+            ),
+        },
+    )
+
+    class ChainExtractor:
+        def __init__(self) -> None:
+            self.unit_payloads: list[dict[str, Any]] = []
+
+        def extract_objective_evidence_units(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredObjectiveEvidenceUnits:
+            self.unit_payloads.append(payload)
+            source_ref = payload["evidence_route"]["source_ref"]
+            if source_ref == "methods":
+                return StructuredObjectiveEvidenceUnits(
+                    evidence_units=[
+                        StructuredObjectiveEvidenceUnit(
+                            unit_kind="process_context",
+                            sample_context={"sample": "S1"},
+                            process_context={"heat_treatment": "650 C for 4 h"},
+                            join_keys={"sample_key": "S1"},
+                            resolution_status="partial",
+                            confidence=0.82,
+                        )
+                    ]
+                )
+            if source_ref == "discussion":
+                assert payload["document_state"]["process_contexts"][0]["value"] == {
+                    "heat_treatment": "650 C for 4 h",
+                }
+                return StructuredObjectiveEvidenceUnits(
+                    evidence_units=[
+                        StructuredObjectiveEvidenceUnit(
+                            unit_kind="interpretation",
+                            sample_context={"sample": "S1"},
+                            process_context={
+                                "heat_treatment": "650 C for 4 h",
+                            },
+                            interpretation=(
+                                "Strength improvement is attributed to heat treatment."
+                            ),
+                            value_payload={"mechanism": "heat treatment response"},
+                            join_keys={"sample_key": "S1"},
+                            resolution_status="resolved",
+                            confidence=0.84,
+                        )
+                    ]
+                )
+            return StructuredObjectiveEvidenceUnits()
+
+    extractor = ChainExtractor()
+
+    units = service._build_objective_evidence_units(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        objective_evidence_routes=routes,
+        blocks_by_document_id={"paper-1": blocks},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+    chains = service._build_objective_logic_chains(
+        collection_id="col-test",
+        objectives=(objective,),
+        objective_contexts=(objective_context,),
+        objective_evidence_units=units,
+    )
+
+    assert [payload["evidence_route"]["source_ref"] for payload in extractor.unit_payloads] == [
+        "methods",
+        "discussion",
+    ]
+    measurement = next(unit for unit in units if unit.unit_kind == "measurement")
+    assert measurement.process_context["heat_treatment"] == "650 C for 4 h"
+    assert measurement.value_payload["value"] == 900.0
+    chain_payload = chains[0].chain_payload
+    paper_chain = chain_payload["paper_chains"][0]
+    assert paper_chain["sample_and_process_contexts"]
+    assert paper_chain["measurement_results"]
+    assert paper_chain["author_interpretations"]
+    assert chain_payload["cross_paper"]["resolved_measurement_count"] == 1
+    assert chain_payload["evidence_unit_ids_by_role"]["interpretations"]
 
 
 def test_research_objective_fragmented_table_cells_repair_table_matrix_before_extraction(
@@ -1535,6 +2248,7 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={},
         table_cells_by_document_id={"paper-1": table_cells},
     )
 
@@ -2345,25 +3059,6 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
             },
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": "obj-mechanical",
-            "target_property_axes": [
-                "yield strength",
-                "ultimate tensile strength",
-                "elongation",
-            ],
-        }
-    )
-    corrosion_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": "obj-corrosion",
-            "target_property_axes": [
-                "corrosion potential",
-                "pitting potential",
-            ],
-        }
-    )
     corrosion_route = ObjectiveEvidenceRoute.from_mapping(
         {
             **route.to_record(),
@@ -2378,14 +3073,8 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
         }
     )
 
-    assert service._objective_table_route_should_skip_llm_fallback(
-        route,
-        objective_context=mechanical_context,
-    )
-    assert not service._objective_table_route_should_skip_llm_fallback(
-        corrosion_route,
-        objective_context=corrosion_context,
-    )
+    assert service._objective_table_route_should_skip_llm_fallback(route)
+    assert service._objective_table_route_should_skip_llm_fallback(corrosion_route)
 
     eis_route = ObjectiveEvidenceRoute.from_mapping(
         {
@@ -2400,10 +3089,7 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
         }
     )
 
-    assert service._objective_table_route_should_skip_llm_fallback(
-        eis_route,
-        objective_context=mechanical_context,
-    )
+    assert service._objective_table_route_should_skip_llm_fallback(eis_route)
 
 
 def test_research_objective_service_builds_method_conditions_and_binds_measurements(
@@ -5730,6 +6416,664 @@ def test_research_objective_service_ranks_result_text_candidates(
     assert {route.role for route in routes} == {"characterization"}
 
 
+def test_research_objective_routing_uses_document_tree_order(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="results",
+            block_order=1,
+            block_type="paragraph",
+            heading_path="Results",
+            text="The yield strength result showed 900 MPa after heat treatment.",
+        ),
+        SimpleNamespace(
+            block_id="methods",
+            block_order=100,
+            block_type="paragraph",
+            heading_path="Methods",
+            text="The 316L samples used heat treatment at 650 C for 4 h.",
+        ),
+    ]
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section", "results-section"),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="methods",
+            ),
+            "results-section": SourceDocumentNode(
+                node_id="results-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("results-node",),
+                node_type="section",
+                order=200,
+                title="Results",
+                heading_path=("Results",),
+            ),
+            "results-node": SourceDocumentNode(
+                node_id="results-node",
+                document_id="paper-1",
+                parent_id="results-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=210,
+                heading_path=("Results",),
+                source_ref_kind="block",
+                source_ref_id="results",
+            ),
+        },
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": blocks},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
+        "methods",
+        "results",
+    ]
+    assert extractor.route_payloads[0]["tree_position"]["section_path"] == ["Methods"]
+    assert extractor.route_payloads[1]["tree_position"]["section_path"] == ["Results"]
+
+
+def test_research_objective_routing_binds_current_source_to_model_decision(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+            "relevant_tables": ["table-1"],
+        }
+    )
+    table = SimpleNamespace(
+        table_id="table-1",
+        caption_text="Yield strength results after heat treatment.",
+        heading_path="Results",
+        columns=("condition", "yield strength"),
+        rows=(("HT", "900 MPa"),),
+    )
+    extractor = _ObjectiveExtractor()
+
+    routes = service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={},
+    )
+
+    assert len(extractor.route_payloads) == 1
+    assert extractor.route_payloads[0]["current_source"]["source_ref"] == "table-1"
+    assert len(routes) == 1
+    assert routes[0].source_kind == "table"
+    assert routes[0].source_ref == "table-1"
+    assert routes[0].role == "current_experimental_evidence"
+
+
+def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "comparison_intent": "compare treated and untreated samples",
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["heat treatment"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["yield strength"],
+            "routing_hints": [
+                {
+                    "table_id": "table-1",
+                    "role": "result_table",
+                    "reason": "Large hint text should not enter routing prompt.",
+                }
+            ],
+            "extraction_guidance": {"large": "x" * 1000},
+            "confidence": 0.8,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "background": "x" * 1000,
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+            "relevant_sections": ["Results"],
+            "relevant_tables": ["table-1"],
+            "excluded_tables": ["table-2"],
+        }
+    )
+    table = SimpleNamespace(
+        table_id="table-1",
+        caption_text="Yield strength results after heat treatment.",
+        heading_path="Results",
+        columns=("condition", "yield strength"),
+        column_headers=["condition", "yield strength"],
+        row_count=200,
+        col_count=10,
+        table_matrix=[["condition", "yield strength"], *[["HT", "900 MPa"]] * 20],
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={},
+    )
+
+    route_payload = extractor.route_payloads[0]
+    assert "routing_hints" not in route_payload["objective_context"]
+    assert "extraction_guidance" not in route_payload["objective_context"]
+    assert "background" not in route_payload["paper_frame"]
+    assert "relevant_tables" not in route_payload["paper_frame"]
+    assert "excluded_tables" not in route_payload["paper_frame"]
+    assert "table_schema" not in route_payload["current_source"]
+    assert "sample_rows" not in route_payload["current_source"]
+    assert route_payload["current_source"]["column_headers"] == [
+        "condition",
+        "yield strength",
+    ]
+    assert route_payload["current_source"]["row_count"] == 200
+
+
+def test_research_objective_routing_builds_text_candidates_from_document_tree(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+        }
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section", "results-section", "refs-section"),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                text="The 316L samples used heat treatment at 650 C for 4 h.",
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="methods",
+            ),
+            "results-section": SourceDocumentNode(
+                node_id="results-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("results-node",),
+                node_type="section",
+                order=200,
+                title="Results",
+                heading_path=("Results",),
+            ),
+            "results-node": SourceDocumentNode(
+                node_id="results-node",
+                document_id="paper-1",
+                parent_id="results-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=210,
+                text="The yield strength result showed 900 MPa after heat treatment.",
+                heading_path=("Results",),
+                source_ref_kind="block",
+                source_ref_id="results",
+            ),
+            "refs-section": SourceDocumentNode(
+                node_id="refs-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("reference-node",),
+                node_type="references_section",
+                order=300,
+                title="References",
+                heading_path=("References",),
+            ),
+            "reference-node": SourceDocumentNode(
+                node_id="reference-node",
+                document_id="paper-1",
+                parent_id="refs-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=310,
+                text="A reference also mentions yield strength after heat treatment.",
+                heading_path=("References",),
+                source_ref_kind="block",
+                source_ref_id="reference",
+            ),
+        },
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
+        "methods",
+        "results",
+    ]
+    assert "reference" not in {
+        payload["current_source"]["source_ref"]
+        for payload in extractor.route_payloads
+    }
+
+
+def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "low",
+            "paper_role": "supporting_background",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+            "relevant_sections": ["Results"],
+        }
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("methods-section", "results-section"),
+                node_type="document",
+                order=0,
+            ),
+            "methods-section": SourceDocumentNode(
+                node_id="methods-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("methods-node",),
+                node_type="section",
+                order=100,
+                title="Methods",
+                heading_path=("Methods",),
+            ),
+            "methods-node": SourceDocumentNode(
+                node_id="methods-node",
+                document_id="paper-1",
+                parent_id="methods-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=110,
+                text="The 316L samples used heat treatment at 650 C for 4 h.",
+                heading_path=("Methods",),
+                source_ref_kind="block",
+                source_ref_id="methods",
+            ),
+            "results-section": SourceDocumentNode(
+                node_id="results-section",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("results-node",),
+                node_type="section",
+                order=200,
+                title="Results",
+                heading_path=("Results",),
+            ),
+            "results-node": SourceDocumentNode(
+                node_id="results-node",
+                document_id="paper-1",
+                parent_id="results-section",
+                child_ids=(),
+                node_type="paragraph",
+                order=210,
+                text="The yield strength result showed 900 MPa after heat treatment.",
+                heading_path=("Results",),
+                source_ref_kind="block",
+                source_ref_id="results",
+            ),
+        },
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
+        "results",
+    ]
+
+
+def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "low",
+            "paper_role": "supporting_background",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+        }
+    )
+    child_ids = tuple(f"node-{index}" for index in range(30))
+    nodes: dict[str, SourceDocumentNode] = {
+        "root": SourceDocumentNode(
+            node_id="root",
+            document_id="paper-1",
+            parent_id=None,
+            child_ids=child_ids,
+            node_type="document",
+            order=0,
+        )
+    }
+    for index, node_id in enumerate(child_ids):
+        nodes[node_id] = SourceDocumentNode(
+            node_id=node_id,
+            document_id="paper-1",
+            parent_id="root",
+            child_ids=(),
+            node_type="paragraph",
+            order=100 + index,
+            text=(
+                f"S{index} 316L samples used heat treatment and reported "
+                f"yield strength result {800 + index} MPa."
+            ),
+            heading_path=("Results",),
+            source_ref_kind="block",
+            source_ref_id=f"block-{index}",
+        )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes=nodes,
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    routed_refs = [
+        payload["current_source"]["source_ref"]
+        for payload in extractor.route_payloads
+    ]
+    assert len(routed_refs) == 12
+    assert routed_refs == [f"block-{index}" for index in range(12)]
+
+
+def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+        }
+    )
+    child_ids = tuple(f"node-{index}" for index in range(45))
+    nodes: dict[str, SourceDocumentNode] = {
+        "root": SourceDocumentNode(
+            node_id="root",
+            document_id="paper-1",
+            parent_id=None,
+            child_ids=child_ids,
+            node_type="document",
+            order=0,
+        )
+    }
+    for index, node_id in enumerate(child_ids):
+        nodes[node_id] = SourceDocumentNode(
+            node_id=node_id,
+            document_id="paper-1",
+            parent_id="root",
+            child_ids=(),
+            node_type="paragraph",
+            order=100 + index,
+            text=(
+                f"S{index} 316L samples used heat treatment and reported "
+                f"yield strength result {800 + index} MPa."
+            ),
+            heading_path=("Results",),
+            source_ref_kind="block",
+            source_ref_id=f"block-{index}",
+        )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes=nodes,
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    routed_refs = [
+        payload["current_source"]["source_ref"]
+        for payload in extractor.route_payloads
+    ]
+    assert len(routed_refs) == 12
+    assert routed_refs[-1] == "block-44"
+    assert routed_refs == sorted(
+        routed_refs,
+        key=lambda ref: int(ref.replace("block-", "")),
+    )
+
+
 def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
     tmp_path,
 ):
@@ -6019,7 +7363,10 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
         "sample",
         "corrosion current",
     ]
-    assert table_route.column_roles == {"corrosion current": "target_property"}
+    assert table_route.column_roles == {
+        "sample": "sample_id",
+        "corrosion current": "target_property",
+    }
     assert excluded_table_route.role == "low_value_or_irrelevant"
     assert excluded_table_route.extractable is False
     assert text_route.role == "process_or_treatment"
@@ -6064,11 +7411,22 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     assert "corrosion current range 0.4 uA/cm2-1.2 uA/cm2" in str(
         facts.objective_logic_chains[0].summary
     )
-    assert len(extractor.route_payloads) == 1
+    assert len(extractor.route_payloads) == 2
     assert len(extractor.unit_payloads) == 1
     assert extractor.unit_payloads[0]["evidence_route"]["source_kind"] == "text_window"
     assert extractor.unit_payloads[0]["evidence_route"]["source_ref"] == "b2"
+    assert all("source_candidates" not in payload for payload in extractor.route_payloads)
+    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
+        "b2",
+        "table-1",
+    ]
     assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
+    assert extractor.route_payloads[0]["tree_position"]["section_path"] == ["Abstract"]
+    assert extractor.unit_payloads[0]["tree_position"]["section_path"] == ["Abstract"]
+    assert extractor.unit_payloads[0]["document_state"]["schema_version"] == (
+        "objective_document_state.v1"
+    )
+    assert extractor.unit_payloads[0]["document_state"]["evidence_counts_by_kind"] == {}
     assert extractor.skim_payloads[0]["headings"] == ["Abstract", "References"]
     assert "Additional abstract context" in extractor.skim_payloads[0]["text_preview"]
     assert "Reference text should not" not in extractor.skim_payloads[0]["text_preview"]

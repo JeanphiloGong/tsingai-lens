@@ -410,11 +410,9 @@ class FakeCoreLLMStructuredExtractor:
             for value in objective.get("property_axes", [])
             if str(value).strip()
         ]
-        candidates = (
-            payload.get("source_candidates")
-            if isinstance(payload.get("source_candidates"), list)
-            else []
-        )
+        if not isinstance(payload.get("current_source"), dict):
+            raise ValueError("objective evidence routing requires current_source")
+        candidates = [payload["current_source"]]
         routes: list[StructuredObjectiveEvidenceRoute] = []
         for candidate in candidates:
             if not isinstance(candidate, dict):
@@ -426,8 +424,6 @@ class FakeCoreLLMStructuredExtractor:
             if candidate.get("frame_status") == "excluded":
                 routes.append(
                     StructuredObjectiveEvidenceRoute(
-                        source_kind=source_kind,
-                        source_ref=source_ref,
                         role="low_value_or_irrelevant",
                         extractable=False,
                         reason="Excluded by objective paper frame.",
@@ -441,6 +437,13 @@ class FakeCoreLLMStructuredExtractor:
                     if isinstance(candidate.get("table_schema"), dict)
                     else {}
                 )
+                column_headers = (
+                    table_schema.get("column_headers")
+                    if isinstance(table_schema.get("column_headers"), list)
+                    else candidate.get("column_headers")
+                    if isinstance(candidate.get("column_headers"), list)
+                    else []
+                )
                 table_text = " ".join(
                     str(value or "")
                     for value in (
@@ -448,7 +451,7 @@ class FakeCoreLLMStructuredExtractor:
                         candidate.get("heading_path"),
                         " ".join(
                             str(item)
-                            for item in table_schema.get("column_headers", [])
+                            for item in column_headers
                         ),
                     )
                 ).lower()
@@ -459,31 +462,15 @@ class FakeCoreLLMStructuredExtractor:
                 )
                 routes.append(
                     StructuredObjectiveEvidenceRoute(
-                        source_kind="table",
-                        source_ref=source_ref,
                         role=role,
                         extractable=True,
                         reason="Table is relevant to the active objective.",
-                        table_schema=table_schema,
-                        column_roles={
-                            header: "target_property"
-                            for header in table_schema.get("column_headers", [])
-                            if any(axis in str(header).lower() for axis in property_axes)
-                        },
-                        join_keys={"sample_key": "sample"}
-                        if "sample" in table_text
-                        else {},
-                        join_plan={"join_on": "sample_key"}
-                        if "sample" in table_text
-                        else {},
                         confidence=0.82,
                     )
                 )
                 continue
             routes.append(
                 StructuredObjectiveEvidenceRoute(
-                    source_kind=source_kind,
-                    source_ref=source_ref,
                     role="process_or_treatment",
                     extractable=True,
                     reason="Text window is in a relevant objective section.",

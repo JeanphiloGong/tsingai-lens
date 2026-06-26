@@ -6,7 +6,7 @@ import json
 import logging
 import math
 import re
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -55,10 +55,18 @@ _FRAME_SECTION_TEXT_CHARS = 900
 _FRAME_TABLE_LIMIT = 20
 _FRAME_TABLE_ROW_LIMIT = 6
 _ROUTE_TEXT_CHARS = 1200
+_ROUTE_PROMPT_TEXT_CHARS = 520
+_ROUTE_PROMPT_HEADER_LIMIT = 12
 _ROUTE_CANDIDATE_LIMIT = 40
 _ROUTE_TEXT_CANDIDATE_LIMIT = 12
 _ROUTE_TEXT_HINT_LIMIT = 3
+_ROUTE_TREE_TEXT_SECTION_LIMIT = 3
+_OBJECTIVE_STATE_ITEM_LIMIT = 12
+_OBJECTIVE_STATE_TEXT_CHARS = 220
 _OBJECTIVE_EVIDENCE_TEXT_CHARS = 6000
+_OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS = 1800
+_OBJECTIVE_EVIDENCE_PROMPT_TABLE_ROWS = 8
+_OBJECTIVE_EVIDENCE_PROMPT_TABLE_CELLS = 80
 _OBJECTIVE_RESULT_VALUE_METADATA_KEYS = {
     "value",
     "min",
@@ -472,6 +480,7 @@ class ResearchObjectiveService:
             objective_paper_frames=objective_paper_frames,
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
             progress_callback=progress_callback,
         )
         objective_evidence_units = self._build_objective_evidence_units(
@@ -483,6 +492,7 @@ class ResearchObjectiveService:
             objective_evidence_routes=objective_evidence_routes,
             blocks_by_document_id=blocks_by_document_id,
             tables_by_document_id=tables_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
             table_cells_by_document_id=table_cells_by_document_id,
             progress_callback=progress_callback,
         )
@@ -581,6 +591,7 @@ class ResearchObjectiveService:
             objective_paper_frames=objective_paper_frames,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
+            document_trees_by_document_id=objective_inputs["document_trees_by_document_id"],
             progress_callback=progress_callback,
         )
         objective_evidence_units = self._build_objective_evidence_units(
@@ -592,6 +603,7 @@ class ResearchObjectiveService:
             objective_evidence_routes=objective_evidence_routes,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
+            document_trees_by_document_id=objective_inputs["document_trees_by_document_id"],
             table_cells_by_document_id=objective_inputs["table_cells_by_document_id"],
             progress_callback=progress_callback,
         )
@@ -1606,6 +1618,7 @@ class ResearchObjectiveService:
         objective_paper_frames: tuple[ObjectivePaperFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
+        document_trees_by_document_id: dict[str, SourceDocumentTree],
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectiveEvidenceRoute, ...]:
         objective_by_id = {
@@ -1678,6 +1691,7 @@ class ResearchObjectiveService:
                 frame=frame,
                 blocks=blocks_by_document_id.get(frame.document_id, []),
                 tables=tables_by_document_id.get(frame.document_id, []),
+                document_tree=document_trees_by_document_id.get(frame.document_id),
             )
             if not source_candidates:
                 logger.info(
@@ -1698,57 +1712,117 @@ class ResearchObjectiveService:
                 for candidate in source_candidates
             }
             objective_context = context_by_objective_id.get(frame.objective_id)
-            payload = {
-                "collection_id": collection_id,
-                "objective": objective.to_record(),
-                "objective_context": (
-                    objective_context.to_record()
-                    if objective_context is not None else {}
-                ),
-                "paper_frame": frame.to_record(),
-                "source_candidates": source_candidates,
-            }
-            parsed = extractor.route_objective_evidence(payload)
-            for item in parsed.routes:
-                record = item.model_dump()
-                source_kind = str(record.get("source_kind") or "")
-                source_ref = str(record.get("source_ref") or "")
-                candidate = candidate_by_key.get((source_kind, source_ref))
-                if candidate is None:
-                    continue
+            for candidate in source_candidates:
                 if candidate.get("frame_status") == "excluded":
-                    record["role"] = "low_value_or_irrelevant"
-                    record["extractable"] = False
-                role = str(record.get("role") or "low_value_or_irrelevant")
-                route_key = (
-                    frame.objective_id,
-                    frame.document_id,
-                    source_kind,
-                    source_ref,
-                    role,
-                )
-                if route_key in seen:
+                    route_key = (
+                        frame.objective_id,
+                        frame.document_id,
+                        str(candidate.get("source_kind") or ""),
+                        str(candidate.get("source_ref") or ""),
+                        "low_value_or_irrelevant",
+                    )
+                    if route_key not in seen:
+                        seen.add(route_key)
+                        routes.append(
+                            ObjectiveEvidenceRoute.from_mapping(
+                                {
+                                    "objective_id": frame.objective_id,
+                                    "document_id": frame.document_id,
+                                    "source_kind": candidate.get("source_kind"),
+                                    "source_ref": candidate.get("source_ref"),
+                                    "role": "low_value_or_irrelevant",
+                                    "extractable": False,
+                                    "reason": "Excluded by objective paper frame.",
+                                    "table_schema": self._route_table_schema_record(
+                                        candidate=candidate,
+                                    ),
+                                    "column_roles": {},
+                                    "join_keys": {},
+                                    "join_plan": {},
+                                    "confidence": 0.7,
+                                }
+                            )
+                        )
                     continue
-                seen.add(route_key)
-                record.update(
-                    {
-                        "objective_id": frame.objective_id,
-                        "document_id": frame.document_id,
-                        "table_schema": self._route_table_schema_record(
-                            candidate=candidate,
-                        ),
-                        "extractable": self._normalize_route_extractable(record),
-                    }
-                )
-                if source_kind != "table":
+                payload = {
+                    "collection_id": collection_id,
+                    "objective": self._route_prompt_objective_record(objective),
+                    "objective_context": self._route_prompt_objective_context_record(
+                        objective_context,
+                    ),
+                    "paper_frame": self._route_prompt_paper_frame_record(frame),
+                    "tree_position": self._route_tree_position(candidate),
+                    "document_state": self._empty_objective_document_state(),
+                    "current_source": self._route_prompt_current_source(candidate),
+                }
+                parsed = extractor.route_objective_evidence(payload)
+                for item in parsed.routes[:1]:
+                    record = item.model_dump()
+                    source_kind = str(candidate.get("source_kind") or "")
+                    source_ref = str(candidate.get("source_ref") or "")
+                    route_candidate = candidate_by_key.get((source_kind, source_ref))
+                    if route_candidate is None:
+                        continue
+                    if route_candidate.get("frame_status") == "excluded":
+                        record["role"] = "low_value_or_irrelevant"
+                        record["extractable"] = False
+                    role = str(record.get("role") or "low_value_or_irrelevant")
+                    route_key = (
+                        frame.objective_id,
+                        frame.document_id,
+                        source_kind,
+                        source_ref,
+                        role,
+                    )
+                    if route_key in seen:
+                        continue
+                    seen.add(route_key)
                     record.update(
                         {
-                            "column_roles": {},
-                            "join_keys": {},
-                            "join_plan": {},
+                            "objective_id": frame.objective_id,
+                            "document_id": frame.document_id,
+                            "source_kind": source_kind,
+                            "source_ref": source_ref,
+                            "table_schema": self._route_table_schema_record(
+                                candidate=route_candidate,
+                            ),
+                            "extractable": self._normalize_route_extractable(record),
                         }
                     )
-                routes.append(ObjectiveEvidenceRoute.from_mapping(record))
+                    if source_kind == "table":
+                        table_schema = self._route_table_schema_record(
+                            candidate=route_candidate,
+                        )
+                        record.update(
+                            {
+                                "column_roles": (
+                                    self._objective_context_hint_column_roles(
+                                        objective_context=objective_context,
+                                        hint={
+                                            "role": (
+                                                "result_table"
+                                                if role == "current_experimental_evidence"
+                                                else "condition_context"
+                                            ),
+                                        },
+                                        table_schema=table_schema,
+                                    )
+                                    if objective_context is not None
+                                    else {}
+                                ),
+                                "join_keys": {},
+                                "join_plan": {},
+                            }
+                        )
+                    else:
+                        record.update(
+                            {
+                                "column_roles": {},
+                                "join_keys": {},
+                                "join_plan": {},
+                            }
+                        )
+                    routes.append(ObjectiveEvidenceRoute.from_mapping(record))
             self._append_objective_context_hint_routes(
                 routes=routes,
                 seen=seen,
@@ -1842,6 +1916,91 @@ class ResearchObjectiveService:
                     }
                 )
             )
+
+    def _route_prompt_objective_record(
+        self,
+        objective: ResearchObjective,
+    ) -> dict[str, Any]:
+        return {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "material_scope": list(objective.material_scope),
+            "process_axes": list(objective.process_axes),
+            "property_axes": list(objective.property_axes),
+            "comparison_intent": objective.comparison_intent,
+        }
+
+    def _route_prompt_objective_context_record(
+        self,
+        objective_context: ObjectiveContext | None,
+    ) -> dict[str, Any]:
+        if objective_context is None:
+            return {}
+        return {
+            "objective_id": objective_context.objective_id,
+            "material_scope": list(objective_context.material_scope),
+            "variable_process_axes": list(objective_context.variable_process_axes),
+            "process_context_axes": list(objective_context.process_context_axes),
+            "target_property_axes": list(objective_context.target_property_axes),
+            "excluded_property_axes": list(objective_context.excluded_property_axes),
+        }
+
+    def _route_prompt_paper_frame_record(
+        self,
+        frame: ObjectivePaperFrame,
+    ) -> dict[str, Any]:
+        return {
+            "frame_id": frame.frame_id,
+            "objective_id": frame.objective_id,
+            "document_id": frame.document_id,
+            "relevance": frame.relevance,
+            "paper_role": frame.paper_role,
+            "material_match": list(frame.material_match),
+            "changed_variables": list(frame.changed_variables),
+            "measured_property_scope": list(frame.measured_property_scope),
+            "test_environment_scope": list(frame.test_environment_scope),
+        }
+
+    def _route_prompt_current_source(
+        self,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_kind = str(candidate.get("source_kind") or "")
+        if source_kind == "table":
+            table_schema = (
+                candidate.get("table_schema")
+                if isinstance(candidate.get("table_schema"), dict)
+                else {}
+            )
+            column_headers = (
+                table_schema.get("column_headers")
+                if isinstance(table_schema.get("column_headers"), (list, tuple))
+                else ()
+            )
+            return {
+                "source_kind": "table",
+                "source_ref": str(candidate.get("source_ref") or ""),
+                "frame_status": str(candidate.get("frame_status") or ""),
+                "caption_text": str(candidate.get("caption_text") or "")[
+                    :_ROUTE_PROMPT_TEXT_CHARS
+                ],
+                "heading_path": candidate.get("heading_path"),
+                "column_headers": [
+                    str(header)[:_OBJECTIVE_STATE_TEXT_CHARS]
+                    for header in column_headers[:_ROUTE_PROMPT_HEADER_LIMIT]
+                    if str(header).strip()
+                ],
+                "row_count": table_schema.get("row_count"),
+                "col_count": table_schema.get("col_count"),
+            }
+        return {
+            "source_kind": source_kind or "text_window",
+            "source_ref": str(candidate.get("source_ref") or ""),
+            "frame_status": str(candidate.get("frame_status") or ""),
+            "section_label": candidate.get("section_label"),
+            "block_type": candidate.get("block_type"),
+            "text": str(candidate.get("text") or "")[:_ROUTE_PROMPT_TEXT_CHARS],
+        }
 
     def _objective_context_hint_route_role(
         self,
@@ -2068,6 +2227,7 @@ class ResearchObjectiveService:
         objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
+        document_trees_by_document_id: dict[str, SourceDocumentTree],
         table_cells_by_document_id: dict[str, list[Any]] | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[ObjectiveEvidenceUnit, ...]:
@@ -2083,10 +2243,13 @@ class ResearchObjectiveService:
             (frame.objective_id, frame.document_id): frame
             for frame in objective_paper_frames
         }
-        extractable_routes = tuple(
-            route
-            for route in objective_evidence_routes
-            if route.extractable and route.role != "low_value_or_irrelevant"
+        extractable_routes = self._tree_order_objective_routes(
+            tuple(
+                route
+                for route in objective_evidence_routes
+                if route.extractable and route.role != "low_value_or_irrelevant"
+            ),
+            document_trees_by_document_id=document_trees_by_document_id,
         )
         logger.info(
             "Research objective evidence-unit extraction started collection_id=%s route_count=%s extractable_route_count=%s",
@@ -2096,6 +2259,7 @@ class ResearchObjectiveService:
         )
         units: list[ObjectiveEvidenceUnit] = []
         seen: set[str] = set()
+        document_state_units: dict[tuple[str, str], list[ObjectiveEvidenceUnit]] = {}
         for route_position, route in enumerate(extractable_routes, start=1):
             self._notify_progress(
                 progress_callback,
@@ -2121,6 +2285,7 @@ class ResearchObjectiveService:
                 route=route,
                 blocks=blocks_by_document_id.get(route.document_id, []),
                 tables=tables_by_document_id.get(route.document_id, []),
+                document_tree=document_trees_by_document_id.get(route.document_id),
                 table_cells=(
                     table_cells_by_document_id.get(route.document_id, [])
                     if table_cells_by_document_id is not None else []
@@ -2140,20 +2305,31 @@ class ResearchObjectiveService:
                 )
                 continue
             objective_context = context_by_objective_id.get(route.objective_id)
+            tree_position = self._route_tree_position(
+                self._source_candidate_from_route(
+                    route=route,
+                    source=source,
+                    document_tree=document_trees_by_document_id.get(route.document_id),
+                )
+            )
+            prior_document_state = self._objective_document_state_payload(
+                document_state_units.get((route.objective_id, route.document_id), [])
+            )
             payload = {
                 "collection_id": collection_id,
-                "objective": objective.to_record(),
-                "objective_context": (
-                    objective_context.to_record()
-                    if objective_context is not None else {}
+                "objective": self._route_prompt_objective_record(objective),
+                "objective_context": self._route_prompt_objective_context_record(
+                    objective_context,
                 ),
-                "paper_frame": (
-                    frame_by_key[(route.objective_id, route.document_id)].to_record()
-                    if (route.objective_id, route.document_id) in frame_by_key
-                    else {}
-                ),
-                "evidence_route": route.to_record(),
-                "source": source,
+                "paper_frame": self._route_prompt_paper_frame_record(
+                    frame_by_key[(route.objective_id, route.document_id)]
+                )
+                if (route.objective_id, route.document_id) in frame_by_key
+                else {},
+                "evidence_route": self._objective_evidence_prompt_route_record(route),
+                "tree_position": tree_position,
+                "document_state": prior_document_state,
+                "source": self._objective_evidence_prompt_source(source),
             }
             source = self._repair_objective_table_source_if_needed(
                 collection_id=collection_id,
@@ -2161,7 +2337,7 @@ class ResearchObjectiveService:
                 route=route,
                 source=source,
             )
-            payload["source"] = source
+            payload["source"] = self._objective_evidence_prompt_source(source)
             route_unit_start = len(units)
             route_records = self._objective_table_matrix_evidence_unit_records(
                 route=route,
@@ -2180,10 +2356,7 @@ class ResearchObjectiveService:
             )
             if (
                 (not route_records or needs_structural_repair)
-                and not self._objective_table_route_should_skip_llm_fallback(
-                    route,
-                    objective_context=objective_context,
-                )
+                and not self._objective_table_route_should_skip_llm_fallback(route)
             ):
                 try:
                     parsed = extractor.extract_objective_evidence_units(payload)
@@ -2226,6 +2399,10 @@ class ResearchObjectiveService:
                     continue
                 seen.add(unit.evidence_unit_id)
                 units.append(unit)
+                document_state_units.setdefault(
+                    (unit.objective_id, unit.document_id),
+                    [],
+                ).append(unit)
             logger.info(
                 "Research objective evidence-unit extraction route finished collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s evidence_units=%s completed_routes=%s remaining_routes=%s",
                 collection_id,
@@ -2290,46 +2467,8 @@ class ResearchObjectiveService:
     def _objective_table_route_should_skip_llm_fallback(
         self,
         route: ObjectiveEvidenceRoute,
-        *,
-        objective_context: ObjectiveContext | None = None,
     ) -> bool:
-        if route.source_kind != "table":
-            return False
-        role_text = " ".join(
-            str(role or "").replace("_", " ").casefold()
-            for role in route.column_roles.values()
-        )
-        has_result_like_role = any(
-            token in role_text
-            for token in (
-                "process",
-                "property",
-                "result",
-                "target",
-                "measurement",
-                "variable",
-                "parameter",
-                "resistance",
-                "constant",
-                "exponent",
-                "evidence",
-            )
-        )
-        if (
-            route.role == "current_experimental_evidence"
-            and objective_context is not None
-            and has_result_like_role
-            and not self._objective_route_result_columns(
-                route,
-                objective_context=objective_context,
-            )
-        ):
-            return True
-        if route.role != "test_condition":
-            return False
-        if not route.column_roles:
-            return True
-        return has_result_like_role
+        return route.source_kind == "table"
 
     def _repair_objective_table_source_if_needed(
         self,
@@ -5130,6 +5269,7 @@ class ResearchObjectiveService:
         route: ObjectiveEvidenceRoute,
         blocks: list[Any],
         tables: list[Any],
+        document_tree: SourceDocumentTree | None = None,
         table_cells: list[Any] | None = None,
     ) -> dict[str, Any]:
         if route.source_kind == "table":
@@ -5181,16 +5321,23 @@ class ResearchObjectiveService:
                 ],
             }
         if route.source_kind == "text_window":
+            source_block_id = self._route_text_block_id(
+                route=route,
+                document_tree=document_tree,
+            )
             block = next(
                 (
                     candidate
                     for candidate in blocks
-                    if str(getattr(candidate, "block_id", "") or "") == route.source_ref
+                    if str(getattr(candidate, "block_id", "") or "") == source_block_id
                 ),
                 None,
             )
             if block is None:
-                return {}
+                return self._build_objective_tree_text_source_payload(
+                    route=route,
+                    document_tree=document_tree,
+                )
             text = str(getattr(block, "text", "") or "").strip()
             return {
                 "source_kind": "text_window",
@@ -5202,6 +5349,56 @@ class ResearchObjectiveService:
                 "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
             }
         return {}
+
+    def _route_text_block_id(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        document_tree: SourceDocumentTree | None,
+    ) -> str:
+        if document_tree is None:
+            return route.source_ref
+        node = self._tree_node_for_route_source(
+            document_tree=document_tree,
+            source_ref_kind="block",
+            source_ref_id=route.source_ref,
+        )
+        if node is None:
+            return route.source_ref
+        source_ref_id = str(getattr(node, "source_ref_id", "") or "").strip()
+        return source_ref_id or route.source_ref
+
+    def _build_objective_tree_text_source_payload(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        document_tree: SourceDocumentTree | None,
+    ) -> dict[str, Any]:
+        if document_tree is None:
+            return {}
+        node = self._tree_node_for_route_source(
+            document_tree=document_tree,
+            source_ref_kind="block",
+            source_ref_id=route.source_ref,
+        )
+        if node is None or self._tree_node_in_reference_branch(document_tree, node):
+            return {}
+        text = str(getattr(node, "text", "") or "").strip()
+        if not text:
+            return {}
+        section_path = self._tree_node_section_path(
+            document_tree=document_tree,
+            node=node,
+        )
+        return {
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "document_id": route.document_id,
+            "page": getattr(node, "page_start", None),
+            "block_type": self._route_text_node_block_type(node),
+            "heading_path": " > ".join(section_path) if section_path else None,
+            "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
+        }
 
     def _objective_table_matrix_evidence_unit_records(
         self,
@@ -7272,8 +7469,9 @@ class ResearchObjectiveService:
         frame: ObjectivePaperFrame,
         blocks: list[Any],
         tables: list[Any],
+        document_tree: SourceDocumentTree | None = None,
     ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
+        candidates_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         table_by_id = {
             str(getattr(table, "table_id", "") or ""): table
             for table in tables
@@ -7284,29 +7482,525 @@ class ResearchObjectiveService:
             if table is None:
                 continue
             table_schema = self._build_route_table_schema(table)
-            candidates.append(
-                {
-                    "source_kind": "table",
-                    "source_ref": table_id,
-                    "frame_status": (
-                        "excluded"
-                        if table_id in frame.excluded_tables
-                        else "relevant"
-                    ),
-                    "caption_text": getattr(table, "caption_text", None),
-                    "heading_path": getattr(table, "heading_path", None),
-                    "table_schema": table_schema,
-                    "sample_rows": table_schema["sample_rows"],
-                }
+            candidate = {
+                "source_kind": "table",
+                "source_ref": table_id,
+                "frame_status": (
+                    "excluded"
+                    if table_id in frame.excluded_tables
+                    else "relevant"
+                ),
+                "caption_text": getattr(table, "caption_text", None),
+                "heading_path": getattr(table, "heading_path", None),
+                "table_schema": table_schema,
+                "sample_rows": table_schema["sample_rows"],
+            }
+            candidates_by_key[("table", table_id)] = self._attach_route_tree_position(
+                candidate,
+                document_tree=document_tree,
             )
-        candidates.extend(
-            self._build_ranked_route_text_candidates(
+        if document_tree is not None:
+            text_candidates = self._build_tree_route_text_candidates(
                 frame=frame,
                 blocks=blocks,
-                limit=max(_ROUTE_CANDIDATE_LIMIT - len(candidates), 0),
+                document_tree=document_tree,
+            )
+        else:
+            text_candidate_limit = max(
+                _ROUTE_CANDIDATE_LIMIT - len(candidates_by_key),
+                0,
+            )
+            text_candidates = self._build_ranked_route_text_candidates(
+                frame=frame,
+                blocks=blocks,
+                limit=text_candidate_limit,
+            )
+        for candidate in text_candidates:
+            source_ref = str(candidate.get("source_ref") or "")
+            if not source_ref:
+                continue
+            candidates_by_key[("text_window", source_ref)] = (
+                self._attach_route_tree_position(
+                    candidate,
+                    document_tree=document_tree,
+                )
+            )
+        candidates = self._sort_route_candidates_by_tree(
+            candidates_by_key.values(),
+            document_tree=document_tree,
+        )
+        if document_tree is not None:
+            return candidates
+        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+
+    def _attach_route_tree_position(
+        self,
+        candidate: dict[str, Any],
+        *,
+        document_tree: SourceDocumentTree | None,
+    ) -> dict[str, Any]:
+        tree_position = self._route_candidate_tree_position(
+            candidate,
+            document_tree=document_tree,
+        )
+        if not tree_position:
+            return candidate
+        return {
+            **candidate,
+            "tree_position": tree_position,
+        }
+
+    def _route_candidate_tree_position(
+        self,
+        candidate: dict[str, Any],
+        *,
+        document_tree: SourceDocumentTree | None,
+    ) -> dict[str, Any]:
+        source_kind = str(candidate.get("source_kind") or "")
+        source_ref = str(candidate.get("source_ref") or "")
+        source_ref_kind = "block" if source_kind == "text_window" else source_kind
+        node = (
+            self._tree_node_for_route_source(
+                document_tree=document_tree,
+                source_ref_kind=source_ref_kind,
+                source_ref_id=source_ref,
+            )
+            if document_tree is not None and source_ref and source_ref_kind
+            else None
+        )
+        if node is not None:
+            return self._tree_position_payload(
+                document_tree=document_tree,
+                node=node,
+            )
+        heading_path = candidate.get("heading_path")
+        return {
+            "node_id": None,
+            "node_type": source_kind or None,
+            "section_path": self._heading_path_parts(heading_path),
+            "source_ref_kind": source_kind or None,
+            "source_ref_id": source_ref or None,
+            "order": None,
+            "page_start": None,
+            "page_end": None,
+        }
+
+    def _sort_route_candidates_by_tree(
+        self,
+        candidates: Iterable[dict[str, Any]],
+        *,
+        document_tree: SourceDocumentTree | None,
+    ) -> list[dict[str, Any]]:
+        ordered = list(candidates)
+        if document_tree is None:
+            return ordered
+        return sorted(
+            ordered,
+            key=lambda candidate: (
+                self._route_candidate_order(candidate),
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            ),
+        )
+
+    def _route_candidate_order(self, candidate: dict[str, Any]) -> int:
+        tree_position = candidate.get("tree_position")
+        if isinstance(tree_position, dict):
+            order = tree_position.get("order")
+            if order is not None:
+                try:
+                    return int(order)
+                except (TypeError, ValueError):
+                    pass
+        return 900_000
+
+    def _route_tree_position(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        tree_position = candidate.get("tree_position")
+        if isinstance(tree_position, dict):
+            return dict(tree_position)
+        return {
+            "node_id": None,
+            "node_type": candidate.get("source_kind"),
+            "section_path": self._heading_path_parts(candidate.get("heading_path")),
+            "source_ref_kind": candidate.get("source_kind"),
+            "source_ref_id": candidate.get("source_ref"),
+            "order": None,
+            "page_start": candidate.get("page"),
+            "page_end": candidate.get("page"),
+        }
+
+    def _tree_position_payload(
+        self,
+        *,
+        document_tree: SourceDocumentTree,
+        node: Any,
+    ) -> dict[str, Any]:
+        return {
+            "node_id": getattr(node, "node_id", None),
+            "node_type": str(getattr(node, "node_type", "") or "") or None,
+            "section_path": self._tree_node_section_path(
+                document_tree=document_tree,
+                node=node,
+            ),
+            "source_ref_kind": getattr(node, "source_ref_kind", None),
+            "source_ref_id": getattr(node, "source_ref_id", None),
+            "order": getattr(node, "order", None),
+            "page_start": getattr(node, "page_start", None),
+            "page_end": getattr(node, "page_end", None),
+        }
+
+    def _tree_node_section_path(
+        self,
+        *,
+        document_tree: SourceDocumentTree,
+        node: Any,
+    ) -> list[str]:
+        heading_path = tuple(getattr(node, "heading_path", ()) or ())
+        if heading_path:
+            return [str(part) for part in heading_path if str(part).strip()]
+        titles: list[str] = []
+        parent_id = getattr(node, "parent_id", None)
+        while parent_id:
+            parent = document_tree.nodes.get(parent_id)
+            if parent is None:
+                break
+            if parent.node_type in {"section", "references_section"}:
+                title = str(getattr(parent, "title", "") or "").strip()
+                if title:
+                    titles.append(title)
+            parent_id = getattr(parent, "parent_id", None)
+        return list(reversed(titles))
+
+    def _heading_path_parts(self, heading_path: Any) -> list[str]:
+        if isinstance(heading_path, (list, tuple)):
+            return [str(part).strip() for part in heading_path if str(part).strip()]
+        return [
+            part.strip()
+            for part in str(heading_path or "").split(">")
+            if part.strip()
+        ]
+
+    def _tree_order_objective_routes(
+        self,
+        routes: tuple[ObjectiveEvidenceRoute, ...],
+        *,
+        document_trees_by_document_id: dict[str, SourceDocumentTree],
+    ) -> tuple[ObjectiveEvidenceRoute, ...]:
+        return tuple(
+            sorted(
+                routes,
+                key=lambda route: (
+                    self._route_tree_order(
+                        route,
+                        document_trees_by_document_id=document_trees_by_document_id,
+                    ),
+                    route.route_id,
+                ),
             )
         )
-        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+
+    def _route_tree_order(
+        self,
+        route: ObjectiveEvidenceRoute,
+        *,
+        document_trees_by_document_id: dict[str, SourceDocumentTree],
+    ) -> int:
+        document_tree = document_trees_by_document_id.get(route.document_id)
+        if document_tree is None:
+            return 900_000
+        source_ref_kind = "block" if route.source_kind == "text_window" else route.source_kind
+        node = self._tree_node_for_route_source(
+            document_tree=document_tree,
+            source_ref_kind=source_ref_kind,
+            source_ref_id=route.source_ref,
+        )
+        if node is None:
+            return 900_000
+        return int(getattr(node, "order", 900_000) or 900_000)
+
+    def _tree_node_for_route_source(
+        self,
+        *,
+        document_tree: SourceDocumentTree,
+        source_ref_kind: str,
+        source_ref_id: str,
+    ) -> Any | None:
+        node = document_tree.node_for_source_ref(source_ref_kind, source_ref_id)
+        if node is not None:
+            return node
+        return document_tree.nodes.get(source_ref_id)
+
+    def _source_candidate_from_route(
+        self,
+        *,
+        route: ObjectiveEvidenceRoute,
+        source: dict[str, Any],
+        document_tree: SourceDocumentTree | None,
+    ) -> dict[str, Any]:
+        candidate = {
+            "source_kind": route.source_kind,
+            "source_ref": route.source_ref,
+            "heading_path": source.get("heading_path"),
+            "page": source.get("page"),
+        }
+        return self._attach_route_tree_position(
+            candidate,
+            document_tree=document_tree,
+        )
+
+    def _objective_evidence_prompt_route_record(
+        self,
+        route: ObjectiveEvidenceRoute,
+    ) -> dict[str, Any]:
+        return {
+            "objective_id": route.objective_id,
+            "document_id": route.document_id,
+            "source_kind": route.source_kind,
+            "source_ref": route.source_ref,
+            "role": route.role,
+            "extractable": route.extractable,
+            "reason": route.reason,
+            "column_roles": dict(route.column_roles),
+            "join_keys": dict(route.join_keys),
+            "join_plan": dict(route.join_plan),
+            "confidence": route.confidence,
+        }
+
+    def _objective_evidence_prompt_source(
+        self,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_kind = str(source.get("source_kind") or "")
+        if source_kind == "table":
+            return {
+                "source_kind": "table",
+                "source_ref": str(source.get("source_ref") or ""),
+                "document_id": source.get("document_id"),
+                "page": source.get("page"),
+                "caption_text": str(source.get("caption_text") or "")[
+                    :_ROUTE_PROMPT_TEXT_CHARS
+                ],
+                "heading_path": source.get("heading_path"),
+                "column_headers": [
+                    str(value)[:_OBJECTIVE_STATE_TEXT_CHARS]
+                    for value in source.get("column_headers", []) or []
+                    if str(value).strip()
+                ],
+                "table_matrix": self._objective_evidence_prompt_table_matrix(source),
+                "table_cells": self._objective_evidence_prompt_table_cells(source),
+            }
+        if source_kind == "text_window":
+            return {
+                "source_kind": "text_window",
+                "source_ref": str(source.get("source_ref") or ""),
+                "document_id": source.get("document_id"),
+                "page": source.get("page"),
+                "block_type": source.get("block_type"),
+                "heading_path": source.get("heading_path"),
+                "text": str(source.get("text") or "")[
+                    :_OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS
+                ],
+            }
+        return dict(source)
+
+    def _objective_evidence_prompt_table_matrix(
+        self,
+        source: dict[str, Any],
+    ) -> list[list[str]]:
+        matrix = source.get("table_matrix")
+        if not isinstance(matrix, list):
+            return []
+        rows: list[list[str]] = []
+        for row in matrix[:_OBJECTIVE_EVIDENCE_PROMPT_TABLE_ROWS]:
+            if not isinstance(row, (list, tuple)):
+                continue
+            rows.append(
+                [
+                    str(cell)[:_OBJECTIVE_STATE_TEXT_CHARS]
+                    for cell in row[:_ROUTE_PROMPT_HEADER_LIMIT]
+                ]
+            )
+        return rows
+
+    def _objective_evidence_prompt_table_cells(
+        self,
+        source: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        cells = source.get("table_cells")
+        if not isinstance(cells, list):
+            return []
+        compact_cells: list[dict[str, Any]] = []
+        for cell in cells[:_OBJECTIVE_EVIDENCE_PROMPT_TABLE_CELLS]:
+            if not isinstance(cell, dict):
+                continue
+            compact_cells.append(
+                {
+                    "row_index": cell.get("row_index"),
+                    "col_index": cell.get("col_index"),
+                    "header_path": cell.get("header_path"),
+                    "cell_text": str(cell.get("cell_text") or "")[
+                        :_OBJECTIVE_STATE_TEXT_CHARS
+                    ],
+                }
+            )
+        return compact_cells
+
+    def _empty_objective_document_state(self) -> dict[str, Any]:
+        return {
+            "schema_version": "objective_document_state.v1",
+            "evidence_counts_by_kind": {},
+            "sample_contexts": [],
+            "process_contexts": [],
+            "test_conditions": [],
+            "measurements": [],
+            "open_joins": [],
+        }
+
+    def _objective_document_state_payload(
+        self,
+        units: list[ObjectiveEvidenceUnit],
+    ) -> dict[str, Any]:
+        if not units:
+            return self._empty_objective_document_state()
+        counts_by_kind: dict[str, int] = {}
+        for unit in units:
+            counts_by_kind[unit.unit_kind] = counts_by_kind.get(unit.unit_kind, 0) + 1
+        return {
+            "schema_version": "objective_document_state.v1",
+            "evidence_counts_by_kind": counts_by_kind,
+            "sample_contexts": self._objective_state_items(
+                units,
+                field_name="sample_context",
+            ),
+            "process_contexts": self._objective_state_items(
+                units,
+                field_name="process_context",
+            ),
+            "test_conditions": self._objective_state_items(
+                units,
+                field_name="test_condition",
+            ),
+            "measurements": self._objective_state_measurements(units),
+            "open_joins": self._objective_state_open_joins(units),
+        }
+
+    def _objective_state_items(
+        self,
+        units: list[ObjectiveEvidenceUnit],
+        *,
+        field_name: str,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for unit in reversed(units):
+            value = getattr(unit, field_name)
+            if not value:
+                continue
+            item = {
+                "evidence_unit_id": unit.evidence_unit_id,
+                "unit_kind": unit.unit_kind,
+                "value": self._compact_objective_state_mapping(value),
+                "source_refs": [dict(ref) for ref in unit.source_refs[:2]],
+            }
+            key = json.dumps(item["value"], ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+            if len(items) >= _OBJECTIVE_STATE_ITEM_LIMIT:
+                break
+        return list(reversed(items))
+
+    def _objective_state_measurements(
+        self,
+        units: list[ObjectiveEvidenceUnit],
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for unit in reversed(units):
+            if unit.unit_kind != "measurement":
+                continue
+            items.append(
+                {
+                    "evidence_unit_id": unit.evidence_unit_id,
+                    "property_normalized": unit.property_normalized,
+                    "sample_context": self._compact_objective_state_mapping(
+                        unit.sample_context
+                    ),
+                    "process_context": self._compact_objective_state_mapping(
+                        unit.process_context
+                    ),
+                    "value_payload": self._compact_objective_state_mapping(
+                        unit.value_payload
+                    ),
+                    "unit": unit.unit,
+                    "join_keys": self._compact_objective_state_mapping(unit.join_keys),
+                    "resolution_status": unit.resolution_status,
+                    "source_refs": [dict(ref) for ref in unit.source_refs[:2]],
+                }
+            )
+            if len(items) >= _OBJECTIVE_STATE_ITEM_LIMIT:
+                break
+        return list(reversed(items))
+
+    def _objective_state_open_joins(
+        self,
+        units: list[ObjectiveEvidenceUnit],
+    ) -> list[dict[str, Any]]:
+        joins: list[dict[str, Any]] = []
+        for unit in reversed(units):
+            if unit.resolution_status == "resolved":
+                continue
+            if not unit.join_keys and not unit.sample_context:
+                continue
+            joins.append(
+                {
+                    "evidence_unit_id": unit.evidence_unit_id,
+                    "unit_kind": unit.unit_kind,
+                    "sample_context": self._compact_objective_state_mapping(
+                        unit.sample_context
+                    ),
+                    "join_keys": self._compact_objective_state_mapping(unit.join_keys),
+                    "missing": self._objective_state_missing_context(unit),
+                }
+            )
+            if len(joins) >= _OBJECTIVE_STATE_ITEM_LIMIT:
+                break
+        return list(reversed(joins))
+
+    def _objective_state_missing_context(
+        self,
+        unit: ObjectiveEvidenceUnit,
+    ) -> list[str]:
+        missing: list[str] = []
+        if not unit.process_context:
+            missing.append("process_context")
+        if unit.unit_kind == "measurement" and not unit.value_payload:
+            missing.append("value_payload")
+        if unit.unit_kind == "measurement" and not unit.test_condition:
+            missing.append("test_condition")
+        return missing
+
+    def _compact_objective_state_mapping(
+        self,
+        value: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        compacted: dict[str, Any] = {}
+        for key, item in value.items():
+            if item in (None, "", [], {}):
+                continue
+            if isinstance(item, str):
+                compacted[str(key)] = item[:_OBJECTIVE_STATE_TEXT_CHARS]
+            elif isinstance(item, (int, float, bool)):
+                compacted[str(key)] = item
+            elif isinstance(item, (list, tuple)):
+                compacted[str(key)] = [
+                    str(part)[:_OBJECTIVE_STATE_TEXT_CHARS]
+                    for part in item[:6]
+                    if str(part).strip()
+                ]
+            elif isinstance(item, Mapping):
+                compacted[str(key)] = self._compact_objective_state_mapping(item)
+        return compacted
 
     def _build_ranked_route_text_candidates(
         self,
@@ -7360,6 +8054,232 @@ class ResearchObjectiveService:
             candidate
             for _, _, candidate in scored_candidates[: min(limit, _ROUTE_TEXT_CANDIDATE_LIMIT)]
         ]
+
+    def _build_tree_route_text_candidates(
+        self,
+        *,
+        frame: ObjectivePaperFrame,
+        blocks: list[Any],
+        document_tree: SourceDocumentTree,
+    ) -> list[dict[str, Any]]:
+        block_by_id = {
+            str(getattr(block, "block_id", "") or ""): block
+            for block in blocks
+            if str(getattr(block, "block_id", "") or "")
+        }
+        restrict_to_frame_sections = self._route_text_candidates_use_frame_sections(frame)
+        scored_candidates: list[tuple[int, int, dict[str, Any]]] = []
+        for node in self._document_tree_nodes_in_order(document_tree):
+            if self._tree_node_in_reference_branch(document_tree, node):
+                continue
+            block_type = self._route_text_node_block_type(node)
+            if block_type not in {"paragraph", "list_item", "figure_caption"}:
+                continue
+            source_ref = str(getattr(node, "source_ref_id", "") or "").strip()
+            block = block_by_id.get(source_ref)
+            if not source_ref:
+                source_ref = str(getattr(node, "node_id", "") or "").strip()
+            text = (
+                str(getattr(block, "text", "") or "").strip()
+                if block is not None
+                else ""
+            )
+            if not text:
+                text = str(getattr(node, "text", "") or "").strip()
+            if not source_ref or not text:
+                continue
+            section_label = self._tree_section_label_for_route_node(
+                document_tree=document_tree,
+                node=node,
+                block=block,
+            )
+            if restrict_to_frame_sections and not self._route_section_matches_frame(
+                section_label=section_label,
+                frame=frame,
+            ):
+                continue
+            score = self._route_text_candidate_score(
+                frame=frame,
+                block_type=block_type,
+                section_label=section_label,
+                text=text,
+            )
+            if score <= 0:
+                continue
+            scored_candidates.append(
+                (
+                    -score,
+                    int(getattr(node, "order", 900_000) or 900_000),
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": source_ref,
+                        "frame_status": "relevant",
+                        "section_label": section_label,
+                        "block_type": block_type,
+                        "text": text[:_ROUTE_TEXT_CHARS],
+                    },
+                )
+            )
+        scored_candidates = self._bounded_tree_route_text_candidates(
+            frame=frame,
+            scored_candidates=scored_candidates,
+        )
+        return [
+            candidate
+            for _, _, candidate in sorted(
+                scored_candidates,
+                key=lambda item: (
+                    item[1],
+                    str(item[2].get("source_ref") or ""),
+                ),
+            )
+        ]
+
+    def _bounded_tree_route_text_candidates(
+        self,
+        *,
+        frame: ObjectivePaperFrame,
+        scored_candidates: list[tuple[int, int, dict[str, Any]]],
+    ) -> list[tuple[int, int, dict[str, Any]]]:
+        if len(scored_candidates) <= _ROUTE_TEXT_CANDIDATE_LIMIT:
+            return scored_candidates
+        if not (
+            frame.relevance == "high"
+            and frame.paper_role == "primary_experiment"
+        ):
+            return sorted(scored_candidates)[:_ROUTE_TEXT_CANDIDATE_LIMIT]
+        selected: dict[tuple[str, str], tuple[int, int, dict[str, Any]]] = {}
+        selected_keys: set[tuple[str, str]] = set()
+        section_counts: dict[str, int] = {}
+        for item in sorted(scored_candidates):
+            candidate = item[2]
+            source_key = (
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            )
+            if source_key in selected_keys:
+                continue
+            section_key = self._objective_column_key(candidate.get("section_label"))
+            if section_counts.get(section_key, 0) >= _ROUTE_TREE_TEXT_SECTION_LIMIT:
+                continue
+            selected[source_key] = item
+            selected_keys.add(source_key)
+            section_counts[section_key] = section_counts.get(section_key, 0) + 1
+            if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT // 2:
+                break
+        ordered_candidates = sorted(
+            scored_candidates,
+            key=lambda item: (
+                item[1],
+                str(item[2].get("source_ref") or ""),
+            ),
+        )
+        for item in self._evenly_spaced_tree_route_candidates(
+            ordered_candidates,
+            _ROUTE_TEXT_CANDIDATE_LIMIT - len(selected),
+        ):
+            candidate = item[2]
+            source_key = (
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            )
+            if source_key in selected_keys:
+                continue
+            selected[source_key] = item
+            selected_keys.add(source_key)
+            if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
+                break
+        for item in sorted(scored_candidates):
+            candidate = item[2]
+            source_key = (
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            )
+            if source_key in selected_keys:
+                continue
+            selected[source_key] = item
+            selected_keys.add(source_key)
+            if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
+                break
+        return list(selected.values())
+
+    def _evenly_spaced_tree_route_candidates(
+        self,
+        candidates: list[tuple[int, int, dict[str, Any]]],
+        limit: int,
+    ) -> list[tuple[int, int, dict[str, Any]]]:
+        if limit <= 0:
+            return []
+        if limit >= len(candidates):
+            return candidates
+        if limit == 1:
+            return [candidates[-1]]
+        selected: list[tuple[int, int, dict[str, Any]]] = []
+        seen_indexes: set[int] = set()
+        last_index = len(candidates) - 1
+        for position in range(limit):
+            index = round(position * last_index / (limit - 1))
+            if index in seen_indexes:
+                continue
+            selected.append(candidates[index])
+            seen_indexes.add(index)
+        return selected
+
+    def _route_text_candidates_use_frame_sections(
+        self,
+        frame: ObjectivePaperFrame,
+    ) -> bool:
+        if not frame.relevant_sections:
+            return False
+        if frame.relevance == "high" and frame.paper_role == "primary_experiment":
+            return False
+        return True
+
+    def _route_section_matches_frame(
+        self,
+        *,
+        section_label: str,
+        frame: ObjectivePaperFrame,
+    ) -> bool:
+        section_key = self._objective_column_key(section_label)
+        if not section_key:
+            return False
+        return any(
+            section_key == frame_key
+            or section_key.endswith(f"_{frame_key}")
+            or frame_key.endswith(f"_{section_key}")
+            for frame_key in (
+                self._objective_column_key(section)
+                for section in frame.relevant_sections
+            )
+            if frame_key
+        )
+
+    def _route_text_node_block_type(self, node: Any) -> str:
+        node_type = str(getattr(node, "node_type", "") or "")
+        if node_type == "caption":
+            source_ref_kind = str(getattr(node, "source_ref_kind", "") or "")
+            return "figure_caption" if source_ref_kind == "figure" else "paragraph"
+        return node_type
+
+    def _tree_section_label_for_route_node(
+        self,
+        *,
+        document_tree: SourceDocumentTree,
+        node: Any,
+        block: Any | None,
+    ) -> str:
+        if block is not None:
+            section_label = self._block_section_label(block)
+            if section_label:
+                return section_label
+        section_path = self._tree_node_section_path(
+            document_tree=document_tree,
+            node=node,
+        )
+        if section_path:
+            return " > ".join(section_path)
+        return "Unsectioned"
 
     def _route_text_candidate_score(
         self,

@@ -367,23 +367,9 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
         {
           "routes": [
             {
-              "source_kind": "table",
-              "source_ref": "table-1",
               "role": "current_experimental_evidence",
               "extractable": true,
               "reason": "Target result table.",
-              "table_schema": {
-                "column_headers": ["sample", "corrosion current"]
-              },
-              "column_roles": {
-                "corrosion current": "target_property"
-              },
-              "join_keys": {
-                "sample_key": "sample"
-              },
-              "join_plan": {
-                "join_on": "sample_key"
-              },
               "confidence": 0.88
             }
           ]
@@ -397,15 +383,91 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "paper_frame": {"frame_id": "opf-1"},
-            "source_candidates": [
-                {"source_kind": "table", "source_ref": "table-1"}
-            ],
+            "current_source": {"source_kind": "table", "source_ref": "table-1"},
         }
     )
 
     assert isinstance(routes, StructuredObjectiveEvidenceRoutes)
     assert routes.routes[0].role == "current_experimental_evidence"
-    assert routes.routes[0].join_plan == {"join_on": "sample_key"}
+    assert routes.routes[0].reason == "Target result table."
+
+
+def test_core_llm_extractor_rejects_legacy_objective_route_batches():
+    client = _FakeOpenAIClient('{"routes": []}')
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValueError):
+        extractor.route_objective_evidence(
+            {
+                "collection_id": "col-1",
+                "objective": {"question": "How does heat treatment affect corrosion?"},
+                "paper_frame": {"frame_id": "opf-1"},
+                "source_candidates": [
+                    {"source_kind": "table", "source_ref": "table-1"}
+                ],
+            }
+        )
+
+
+def test_core_llm_extractor_rejects_verbose_objective_route_objects():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "routes": [
+            {
+              "role": "current_experimental_evidence",
+              "extractable": true,
+              "reason": "Target result table.",
+              "table_schema": {
+                "column_headers": ["sample", "corrosion current"]
+              },
+              "confidence": 0.88
+            }
+          ]
+        }
+        """
+    )
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError):
+        extractor.route_objective_evidence(
+            {
+                "collection_id": "col-1",
+                "objective": {"question": "How does heat treatment affect corrosion?"},
+                "paper_frame": {"frame_id": "opf-1"},
+                "current_source": {"source_kind": "table", "source_ref": "table-1"},
+            }
+        )
+
+
+def test_core_llm_extractor_rejects_source_ids_in_objective_routes():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "routes": [
+            {
+              "source_kind": "table",
+              "source_ref": "table-1",
+              "role": "current_experimental_evidence",
+              "extractable": true,
+              "reason": "Target result table.",
+              "confidence": 0.88
+            }
+          ]
+        }
+        """
+    )
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError):
+        extractor.route_objective_evidence(
+            {
+                "collection_id": "col-1",
+                "objective": {"question": "How does heat treatment affect corrosion?"},
+                "paper_frame": {"frame_id": "opf-1"},
+                "current_source": {"source_kind": "table", "source_ref": "table-1"},
+            }
+        )
 
 
 def test_core_llm_extractor_validates_objective_evidence_units_response():
@@ -425,10 +487,6 @@ def test_core_llm_extractor_validates_objective_evidence_units_response():
               "unit": "uA/cm2",
               "baseline_context": {},
               "interpretation": null,
-              "source_refs": [
-                {"source_kind": "table", "source_ref": "table-1"}
-              ],
-              "evidence_anchor_ids": [],
               "join_keys": {"sample_key": "heat-treated"},
               "resolution_status": "resolved",
               "confidence": 0.86
@@ -460,7 +518,7 @@ def test_core_llm_extractor_validates_objective_evidence_units_response():
     assert units.evidence_units[0].resolution_status == "resolved"
 
 
-def test_objective_evidence_unit_prompt_requires_text_multi_value_splitting():
+def test_objective_evidence_unit_prompt_limits_text_routes_to_one_unit():
     _, prompt = build_objective_evidence_unit_prompt(
         {
             "collection_id": "col-1",
@@ -480,13 +538,54 @@ def test_objective_evidence_unit_prompt_requires_text_multi_value_splitting():
         }
     )
 
-    assert "one evidence unit per binding" in prompt
-    assert "Do not merge those bindings into one `interpretation`" in prompt
+    assert "For text routes, return at most one evidence unit" in prompt
+    assert "Do not enumerate every possible number" in prompt
+    assert "The backend binds `source_refs` from the active route" in prompt
+    assert "Do not output `source_refs`" in prompt
+    assert "one evidence unit per binding" not in prompt
+    assert "Do not merge those bindings into one `interpretation`" not in prompt
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
-    assert "17.8 MPa" in prompt
-    assert "99.5 MPa" in prompt
     assert "Bad text example" in prompt
+
+
+def test_core_llm_extractor_rejects_backend_bound_objective_unit_fields():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "evidence_units": [
+            {
+              "unit_kind": "measurement",
+              "property_normalized": "yield strength",
+              "value_payload": {"value": 450},
+              "source_refs": [
+                {"source_kind": "text_window", "source_ref": "block-1"}
+              ],
+              "evidence_anchor_ids": [],
+              "confidence": 0.86
+            }
+          ]
+        }
+        """
+    )
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError):
+        extractor.extract_objective_evidence_units(
+            {
+                "collection_id": "col-1",
+                "objective": {"question": "How does heat treatment affect strength?"},
+                "evidence_route": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                },
+                "source": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                    "text": "Yield strength reached 450 MPa.",
+                },
+            }
+        )
 
 
 def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
@@ -618,6 +717,50 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batc
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTableBatchMentions
     assert parse_call["max_completion_tokens"] == 4096
+
+
+def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_routes(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient("unused", parsed=StructuredObjectiveEvidenceRoutes())
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    routes = extractor.route_objective_evidence(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_frame": {"frame_id": "opf-1"},
+            "current_source": {"source_kind": "text_window", "source_ref": "b1"},
+        }
+    )
+
+    assert routes == StructuredObjectiveEvidenceRoutes()
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"] is StructuredObjectiveEvidenceRoutes
+    assert parse_call["max_completion_tokens"] == 1536
+
+
+def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_units(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient("unused", parsed=StructuredObjectiveEvidenceUnits())
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    units = extractor.extract_objective_evidence_units(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "evidence_route": {"source_kind": "text_window", "source_ref": "b1"},
+            "source": {"source_kind": "text_window", "source_ref": "b1", "text": "x"},
+        }
+    )
+
+    assert units == StructuredObjectiveEvidenceUnits()
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"] is StructuredObjectiveEvidenceUnits
+    assert parse_call["max_completion_tokens"] == 768
 
 
 def test_core_llm_extractor_validates_lightweight_table_batch_mentions():

@@ -832,8 +832,6 @@ class StructuredObjectivePaperFrame(_StrictModel):
 
 
 class StructuredObjectiveEvidenceRoute(_StrictModel):
-    source_kind: Literal["text_window", "table", "figure"] = "text_window"
-    source_ref: str
     role: Literal[
         "current_experimental_evidence",
         "process_or_treatment",
@@ -845,21 +843,8 @@ class StructuredObjectiveEvidenceRoute(_StrictModel):
         "low_value_or_irrelevant",
     ] = "low_value_or_irrelevant"
     extractable: bool = False
-    reason: str | None = None
-    table_schema: dict[str, Any] = Field(default_factory=dict)
-    column_roles: dict[str, Any] = Field(default_factory=dict)
-    join_keys: dict[str, Any] = Field(default_factory=dict)
-    join_plan: dict[str, Any] = Field(default_factory=dict)
+    reason: str | None = Field(default=None, max_length=240)
     confidence: float = 0.0
-
-    @field_validator("source_kind", mode="before")
-    @classmethod
-    def _normalize_source_kind(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_OBJECTIVE_SOURCE_KINDS,
-            default="text_window",
-        )
 
     @field_validator("role", mode="before")
     @classmethod
@@ -870,14 +855,12 @@ class StructuredObjectiveEvidenceRoute(_StrictModel):
             default="low_value_or_irrelevant",
         )
 
-    @field_validator("table_schema", "column_roles", "join_keys", "join_plan", mode="before")
-    @classmethod
-    def _normalize_objects(cls, value: object) -> object:
-        return _normalize_object_container(value)
-
 
 class StructuredObjectiveEvidenceRoutes(_StrictModel):
-    routes: list[StructuredObjectiveEvidenceRoute] = Field(default_factory=list)
+    routes: list[StructuredObjectiveEvidenceRoute] = Field(
+        default_factory=list,
+        max_length=1,
+    )
 
     @field_validator("routes", mode="before")
     @classmethod
@@ -908,8 +891,6 @@ class StructuredObjectiveEvidenceUnit(_StrictModel):
     unit: str | None = None
     baseline_context: dict[str, Any] = Field(default_factory=dict)
     interpretation: str | None = None
-    source_refs: list[dict[str, Any]] = Field(default_factory=list)
-    evidence_anchor_ids: list[str] = Field(default_factory=list)
     join_keys: dict[str, Any] = Field(default_factory=dict)
     resolution_status: Literal[
         "resolved",
@@ -962,14 +943,12 @@ class StructuredObjectiveEvidenceUnit(_StrictModel):
             }
         return {}
 
-    @field_validator("source_refs", "evidence_anchor_ids", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
 
 class StructuredObjectiveEvidenceUnits(_StrictModel):
-    evidence_units: list[StructuredObjectiveEvidenceUnit] = Field(default_factory=list)
+    evidence_units: list[StructuredObjectiveEvidenceUnit] = Field(
+        default_factory=list,
+        max_length=1,
+    )
 
     @field_validator("evidence_units", mode="before")
     @classmethod

@@ -78,6 +78,8 @@ export type ResearchUnderstandingRelation = {
 	subject: string;
 	predicate: string;
 	object: string;
+	statement: string | null;
+	conditions: string[];
 	status: string;
 	confidence: number | null;
 	evidence_ref_ids: string[];
@@ -1032,6 +1034,8 @@ function normalizeResearchUnderstandingRelation(
 		subject,
 		predicate: toText(record.predicate, 'compares'),
 		object,
+		statement: toText(record.statement) || null,
+		conditions: toStringList(record.conditions),
 		status: toText(record.status, 'limited'),
 		confidence: toOptionalNumber(record.confidence),
 		evidence_ref_ids: toStringList(record.evidence_ref_ids),

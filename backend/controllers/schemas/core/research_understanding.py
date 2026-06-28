@@ -105,6 +105,8 @@ class ResearchRelationResponse(BaseModel):
     subject: str = Field(..., description="Relation subject")
     predicate: str = Field(..., description="Relation predicate or direction")
     object: str = Field(..., description="Relation object")
+    statement: str | None = Field(default=None, description="Expert-readable relation statement")
+    conditions: list[str] = Field(default_factory=list, description="Relation scope conditions")
     status: ClaimStatus = Field(..., description="Support status")
     confidence: float | None = Field(default=None)
     evidence_ref_ids: list[str] = Field(default_factory=list)

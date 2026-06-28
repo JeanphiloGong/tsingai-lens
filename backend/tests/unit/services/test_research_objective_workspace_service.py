@@ -377,7 +377,9 @@ def test_objective_workspace_detail_returns_research_understanding(tmp_path):
     assert understanding["scope"]["scope_type"] == "objective"
     assert understanding["scope"]["objective_id"] == objective_id
     assert understanding["claims"][0]["evidence_ref_ids"]
-    assert understanding["relations"][0]["relation_type"] == "increases"
+    assert understanding["relations"][0]["relation_type"] in {"improves", "increases"}
+    assert understanding["relations"][0]["subject"] == "heat treatment"
+    assert understanding["relations"][0]["evidence_ref_ids"]
     assert any(
         evidence_ref["fact_ids"] == ["oeu-corrosion"]
         for evidence_ref in understanding["evidence_refs"]

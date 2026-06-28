@@ -6,8 +6,47 @@ from application.core.research_understanding_service import (
 from domain.core import ResearchUnderstanding
 
 
+class _FakeSemanticExtractor:
+    def __init__(self, relations: list[dict] | None = None) -> None:
+        self.relations = relations or []
+        self.payloads: list[dict] = []
+
+    def extract_research_understanding_relations(self, payload: dict):
+        self.payloads.append(payload)
+        return _FakeSemanticRelations(self.relations)
+
+
+class _FakeSemanticRelations:
+    def __init__(self, relations: list[dict]) -> None:
+        self.relations = [_FakeSemanticRelation(item) for item in relations]
+
+
+class _FakeSemanticRelation:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def model_dump(self) -> dict:
+        return dict(self.payload)
+
+
 def test_objective_understanding_projects_claims_relations_and_evidence_refs():
-    service = ResearchUnderstandingService()
+    extractor = _FakeSemanticExtractor(
+        [
+            {
+                "relation_type": "causal",
+                "source_concept": "heat treatment",
+                "target_concept": "corrosion resistance",
+                "mediator_concepts": [],
+                "direction": "improves",
+                "statement": "Heat treatment improves corrosion resistance.",
+                "conditions": ["316L stainless steel"],
+                "evidence_unit_ids": ["oeu-comparison"],
+                "confidence": 0.82,
+                "warnings": [],
+            }
+        ]
+    )
+    service = ResearchUnderstandingService(structured_extractor=extractor)
     payload = {
         "collection_id": "col-1",
         "objective": {
@@ -87,7 +126,17 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert understanding["claims"][0]["status"] == "supported"
     assert understanding["claims"][0]["evidence_ref_ids"]
     assert understanding["relations"][0]["relation_type"] == "improves"
-    assert understanding["relations"][0]["subject"] == "sample: heat-treated"
+    assert understanding["relations"][0]["subject"] == "heat treatment"
+    assert understanding["relations"][0]["object"] == "corrosion resistance"
+    assert (
+        understanding["relations"][0]["statement"]
+        == "Heat treatment improves corrosion resistance."
+    )
+    assert understanding["relations"][0]["conditions"] == ["316L stainless steel"]
+    assert understanding["relations"][0]["source_object_ids"] == ["oeu-comparison"]
+    assert extractor.payloads[0]["evidence_units"][1]["sample_context"] == {
+        "sample": "heat-treated"
+    }
     assert understanding["evidence_refs"][0]["fact_ids"] == ["oeu-corrosion"]
     assert understanding["evidence_refs"][0]["label"] == "P001 Table 1"
     assert understanding["contexts"][0]["material_scope"] == ["316L stainless steel"]
@@ -103,7 +152,7 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
 
 
 def test_material_understanding_projects_findings_measurements_and_relations():
-    service = ResearchUnderstandingService()
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     evidence_ref = {
         "evidence_ref_id": "E001",
         "source_kind": "table",
@@ -161,7 +210,7 @@ def test_material_understanding_projects_findings_measurements_and_relations():
 
 
 def test_understanding_deduplicates_claims_without_blank_records():
-    service = ResearchUnderstandingService()
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     payload = {
         "collection_id": "col-1",
         "objective": {
@@ -178,8 +227,45 @@ def test_understanding_deduplicates_claims_without_blank_records():
     ]
 
 
+def test_objective_understanding_does_not_project_low_level_comparisons_as_relations():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How does LPBF affect density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power"],
+            "property_axes": ["density"],
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-row-1",
+                "document_id": "paper-1",
+                "unit_kind": "comparison",
+                "property_normalized": "density",
+                "sample_context": {"sample_number": "2"},
+                "baseline_context": {"sample_number": "1"},
+                "value_payload": {
+                    "comparison_axis": "laser power",
+                    "direction": "increase",
+                    "source_value_text": "sample 2 shows higher density than sample 1",
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        ],
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert understanding["claims"]
+    assert understanding["relations"] == []
+    assert understanding["presentation"]["summary"]["relation_count"] == 0
+
+
 def test_with_presentation_backfills_existing_understanding_without_internal_labels():
-    service = ResearchUnderstandingService()
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(
         {
             "state": "ready",
@@ -228,5 +314,8 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
 
     assert understanding is not None
     assert understanding["presentation"]["summary"]["title"] == "How does LPBF affect density?"
-    assert understanding["presentation"]["effects"][0]["title"] == "laser power -> relative density"
+    assert (
+        understanding["presentation"]["effects"][0]["title"]
+        == "Relative density is reported as 99.1%."
+    )
     assert understanding["presentation"]["evidence_items"][0]["title"] == "Text evidence"

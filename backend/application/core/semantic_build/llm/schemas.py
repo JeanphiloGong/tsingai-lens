@@ -98,6 +98,24 @@ _OBJECTIVE_EVIDENCE_RESOLUTION_STATUSES = {
     "skipped",
     "unknown",
 }
+_RESEARCH_UNDERSTANDING_RELATION_TYPES = {
+    "causal",
+    "correlational",
+    "mechanistic",
+    "conditional",
+    "conflicting",
+    "comparative",
+}
+_RESEARCH_UNDERSTANDING_DIRECTIONS = {
+    "increases",
+    "decreases",
+    "improves",
+    "reduces",
+    "changes",
+    "mixed",
+    "conditional",
+    "unknown",
+}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -952,6 +970,65 @@ class StructuredObjectiveEvidenceUnits(_StrictModel):
     @field_validator("evidence_units", mode="before")
     @classmethod
     def _normalize_evidence_units(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredResearchUnderstandingRelation(_StrictModel):
+    relation_type: Literal[
+        "causal",
+        "correlational",
+        "mechanistic",
+        "conditional",
+        "conflicting",
+        "comparative",
+    ] = "conditional"
+    source_concept: str
+    target_concept: str
+    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
+    direction: Literal[
+        "increases",
+        "decreases",
+        "improves",
+        "reduces",
+        "changes",
+        "mixed",
+        "conditional",
+        "unknown",
+    ] = "unknown"
+    statement: str
+    conditions: list[str] = Field(default_factory=list, max_length=8)
+    evidence_unit_ids: list[str] = Field(default_factory=list, max_length=12)
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list, max_length=6)
+
+    @field_validator("relation_type", mode="before")
+    @classmethod
+    def _normalize_relation_type(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_RESEARCH_UNDERSTANDING_RELATION_TYPES,
+            default="conditional",
+        )
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_RESEARCH_UNDERSTANDING_DIRECTIONS,
+            default="unknown",
+        )
+
+
+class StructuredResearchUnderstandingRelations(_StrictModel):
+    relations: list[StructuredResearchUnderstandingRelation] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+
+    @field_validator("relations", mode="before")
+    @classmethod
+    def _normalize_relations(cls, value: object) -> object:
         return _normalize_list_container(value)
 
 

@@ -13,6 +13,7 @@
 		type ResearchUnderstandingPresentationEffect,
 		type ResearchUnderstandingPresentationEvidence,
 		type ResearchUnderstandingPresentationContext,
+		type ResearchUnderstandingRelation,
 		type ResearchUnderstandingFeedbackIssueType,
 		type ResearchUnderstandingFeedback,
 		type ResearchUnderstandingFeedbackStatus
@@ -56,6 +57,7 @@
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
 	let selectedEffectId = '';
+	let detailMode = false;
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
 	let curationStatement = '';
@@ -95,6 +97,9 @@
 	);
 	$: claims = understanding?.claims ?? [];
 	$: claimById = new Map(claims.map((claim) => [claim.claim_id, claim]));
+	$: relationById = new Map(
+		(understanding?.relations ?? []).map((relation) => [relation.relation_id, relation])
+	);
 	$: reviewQueueClaimIds = new Set(
 		claims
 			.filter((claim) => shouldReviewClaim(claim, feedbackByClaimId))
@@ -110,19 +115,28 @@
 	$: claimStatusCounts = countEffectsBy(effectRows, 'support_status');
 	$: if (
 		understanding &&
+		detailMode &&
 		filteredEffects.length &&
 		!filteredEffects.some((effect) => effect.effect_id === selectedEffectId)
 	) {
 		selectedEffectId = filteredEffects[0].effect_id;
 	}
-	$: if (!filteredEffects.length && selectedEffectId) {
+	$: if ((!filteredEffects.length || !detailMode) && selectedEffectId) {
 		selectedEffectId = '';
 	}
 	$: selectedEffect =
-		filteredEffects.find((effect) => effect.effect_id === selectedEffectId) ??
-		filteredEffects[0] ??
-		null;
+		detailMode ? (filteredEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
 	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
+	$: selectedRelations = selectedEffect
+		? selectedEffect.relation_ids
+				.map((relationId) => relationById.get(relationId))
+				.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
+		: [];
+	$: selectedReadableRelations = selectedRelations.filter((relation) => isReadableRelation(relation));
+	$: selectedHiddenRelationCount = Math.max(
+		0,
+		selectedRelations.length - selectedReadableRelations.length
+	);
 	$: selectedScopeId = scopeId(understanding);
 	$: selectedCuration = selectedClaim ? curationsByClaimId.get(selectedClaim.claim_id) : null;
 	$: selectedFeedback = selectedClaim ? (feedbackByClaimId.get(selectedClaim.claim_id) ?? []) : [];
@@ -137,7 +151,6 @@
 		: null;
 	$: selectedEvidenceRefs = displayClaim ? presentationEvidenceForIds(displayClaim.evidence_ref_ids) : [];
 	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
-	$: selectedEvidenceIdSet = new Set(displayClaim?.evidence_ref_ids ?? []);
 	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
 		lastCurationClaimId = selectedClaim?.claim_id ?? '';
 		resetCurationForm();
@@ -189,6 +202,10 @@
 		return translatedCatalogLabel('research.understanding.relations', type);
 	}
 
+	function relationStatusLabel(status: string) {
+		return statusLabel(status || 'limited');
+	}
+
 	function feedbackStatusLabel(status: string) {
 		return translatedCatalogLabel('research.understanding.feedbackStatuses', status);
 	}
@@ -230,6 +247,54 @@
 	function listLabel(values: string[]) {
 		const cleaned = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 		return cleaned.length ? cleaned.join(', ') : $t('research.emptyValue');
+	}
+
+	function compactText(value: string, limit = 160) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (normalized.length <= limit) return normalized;
+		return `${normalized.slice(0, limit).trim()}...`;
+	}
+
+	function readableRelationSide(value: string) {
+		const normalized = compactText(value);
+		if (!normalized) return '';
+		if (
+			/(sample_context|process_context|test_condition|source_object_ids|evidence_ref_ids)/i.test(
+				normalized
+			)
+			|| /(^|[,;]\s*)(sample_number|condition_number|sample id|condition id|sample number|condition number)\s*:/i.test(
+				normalized
+			)
+		) {
+			return '';
+		}
+		return normalized;
+	}
+
+	function relationSummary(relation: ResearchUnderstandingRelation) {
+		if (relation.statement) return relation.statement;
+		const subject = readableRelationSide(relation.subject);
+		const object = readableRelationSide(relation.object);
+		const predicate = relationLabel(relation.predicate || relation.relation_type);
+		if (subject && object) return `${subject} -> ${predicate} -> ${object}`;
+		if (subject) return `${predicate}: ${subject}`;
+		if (object) return `${predicate}: ${object}`;
+		return $t('research.understanding.relationNeedsNormalization');
+	}
+
+	function isReadableRelation(relation: ResearchUnderstandingRelation) {
+		const summary = relationSummary(relation);
+		return summary !== $t('research.understanding.relationNeedsNormalization');
+	}
+
+	function openClaimDetail(effectId: string) {
+		selectedEffectId = effectId;
+		detailMode = true;
+	}
+
+	function closeClaimDetail() {
+		detailMode = false;
+		selectedEffectId = '';
 	}
 
 	function confidenceLabel(value: number | null) {
@@ -282,10 +347,6 @@
 			.map((id) => presentationEvidenceById.get(id)?.title || evidenceById.get(id)?.label || '')
 			.filter(Boolean)
 			.slice(0, limit);
-	}
-
-	function visibleEvidenceRefs(currentUnderstanding: ResearchUnderstanding) {
-		return currentUnderstanding.presentation.evidence_items.slice(0, 5);
 	}
 
 	function shouldReviewClaim(
@@ -551,13 +612,13 @@
 				</div>
 			{/if}
 
-			<div class="research-understanding-workbench__grid">
+			{#if !detailMode}
 				<section
-					class="research-understanding-workbench__column"
-					aria-label={$t('research.understanding.effectMap')}
+					class="research-understanding-workbench__column research-understanding-workbench__column--list"
+					aria-label={$t('research.understanding.claimWorkspace')}
 				>
 					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.effectMap')}</h4>
+						<h4>{$t('research.understanding.claimWorkspace')}</h4>
 						<span>
 							{$t('research.understanding.filteredClaimCount', {
 								shown: filteredEffects.length,
@@ -577,10 +638,7 @@
 						<button
 							type="button"
 							class="research-understanding-workbench__card research-understanding-workbench__card--claim"
-							class:research-understanding-workbench__card--selected={selectedEffect?.effect_id ===
-								effect.effect_id}
-							aria-pressed={selectedEffect?.effect_id === effect.effect_id}
-							on:click={() => (selectedEffectId = effect.effect_id)}
+							on:click={() => openClaimDetail(effect.effect_id)}
 						>
 							<div class="research-understanding-workbench__meta">
 								<span>{claimTypeLabel(displayType)}</span>
@@ -599,9 +657,11 @@
 									</span>
 								{/if}
 							</div>
-							<strong>{effect.title}</strong>
-							<p>{displayStatement}</p>
-							<div class="research-understanding-workbench__effect-stats">
+							<strong>{displayStatement}</strong>
+							{#if effect.title && effect.title !== displayStatement}
+								<p>{effect.title}</p>
+							{/if}
+							<div class="research-understanding-workbench__claim-stats">
 								<span>
 									{$t('research.understanding.paperCount', {
 										count: effect.paper_count
@@ -639,57 +699,21 @@
 						</div>
 					{/each}
 				</section>
-
+			{:else}
 				<section
-					class="research-understanding-workbench__column"
-					aria-label={$t('research.understanding.evidenceRefs')}
-				>
-					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.evidenceRefs')}</h4>
-						<span>{$t('research.understanding.evidenceStripHint')}</span>
-					</div>
-					{#each selectedEffect ? selectedEvidenceRefs : visibleEvidenceRefs(understanding) as ref (ref.evidence_ref_id)}
-						{@const href = evidenceHref(ref)}
-						{#if href}
-							<a
-								class="research-understanding-workbench__evidence"
-								class:research-understanding-workbench__evidence--selected={selectedEvidenceIdSet.has(
-									ref.evidence_ref_id
-								)}
-								{href}
-							>
-								<strong>{ref.title}</strong>
-								<span>{evidenceMeta(ref)}</span>
-								{#if ref.quote}
-									<small>{ref.quote}</small>
-								{/if}
-							</a>
-						{:else}
-							<div
-								class="research-understanding-workbench__evidence"
-								class:research-understanding-workbench__evidence--selected={selectedEvidenceIdSet.has(
-									ref.evidence_ref_id
-								)}
-							>
-								<strong>{ref.title}</strong>
-								<span>{evidenceMeta(ref)}</span>
-								{#if ref.quote}
-									<small>{ref.quote}</small>
-								{/if}
-							</div>
-						{/if}
-					{:else}
-						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noEvidence')}
-						</div>
-					{/each}
-				</section>
-
-				<section
-					class="research-understanding-workbench__column"
+					class="research-understanding-workbench__detail-view"
 					aria-label={$t('research.understanding.claimDetail')}
 				>
-					<h4>{$t('research.understanding.effectDetail')}</h4>
+					<div class="research-understanding-workbench__column-heading">
+						<button
+							type="button"
+							class="research-understanding-workbench__back"
+							on:click={closeClaimDetail}
+						>
+							{$t('research.understanding.backToClaims')}
+						</button>
+						<h4>{$t('research.understanding.claimDetail')}</h4>
+					</div>
 					{#if selectedEffect && selectedClaim}
 						<article class="research-understanding-workbench__detail">
 							<div class="research-understanding-workbench__meta">
@@ -712,8 +736,10 @@
 									</span>
 								{/if}
 							</div>
-							<strong>{selectedEffect.title}</strong>
-							<p>{displayClaim?.statement ?? selectedClaim.statement}</p>
+							<strong>{displayClaim?.statement ?? selectedClaim.statement}</strong>
+							{#if selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
+								<p>{selectedEffect.title}</p>
+							{/if}
 							{#if selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction}
 								<div class="research-understanding-workbench__context">
 									{#if selectedEffect.variable_axis}
@@ -730,7 +756,7 @@
 									{/if}
 									{#if selectedEffect.effect_direction}
 										<div>
-											<span>{$t('research.understanding.effectDirection')}</span>
+											<span>{$t('research.understanding.relationDirection')}</span>
 											<p>{relationLabel(selectedEffect.effect_direction)}</p>
 										</div>
 									{/if}
@@ -839,6 +865,48 @@
 										{$t('research.understanding.noContexts')}
 									</div>
 								{/each}
+							</div>
+
+							<div class="research-understanding-workbench__detail-section">
+								<h5>{$t('research.understanding.relatedRelations')}</h5>
+								{#each selectedReadableRelations.slice(0, 5) as relation (relation.relation_id)}
+									<div class="research-understanding-workbench__context">
+										<div class="research-understanding-workbench__meta">
+											<span>{relationLabel(relation.relation_type)}</span>
+											<span>{relationStatusLabel(relation.status)}</span>
+											{#if relation.confidence !== null}
+												<span>{confidenceLabel(relation.confidence)}</span>
+											{/if}
+										</div>
+										<p>{relationSummary(relation)}</p>
+										{#if relation.conditions.length}
+											<small>
+												{$t('research.understanding.contextPrefix')}
+												{listLabel(relation.conditions)}
+											</small>
+										{/if}
+										{#if relation.warnings.length}
+											<div class="research-understanding-workbench__chips">
+												{#each relation.warnings as warning (`${relation.relation_id}-${warning}`)}
+													<span>{humanizeCode(warning)}</span>
+												{/each}
+											</div>
+										{/if}
+									</div>
+								{:else}
+									<div class="research-understanding-workbench__empty">
+										{$t('research.understanding.noRelations')}
+									</div>
+								{/each}
+								{#if selectedHiddenRelationCount || selectedReadableRelations.length > 5}
+									<small>
+										{$t('research.understanding.hiddenRelationCount', {
+											count:
+												selectedHiddenRelationCount +
+												Math.max(0, selectedReadableRelations.length - 5)
+										})}
+									</small>
+								{/if}
 							</div>
 
 							{#if selectedClaim.warnings.length || selectedClaim.source_object_ids.length}
@@ -1048,11 +1116,11 @@
 						</article>
 					{:else}
 						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noSelectedEffect')}
+							{$t('research.understanding.noSelectedClaim')}
 						</div>
 					{/if}
 				</section>
-			</div>
+			{/if}
 		{:else}
 			<div class="research-understanding-workbench__empty">
 				{$t('research.understanding.empty')}
@@ -1211,20 +1279,17 @@
 		background: var(--surface-card);
 	}
 
-	.research-understanding-workbench__grid {
-		display: grid;
-		grid-template-columns: minmax(260px, 1.05fr) minmax(220px, 0.85fr) minmax(280px, 1.1fr);
-		gap: 14px;
-		align-items: start;
-		min-width: 0;
-	}
-
 	.research-understanding-workbench__column-heading {
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
 		gap: 10px;
 		min-width: 0;
+	}
+
+	.research-understanding-workbench__column--list,
+	.research-understanding-workbench__detail-view {
+		max-width: 980px;
 	}
 
 	.research-understanding-workbench__column h4 {
@@ -1256,8 +1321,7 @@
 	}
 
 	.research-understanding-workbench__card--claim:hover,
-	.research-understanding-workbench__card--claim:focus-visible,
-	.research-understanding-workbench__card--selected {
+	.research-understanding-workbench__card--claim:focus-visible {
 		border-color: var(--color-accent);
 		background: var(--surface-card);
 	}
@@ -1300,7 +1364,7 @@
 		min-width: 0;
 	}
 
-	.research-understanding-workbench__effect-stats {
+	.research-understanding-workbench__claim-stats {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
@@ -1399,6 +1463,25 @@
 		opacity: 0.62;
 	}
 
+	.research-understanding-workbench__back {
+		min-height: 34px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 6px 11px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__back:hover,
+	.research-understanding-workbench__back:focus-visible {
+		border-color: var(--color-accent);
+	}
+
 	.research-understanding-workbench__feedback-state {
 		margin: 0;
 		color: var(--text-secondary);
@@ -1448,11 +1531,6 @@
 		line-height: 18px;
 	}
 
-	.research-understanding-workbench__evidence--selected {
-		border-color: var(--color-accent);
-		background: var(--surface-card);
-	}
-
 	.research-understanding-workbench__empty {
 		border: 1px dashed var(--border-default);
 		border-radius: var(--radius-md);
@@ -1468,12 +1546,6 @@
 	:global(:root[data-theme='dark']) .research-understanding-workbench__chips span,
 	:global(:root[data-theme='dark']) .research-understanding-workbench__segmented button {
 		background: rgba(120, 140, 180, 0.16);
-	}
-
-	@media (max-width: 1080px) {
-		.research-understanding-workbench__grid {
-			grid-template-columns: 1fr;
-		}
 	}
 
 	@media (max-width: 760px) {

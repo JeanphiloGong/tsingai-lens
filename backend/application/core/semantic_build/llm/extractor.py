@@ -18,6 +18,7 @@ from .schemas import (
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
+    StructuredResearchUnderstandingRelations,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableMatrixRepair,
@@ -32,6 +33,7 @@ from .prompts import (
     build_research_axis_canonicalization_prompt,
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
+    build_research_understanding_relation_prompt,
     build_table_batch_mentions_prompt,
     build_table_matrix_repair_prompt,
     build_text_window_extraction_prompt,
@@ -213,6 +215,20 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredObjectiveEvidenceUnits):
             raise TypeError("unexpected objective evidence unit response type")
+        return response
+
+    def extract_research_understanding_relations(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchUnderstandingRelations:
+        system_prompt, user_prompt = build_research_understanding_relation_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredResearchUnderstandingRelations,
+        )
+        if not isinstance(response, StructuredResearchUnderstandingRelations):
+            raise TypeError("unexpected research understanding relations response type")
         return response
 
     def _parse_structured_response(

@@ -75,20 +75,37 @@ function understandingFixture(): ResearchUnderstanding {
 			}
 		],
 		relations: [
-			{
-				relation_id: 'rel_annealing_microstructure',
-				relation_type: 'explains',
-				subject: 'annealing',
-				predicate: 'explains',
-				object: 'cellular substructure change',
-				status: 'limited',
-				confidence: 0.64,
-				evidence_ref_ids: ['ev_section_3'],
-				context_ids: ['ctx_heat_treatment'],
-				source_object_ids: ['unit_interpretation'],
-				warnings: []
-			}
-		],
+				{
+					relation_id: 'rel_annealing_microstructure',
+					relation_type: 'explains',
+					subject: 'annealing',
+					predicate: 'explains',
+					object: 'cellular substructure change',
+					statement: 'Annealing explains cellular substructure changes in LPBF 316L.',
+					conditions: ['316L stainless steel', 'LPBF'],
+					status: 'limited',
+					confidence: 0.64,
+					evidence_ref_ids: ['ev_section_3'],
+					context_ids: ['ctx_heat_treatment'],
+					source_object_ids: ['unit_interpretation'],
+					warnings: []
+				},
+				{
+					relation_id: 'rel_internal_sample',
+					relation_type: 'increases',
+					subject: 'sample_number: 2',
+					predicate: 'increases',
+					object: 'sample_context: {"sample": 2}',
+					statement: null,
+					conditions: [],
+					status: 'supported',
+					confidence: 0.95,
+					evidence_ref_ids: ['ev_section_3'],
+					context_ids: ['ctx_heat_treatment'],
+					source_object_ids: ['unit_interpretation'],
+					warnings: []
+				}
+			],
 		evidence_refs: [
 			{
 				evidence_ref_id: 'ev_table_2',
@@ -197,7 +214,7 @@ function understandingFixture(): ResearchUnderstanding {
 					context_summary: '316L stainless steel, LPBF, annealing, tensile test',
 					evidence_ref_ids: ['ev_section_3'],
 					context_ids: ['ctx_heat_treatment'],
-					relation_ids: ['rel_annealing_microstructure'],
+					relation_ids: ['rel_annealing_microstructure', 'rel_internal_sample'],
 					needs_review: true,
 					warnings: ['needs_expert_review']
 				},
@@ -292,6 +309,22 @@ function goalUnderstandingFixture(): ResearchUnderstanding {
 	};
 }
 
+async function openMechanismClaimDetail() {
+	await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
+	await browserPage
+		.getByRole('button', { name: /Annealing may reduce cellular substructure\./ })
+		.click();
+	return browserPage.getByLabelText('Claim detail');
+}
+
+async function openConflictedClaimDetail() {
+	await browserPage.getByRole('button', { name: 'Conflicted 1' }).click();
+	await browserPage
+		.getByRole('button', { name: /Strength trends conflict across reported heat treatments\./ })
+		.click();
+	return browserPage.getByLabelText('Claim detail');
+}
+
 describe('ResearchUnderstandingWorkbench', () => {
 	beforeEach(() => {
 		fetchMock.mockReset();
@@ -346,7 +379,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('filters effect rows by type and opens the selected effect detail', async () => {
+	it('filters claim rows by type and opens the selected claim detail', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
@@ -356,17 +389,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('3 of 3')).toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Claim detail')).not.toBeInTheDocument();
 
-		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-
-		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Annealing may reduce cellular substructure.').first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Heat treatment changes LPBF 316L tensile response.').first())
-			.not.toBeInTheDocument();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openMechanismClaimDetail();
+		await expect.element(claimDetail).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Back to claims' })).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('P001 Section 3.2').first()).toBeInTheDocument();
 		await expect
 			.element(claimDetail.getByText('Annealing reduced cellular substructure.'))
@@ -378,6 +405,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 		await expect.element(claimDetail.getByText('needs expert review')).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('Annealing -> yield strength')).toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('Annealing explains cellular substructure changes in LPBF 316L.'))
+			.toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Context: 316L stainless steel, LPBF')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('1 low-level relation(s) are hidden until normalized.')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('sample_number: 2')).not.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'Back to claims' }).click();
+		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Claim detail')).not.toBeInTheDocument();
 	});
 
 	it('filters claims by support status for conflict review', async () => {
@@ -386,10 +423,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Conflicted 1' }).click();
-
-		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openConflictedClaimDetail();
 		await expect
 			.element(claimDetail.getByText('Strength trends conflict across reported heat treatments.'))
 			.toBeInTheDocument();
@@ -397,14 +431,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('conflicting direction')).toBeInTheDocument();
 	});
 
-	it('submits expert feedback for the selected effect', async () => {
+	it('submits expert feedback for the selected claim', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openMechanismClaimDetail();
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByLabelText('Issue type').selectOptions('evidence_not_grounded');
 		await claimDetail
@@ -441,8 +474,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openMechanismClaimDetail();
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
 
@@ -463,14 +495,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('submits expert curation for the selected effect classification', async () => {
+	it('submits expert curation for the selected claim classification', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openMechanismClaimDetail();
 		await claimDetail.getByLabelText('Curated type').selectOptions('mechanism');
 		await claimDetail.getByLabelText('Curated support status').selectOptions('limited');
 		await claimDetail
@@ -509,7 +540,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('loads existing expert curation into the selected effect form', async () => {
+	it('loads existing expert curation into the selected claim form', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			if (path.endsWith('/research-understanding/curations') && init?.method !== 'POST') {
@@ -544,8 +575,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openMechanismClaimDetail();
 
 		await expect
 			.element(claimDetail.getByLabelText('Curated statement'))
@@ -563,7 +593,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('Original classification')).toBeInTheDocument();
 	});
 
-	it('loads existing expert feedback into the selected effect review history', async () => {
+	it('loads existing expert feedback into the selected claim review history', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -604,8 +634,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Effect review');
+		const claimDetail = await openMechanismClaimDetail();
 
 		await expect.element(claimDetail.getByText('Feedback history')).toBeInTheDocument();
 		await expect
@@ -615,7 +644,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('materials-expert · 2026-06-18T09:00:00+00:00')).toBeInTheDocument();
 	});
 
-	it('filters the effect list to the review queue', async () => {
+	it('filters the claim list to the review queue', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'

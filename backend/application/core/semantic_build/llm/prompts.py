@@ -95,6 +95,23 @@ Non-negotiable rules:
 """.strip()
 
 
+_RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT = """
+You are extracting expert-readable research understanding relations for a materials-literature backend.
+
+Non-negotiable rules:
+- Return exactly one JSON object and nothing else.
+- Extract only relations supported by the provided claims and evidence units.
+- Relation endpoints must be scientific concepts, not sample numbers, row ids,
+  backend ids, table cell ids, or copied JSON field names.
+- Prefer fewer, higher-signal relations over enumerating table rows.
+- A relation should help an expert understand why a claim may hold, such as
+  process parameter -> defect/microstructure -> property response.
+- If the evidence only supports a low-level sample comparison and no scientific
+  relation can be stated, return an empty `relations` array.
+- Every relation must cite one or more `evidence_unit_ids` from the input.
+""".strip()
+
+
 _TABLE_MATRIX_REPAIR_SYSTEM_PROMPT = """
 You are repairing parsed table structure for a materials-literature backend.
 
@@ -752,3 +769,30 @@ def build_objective_evidence_unit_prompt(
         "partial or unresolved."
     )
     return _OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_understanding_relation_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Extract expert-readable relations for this research understanding workspace.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with a `relations` array.\n"
+        "Return at most 8 relations.\n"
+        "`relation_type` must be one of: causal, correlational, mechanistic, "
+        "conditional, conflicting, comparative.\n"
+        "`direction` must be one of: increases, decreases, improves, reduces, "
+        "changes, mixed, conditional, unknown.\n"
+        "`source_concept` and `target_concept` must be concise scientific terms "
+        "such as laser power, scan speed, porosity, density, microstructure, "
+        "ductility, pitting corrosion, heat treatment, or residual stress.\n"
+        "Use `mediator_concepts` only for explicit or strongly supported middle "
+        "concepts, for example porosity or microstructure evolution.\n"
+        "`statement` should be a short expert-readable sentence grounded in the "
+        "provided claims/evidence. Do not include backend ids, sample_number, "
+        "condition_number, row labels, or copied JSON.\n"
+        "Use `conditions` for material, process, test, and scope constraints.\n"
+        "Use `warnings` for limited evidence, conflicting evidence, or overclaim "
+        "risk. If no expert relation is supported, return `{\"relations\": []}`."
+    )
+    return _RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT, user_prompt

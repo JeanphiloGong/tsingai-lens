@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import math
+import logging
 from typing import Any, Mapping
 
+from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from domain.core import ResearchUnderstanding
+from domain.ports import SourceArtifactRepository
+from domain.source import SourceBlock, SourceDocument
+from infra.persistence.factory import build_source_artifact_repository
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchUnderstandingService:
     """Project existing Core research views into claim/relation/evidence form."""
+
+    def __init__(
+        self,
+        source_artifact_repository: SourceArtifactRepository | None = None,
+        structured_extractor: Any | None = None,
+    ) -> None:
+        self.source_artifact_repository = (
+            source_artifact_repository or build_source_artifact_repository()
+        )
+        self.structured_extractor = structured_extractor or CoreLLMStructuredExtractor()
 
     def with_presentation(
         self,
@@ -67,9 +84,12 @@ class ResearchUnderstandingService:
             context_ids=context_ids,
         )
         relations = self._objective_relations(
+            payload,
             evidence_units,
+            claims=claims,
             evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
             context_ids=context_ids,
+            contexts=contexts,
         )
         state = self._state_for(claims, relations, evidence_refs)
         return self.with_presentation(
@@ -236,42 +256,37 @@ class ResearchUnderstandingService:
 
     def _objective_relations(
         self,
+        payload: Mapping[str, Any],
         evidence_units: list[dict[str, Any]],
         *,
+        claims: list[dict[str, Any]],
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
+        contexts: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        relations: list[dict[str, Any]] = []
-        for unit in evidence_units:
-            if _text(unit.get("unit_kind")) != "comparison":
-                continue
-            evidence_unit_id = _text(unit.get("evidence_unit_id"))
-            property_name = _text(unit.get("property_normalized"))
-            value_payload = _mapping(unit.get("value_payload"))
-            direction = _text(value_payload.get("direction"))
-            axis = _text(value_payload.get("comparison_axis"))
-            sample_context = _display_mapping(_mapping(unit.get("sample_context")))
-            baseline_context = _display_mapping(_mapping(unit.get("baseline_context")))
-            subject = sample_context or "Observed condition"
-            object_text = baseline_context or property_name or "baseline"
-            relations.append(
-                {
-                    "relation_type": self._relation_type_from_direction(direction),
-                    "subject": subject,
-                    "predicate": direction or axis or "compares with",
-                    "object": object_text,
-                    "status": "supported",
-                    "confidence": unit.get("confidence"),
-                    "evidence_ref_ids": self._ref_ids_for(
-                        [evidence_unit_id] if evidence_unit_id else [],
-                        evidence_ref_ids_by_unit,
-                    ),
-                    "context_ids": context_ids,
-                    "source_object_ids": [evidence_unit_id] if evidence_unit_id else [],
-                    "warnings": [],
-                }
+        relation_payload = self._semantic_relation_payload(
+            payload,
+            evidence_units=evidence_units,
+            claims=claims,
+            contexts=contexts,
+        )
+        try:
+            extracted = self.structured_extractor.extract_research_understanding_relations(
+                relation_payload
             )
-        return relations
+        except Exception:  # noqa: BLE001
+            logger.warning("research understanding semantic relation extraction failed", exc_info=True)
+            return []
+        relations: list[dict[str, Any]] = []
+        for item in getattr(extracted, "relations", []):
+            relation = self._semantic_relation_from_model(
+                item.model_dump(),
+                evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+                context_ids=context_ids,
+            )
+            if relation:
+                relations.append(relation)
+        return _dedupe_by_id(relations, "relation_id")
 
     def _material_claims(
         self,
@@ -354,6 +369,134 @@ class ResearchUnderstandingService:
                 }
             )
         return relations
+
+    def _semantic_relation_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+        claims: list[dict[str, Any]],
+        contexts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        objective = _mapping(payload.get("objective"))
+        objective_context = _mapping(payload.get("objective_context"))
+        return {
+            "objective": {
+                "question": _text(objective.get("question"))
+                or _text(objective_context.get("question")),
+                "material_scope": _strings(
+                    objective_context.get("material_scope")
+                    or objective.get("material_scope")
+                ),
+                "process_axes": _strings(
+                    objective_context.get("variable_process_axes")
+                    or objective.get("process_axes")
+                ),
+                "property_axes": _strings(
+                    objective_context.get("target_property_axes")
+                    or objective.get("property_axes")
+                ),
+            },
+            "claims": [
+                {
+                    "statement": _text(claim.get("statement")),
+                    "claim_type": _text(claim.get("claim_type")),
+                    "evidence_unit_ids": _strings(claim.get("source_object_ids")),
+                }
+                for claim in claims
+                if _text(claim.get("statement"))
+            ][:12],
+            "contexts": [
+                {
+                    "label": _text(context.get("label")),
+                    "material_scope": _strings(context.get("material_scope")),
+                    "process_context": _mapping(context.get("process_context")),
+                    "test_condition": _mapping(context.get("test_condition")),
+                    "property_scope": _strings(context.get("property_scope")),
+                }
+                for context in contexts
+            ],
+            "evidence_units": [
+                self._semantic_relation_evidence_unit(unit)
+                for unit in evidence_units
+                if _text(unit.get("evidence_unit_id"))
+            ][:80],
+        }
+
+    def _semantic_relation_evidence_unit(self, unit: Mapping[str, Any]) -> dict[str, Any]:
+        value_payload = _mapping(unit.get("value_payload"))
+        return {
+            "evidence_unit_id": _text(unit.get("evidence_unit_id")),
+            "unit_kind": _text(unit.get("unit_kind")),
+            "property_normalized": _text(unit.get("property_normalized")),
+            "sample_context": _mapping(unit.get("sample_context")),
+            "process_context": _mapping(unit.get("process_context")),
+            "test_condition": _mapping(unit.get("test_condition")),
+            "value_payload": {
+                key: value
+                for key, value in value_payload.items()
+                if key
+                in {
+                    "source_value_text",
+                    "summary",
+                    "statement",
+                    "direction",
+                    "comparison_axis",
+                    "comparison_axis_value",
+                    "value",
+                    "trend",
+                }
+            },
+            "unit": _text(unit.get("unit")),
+            "baseline_context": _mapping(unit.get("baseline_context")),
+            "interpretation": _text(unit.get("interpretation")),
+            "resolution_status": _text(unit.get("resolution_status")),
+            "confidence": unit.get("confidence"),
+        }
+
+    def _semantic_relation_from_model(
+        self,
+        item: Mapping[str, Any],
+        *,
+        evidence_ref_ids_by_unit: dict[str, list[str]],
+        context_ids: list[str],
+    ) -> dict[str, Any]:
+        source = _text(item.get("source_concept"))
+        target = _text(item.get("target_concept"))
+        statement = _text(item.get("statement"))
+        evidence_unit_ids = _strings(item.get("evidence_unit_ids"))
+        if not source or not target or not statement or not evidence_unit_ids:
+            return {}
+        if not _looks_user_facing(source) or not _looks_user_facing(target):
+            return {}
+        relation_type = _text(item.get("relation_type")) or "conditional"
+        direction = _text(item.get("direction")) or "unknown"
+        mediators = _strings(item.get("mediator_concepts"))
+        conditions = _strings(item.get("conditions"))
+        return {
+            "relation_id": _stable_relation_id(
+                relation_type,
+                source,
+                target,
+                statement,
+                evidence_unit_ids,
+            ),
+            "relation_type": self._presentation_relation_type(relation_type, direction),
+            "subject": source,
+            "predicate": direction if direction != "unknown" else relation_type,
+            "object": " -> ".join((*mediators, target)) if mediators else target,
+            "statement": statement,
+            "conditions": conditions,
+            "status": "supported" if self._ref_ids_for(evidence_unit_ids, evidence_ref_ids_by_unit) else "limited",
+            "confidence": item.get("confidence"),
+            "evidence_ref_ids": self._ref_ids_for(
+                evidence_unit_ids,
+                evidence_ref_ids_by_unit,
+            ),
+            "context_ids": context_ids,
+            "source_object_ids": evidence_unit_ids,
+            "warnings": _strings(item.get("warnings")),
+        }
 
     def _material_evidence_refs(self, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = []
@@ -472,6 +615,7 @@ class ResearchUnderstandingService:
                 _text(value_payload.get("summary"))
                 or _text(value_payload.get("source_value_text"))
                 or interpretation
+                or self._comparison_statement(value_payload, property_name)
             )
         if interpretation:
             return interpretation
@@ -479,6 +623,23 @@ class ResearchUnderstandingService:
             suffix = f" {unit_text}" if unit_text and unit_text not in source_value else ""
             return f"{property_name} is reported as {source_value}{suffix}."
         return source_value
+
+    def _comparison_statement(
+        self,
+        value_payload: Mapping[str, Any],
+        property_name: str | None,
+    ) -> str | None:
+        axis = _text(value_payload.get("comparison_axis"))
+        direction = _text(value_payload.get("direction")) or _text(value_payload.get("trend"))
+        if not axis and not property_name:
+            return None
+        if axis and direction and property_name:
+            return f"{axis} is associated with {direction} in {property_name}."
+        if axis and property_name:
+            return f"{axis} is compared for {property_name}."
+        if property_name and direction:
+            return f"{property_name} shows {direction}."
+        return None
 
     def _claim_type_from_unit(self, unit: Mapping[str, Any]) -> str:
         unit_kind = _text(unit.get("unit_kind"))
@@ -548,16 +709,19 @@ class ResearchUnderstandingService:
                 grouped.setdefault(fact_id, []).append(ref_id)
         return {key: _dedupe_strings(value) for key, value in grouped.items()}
 
-    def _relation_type_from_direction(self, direction: str | None) -> str:
-        normalized = (direction or "").lower().replace("-", " ").replace("_", " ")
-        if "improv" in normalized:
-            return "improves"
-        if "reduc" in normalized or "lower" in normalized:
-            return "reduces"
-        if "increas" in normalized:
-            return "increases"
-        if "decreas" in normalized:
-            return "decreases"
+    def _presentation_relation_type(self, relation_type: str, direction: str) -> str:
+        normalized_direction = (direction or "").lower()
+        if normalized_direction in {"improves", "reduces", "increases", "decreases"}:
+            return normalized_direction
+        normalized_type = (relation_type or "").lower()
+        if normalized_type == "conflicting":
+            return "conflicts"
+        if normalized_type == "comparative":
+            return "compares"
+        if normalized_type == "mechanistic":
+            return "explains"
+        if normalized_type == "correlational":
+            return "correlates"
         return "compares"
 
     def _state_for(
@@ -603,8 +767,15 @@ class ResearchUnderstandingService:
             for context in contexts
             if _text(context.get("context_id"))
         }
+        blocks_by_id, documents_by_id = self._source_artifact_lookups(
+            _text(scope.get("collection_id"))
+        )
         evidence_items = [
-            self._presentation_evidence_item(ref)
+            self._presentation_evidence_item(
+                ref,
+                blocks_by_id=blocks_by_id,
+                documents_by_id=documents_by_id,
+            )
             for ref in evidence_refs
         ]
         effects = [
@@ -721,6 +892,7 @@ class ResearchUnderstandingService:
                 variable_axis=variable_axis,
                 target_property=target_property,
                 fallback=statement,
+                relation_count=len(related_relations),
             ),
             "statement": statement,
             "claim_type": _text(claim.get("claim_type")) or "finding",
@@ -741,36 +913,83 @@ class ResearchUnderstandingService:
             "warnings": _strings(claim.get("warnings")),
         }
 
-    def _presentation_evidence_item(self, ref: Mapping[str, Any]) -> dict[str, Any]:
+    def _presentation_evidence_item(
+        self,
+        ref: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        documents_by_id: Mapping[str, SourceDocument],
+    ) -> dict[str, Any]:
         locator = _locator_mapping(ref.get("locator"))
         source_ref = _text(locator.get("source_ref"))
         label = _text(ref.get("label"))
         source_kind = _text(ref.get("source_kind")) or "unknown"
-        source_label = (
-            source_ref
-            if _looks_user_facing(source_ref)
-            else label
-            if _looks_user_facing(label)
-            else _source_kind_label(source_kind)
+        document_id = _text(ref.get("document_id"))
+        block = blocks_by_id.get(source_ref or "") if source_ref else None
+        document = (
+            documents_by_id.get(block.document_id)
+            if block and block.document_id
+            else documents_by_id.get(document_id or "")
+            if document_id
+            else None
         )
-        page = _text(locator.get("page")) or _text(locator.get("page_no"))
+        paper_label = _paper_label(document)
+        block_label = _block_kind_label(block)
+        if paper_label:
+            source_label = paper_label
+        elif _looks_user_facing(source_ref):
+            source_label = source_ref or ""
+        elif _looks_user_facing(label):
+            source_label = label or ""
+        elif block_label:
+            source_label = block_label
+        else:
+            source_label = _source_kind_label(source_kind)
+        page = (
+            _text(locator.get("page"))
+            or _text(locator.get("page_no"))
+            or _text(block.page if block else None)
+        )
         title_parts = [source_label]
         if page:
             title_parts.append(f"p. {page}")
         title = " / ".join(title_parts)
+        quote = _text(ref.get("quote"))
+        if not quote and block:
+            quote = _short_text(block.text, limit=420)
+        value_summary = (
+            _block_context_label(block)
+            or (label if _looks_user_facing(label) else "")
+        )
         return {
             "evidence_ref_id": _text(ref.get("evidence_ref_id")) or "",
-            "document_id": _text(ref.get("document_id")),
+            "document_id": document_id or (block.document_id if block else None),
             "title": title,
             "source_label": source_label,
             "source_kind": source_kind,
             "page": page,
-            "quote": _text(ref.get("quote")),
-            "value_summary": label if _looks_user_facing(label) else "",
+            "quote": quote,
+            "value_summary": value_summary,
             "traceability_status": _text(ref.get("traceability_status")) or "unknown",
             "confidence": ref.get("confidence"),
             "href": _text(ref.get("href")),
         }
+
+    def _source_artifact_lookups(
+        self,
+        collection_id: str | None,
+    ) -> tuple[dict[str, SourceBlock], dict[str, SourceDocument]]:
+        if not collection_id:
+            return {}, {}
+        try:
+            blocks = self.source_artifact_repository.list_blocks(collection_id)
+            documents = self.source_artifact_repository.list_documents(collection_id)
+        except Exception:  # noqa: BLE001
+            return {}, {}
+        return (
+            {block.block_id: block for block in blocks if block.block_id},
+            {document.document_id: document for document in documents if document.document_id},
+        )
 
     def _presentation_context_summary(self, context: Mapping[str, Any]) -> dict[str, Any]:
         context_id = _text(context.get("context_id")) or "context"
@@ -831,14 +1050,17 @@ class ResearchUnderstandingService:
         variable_axis: str,
         target_property: str,
         fallback: str,
+        relation_count: int = 0,
     ) -> str:
-        if variable_axis and target_property:
+        if relation_count and variable_axis and target_property:
             return f"{variable_axis} -> {target_property}"
+        if fallback:
+            return _short_text(fallback, limit=96)
         if target_property:
             return target_property
         if variable_axis:
             return variable_axis
-        return _short_text(fallback, limit=96) or "Research finding"
+        return "Research finding"
 
     def _context_summary_text(self, contexts: list[dict[str, Any]]) -> str:
         parts: list[str] = []
@@ -876,6 +1098,25 @@ def _stable_ref_id(
     from hashlib import sha1
 
     return f"evref_{sha1('|'.join(parts).encode('utf-8')).hexdigest()[:12]}"
+
+
+def _stable_relation_id(
+    relation_type: str,
+    source: str,
+    target: str,
+    statement: str,
+    evidence_unit_ids: list[str] | tuple[str, ...],
+) -> str:
+    parts = [
+        relation_type,
+        source,
+        target,
+        statement,
+        ",".join(evidence_unit_ids),
+    ]
+    from hashlib import sha1
+
+    return f"rel_{sha1('|'.join(parts).encode('utf-8')).hexdigest()[:12]}"
 
 
 def _dedupe_by_id(items: list[dict[str, Any]], id_key: str) -> list[dict[str, Any]]:
@@ -978,6 +1219,41 @@ def _source_kind_label(source_kind: str) -> str:
     if "text" in normalized or "paragraph" in normalized:
         return "Text evidence"
     return "Evidence"
+
+
+def _paper_label(document: SourceDocument | None) -> str:
+    if not document:
+        return ""
+    for value in (
+        document.title,
+        document.metadata.get("file_name") if isinstance(document.metadata, Mapping) else None,
+        document.metadata.get("filename") if isinstance(document.metadata, Mapping) else None,
+        document.document_id,
+    ):
+        text = _text(value)
+        if text and _looks_user_facing(text):
+            return _short_text(text, limit=120)
+    return ""
+
+
+def _block_kind_label(block: SourceBlock | None) -> str:
+    if not block:
+        return ""
+    block_type = str(block.block_type or "").replace("_", " ").strip()
+    if not block_type:
+        return ""
+    if block.block_order:
+        return f"{block_type.title()} {block.block_order}"
+    return block_type.title()
+
+
+def _block_context_label(block: SourceBlock | None) -> str:
+    if not block:
+        return ""
+    heading = _text(block.heading_path)
+    if heading and _looks_user_facing(heading):
+        return _short_text(heading, limit=160)
+    return _block_kind_label(block)
 
 
 def _mapping(value: Any) -> dict[str, Any]:

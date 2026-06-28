@@ -210,6 +210,8 @@ class ResearchRelation:
     subject: str
     predicate: str
     object: str
+    statement: str | None
+    conditions: tuple[str, ...]
     status: str
     confidence: float | None
     evidence_ref_ids: tuple[str, ...]
@@ -223,12 +225,14 @@ class ResearchRelation:
         subject = _text(payload.get("subject")) or ""
         predicate = _text(payload.get("predicate")) or relation_type
         object_text = _text(payload.get("object")) or ""
+        statement = _text(payload.get("statement"))
         relation_id = _text(payload.get("relation_id")) or _stable_id(
             "rel",
             relation_type,
             subject,
             predicate,
             object_text,
+            statement,
             payload.get("evidence_ref_ids"),
         )
         return cls(
@@ -237,6 +241,8 @@ class ResearchRelation:
             subject=subject,
             predicate=predicate,
             object=object_text,
+            statement=statement,
+            conditions=_strings(payload.get("conditions")),
             status=_choice(payload.get("status"), CLAIM_STATUSES, "limited"),
             confidence=_confidence_or_none(payload.get("confidence")),
             evidence_ref_ids=_strings(payload.get("evidence_ref_ids")),
@@ -252,6 +258,8 @@ class ResearchRelation:
             "subject": self.subject,
             "predicate": self.predicate,
             "object": self.object,
+            "statement": self.statement,
+            "conditions": list(self.conditions),
             "status": self.status,
             "confidence": self.confidence,
             "evidence_ref_ids": list(self.evidence_ref_ids),

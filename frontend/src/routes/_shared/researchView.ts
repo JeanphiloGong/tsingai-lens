@@ -85,6 +85,65 @@ export type ResearchUnderstandingRelation = {
 	source_object_ids: string[];
 	warnings: string[];
 };
+export type ResearchUnderstandingPresentationSummary = {
+	title: string;
+	material_scope: string[];
+	variable_axes: string[];
+	property_scope: string[];
+	claim_count: number;
+	relation_count: number;
+	evidence_count: number;
+	context_count: number;
+	review_queue_count: number;
+};
+export type ResearchUnderstandingPresentationEffect = {
+	effect_id: string;
+	claim_id: string;
+	title: string;
+	statement: string;
+	claim_type: string;
+	support_status: string;
+	confidence: number | null;
+	effect_direction: string;
+	variable_axis: string;
+	target_property: string;
+	paper_count: number;
+	evidence_count: number;
+	context_summary: string;
+	evidence_ref_ids: string[];
+	context_ids: string[];
+	relation_ids: string[];
+	needs_review: boolean;
+	warnings: string[];
+};
+export type ResearchUnderstandingPresentationEvidence = {
+	evidence_ref_id: string;
+	document_id: string | null;
+	title: string;
+	source_label: string;
+	source_kind: string;
+	page: string | null;
+	quote: string | null;
+	value_summary: string;
+	traceability_status: string;
+	confidence: number | null;
+	href: string | null;
+};
+export type ResearchUnderstandingPresentationContext = {
+	context_id: string;
+	label: string;
+	material_scope: string[];
+	property_scope: string[];
+	process_summary: string;
+	test_summary: string;
+	limitations: string[];
+};
+export type ResearchUnderstandingPresentation = {
+	summary: ResearchUnderstandingPresentationSummary;
+	effects: ResearchUnderstandingPresentationEffect[];
+	evidence_items: ResearchUnderstandingPresentationEvidence[];
+	context_summaries: ResearchUnderstandingPresentationContext[];
+};
 export type ResearchUnderstanding = {
 	schema_version: string;
 	state: ResearchUnderstandingState;
@@ -100,6 +159,7 @@ export type ResearchUnderstanding = {
 		evidence_ref_count: number;
 		context_count: number;
 	};
+	presentation: ResearchUnderstandingPresentation;
 };
 export type ResearchUnderstandingFeedbackStatus = 'correct' | 'incorrect' | 'partial' | 'unclear';
 export type ResearchUnderstandingFeedbackIssueType =
@@ -847,6 +907,7 @@ function normalizeUnderstandingState(value: unknown): ResearchUnderstandingState
 function normalizeResearchUnderstanding(value: unknown): ResearchUnderstanding | null {
 	const record = asRecord(value);
 	if (!record) return null;
+	const scope = normalizeResearchUnderstandingScope(record.scope);
 	const claims = asArray(record.claims)
 		.map((item) => normalizeResearchUnderstandingClaim(item))
 		.filter((item): item is ResearchUnderstandingClaim => item !== null);
@@ -859,24 +920,29 @@ function normalizeResearchUnderstanding(value: unknown): ResearchUnderstanding |
 	const contexts = asArray(record.contexts)
 		.map((item) => normalizeResearchUnderstandingContext(item))
 		.filter((item): item is ResearchUnderstandingContext => item !== null);
+	const summary = {
+		claim_count: toNumber((asRecord(record.summary) ?? {}).claim_count, claims.length),
+		relation_count: toNumber((asRecord(record.summary) ?? {}).relation_count, relations.length),
+		evidence_ref_count: toNumber(
+			(asRecord(record.summary) ?? {}).evidence_ref_count,
+			evidenceRefs.length
+		),
+		context_count: toNumber((asRecord(record.summary) ?? {}).context_count, contexts.length)
+	};
 	return {
 		schema_version: toText(record.schema_version, 'research_understanding.v1'),
 		state: normalizeUnderstandingState(record.state),
-		scope: normalizeResearchUnderstandingScope(record.scope),
+		scope,
 		claims,
 		relations,
 		evidence_refs: evidenceRefs,
 		contexts,
 		warnings: toStringList(record.warnings),
-		summary: {
-			claim_count: toNumber((asRecord(record.summary) ?? {}).claim_count, claims.length),
-			relation_count: toNumber((asRecord(record.summary) ?? {}).relation_count, relations.length),
-			evidence_ref_count: toNumber(
-				(asRecord(record.summary) ?? {}).evidence_ref_count,
-				evidenceRefs.length
-			),
-			context_count: toNumber((asRecord(record.summary) ?? {}).context_count, contexts.length)
-		}
+		summary,
+		presentation: normalizeResearchUnderstandingPresentation(record.presentation, {
+			scope,
+			summary
+		})
 	};
 }
 
@@ -972,6 +1038,135 @@ function normalizeResearchUnderstandingRelation(
 		context_ids: toStringList(record.context_ids),
 		source_object_ids: toStringList(record.source_object_ids),
 		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingPresentation(
+	value: unknown,
+	fallback: {
+		scope: ResearchUnderstandingScope;
+		summary: ResearchUnderstanding['summary'];
+	}
+): ResearchUnderstandingPresentation {
+	const record = asRecord(value);
+	if (!record) return emptyResearchUnderstandingPresentation(fallback);
+	const summaryRecord = asRecord(record.summary) ?? {};
+	const effects = asArray(record.effects)
+		.map((item) => normalizeResearchUnderstandingPresentationEffect(item))
+		.filter((item): item is ResearchUnderstandingPresentationEffect => item !== null);
+	const evidenceItems = asArray(record.evidence_items)
+		.map((item) => normalizeResearchUnderstandingPresentationEvidence(item))
+		.filter((item): item is ResearchUnderstandingPresentationEvidence => item !== null);
+	const contextSummaries = asArray(record.context_summaries)
+		.map((item) => normalizeResearchUnderstandingPresentationContext(item))
+		.filter((item): item is ResearchUnderstandingPresentationContext => item !== null);
+	return {
+		summary: {
+			title: toText(summaryRecord.title, fallback.scope.title ?? 'Research understanding'),
+			material_scope: toStringList(summaryRecord.material_scope),
+			variable_axes: toStringList(summaryRecord.variable_axes),
+			property_scope: toStringList(summaryRecord.property_scope),
+			claim_count: toNumber(summaryRecord.claim_count, fallback.summary.claim_count),
+			relation_count: toNumber(summaryRecord.relation_count, fallback.summary.relation_count),
+			evidence_count: toNumber(summaryRecord.evidence_count, fallback.summary.evidence_ref_count),
+			context_count: toNumber(summaryRecord.context_count, fallback.summary.context_count),
+			review_queue_count: toNumber(summaryRecord.review_queue_count, 0)
+		},
+		effects,
+		evidence_items: evidenceItems,
+		context_summaries: contextSummaries
+	};
+}
+
+function normalizeResearchUnderstandingPresentationEffect(
+	value: unknown
+): ResearchUnderstandingPresentationEffect | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const claimId = toText(record.claim_id);
+	const statement = toText(record.statement);
+	if (!claimId && !statement) return null;
+	return {
+		effect_id: toText(record.effect_id, claimId || statement),
+		claim_id: claimId || statement,
+		title: toText(record.title, statement || 'Research finding'),
+		statement,
+		claim_type: toText(record.claim_type, 'finding'),
+		support_status: toText(record.support_status, 'limited'),
+		confidence: toOptionalNumber(record.confidence),
+		effect_direction: toText(record.effect_direction),
+		variable_axis: toText(record.variable_axis),
+		target_property: toText(record.target_property),
+		paper_count: toNumber(record.paper_count, 0),
+		evidence_count: toNumber(record.evidence_count, 0),
+		context_summary: toText(record.context_summary),
+		evidence_ref_ids: toStringList(record.evidence_ref_ids),
+		context_ids: toStringList(record.context_ids),
+		relation_ids: toStringList(record.relation_ids),
+		needs_review: Boolean(record.needs_review),
+		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationEvidence(
+	value: unknown
+): ResearchUnderstandingPresentationEvidence | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const evidenceRefId = toText(record.evidence_ref_id ?? record.id);
+	if (!evidenceRefId) return null;
+	return {
+		evidence_ref_id: evidenceRefId,
+		document_id: nonEmptyText(record.document_id),
+		title: toText(record.title, 'Evidence'),
+		source_label: toText(record.source_label, 'Evidence'),
+		source_kind: toText(record.source_kind, 'unknown'),
+		page: nonEmptyText(record.page),
+		quote: nonEmptyText(record.quote),
+		value_summary: toText(record.value_summary),
+		traceability_status: toText(record.traceability_status, 'unknown'),
+		confidence: toOptionalNumber(record.confidence),
+		href: nonEmptyText(record.href)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationContext(
+	value: unknown
+): ResearchUnderstandingPresentationContext | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const contextId = toText(record.context_id ?? record.id);
+	if (!contextId) return null;
+	return {
+		context_id: contextId,
+		label: toText(record.label, 'Context'),
+		material_scope: toStringList(record.material_scope),
+		property_scope: toStringList(record.property_scope),
+		process_summary: toText(record.process_summary),
+		test_summary: toText(record.test_summary),
+		limitations: toStringList(record.limitations)
+	};
+}
+
+function emptyResearchUnderstandingPresentation(fallback: {
+	scope: ResearchUnderstandingScope;
+	summary: ResearchUnderstanding['summary'];
+}): ResearchUnderstandingPresentation {
+	return {
+		summary: {
+			title: fallback.scope.title ?? 'Research understanding',
+			material_scope: [],
+			variable_axes: [],
+			property_scope: [],
+			claim_count: fallback.summary.claim_count,
+			relation_count: fallback.summary.relation_count,
+			evidence_count: fallback.summary.evidence_ref_count,
+			context_count: fallback.summary.context_count,
+			review_queue_count: 0
+		},
+		effects: [],
+		evidence_items: [],
+		context_summaries: []
 	};
 }
 

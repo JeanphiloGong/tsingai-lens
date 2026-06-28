@@ -38,6 +38,10 @@ This node owns the collection workspace route family in the frontend.
 - poll task status and artifact readiness
 - surface graph, research-understanding, evidence, and comparison capabilities
   to the user
+- render research understanding as an expert review workspace by default:
+  users scan effect rows by variable axis, target property, support status, paper
+  count, and evidence count; internal claim/evidence ids remain hidden binding
+  data for feedback, curation, source navigation, and audit details
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

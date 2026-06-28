@@ -9,13 +9,13 @@
 		formatShortIdentifier,
 		type ResearchUnderstanding,
 		type ResearchUnderstandingClaim,
-		type ResearchUnderstandingContext,
 		type ResearchUnderstandingCuration,
-		type ResearchUnderstandingEvidenceRef,
+		type ResearchUnderstandingPresentationEffect,
+		type ResearchUnderstandingPresentationEvidence,
+		type ResearchUnderstandingPresentationContext,
 		type ResearchUnderstandingFeedbackIssueType,
 		type ResearchUnderstandingFeedback,
-		type ResearchUnderstandingFeedbackStatus,
-		type ResearchUnderstandingRelation
+		type ResearchUnderstandingFeedbackStatus
 	} from '../../../_shared/researchView';
 
 	export let understanding: ResearchUnderstanding | null = null;
@@ -55,7 +55,7 @@
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
-	let selectedClaimId = '';
+	let selectedEffectId = '';
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
 	let curationStatement = '';
@@ -81,38 +81,48 @@
 	let feedbackError = '';
 	let lastFeedbackClaimId = '';
 
+	$: presentation = understanding?.presentation ?? null;
+	$: presentationSummary = presentation?.summary ?? null;
+	$: effectRows = presentation?.effects ?? [];
+	$: presentationEvidenceById = new Map(
+		(presentation?.evidence_items ?? []).map((item) => [item.evidence_ref_id, item])
+	);
+	$: presentationContextById = new Map(
+		(presentation?.context_summaries ?? []).map((item) => [item.context_id, item])
+	);
 	$: evidenceById = new Map(
 		(understanding?.evidence_refs ?? []).map((ref) => [ref.evidence_ref_id, ref])
 	);
-	$: contextById = new Map(
-		(understanding?.contexts ?? []).map((context) => [context.context_id, context])
-	);
 	$: claims = understanding?.claims ?? [];
+	$: claimById = new Map(claims.map((claim) => [claim.claim_id, claim]));
 	$: reviewQueueClaimIds = new Set(
 		claims
 			.filter((claim) => shouldReviewClaim(claim, feedbackByClaimId))
 			.map((claim) => claim.claim_id)
 	);
-	$: filteredClaims = claims.filter(
-		(claim) =>
-			(selectedClaimType === 'all' || claim.claim_type === selectedClaimType) &&
-			(selectedClaimStatus === 'all' || claim.status === selectedClaimStatus) &&
-			(!reviewQueueOnly || reviewQueueClaimIds.has(claim.claim_id))
+	$: filteredEffects = effectRows.filter(
+		(effect) =>
+			(selectedClaimType === 'all' || effect.claim_type === selectedClaimType) &&
+			(selectedClaimStatus === 'all' || effect.support_status === selectedClaimStatus) &&
+			(!reviewQueueOnly || effect.needs_review || reviewQueueClaimIds.has(effect.claim_id))
 	);
-	$: claimTypeCounts = countClaimsBy(claims, 'claim_type');
-	$: claimStatusCounts = countClaimsBy(claims, 'status');
+	$: claimTypeCounts = countEffectsBy(effectRows, 'claim_type');
+	$: claimStatusCounts = countEffectsBy(effectRows, 'support_status');
 	$: if (
 		understanding &&
-		filteredClaims.length &&
-		!filteredClaims.some((claim) => claim.claim_id === selectedClaimId)
+		filteredEffects.length &&
+		!filteredEffects.some((effect) => effect.effect_id === selectedEffectId)
 	) {
-		selectedClaimId = filteredClaims[0].claim_id;
+		selectedEffectId = filteredEffects[0].effect_id;
 	}
-	$: if (!filteredClaims.length && selectedClaimId) {
-		selectedClaimId = '';
+	$: if (!filteredEffects.length && selectedEffectId) {
+		selectedEffectId = '';
 	}
-	$: selectedClaim =
-		filteredClaims.find((claim) => claim.claim_id === selectedClaimId) ?? filteredClaims[0] ?? null;
+	$: selectedEffect =
+		filteredEffects.find((effect) => effect.effect_id === selectedEffectId) ??
+		filteredEffects[0] ??
+		null;
+	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
 	$: selectedScopeId = scopeId(understanding);
 	$: selectedCuration = selectedClaim ? curationsByClaimId.get(selectedClaim.claim_id) : null;
 	$: selectedFeedback = selectedClaim ? (feedbackByClaimId.get(selectedClaim.claim_id) ?? []) : [];
@@ -125,11 +135,8 @@
 				context_ids: selectedCuration?.curated_context_ids ?? selectedClaim.context_ids
 			}
 		: null;
-	$: selectedEvidenceRefs = displayClaim ? evidenceRefsForIds(displayClaim.evidence_ref_ids) : [];
-	$: selectedContextRefs = displayClaim ? contextRefsForIds(displayClaim.context_ids) : [];
-	$: selectedRelations = selectedClaim
-		? relatedRelationsForClaim(selectedClaim, understanding?.relations ?? [])
-		: [];
+	$: selectedEvidenceRefs = displayClaim ? presentationEvidenceForIds(displayClaim.evidence_ref_ids) : [];
+	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
 	$: selectedEvidenceIdSet = new Set(displayClaim?.evidence_ref_ids ?? []);
 	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
 		lastCurationClaimId = selectedClaim?.claim_id ?? '';
@@ -220,22 +227,6 @@
 		return String(value);
 	}
 
-	function flattenDisplayValues(value: unknown): string[] {
-		if (!hasDisplayValue(value)) return [];
-		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-			return [String(value)];
-		}
-		if (Array.isArray(value)) {
-			return value.flatMap((item) => flattenDisplayValues(item));
-		}
-		if (typeof value === 'object') {
-			return Object.values(value as Record<string, unknown>).flatMap((item) =>
-				flattenDisplayValues(item)
-			);
-		}
-		return [String(value)];
-	}
-
 	function listLabel(values: string[]) {
 		const cleaned = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 		return cleaned.length ? cleaned.join(', ') : $t('research.emptyValue');
@@ -255,13 +246,16 @@
 		return query ? `?${query}` : '';
 	}
 
-	function evidenceHref(ref: ResearchUnderstandingEvidenceRef) {
+	function evidenceHref(ref: ResearchUnderstandingPresentationEvidence) {
+		const rawRef = evidenceById.get(ref.evidence_ref_id);
 		if (ref.href) return ref.href;
+		if (rawRef?.href) return rawRef.href;
 		if (!collectionId || !ref.document_id) return '';
 		const params: [string, string][] = [];
-		const pageValue = displayValue(ref.locator.page);
-		const sourceRef = displayValue(ref.locator.source_ref);
-		const anchorId = ref.anchor_ids[0] ?? '';
+		const pageValue = ref.page || displayValue(rawRef?.locator.page);
+		const sourceRef = displayValue(rawRef?.locator.source_ref);
+		const anchorId = rawRef?.anchor_ids[0] ?? '';
+		params.push(['view', 'parsed-paper']);
 		if (pageValue) params.push(['page', pageValue]);
 		if (sourceRef) params.push(['source_ref', sourceRef]);
 		if (ref.evidence_ref_id) params.push(['evidence_id', ref.evidence_ref_id]);
@@ -273,11 +267,11 @@
 		})}${queryString(params)}`;
 	}
 
-	function evidenceMeta(ref: ResearchUnderstandingEvidenceRef) {
+	function evidenceMeta(ref: ResearchUnderstandingPresentationEvidence) {
 		return [
 			ref.source_kind,
 			ref.traceability_status,
-			ref.document_id ? formatShortIdentifier(ref.document_id) : ''
+			ref.page ? `p. ${ref.page}` : ''
 		]
 			.filter(Boolean)
 			.join(' · ');
@@ -285,30 +279,13 @@
 
 	function evidenceLabelsForIds(evidenceIds: string[], limit = 3) {
 		return evidenceIds
-			.map((id) => evidenceById.get(id)?.label || formatShortIdentifier(id))
+			.map((id) => presentationEvidenceById.get(id)?.title || evidenceById.get(id)?.label || '')
 			.filter(Boolean)
 			.slice(0, limit);
 	}
 
-	function contextLabelForIds(contextIds: string[]) {
-		const labels = contextIds
-			.map((id) => contextById.get(id))
-			.filter((context): context is ResearchUnderstandingContext => Boolean(context))
-			.flatMap((context) => [
-				...context.material_scope,
-				...context.property_scope,
-				...flattenDisplayValues(context.process_context),
-				...flattenDisplayValues(context.test_condition)
-			]);
-		return listLabel(labels.slice(0, 4));
-	}
-
-	function visibleRelations(currentUnderstanding: ResearchUnderstanding) {
-		return currentUnderstanding.relations.slice(0, 4);
-	}
-
 	function visibleEvidenceRefs(currentUnderstanding: ResearchUnderstanding) {
-		return currentUnderstanding.evidence_refs.slice(0, 5);
+		return currentUnderstanding.presentation.evidence_items.slice(0, 5);
 	}
 
 	function shouldReviewClaim(
@@ -327,17 +304,13 @@
 		);
 	}
 
-	function relationEvidenceLabels(relation: ResearchUnderstandingRelation) {
-		return evidenceLabelsForIds(relation.evidence_ref_ids, 2);
-	}
-
-	function countClaimsBy(
-		currentClaims: ResearchUnderstandingClaim[],
-		field: 'claim_type' | 'status'
+	function countEffectsBy(
+		currentEffects: ResearchUnderstandingPresentationEffect[],
+		field: 'claim_type' | 'support_status'
 	) {
-		const counts = new Map<string, number>([['all', currentClaims.length]]);
-		for (const claim of currentClaims) {
-			counts.set(claim[field], (counts.get(claim[field]) ?? 0) + 1);
+		const counts = new Map<string, number>([['all', currentEffects.length]]);
+		for (const effect of currentEffects) {
+			counts.set(effect[field], (counts.get(effect[field]) ?? 0) + 1);
 		}
 		return counts;
 	}
@@ -346,43 +319,16 @@
 		return `${label} ${count}`;
 	}
 
-	function evidenceRefsForIds(ids: string[]) {
+	function presentationEvidenceForIds(ids: string[]) {
 		return ids
-			.map((id) => evidenceById.get(id))
-			.filter((ref): ref is ResearchUnderstandingEvidenceRef => Boolean(ref));
+			.map((id) => presentationEvidenceById.get(id))
+			.filter((ref): ref is ResearchUnderstandingPresentationEvidence => Boolean(ref));
 	}
 
-	function contextRefsForIds(ids: string[]) {
+	function presentationContextsForIds(ids: string[]) {
 		return ids
-			.map((id) => contextById.get(id))
-			.filter((context): context is ResearchUnderstandingContext => Boolean(context));
-	}
-
-	function intersects(left: string[], right: string[]) {
-		const rightSet = new Set(right);
-		return left.some((item) => rightSet.has(item));
-	}
-
-	function relatedRelationsForClaim(
-		claim: ResearchUnderstandingClaim,
-		relations: ResearchUnderstandingRelation[]
-	) {
-		return relations.filter(
-			(relation) =>
-				intersects(claim.evidence_ref_ids, relation.evidence_ref_ids) ||
-				intersects(claim.context_ids, relation.context_ids) ||
-				intersects(claim.source_object_ids, relation.source_object_ids)
-		);
-	}
-
-	function contextRows(context: ResearchUnderstandingContext) {
-		return [
-			[$t('research.understanding.contextMaterial'), listLabel(context.material_scope)],
-			[$t('research.understanding.contextProperty'), listLabel(context.property_scope)],
-			[$t('research.understanding.contextProcess'), displayValue(context.process_context)],
-			[$t('research.understanding.contextTest'), displayValue(context.test_condition)],
-			[$t('research.understanding.limitations'), listLabel(context.limitations)]
-		].filter(([, value]) => hasDisplayValue(value));
+			.map((id) => presentationContextById.get(id))
+			.filter((context): context is ResearchUnderstandingPresentationContext => Boolean(context));
 	}
 
 	function scopeId(currentUnderstanding: ResearchUnderstanding | null) {
@@ -518,25 +464,25 @@
 			aria-label={$t('research.understanding.summary')}
 		>
 			<div>
-				<strong>{understanding.summary.claim_count}</strong>
+				<strong>{presentationSummary?.claim_count ?? understanding.summary.claim_count}</strong>
 				<span>{$t('research.understanding.claims')}</span>
 			</div>
 			<div>
-				<strong>{understanding.summary.relation_count}</strong>
+				<strong>{presentationSummary?.relation_count ?? understanding.summary.relation_count}</strong>
 				<span>{$t('research.understanding.relationsLabel')}</span>
 			</div>
 			<div>
-				<strong>{understanding.summary.evidence_ref_count}</strong>
+				<strong>{presentationSummary?.evidence_count ?? understanding.summary.evidence_ref_count}</strong>
 				<span>{$t('research.understanding.evidenceRefs')}</span>
 			</div>
 			<div>
-				<strong>{understanding.summary.context_count}</strong>
-				<span>{$t('research.understanding.contexts')}</span>
+				<strong>{presentationSummary?.review_queue_count ?? reviewQueueClaimIds.size}</strong>
+				<span>{$t('research.understanding.reviewQueue')}</span>
 			</div>
 		</div>
 
-		{#if understanding.claims.length || understanding.relations.length || understanding.evidence_refs.length}
-			{#if understanding.claims.length}
+		{#if effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
+			{#if effectRows.length}
 				<div
 					class="research-understanding-workbench__filters"
 					aria-label={$t('research.understanding.claimFilters')}
@@ -589,7 +535,7 @@
 								on:click={() => (reviewQueueOnly = !reviewQueueOnly)}
 							>
 								{$t('research.understanding.reviewQueueCount', {
-									count: reviewQueueClaimIds.size
+									count: presentationSummary?.review_queue_count ?? reviewQueueClaimIds.size
 								})}
 							</button>
 						</div>
@@ -608,39 +554,39 @@
 			<div class="research-understanding-workbench__grid">
 				<section
 					class="research-understanding-workbench__column"
-					aria-label={$t('research.understanding.claims')}
+					aria-label={$t('research.understanding.effectMap')}
 				>
 					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.claims')}</h4>
+						<h4>{$t('research.understanding.effectMap')}</h4>
 						<span>
 							{$t('research.understanding.filteredClaimCount', {
-								shown: filteredClaims.length,
-								total: understanding.claims.length
+								shown: filteredEffects.length,
+								total: effectRows.length
 							})}
 						</span>
 					</div>
-					{#each filteredClaims as claim (claim.claim_id)}
-						{@const curation = curationsByClaimId.get(claim.claim_id)}
-						{@const claimFeedback = feedbackByClaimId.get(claim.claim_id) ?? []}
-						{@const displayType = curation?.curated_claim_type ?? claim.claim_type}
-						{@const displayStatus = curation?.curated_status ?? claim.status}
-						{@const displayStatement = curation?.curated_statement ?? claim.statement}
-						{@const displayEvidenceIds = curation?.curated_evidence_ref_ids ?? claim.evidence_ref_ids}
-						{@const displayContextIds = curation?.curated_context_ids ?? claim.context_ids}
+					{#each filteredEffects as effect (effect.effect_id)}
+						{@const claim = claimById.get(effect.claim_id)}
+						{@const curation = claim ? curationsByClaimId.get(claim.claim_id) : null}
+						{@const claimFeedback = claim ? (feedbackByClaimId.get(claim.claim_id) ?? []) : []}
+						{@const displayType = curation?.curated_claim_type ?? effect.claim_type}
+						{@const displayStatus = curation?.curated_status ?? effect.support_status}
+						{@const displayStatement = curation?.curated_statement ?? effect.statement}
+						{@const displayEvidenceIds = curation?.curated_evidence_ref_ids ?? effect.evidence_ref_ids}
 						{@const labels = evidenceLabelsForIds(displayEvidenceIds)}
 						<button
 							type="button"
 							class="research-understanding-workbench__card research-understanding-workbench__card--claim"
-							class:research-understanding-workbench__card--selected={selectedClaim?.claim_id ===
-								claim.claim_id}
-							aria-pressed={selectedClaim?.claim_id === claim.claim_id}
-							on:click={() => (selectedClaimId = claim.claim_id)}
+							class:research-understanding-workbench__card--selected={selectedEffect?.effect_id ===
+								effect.effect_id}
+							aria-pressed={selectedEffect?.effect_id === effect.effect_id}
+							on:click={() => (selectedEffectId = effect.effect_id)}
 						>
 							<div class="research-understanding-workbench__meta">
 								<span>{claimTypeLabel(displayType)}</span>
 								<span>{statusLabel(displayStatus)}</span>
-								{#if claim.confidence !== null}
-									<span>{confidenceLabel(claim.confidence)}</span>
+								{#if effect.confidence !== null}
+									<span>{confidenceLabel(effect.confidence)}</span>
 								{/if}
 								{#if curation}
 									<span>{$t('research.understanding.curatedBadge')}</span>
@@ -653,8 +599,21 @@
 									</span>
 								{/if}
 							</div>
+							<strong>{effect.title}</strong>
 							<p>{displayStatement}</p>
-							{#if curation && curation.curated_statement !== claim.statement}
+							<div class="research-understanding-workbench__effect-stats">
+								<span>
+									{$t('research.understanding.paperCount', {
+										count: effect.paper_count
+									})}
+								</span>
+								<span>
+									{$t('research.understanding.evidenceCount', {
+										count: effect.evidence_count
+									})}
+								</span>
+							</div>
+							{#if curation && claim && curation.curated_statement !== claim.statement}
 								<small>
 									{$t('research.understanding.originalClaimPrefix')}
 									{claim.statement}
@@ -662,58 +621,66 @@
 							{/if}
 							{#if labels.length}
 								<div class="research-understanding-workbench__chips">
-									{#each labels as label (`${claim.claim_id}-${label}`)}
+									{#each labels as label, index (`${effect.effect_id}-${index}-${label}`)}
 										<span>{label}</span>
 									{/each}
 								</div>
 							{/if}
-							{#if displayContextIds.length}
+							{#if effect.context_summary}
 								<small>
 									{$t('research.understanding.contextPrefix')}
-									{contextLabelForIds(displayContextIds)}
+									{effect.context_summary}
 								</small>
 							{/if}
 						</button>
 					{:else}
 						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noClaims')}
+							{$t('research.understanding.noEffects')}
 						</div>
 					{/each}
 				</section>
 
 				<section
 					class="research-understanding-workbench__column"
-					aria-label={$t('research.understanding.relationsLabel')}
+					aria-label={$t('research.understanding.evidenceRefs')}
 				>
 					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.relationsLabel')}</h4>
-						<span>{$t('research.understanding.relatedToSelectedClaim')}</span>
+						<h4>{$t('research.understanding.evidenceRefs')}</h4>
+						<span>{$t('research.understanding.evidenceStripHint')}</span>
 					</div>
-					{#each selectedClaim ? selectedRelations : visibleRelations(understanding) as relation (relation.relation_id)}
-						{@const labels = relationEvidenceLabels(relation)}
-						<article
-							class="research-understanding-workbench__card research-understanding-workbench__card--relation"
-						>
-							<div class="research-understanding-workbench__meta">
-								<span>{relationLabel(relation.relation_type)}</span>
-								<span>{statusLabel(relation.status)}</span>
+					{#each selectedEffect ? selectedEvidenceRefs : visibleEvidenceRefs(understanding) as ref (ref.evidence_ref_id)}
+						{@const href = evidenceHref(ref)}
+						{#if href}
+							<a
+								class="research-understanding-workbench__evidence"
+								class:research-understanding-workbench__evidence--selected={selectedEvidenceIdSet.has(
+									ref.evidence_ref_id
+								)}
+								{href}
+							>
+								<strong>{ref.title}</strong>
+								<span>{evidenceMeta(ref)}</span>
+								{#if ref.quote}
+									<small>{ref.quote}</small>
+								{/if}
+							</a>
+						{:else}
+							<div
+								class="research-understanding-workbench__evidence"
+								class:research-understanding-workbench__evidence--selected={selectedEvidenceIdSet.has(
+									ref.evidence_ref_id
+								)}
+							>
+								<strong>{ref.title}</strong>
+								<span>{evidenceMeta(ref)}</span>
+								{#if ref.quote}
+									<small>{ref.quote}</small>
+								{/if}
 							</div>
-							<p>
-								<strong>{relation.subject}</strong>
-								<span>{relation.predicate}</span>
-								<strong>{relation.object}</strong>
-							</p>
-							{#if labels.length}
-								<div class="research-understanding-workbench__chips">
-									{#each labels as label (`${relation.relation_id}-${label}`)}
-										<span>{label}</span>
-									{/each}
-								</div>
-							{/if}
-						</article>
+						{/if}
 					{:else}
 						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noRelations')}
+							{$t('research.understanding.noEvidence')}
 						</div>
 					{/each}
 				</section>
@@ -722,8 +689,8 @@
 					class="research-understanding-workbench__column"
 					aria-label={$t('research.understanding.claimDetail')}
 				>
-					<h4>{$t('research.understanding.claimDetail')}</h4>
-					{#if selectedClaim}
+					<h4>{$t('research.understanding.effectDetail')}</h4>
+					{#if selectedEffect && selectedClaim}
 						<article class="research-understanding-workbench__detail">
 							<div class="research-understanding-workbench__meta">
 								<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
@@ -745,7 +712,30 @@
 									</span>
 								{/if}
 							</div>
+							<strong>{selectedEffect.title}</strong>
 							<p>{displayClaim?.statement ?? selectedClaim.statement}</p>
+							{#if selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction}
+								<div class="research-understanding-workbench__context">
+									{#if selectedEffect.variable_axis}
+										<div>
+											<span>{$t('research.understanding.variableAxis')}</span>
+											<p>{selectedEffect.variable_axis}</p>
+										</div>
+									{/if}
+									{#if selectedEffect.target_property}
+										<div>
+											<span>{$t('research.understanding.targetProperty')}</span>
+											<p>{selectedEffect.target_property}</p>
+										</div>
+									{/if}
+									{#if selectedEffect.effect_direction}
+										<div>
+											<span>{$t('research.understanding.effectDirection')}</span>
+											<p>{relationLabel(selectedEffect.effect_direction)}</p>
+										</div>
+									{/if}
+								</div>
+							{/if}
 
 							{#if selectedCuration}
 								<div class="research-understanding-workbench__detail-section">
@@ -786,7 +776,7 @@
 									{@const href = evidenceHref(ref)}
 									{#if href}
 										<a class="research-understanding-workbench__evidence" {href}>
-											<strong>{ref.label}</strong>
+											<strong>{ref.title}</strong>
 											<span>{evidenceMeta(ref)}</span>
 											{#if ref.quote}
 												<small>{ref.quote}</small>
@@ -794,7 +784,7 @@
 										</a>
 									{:else}
 										<div class="research-understanding-workbench__evidence">
-											<strong>{ref.label}</strong>
+											<strong>{ref.title}</strong>
 											<span>{evidenceMeta(ref)}</span>
 											{#if ref.quote}
 												<small>{ref.quote}</small>
@@ -813,12 +803,36 @@
 								{#each selectedContextRefs as context (context.context_id)}
 									<div class="research-understanding-workbench__context">
 										<strong>{context.label}</strong>
-										{#each contextRows(context) as [label, value] (`${context.context_id}-${label}`)}
+										{#if context.material_scope.length}
 											<div>
-												<span>{label}</span>
-												<p>{value}</p>
+												<span>{$t('research.understanding.contextMaterial')}</span>
+												<p>{listLabel(context.material_scope)}</p>
 											</div>
-										{/each}
+										{/if}
+										{#if context.property_scope.length}
+											<div>
+												<span>{$t('research.understanding.contextProperty')}</span>
+												<p>{listLabel(context.property_scope)}</p>
+											</div>
+										{/if}
+										{#if context.process_summary}
+											<div>
+												<span>{$t('research.understanding.contextProcess')}</span>
+												<p>{context.process_summary}</p>
+											</div>
+										{/if}
+										{#if context.test_summary}
+											<div>
+												<span>{$t('research.understanding.contextTest')}</span>
+												<p>{context.test_summary}</p>
+											</div>
+										{/if}
+										{#if context.limitations.length}
+											<div>
+												<span>{$t('research.understanding.limitations')}</span>
+												<p>{listLabel(context.limitations)}</p>
+											</div>
+										{/if}
 									</div>
 								{:else}
 									<div class="research-understanding-workbench__empty">
@@ -838,10 +852,10 @@
 										</div>
 									{/if}
 									{#if selectedClaim.source_object_ids.length}
-										<small>
-											{$t('research.understanding.sourceObjects')}
-											{listLabel(selectedClaim.source_object_ids)}
-										</small>
+										<details class="research-understanding-workbench__debug">
+											<summary>{$t('research.understanding.auditBinding')}</summary>
+											<small>{listLabel(selectedClaim.source_object_ids)}</small>
+										</details>
 									{/if}
 								</div>
 							{/if}
@@ -853,7 +867,12 @@
 								<h5>{$t('research.understanding.curationTitle')}</h5>
 								<label>
 									<span>{$t('research.understanding.curationClaimType')}</span>
-									<select bind:value={curationClaimType} disabled={curationSubmitting}>
+									<select
+										id={`${titleId}-curation-type`}
+										name="curation_claim_type"
+										bind:value={curationClaimType}
+										disabled={curationSubmitting}
+									>
 										{#each CURATION_CLAIM_TYPE_OPTIONS as type (type)}
 											<option value={type}>{claimTypeLabel(type)}</option>
 										{/each}
@@ -861,7 +880,12 @@
 								</label>
 								<label>
 									<span>{$t('research.understanding.curationStatus')}</span>
-									<select bind:value={curationStatus} disabled={curationSubmitting}>
+									<select
+										id={`${titleId}-curation-status`}
+										name="curation_status"
+										bind:value={curationStatus}
+										disabled={curationSubmitting}
+									>
 										{#each CURATION_STATUS_OPTIONS as status (status)}
 											<option value={status}>{statusLabel(status)}</option>
 										{/each}
@@ -870,6 +894,8 @@
 								<label>
 									<span>{$t('research.understanding.curationStatement')}</span>
 									<textarea
+										id={`${titleId}-curation-statement`}
+										name="curation_statement"
 										bind:value={curationStatement}
 										disabled={curationSubmitting}
 										maxlength="4000"
@@ -880,6 +906,8 @@
 								<label>
 									<span>{$t('research.understanding.curationNote')}</span>
 									<textarea
+										id={`${titleId}-curation-note`}
+										name="curation_note"
 										bind:value={curationNote}
 										disabled={curationSubmitting}
 										maxlength="2000"
@@ -889,6 +917,8 @@
 								<label>
 									<span>{$t('research.understanding.curationReviewer')}</span>
 									<input
+										id={`${titleId}-curation-reviewer`}
+										name="curation_reviewer"
 										bind:value={curationReviewer}
 										disabled={curationSubmitting}
 										maxlength="120"
@@ -951,7 +981,12 @@
 								<h5>{$t('research.understanding.feedbackTitle')}</h5>
 								<label>
 									<span>{$t('research.understanding.feedbackStatus')}</span>
-									<select bind:value={feedbackStatus} disabled={feedbackSubmitting}>
+									<select
+										id={`${titleId}-feedback-status`}
+										name="feedback_status"
+										bind:value={feedbackStatus}
+										disabled={feedbackSubmitting}
+									>
 										{#each FEEDBACK_STATUS_OPTIONS as status (status)}
 											<option value={status}>{feedbackStatusLabel(status)}</option>
 										{/each}
@@ -959,7 +994,12 @@
 								</label>
 								<label>
 									<span>{$t('research.understanding.feedbackIssue')}</span>
-									<select bind:value={feedbackIssue} disabled={feedbackSubmitting}>
+									<select
+										id={`${titleId}-feedback-issue`}
+										name="feedback_issue"
+										bind:value={feedbackIssue}
+										disabled={feedbackSubmitting}
+									>
 										{#each FEEDBACK_ISSUE_OPTIONS as issue (issue)}
 											<option value={issue}>{feedbackIssueLabel(issue)}</option>
 										{/each}
@@ -968,6 +1008,8 @@
 								<label>
 									<span>{$t('research.understanding.feedbackNote')}</span>
 									<textarea
+										id={`${titleId}-feedback-note`}
+										name="feedback_note"
 										bind:value={feedbackNote}
 										disabled={feedbackSubmitting}
 										maxlength="2000"
@@ -977,6 +1019,8 @@
 								<label>
 									<span>{$t('research.understanding.feedbackReviewer')}</span>
 									<input
+										id={`${titleId}-feedback-reviewer`}
+										name="feedback_reviewer"
 										bind:value={feedbackReviewer}
 										disabled={feedbackSubmitting}
 										maxlength="120"
@@ -1004,52 +1048,11 @@
 						</article>
 					{:else}
 						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noSelectedClaim')}
+							{$t('research.understanding.noSelectedEffect')}
 						</div>
 					{/if}
 				</section>
 			</div>
-
-			<section
-				class="research-understanding-workbench__evidence-strip"
-				aria-label={$t('research.understanding.evidenceRefs')}
-			>
-				<div class="research-understanding-workbench__column-heading">
-					<h4>{$t('research.understanding.evidenceRefs')}</h4>
-					<span>{$t('research.understanding.evidenceStripHint')}</span>
-				</div>
-				<div>
-					{#each visibleEvidenceRefs(understanding) as ref (ref.evidence_ref_id)}
-						{@const href = evidenceHref(ref)}
-						{#if href}
-							<a
-								class="research-understanding-workbench__evidence"
-								class:research-understanding-workbench__evidence--selected={selectedEvidenceIdSet.has(
-									ref.evidence_ref_id
-								)}
-								{href}
-							>
-								<strong>{ref.label}</strong>
-								<span>{evidenceMeta(ref)}</span>
-							</a>
-						{:else}
-							<div
-								class="research-understanding-workbench__evidence"
-								class:research-understanding-workbench__evidence--selected={selectedEvidenceIdSet.has(
-									ref.evidence_ref_id
-								)}
-							>
-								<strong>{ref.label}</strong>
-								<span>{evidenceMeta(ref)}</span>
-							</div>
-						{/if}
-					{:else}
-						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noEvidence')}
-						</div>
-					{/each}
-				</div>
-			</section>
 		{:else}
 			<div class="research-understanding-workbench__empty">
 				{$t('research.understanding.empty')}
@@ -1280,25 +1283,30 @@
 		overflow-wrap: anywhere;
 	}
 
-	.research-understanding-workbench__card--relation p {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		align-items: baseline;
-	}
-
-	.research-understanding-workbench__card--relation p span {
-		color: var(--text-secondary);
+	.research-understanding-workbench__card > strong,
+	.research-understanding-workbench__detail > strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 20px;
+		overflow-wrap: anywhere;
 	}
 
 	.research-understanding-workbench__detail,
 	.research-understanding-workbench__detail-section,
 	.research-understanding-workbench__context,
-	.research-understanding-workbench__feedback,
-	.research-understanding-workbench__evidence-strip {
+	.research-understanding-workbench__feedback {
 		display: grid;
 		gap: 10px;
 		min-width: 0;
+	}
+
+	.research-understanding-workbench__effect-stats {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__detail {
@@ -1438,17 +1446,6 @@
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 18px;
-	}
-
-	.research-understanding-workbench__evidence-strip {
-		border-top: 1px solid var(--border-default);
-		padding-top: 14px;
-	}
-
-	.research-understanding-workbench__evidence-strip > div:last-child {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-		gap: 10px;
 	}
 
 	.research-understanding-workbench__evidence--selected {

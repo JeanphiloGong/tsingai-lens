@@ -147,6 +147,133 @@ function understandingFixture(): ResearchUnderstanding {
 			relation_count: 1,
 			evidence_ref_count: 3,
 			context_count: 1
+		},
+		presentation: {
+			summary: {
+				title: 'LPBF 316L heat treatment',
+				material_scope: ['316L stainless steel'],
+				variable_axes: ['LPBF', 'annealing'],
+				property_scope: ['yield strength'],
+				claim_count: 3,
+				relation_count: 1,
+				evidence_count: 3,
+				context_count: 1,
+				review_queue_count: 2
+			},
+			effects: [
+				{
+					effect_id: 'effect_strength_supported',
+					claim_id: 'claim_strength_supported',
+					title: 'Heat treatment -> yield strength',
+					statement: 'Heat treatment changes LPBF 316L tensile response.',
+					claim_type: 'finding',
+					support_status: 'supported',
+					confidence: 0.9,
+					effect_direction: '',
+					variable_axis: 'heat treatment',
+					target_property: 'yield strength',
+					paper_count: 1,
+					evidence_count: 1,
+					context_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					evidence_ref_ids: ['ev_table_2'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: [],
+					needs_review: false,
+					warnings: []
+				},
+				{
+					effect_id: 'effect_mechanism_limited',
+					claim_id: 'claim_mechanism_limited',
+					title: 'Annealing -> yield strength',
+					statement: 'Annealing may reduce cellular substructure.',
+					claim_type: 'mechanism',
+					support_status: 'limited',
+					confidence: 0.64,
+					effect_direction: 'explains',
+					variable_axis: 'annealing',
+					target_property: 'yield strength',
+					paper_count: 1,
+					evidence_count: 1,
+					context_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					evidence_ref_ids: ['ev_section_3'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: ['rel_annealing_microstructure'],
+					needs_review: true,
+					warnings: ['needs_expert_review']
+				},
+				{
+					effect_id: 'effect_comparison_conflict',
+					claim_id: 'claim_comparison_conflict',
+					title: 'Heat treatment -> yield strength conflict',
+					statement: 'Strength trends conflict across reported heat treatments.',
+					claim_type: 'comparison',
+					support_status: 'conflicted',
+					confidence: 0.51,
+					effect_direction: 'compares',
+					variable_axis: 'heat treatment',
+					target_property: 'yield strength',
+					paper_count: 1,
+					evidence_count: 1,
+					context_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					evidence_ref_ids: ['ev_conflict'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: [],
+					needs_review: true,
+					warnings: ['conflicting_direction']
+				}
+			],
+			evidence_items: [
+				{
+					evidence_ref_id: 'ev_table_2',
+					document_id: 'doc_1',
+					title: 'P001 Table 2 / p. 5',
+					source_label: 'P001 Table 2',
+					source_kind: 'table',
+					page: '5',
+					quote: null,
+					value_summary: 'P001 Table 2',
+					traceability_status: 'traceable',
+					confidence: 0.9,
+					href: null
+				},
+				{
+					evidence_ref_id: 'ev_section_3',
+					document_id: 'doc_1',
+					title: 'P001 Section 3.2 / p. 7',
+					source_label: 'P001 Section 3.2',
+					source_kind: 'text_window',
+					page: '7',
+					quote: 'Annealing reduced cellular substructure.',
+					value_summary: 'P001 Section 3.2',
+					traceability_status: 'traceable',
+					confidence: 0.64,
+					href: null
+				},
+				{
+					evidence_ref_id: 'ev_conflict',
+					document_id: 'doc_2',
+					title: 'P002 Table 4 / p. 9',
+					source_label: 'P002 Table 4',
+					source_kind: 'table',
+					page: '9',
+					quote: null,
+					value_summary: 'P002 Table 4',
+					traceability_status: 'traceable',
+					confidence: 0.51,
+					href: null
+				}
+			],
+			context_summaries: [
+				{
+					context_id: 'ctx_heat_treatment',
+					label: 'Heat treatment scope',
+					material_scope: ['316L stainless steel'],
+					property_scope: ['yield strength'],
+					process_summary: 'LPBF, annealing',
+					test_summary: 'tensile test',
+					limitations: ['single paper mechanism claim']
+				}
+			]
 		}
 	};
 }
@@ -219,7 +346,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('filters claims by type and opens the selected claim detail', async () => {
+	it('filters effect rows by type and opens the selected effect detail', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
@@ -239,16 +366,18 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(browserPage.getByText('Heat treatment changes LPBF 316L tensile response.').first())
 			.not.toBeInTheDocument();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 		await expect.element(claimDetail.getByText('P001 Section 3.2').first()).toBeInTheDocument();
 		await expect
 			.element(claimDetail.getByText('Annealing reduced cellular substructure.'))
 			.toBeInTheDocument();
+		const evidenceLink = claimDetail.getByRole('link', { name: /P001 Section 3.2/ }).element();
+		expect(evidenceLink.getAttribute('href')).toContain('view=parsed-paper');
 		await expect
-			.element(claimDetail.getByText('process: LPBF; treatment: annealing'))
+			.element(claimDetail.getByText('LPBF, annealing'))
 			.toBeInTheDocument();
 		await expect.element(claimDetail.getByText('needs expert review')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('cellular substructure change')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Annealing -> yield strength')).toBeInTheDocument();
 	});
 
 	it('filters claims by support status for conflict review', async () => {
@@ -260,7 +389,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await browserPage.getByRole('button', { name: 'Conflicted 1' }).click();
 
 		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 		await expect
 			.element(claimDetail.getByText('Strength trends conflict across reported heat treatments.'))
 			.toBeInTheDocument();
@@ -268,14 +397,14 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('conflicting direction')).toBeInTheDocument();
 	});
 
-	it('submits expert feedback for the selected claim', async () => {
+	it('submits expert feedback for the selected effect', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
 		});
 
 		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByLabelText('Issue type').selectOptions('evidence_not_grounded');
 		await claimDetail
@@ -313,7 +442,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
 
@@ -334,18 +463,18 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('submits expert curation for the selected claim classification', async () => {
+	it('submits expert curation for the selected effect classification', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
 		});
 
 		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 		await claimDetail.getByLabelText('Curated type').selectOptions('mechanism');
 		await claimDetail.getByLabelText('Curated support status').selectOptions('limited');
 		await claimDetail
-			.getByLabelText('Curated claim')
+			.getByLabelText('Curated statement')
 			.fill('Annealing may reduce cellular substructure, but the mechanism evidence is limited.');
 		await claimDetail
 			.getByLabelText('Curation note')
@@ -380,7 +509,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('loads existing expert curation into the selected claim form', async () => {
+	it('loads existing expert curation into the selected effect form', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			if (path.endsWith('/research-understanding/curations') && init?.method !== 'POST') {
@@ -416,10 +545,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 
 		await expect
-			.element(claimDetail.getByLabelText('Curated claim'))
+			.element(claimDetail.getByLabelText('Curated statement'))
 			.toHaveValue('Existing expert curation: mechanism evidence remains limited.');
 		await expect.element(claimDetail.getByLabelText('Curated type')).toHaveValue('limitation');
 		await expect
@@ -434,7 +563,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('Original classification')).toBeInTheDocument();
 	});
 
-	it('loads existing expert feedback into the selected claim review history', async () => {
+	it('loads existing expert feedback into the selected effect review history', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -476,7 +605,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
-		const claimDetail = browserPage.getByLabelText('Claim detail');
+		const claimDetail = browserPage.getByLabelText('Effect review');
 
 		await expect.element(claimDetail.getByText('Feedback history')).toBeInTheDocument();
 		await expect
@@ -486,7 +615,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('materials-expert · 2026-06-18T09:00:00+00:00')).toBeInTheDocument();
 	});
 
-	it('filters the claim list to the review queue', async () => {
+	it('filters the effect list to the review queue', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'

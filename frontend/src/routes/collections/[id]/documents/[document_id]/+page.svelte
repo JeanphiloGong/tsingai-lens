@@ -71,9 +71,10 @@
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
 	$: requestedPageNumber = positivePageParam($page.url.searchParams.get('page'));
+	$: requestedReaderMode = readerModeParam($page.url.searchParams.get('view'));
 	$: requestedReturnTo = safeReturnTo($page.url.searchParams.get('return_to'));
 	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
-	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedPageNumber ?? ''}`;
+	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedPageNumber ?? ''}:${requestedReaderMode ?? ''}`;
 	$: hasMarkdownSource = Boolean(markdownForReader?.markdown);
 	$: hasDocumentSource = Boolean(contentForModel || markdownForReader?.markdown);
 	$: hasExtractionDetails = Boolean(
@@ -137,7 +138,10 @@
 		selectedMatrixValue = null;
 		extractionDetailsOpen = false;
 		readerMode =
-			currentRequestedEvidenceId || requestedAnchorId || requestedPageNumber ? 'pdf-preview' : 'parsed-paper';
+			requestedReaderMode ??
+			(currentRequestedEvidenceId || requestedAnchorId || requestedPageNumber
+				? 'pdf-preview'
+				: 'parsed-paper');
 
 		const researchPromise = loadPaperResearchView(currentCollectionId, currentDocumentId);
 		const [contentResult, markdownResult, resultsResult, semanticsResult] = await Promise.allSettled([
@@ -198,7 +202,7 @@
 		const sourceSpanId = `source-anchor-${requestedAnchorId}`;
 		if (!nextModel.source_anchors_by_span_id[sourceSpanId]) return false;
 		selectedSourceSpanId = sourceSpanId;
-		readerMode = 'pdf-preview';
+		readerMode = requestedReaderMode ?? 'pdf-preview';
 		sourceJumpToken += 1;
 		return true;
 	}
@@ -208,7 +212,7 @@
 		const sourceSpan = nextModel.source_spans.find((span) => span.page === requestedPageNumber);
 		if (!sourceSpan) return false;
 		selectedSourceSpanId = sourceSpan.id;
-		readerMode = 'pdf-preview';
+		readerMode = requestedReaderMode ?? 'pdf-preview';
 		sourceJumpToken += 1;
 		return true;
 	}
@@ -428,6 +432,13 @@
 		const value = Number(rawValue ?? NaN);
 		if (!Number.isInteger(value) || value < 1) return null;
 		return value;
+	}
+
+	function readerModeParam(rawValue: string | null): 'parsed-paper' | 'pdf-preview' | null {
+		if (rawValue === 'parsed-paper' || rawValue === 'pdf-preview') return rawValue;
+		if (rawValue === 'markdown') return 'parsed-paper';
+		if (rawValue === 'pdf') return 'pdf-preview';
+		return null;
 	}
 
 	function safeReturnTo(rawValue: string | null) {

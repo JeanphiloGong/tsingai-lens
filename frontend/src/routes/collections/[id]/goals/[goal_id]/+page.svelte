@@ -105,7 +105,6 @@
 		return (
 			value?.active_document_title ||
 			value?.active_source_filename ||
-			value?.active_document_id ||
 			$t('research.goalWorkspace.waitingDocument')
 		);
 	}
@@ -135,9 +134,6 @@
 			{#if goal}
 				<div class="goal-meta">
 					<span>{statusLabel(goal.status)}</span>
-					{#if goal.source_objective_id}
-						<span>{goal.source_objective_id}</span>
-					{/if}
 				</div>
 			{/if}
 		</div>

@@ -126,6 +126,43 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 								relation_count: 0,
 								evidence_ref_count: 0,
 								context_count: 0
+							},
+							presentation: {
+								summary: {
+									title: 'How does heat treatment affect strength?',
+									material_scope: ['316L stainless steel'],
+									variable_axes: ['heat treatment'],
+									property_scope: ['tensile strength'],
+									claim_count: 1,
+									relation_count: 0,
+									evidence_count: 0,
+									context_count: 0,
+									review_queue_count: 0
+								},
+								effects: [
+									{
+										effect_id: 'effect_claim_1',
+										claim_id: 'claim_1',
+										title: 'heat treatment -> tensile strength',
+										statement: 'Heat treatment changes tensile strength.',
+										claim_type: 'finding',
+										support_status: 'supported',
+										confidence: 0.84,
+										effect_direction: '',
+										variable_axis: 'heat treatment',
+										target_property: 'tensile strength',
+										paper_count: 0,
+										evidence_count: 0,
+										context_summary: '316L stainless steel, heat treatment',
+										evidence_ref_ids: [],
+										context_ids: [],
+										relation_ids: [],
+										needs_review: false,
+										warnings: []
+									}
+								],
+								evidence_items: [],
+								context_summaries: []
 							}
 						},
 						pipeline_nodes: {},
@@ -150,6 +187,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('obj_1')).not.toBeInTheDocument();
 	});
 
 	it('shows running goal analysis progress with the active paper', async () => {

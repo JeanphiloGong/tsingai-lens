@@ -589,6 +589,22 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 	});
 
+	it('keeps research-understanding evidence links in parsed paper mode', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&evidence_id=ev_1&anchor_id=anc_1&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
+		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
+	});
+
 	it('honors page and return_to query parameters for source review links', async () => {
 		setPage({
 			params: { id: 'col_123', document_id: 'doc_1' },

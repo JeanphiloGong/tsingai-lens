@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import logging
+from threading import Lock
+
 from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
@@ -10,6 +14,13 @@ from domain.core import ConfirmedGoal, ResearchUnderstanding
 
 router = APIRouter(prefix="/collections", tags=["goal-analysis"])
 goal_analysis_service = GoalAnalysisPipelineService()
+logger = logging.getLogger(__name__)
+_goal_analysis_executor = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="goal-analysis",
+)
+_active_goal_analysis_jobs: set[tuple[str, str]] = set()
+_active_goal_analysis_jobs_lock = Lock()
 
 
 @router.post(
@@ -23,10 +34,23 @@ async def run_confirmed_goal_analysis(
 ) -> GoalAnalysisResponse:
     try:
         payload = await run_in_threadpool(
-            _run_goal_analysis_blocking,
+            goal_analysis_service.start_goal_analysis,
             collection_id,
             goal_id,
         )
+        if _register_goal_analysis_job(collection_id, goal_id):
+            future = _goal_analysis_executor.submit(
+                _run_goal_analysis_blocking,
+                collection_id,
+                goal_id,
+            )
+            future.add_done_callback(
+                lambda completed: _finish_goal_analysis_job(
+                    collection_id,
+                    goal_id,
+                    completed,
+                )
+            )
     except ConfirmedGoalNotFoundError as exc:
         raise _goal_not_found(exc) from exc
     except FileNotFoundError as exc:
@@ -40,6 +64,25 @@ def _run_goal_analysis_blocking(collection_id: str, goal_id: str) -> dict:
     return asyncio.run(
         goal_analysis_service.run_goal_analysis(collection_id, goal_id)
     )
+
+
+def _register_goal_analysis_job(collection_id: str, goal_id: str) -> bool:
+    job_key = (collection_id, goal_id)
+    with _active_goal_analysis_jobs_lock:
+        if job_key in _active_goal_analysis_jobs:
+            return False
+        _active_goal_analysis_jobs.add(job_key)
+        return True
+
+
+def _finish_goal_analysis_job(collection_id: str, goal_id: str, future) -> None:
+    job_key = (collection_id, goal_id)
+    with _active_goal_analysis_jobs_lock:
+        _active_goal_analysis_jobs.discard(job_key)
+    try:
+        future.result()
+    except Exception:  # noqa: BLE001
+        logger.exception("background confirmed goal analysis failed")
 
 
 @router.get(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +36,7 @@ class ConfirmedGoalResponse(BaseModel):
     source_objective_id: str | None = None
     status: ConfirmedGoalStatus
     analysis_error: str | None = None
+    analysis_progress: dict[str, Any] | None = None
     created_at: str | None = None
     updated_at: str | None = None
 

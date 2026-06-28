@@ -453,6 +453,17 @@ export type ObjectiveResearchView = {
 };
 
 export type ConfirmedGoalStatus = 'pending' | 'running' | 'ready' | 'failed';
+export type GoalAnalysisProgress = {
+	phase: string;
+	current: number | null;
+	total: number | null;
+	unit: string | null;
+	message: string | null;
+	active_document_id: string | null;
+	active_document_title: string | null;
+	active_source_filename: string | null;
+	active_objective_id: string | null;
+};
 export type ConfirmedGoal = {
 	goal_id: string;
 	collection_id: string;
@@ -464,6 +475,7 @@ export type ConfirmedGoal = {
 	source_objective_id: string | null;
 	status: ConfirmedGoalStatus;
 	analysis_error: string | null;
+	analysis_progress: GoalAnalysisProgress | null;
 	created_at: string | null;
 	updated_at: string | null;
 };
@@ -1867,8 +1879,27 @@ function normalizeConfirmedGoal(value: unknown): ConfirmedGoal {
 		source_objective_id: nonEmptyText(record.source_objective_id),
 		status: normalizeConfirmedGoalStatus(record.status),
 		analysis_error: nonEmptyText(record.analysis_error),
+		analysis_progress: normalizeGoalAnalysisProgress(record.analysis_progress),
 		created_at: nonEmptyText(record.created_at),
 		updated_at: nonEmptyText(record.updated_at)
+	};
+}
+
+function normalizeGoalAnalysisProgress(value: unknown): GoalAnalysisProgress | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const phase = toText(record.phase);
+	if (!phase) return null;
+	return {
+		phase,
+		current: toOptionalNumber(record.current),
+		total: toOptionalNumber(record.total),
+		unit: nonEmptyText(record.unit),
+		message: nonEmptyText(record.message),
+		active_document_id: nonEmptyText(record.active_document_id),
+		active_document_title: nonEmptyText(record.active_document_title),
+		active_source_filename: nonEmptyText(record.active_source_filename),
+		active_objective_id: nonEmptyText(record.active_objective_id)
 	};
 }
 

@@ -411,6 +411,13 @@ Objective research-view 最小返回结构：
 - confirmed goal analysis 的 `POST` 是显式深度分析入口；失败只更新该
   `goal_id` 的 `status=failed` 和 `analysis_error`，不应让 collection build
   整体失败
+- confirmed goal analysis 的 `POST` 只启动后台分析并立即返回当前
+  `GoalAnalysisResponse`；前端应轮询 `GET .../analysis` 读取
+  `goal.status`、`goal.analysis_progress` 和最终 `understanding`
+- `goal.analysis_progress` 是可选对象，运行中可包含 `phase`、`current`、
+  `total`、`unit`、`message`、`active_document_id`、
+  `active_document_title`、`active_source_filename` 和
+  `active_objective_id`，用于展示当前阶段和正在分析的文献
 - `existing_comparison_rows` 当前是投影保留字段，不作为第一版 objective
   research-view 的事实来源
 

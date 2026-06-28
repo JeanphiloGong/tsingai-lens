@@ -2,39 +2,55 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
 	import {
 		fetchGoalAnalysis,
 		runGoalAnalysis,
-		type GoalAnalysis
+		type GoalAnalysis,
+		type GoalAnalysisProgress
 	} from '../../../../_shared/researchView';
+
+	const POLL_DELAY_MS = 2500;
 
 	let analysis: GoalAnalysis | null = null;
 	let loading = false;
 	let running = false;
 	let error = '';
 	let loadedKey = '';
+	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$: collectionId = $page.params.id ?? '';
 	$: goalId = $page.params.goal_id ?? '';
 	$: loadKey = `${collectionId}:${goalId}`;
 	$: goal = analysis?.goal ?? null;
 	$: understanding = analysis?.understanding ?? null;
+	$: progress = goal?.analysis_progress ?? null;
+	$: isAnalysisRunning = goal?.status === 'running';
+	$: progressPercent = progressPercentLabel(progress);
+	$: currentDocumentLabel = progressDocumentLabel(progress);
 	$: if (browser && collectionId && goalId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
+		clearPoll();
 		void loadAnalysis();
 	}
+
+	onDestroy(() => {
+		clearPoll();
+	});
 
 	async function loadAnalysis() {
 		loading = true;
 		error = '';
 		try {
 			analysis = await fetchGoalAnalysis(collectionId, goalId);
+			schedulePollIfRunning();
 		} catch (err) {
 			analysis = null;
 			error = errorMessage(err);
+			clearPoll();
 		} finally {
 			loading = false;
 		}
@@ -45,16 +61,58 @@
 		error = '';
 		try {
 			analysis = await runGoalAnalysis(collectionId, goalId);
+			schedulePollIfRunning();
 		} catch (err) {
 			error = errorMessage(err);
+			clearPoll();
 		} finally {
 			running = false;
+		}
+	}
+
+	function clearPoll() {
+		if (pollTimer) {
+			clearTimeout(pollTimer);
+			pollTimer = null;
+		}
+	}
+
+	function schedulePollIfRunning() {
+		clearPoll();
+		if (!browser || analysis?.goal.status !== 'running') return;
+		pollTimer = setTimeout(() => {
+			void refreshAnalysis();
+		}, POLL_DELAY_MS);
+	}
+
+	async function refreshAnalysis() {
+		try {
+			analysis = await fetchGoalAnalysis(collectionId, goalId);
+			error = '';
+			schedulePollIfRunning();
+		} catch (err) {
+			error = errorMessage(err);
+			clearPoll();
 		}
 	}
 
 	function statusLabel(status: string | null | undefined) {
 		if (!status) return $t('research.emptyValue');
 		return status.replace(/_/g, ' ');
+	}
+
+	function progressDocumentLabel(value: GoalAnalysisProgress | null) {
+		return (
+			value?.active_document_title ||
+			value?.active_source_filename ||
+			value?.active_document_id ||
+			$t('research.goalWorkspace.waitingDocument')
+		);
+	}
+
+	function progressPercentLabel(value: GoalAnalysisProgress | null) {
+		if (!value?.current || !value.total || value.total <= 0) return '';
+		return `${value.current}/${value.total} ${value.unit ?? ''}`.trim();
 	}
 </script>
 
@@ -90,10 +148,12 @@
 			<button
 				class="btn btn--primary btn--small"
 				type="button"
-				disabled={running}
+				disabled={running || isAnalysisRunning}
 				on:click={rerunAnalysis}
 			>
-				{running ? $t('research.objectives.analyzing') : $t('research.objectives.confirmAndAnalyze')}
+				{running || isAnalysisRunning
+					? $t('research.objectives.analyzing')
+					: $t('research.objectives.confirmAndAnalyze')}
 			</button>
 		</div>
 	</header>
@@ -113,6 +173,31 @@
 			<p>{$t('research.objectiveWorkspace.emptyBody')}</p>
 		</section>
 	{:else}
+		{#if isAnalysisRunning}
+			<section class="goal-progress" aria-live="polite" aria-busy="true">
+				<div>
+					<p class="goal-progress__eyebrow">{$t('research.goalWorkspace.progressEyebrow')}</p>
+					<h3>{$t('research.goalWorkspace.progressTitle')}</h3>
+					<p>{progress?.message ?? $t('research.goalWorkspace.progressBody')}</p>
+				</div>
+				<div class="goal-progress__grid">
+					<div>
+						<span>{$t('research.goalWorkspace.phase')}</span>
+						<strong>{statusLabel(progress?.phase ?? 'running')}</strong>
+					</div>
+					<div>
+						<span>{$t('research.goalWorkspace.currentDocument')}</span>
+						<strong>{currentDocumentLabel}</strong>
+					</div>
+					{#if progressPercent}
+						<div>
+							<span>{$t('research.goalWorkspace.stepProgress')}</span>
+							<strong>{progressPercent}</strong>
+						</div>
+					{/if}
+				</div>
+			</section>
+		{/if}
 		<ResearchUnderstandingWorkbench
 			{understanding}
 			{collectionId}
@@ -150,7 +235,8 @@
 	}
 
 	.goal-header,
-	.goal-state {
+	.goal-state,
+	.goal-progress {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-lg);
 		background: var(--surface-card);
@@ -209,6 +295,65 @@
 		color: var(--text-secondary);
 	}
 
+	.goal-progress {
+		display: grid;
+		gap: 18px;
+		padding: 22px 24px;
+	}
+
+	.goal-progress__eyebrow {
+		margin: 0 0 6px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.goal-progress h3 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 18px;
+		line-height: 26px;
+	}
+
+	.goal-progress p {
+		margin: 8px 0 0;
+		color: var(--text-secondary);
+	}
+
+	.goal-progress__grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.goal-progress__grid div {
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--bg-subtle);
+	}
+
+	.goal-progress__grid span,
+	.goal-progress__grid strong {
+		display: block;
+	}
+
+	.goal-progress__grid span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.goal-progress__grid strong {
+		margin-top: 4px;
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 20px;
+	}
+
 	.goal-state--error {
 		border-color: rgba(185, 28, 28, 0.28);
 		background: rgba(254, 242, 242, 0.72);
@@ -217,6 +362,10 @@
 	@media (max-width: 760px) {
 		.goal-header {
 			display: grid;
+		}
+
+		.goal-progress__grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

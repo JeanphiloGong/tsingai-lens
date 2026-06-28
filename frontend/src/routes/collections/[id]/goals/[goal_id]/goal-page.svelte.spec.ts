@@ -87,6 +87,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 							source_objective_id: 'obj_1',
 							status: 'ready',
 							analysis_error: null,
+							analysis_progress: null,
 							created_at: null,
 							updated_at: null
 						},
@@ -149,5 +150,59 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();
+	});
+
+	it('shows running goal analysis progress with the active paper', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request) => {
+			const path = requestPath(input);
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal: {
+							goal_id: 'goal_1',
+							collection_id: 'col_123',
+							question: 'How does heat treatment affect strength?',
+							source_type: 'objective_candidate',
+							material_hints: ['316L stainless steel'],
+							process_hints: ['heat treatment'],
+							property_hints: ['yield strength'],
+							source_objective_id: 'obj_1',
+							status: 'running',
+							analysis_error: null,
+							analysis_progress: {
+								phase: 'objective_evidence_routing_started',
+								current: 3,
+								total: 6,
+								unit: 'frames',
+								message: 'Routing source blocks and tables.',
+								active_document_id: 'doc_1',
+								active_document_title: 'Heat treatment study',
+								active_source_filename: 'heat-treatment.pdf',
+								active_objective_id: 'obj_1'
+							},
+							created_at: null,
+							updated_at: null
+						},
+						understanding: null,
+						pipeline_nodes: {},
+						errors: [],
+						warnings: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Analyzing this research goal' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Heat treatment study')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('3/6 frames')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Analyzing...' }))
+			.toBeDisabled();
 	});
 });

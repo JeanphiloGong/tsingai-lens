@@ -75,6 +75,7 @@
 		try {
 			const goal = await createConfirmedGoalFromObjective(collectionId, objective);
 			await runGoalAnalysis(collectionId, goal.goal_id);
+			analyzingObjectiveId = '';
 			await goto(
 				resolve('/collections/[id]/goals/[goal_id]', {
 					id: collectionId,

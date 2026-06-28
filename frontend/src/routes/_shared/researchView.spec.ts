@@ -18,6 +18,7 @@ const {
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
 	fetchDocumentResearchView,
+	fetchGoalAnalysis,
 	fetchObjectiveResearchView,
 	fetchMaterialResearchView,
 	formatShortIdentifier,
@@ -225,6 +226,51 @@ describe('research view shared helpers', () => {
 		expect(objectiveView.paper_frames[0].frame_id).toBe('opf_1');
 		expect(objectiveView.understanding?.state).toBe('limited');
 		expect(objectiveView.understanding?.claims[0].statement).toBe('Current evidence is limited.');
+	});
+
+	it('normalizes confirmed goal analysis progress', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			goal: {
+				goal_id: 'goal_1',
+				collection_id: 'col_123',
+				question: 'How does heat treatment affect strength?',
+				source_type: 'objective_candidate',
+				material_hints: ['316L stainless steel'],
+				process_hints: ['heat treatment'],
+				property_hints: ['yield strength'],
+				source_objective_id: 'obj_1',
+				status: 'running',
+				analysis_error: null,
+				analysis_progress: {
+					phase: 'objective_evidence_routing_started',
+					current: '3',
+					total: 6,
+					unit: 'frames',
+					message: 'Routing source blocks and tables.',
+					active_document_id: 'doc_1',
+					active_document_title: 'Heat treatment study',
+					active_source_filename: 'heat-treatment.pdf',
+					active_objective_id: 'obj_1'
+				}
+			},
+			understanding: null,
+			pipeline_nodes: {},
+			errors: [],
+			warnings: []
+		});
+
+		const analysis = await fetchGoalAnalysis('col_123', 'goal_1');
+
+		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/goals/goal_1/analysis');
+		expect(analysis.goal.status).toBe('running');
+		expect(analysis.goal.analysis_progress).toMatchObject({
+			phase: 'objective_evidence_routing_started',
+			current: 3,
+			total: 6,
+			unit: 'frames',
+			active_document_title: 'Heat treatment study'
+		});
 	});
 
 	it('posts research understanding feedback through the same-origin collection contract', async () => {

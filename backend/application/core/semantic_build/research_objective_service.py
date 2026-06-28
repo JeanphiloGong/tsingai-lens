@@ -900,6 +900,8 @@ class ResearchObjectiveService:
                 unit="documents",
                 message="Scanning papers for candidate research objectives.",
                 active_document_id=document.document_id,
+                active_document_title=getattr(document, "title", None),
+                active_source_filename=self._resolve_source_filename(document),
             )
             document_blocks = blocks_by_document_id.get(document.document_id, [])
             document_tables = tables_by_document_id.get(document.document_id, [])
@@ -1630,6 +1632,19 @@ class ResearchObjectiveService:
             }
         return metadata
 
+    def _progress_document_metadata(
+        self,
+        *,
+        document_trees_by_document_id: dict[str, SourceDocumentTree],
+    ) -> dict[str, dict[str, str | None]]:
+        return {
+            document_id: {
+                "title": _normalize_text(tree.root.title),
+                "source_filename": None,
+            }
+            for document_id, tree in document_trees_by_document_id.items()
+        }
+
     def _build_objective_paper_frames(
         self,
         *,
@@ -1670,6 +1685,8 @@ class ResearchObjectiveService:
             for document_position, document in enumerate(documents, start=1):
                 completed_frame_requests += 1
                 document_id = str(getattr(document, "document_id", "") or "")
+                document_title = _normalize_text(getattr(document, "title", None))
+                source_filename = self._resolve_source_filename(document)
                 self._notify_progress(
                     progress_callback,
                     phase="objective_paper_framing_started",
@@ -1678,6 +1695,8 @@ class ResearchObjectiveService:
                     unit="frames",
                     message="Checking each paper against each research objective.",
                     active_document_id=document_id,
+                    active_document_title=document_title,
+                    active_source_filename=source_filename,
                     active_objective_id=objective.objective_id,
                 )
                 tables = tables_by_document_id.get(document_id, [])
@@ -1797,7 +1816,11 @@ class ResearchObjectiveService:
             len(objective_paper_frames),
         )
         frame_count = len(objective_paper_frames)
+        document_metadata = self._progress_document_metadata(
+            document_trees_by_document_id=document_trees_by_document_id,
+        )
         for frame_position, frame in enumerate(objective_paper_frames, start=1):
+            frame_document_metadata = document_metadata.get(frame.document_id, {})
             self._notify_progress(
                 progress_callback,
                 phase="objective_evidence_routing_started",
@@ -1806,6 +1829,8 @@ class ResearchObjectiveService:
                 unit="frames",
                 message="Routing source blocks and tables for objective-scoped extraction.",
                 active_document_id=frame.document_id,
+                active_document_title=frame_document_metadata.get("title"),
+                active_source_filename=frame_document_metadata.get("source_filename"),
                 active_objective_id=frame.objective_id,
             )
             logger.info(
@@ -2420,7 +2445,11 @@ class ResearchObjectiveService:
         units: list[ObjectiveEvidenceUnit] = []
         seen: set[str] = set()
         document_state_units: dict[tuple[str, str], list[ObjectiveEvidenceUnit]] = {}
+        document_metadata = self._progress_document_metadata(
+            document_trees_by_document_id=document_trees_by_document_id,
+        )
         for route_position, route in enumerate(extractable_routes, start=1):
+            route_document_metadata = document_metadata.get(route.document_id, {})
             self._notify_progress(
                 progress_callback,
                 phase="objective_evidence_units_started",
@@ -2429,6 +2458,8 @@ class ResearchObjectiveService:
                 unit="routes",
                 message="Extracting objective evidence units from routed sources.",
                 active_document_id=route.document_id,
+                active_document_title=route_document_metadata.get("title"),
+                active_source_filename=route_document_metadata.get("source_filename"),
                 active_objective_id=route.objective_id,
             )
             objective = objective_by_id.get(route.objective_id)

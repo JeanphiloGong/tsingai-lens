@@ -212,6 +212,7 @@ class ConfirmedGoal:
     source_objective_id: str | None
     status: str
     analysis_error: str | None
+    analysis_progress: dict[str, Any] | None
     created_at: str | None
     updated_at: str | None
 
@@ -244,6 +245,9 @@ class ConfirmedGoal:
                 default="pending",
             ),
             analysis_error=_normalize_text(payload.get("analysis_error")),
+            analysis_progress=_normalize_optional_mapping(
+                payload.get("analysis_progress")
+            ),
             created_at=_normalize_text(payload.get("created_at")),
             updated_at=_normalize_text(payload.get("updated_at")),
         )
@@ -260,6 +264,11 @@ class ConfirmedGoal:
             "source_objective_id": self.source_objective_id,
             "status": self.status,
             "analysis_error": self.analysis_error,
+            "analysis_progress": (
+                dict(self.analysis_progress)
+                if self.analysis_progress is not None
+                else None
+            ),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -721,6 +730,12 @@ def _normalize_mapping(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
     return {str(key): item for key, item in value.items()}
+
+
+def _normalize_optional_mapping(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return _normalize_mapping(value)
 
 
 def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:

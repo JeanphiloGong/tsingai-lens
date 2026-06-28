@@ -161,6 +161,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					source_objective_id: 'obj_heat_strength',
 					status: 'pending',
 					analysis_error: null,
+					analysis_progress: null,
 					created_at: null,
 					updated_at: null
 				});
@@ -181,8 +182,13 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 						process_hints: ['heat treatment'],
 						property_hints: ['yield strength'],
 						source_objective_id: 'obj_heat_strength',
-						status: 'ready',
+						status: 'running',
 						analysis_error: null,
+						analysis_progress: {
+							phase: 'queued',
+							unit: 'steps',
+							message: 'Goal analysis is queued.'
+						},
 						created_at: null,
 						updated_at: null
 					},

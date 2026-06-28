@@ -561,6 +561,10 @@ def test_sqlite_core_fact_repository_round_trips_confirmed_goals(tmp_path):
             "property_hints": ["relative density"],
             "source_objective_id": "obj_density",
             "status": "pending",
+            "analysis_progress": {
+                "phase": "queued",
+                "unit": "steps",
+            },
         }
     )
 
@@ -578,6 +582,7 @@ def test_sqlite_core_fact_repository_round_trips_confirmed_goals(tmp_path):
     assert restored.property_hints == ("relative density",)
     assert restored.source_objective_id == "obj_density"
     assert restored.status == "pending"
+    assert restored.analysis_progress == {"phase": "queued", "unit": "steps"}
     assert listed == (restored,)
 
     repository.upsert_confirmed_goal(
@@ -586,6 +591,12 @@ def test_sqlite_core_fact_repository_round_trips_confirmed_goals(tmp_path):
                 **restored.to_record(),
                 "status": "running",
                 "analysis_error": "temporary failure",
+                "analysis_progress": {
+                    "phase": "objective_evidence_routing_started",
+                    "current": 1,
+                    "total": 2,
+                    "unit": "frames",
+                },
             }
         )
     )
@@ -594,6 +605,12 @@ def test_sqlite_core_fact_repository_round_trips_confirmed_goals(tmp_path):
     assert updated is not None
     assert updated.status == "running"
     assert updated.analysis_error == "temporary failure"
+    assert updated.analysis_progress == {
+        "phase": "objective_evidence_routing_started",
+        "current": 1,
+        "total": 2,
+        "unit": "frames",
+    }
 
 
 def _comparable_result(value: int = 620) -> ComparableResult:

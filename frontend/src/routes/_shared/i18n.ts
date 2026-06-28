@@ -801,7 +801,15 @@ const translations: Record<Language, Translations> = {
 				}
 			},
 			goalWorkspace: {
-				eyebrow: 'Confirmed goal'
+				eyebrow: 'Confirmed goal',
+				progressEyebrow: 'Goal analysis',
+				progressTitle: 'Analyzing this research goal',
+				progressBody:
+					'Lens is extracting evidence, building logic chains, and projecting research understanding for this goal.',
+				phase: 'Current phase',
+				currentDocument: 'Current paper',
+				stepProgress: 'Step progress',
+				waitingDocument: 'Waiting for paper context'
 			},
 			paperMaterials: {
 				title: 'Materials in this paper'
@@ -3335,7 +3343,14 @@ const translations: Record<Language, Translations> = {
 				}
 			},
 			goalWorkspace: {
-				eyebrow: '已确认目标'
+				eyebrow: '已确认目标',
+				progressEyebrow: '目标分析',
+				progressTitle: '正在分析该研究目标',
+				progressBody: '系统正在围绕该目标抽取证据、构建逻辑链并生成研究理解。',
+				phase: '当前阶段',
+				currentDocument: '当前文献',
+				stepProgress: '阶段进度',
+				waitingDocument: '等待文献信息'
 			},
 			paperMaterials: {
 				title: '本文献中的材料'

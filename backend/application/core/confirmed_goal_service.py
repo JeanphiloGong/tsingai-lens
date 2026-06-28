@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from domain.core import ConfirmedGoal, ResearchObjective, ResearchUnderstanding
 from domain.ports import CoreFactRepository
 from infra.persistence.factory import build_core_fact_repository
@@ -70,12 +72,31 @@ class ConfirmedGoalService:
         goal_id: str,
         status: str,
         analysis_error: str | None = None,
+        analysis_progress: dict[str, Any] | None = None,
     ) -> ConfirmedGoal:
         goal = self.get_goal(collection_id, goal_id)
         payload = {
             **goal.to_record(),
             "status": status,
             "analysis_error": analysis_error,
+            "analysis_progress": analysis_progress,
+            "updated_at": None,
+        }
+        return self.repository.upsert_confirmed_goal(
+            ConfirmedGoal.from_mapping(payload)
+        )
+
+    def update_goal_progress(
+        self,
+        *,
+        collection_id: str,
+        goal_id: str,
+        analysis_progress: dict[str, Any],
+    ) -> ConfirmedGoal:
+        goal = self.get_goal(collection_id, goal_id)
+        payload = {
+            **goal.to_record(),
+            "analysis_progress": analysis_progress,
             "updated_at": None,
         }
         return self.repository.upsert_confirmed_goal(

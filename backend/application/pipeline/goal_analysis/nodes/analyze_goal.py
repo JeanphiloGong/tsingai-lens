@@ -7,7 +7,10 @@ def run(context: GoalAnalysisContext) -> dict:
     goal = context.state["goal"]
     understanding = context.services[
         "research_objective_service"
-    ].analyze_confirmed_goal(goal)
+    ].analyze_confirmed_goal(
+        goal,
+        progress_callback=context.services.get("goal_progress_callback"),
+    )
     context.state["understanding"] = understanding
     return {
         "goal_id": goal.goal_id,

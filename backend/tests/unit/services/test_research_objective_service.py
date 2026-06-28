@@ -282,7 +282,6 @@ class _ObjectiveExtractor:
                     StructuredObjectiveEvidenceRoute(
                         role="low_value_or_irrelevant",
                         extractable=False,
-                        reason="Excluded by objective paper frame.",
                         confidence=0.7,
                     )
                 )
@@ -292,7 +291,6 @@ class _ObjectiveExtractor:
                     StructuredObjectiveEvidenceRoute(
                         role="process_or_treatment",
                         extractable=True,
-                        reason="Text window is in a relevant objective section.",
                         confidence=0.72,
                     )
                 )
@@ -327,7 +325,6 @@ class _ObjectiveExtractor:
                 StructuredObjectiveEvidenceRoute(
                     role=role,
                     extractable=True,
-                    reason="Table is relevant for this objective.",
                     confidence=0.82,
                 )
             )
@@ -401,6 +398,15 @@ class _ObjectiveExtractor:
                 ]
             )
         return StructuredObjectiveEvidenceUnits()
+
+
+class _FailingRouteExtractor(_ObjectiveExtractor):
+    def route_objective_evidence(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveEvidenceRoutes:
+        self.route_payloads.append(payload)
+        raise RuntimeError("route model failed")
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -6680,6 +6686,78 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
     assert route_payload["current_source"]["row_count"] == 200
 
 
+def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "question": "How does heat treatment affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["yield strength"],
+        }
+    )
+    long_text = "Heat treatment changed yield strength. " + ("x" * 1000)
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("results-node",),
+                node_type="document",
+                order=0,
+            ),
+            "results-node": SourceDocumentNode(
+                node_id="results-node",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=(),
+                node_type="paragraph",
+                order=100,
+                text=long_text,
+                heading_path=("Results",),
+                source_ref_kind="block",
+                source_ref_id="results",
+            ),
+        },
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_contexts=(),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    current_source = extractor.route_payloads[0]["current_source"]
+    assert "text" not in current_source
+    assert current_source["text_hint"] == long_text[:320]
+    assert len(current_source["text_hint"]) == 320
+
+
 def test_research_objective_routing_builds_text_candidates_from_document_tree(tmp_path):
     service = ResearchObjectiveService(
         collection_service=CollectionService(tmp_path / "collections"),
@@ -6989,8 +7067,8 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
         payload["current_source"]["source_ref"]
         for payload in extractor.route_payloads
     ]
-    assert len(routed_refs) == 12
-    assert routed_refs == [f"block-{index}" for index in range(12)]
+    assert len(routed_refs) == 8
+    assert routed_refs == [f"block-{index}" for index in range(8)]
 
 
 def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
@@ -7068,7 +7146,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
         payload["current_source"]["source_ref"]
         for payload in extractor.route_payloads
     ]
-    assert len(routed_refs) == 12
+    assert len(routed_refs) == 8
     assert routed_refs[-1] == "block-44"
     assert routed_refs == sorted(
         routed_refs,
@@ -8079,6 +8157,131 @@ def test_confirmed_goal_analysis_builds_objective_id_for_user_input_goal():
     assert objective.material_scope == ("316L stainless steel",)
     assert objective.process_axes == ("coating",)
     assert objective.property_axes == ("corrosion resistance",)
+
+
+def test_confirmed_goal_analysis_persists_frames_before_routing_failure(tmp_path):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Goal stage retry")
+    collection_id = collection["collection_id"]
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        structured_extractor=_ObjectiveExtractor(),
+    )
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "LPBF 316L Heat Treatment Corrosion Study",
+                    "text": "LPBF 316L was heat treated and corrosion current was measured.",
+                    "metadata": {"source_filename": "paper-1.pdf"},
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "b1",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "LPBF 316L was heat treated.",
+                    "block_order": 1,
+                }
+            ],
+            tables=[
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "caption_text": "Corrosion current results",
+                    "column_headers": ["sample", "corrosion current"],
+                    "table_matrix": [
+                        ["sample", "corrosion current"],
+                        ["as-built", "1.2 uA/cm2"],
+                    ],
+                }
+            ],
+        ),
+    )
+    _seed_document_profiles(service, collection_id)
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj_corrosion",
+            "question": "How does heat treatment affect corrosion current?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["LPBF", "heat treatment"],
+            "property_axes": ["corrosion current"],
+            "comparison_intent": "Compare corrosion current before and after heat treatment.",
+            "seed_document_ids": ["paper-1"],
+            "confidence": 0.9,
+        }
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "collection_id": collection_id,
+            "source_filename": "paper-1.pdf",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["LPBF", "heat treatment"],
+            "candidate_properties": ["corrosion current"],
+            "changed_variables": ["heat treatment"],
+            "possible_objectives": [objective.question],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "material_scope": ["316L stainless steel"],
+            "process_context_axes": ["LPBF"],
+            "variable_process_axes": ["heat treatment"],
+            "target_property_axes": ["corrosion current"],
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        (paper_skim,),
+        (objective,),
+        (objective_context,),
+        (),
+        (),
+        (),
+        (),
+    )
+    goal = ConfirmedGoal.from_mapping(
+        {
+            "collection_id": collection_id,
+            "goal_id": "goal_corrosion",
+            "question": objective.question,
+            "source_type": "objective_candidate",
+            "source_objective_id": objective.objective_id,
+        }
+    )
+
+    service._structured_extractor = _FailingRouteExtractor()
+    try:
+        service.analyze_confirmed_goal(goal)
+    except RuntimeError as exc:
+        assert str(exc) == "route model failed"
+    else:  # pragma: no cover - defensive test guard
+        raise AssertionError("expected route failure")
+
+    facts_after_failure = service.core_fact_repository.read_collection_facts(collection_id)
+    assert len(facts_after_failure.objective_paper_frames) == 1
+    assert facts_after_failure.objective_evidence_routes == ()
+
+    retry_extractor = _ObjectiveExtractor()
+    service._structured_extractor = retry_extractor
+    understanding = service.analyze_confirmed_goal(goal)
+
+    assert understanding.scope.scope_type == "goal"
+    assert len(retry_extractor.frame_payloads) == 0
+    assert retry_extractor.route_payloads
+    facts_after_retry = service.core_fact_repository.read_collection_facts(collection_id)
+    assert facts_after_retry.objective_paper_frames == facts_after_failure.objective_paper_frames
+    assert facts_after_retry.objective_evidence_routes
+    assert facts_after_retry.objective_evidence_units
+    assert facts_after_retry.objective_logic_chains
 
 
 def _build_duplicate_paper_objectives(

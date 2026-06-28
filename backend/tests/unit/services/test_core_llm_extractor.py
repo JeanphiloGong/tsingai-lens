@@ -364,16 +364,15 @@ def test_core_llm_extractor_validates_objective_paper_frame_response():
 def test_core_llm_extractor_validates_objective_evidence_routes_response():
     client = _FakeOpenAIClient(
         """
-        {
-          "routes": [
             {
-              "role": "current_experimental_evidence",
-              "extractable": true,
-              "reason": "Target result table.",
-              "confidence": 0.88
+              "routes": [
+                {
+                  "role": "current_experimental_evidence",
+                  "extractable": true,
+                  "confidence": 0.88
+                }
+              ]
             }
-          ]
-        }
         """
     )
     extractor = _json_text_extractor(client)
@@ -389,7 +388,7 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
 
     assert isinstance(routes, StructuredObjectiveEvidenceRoutes)
     assert routes.routes[0].role == "current_experimental_evidence"
-    assert routes.routes[0].reason == "Target result table."
+    assert "reason" not in routes.routes[0].model_dump()
 
 
 def test_core_llm_extractor_rejects_legacy_objective_route_batches():

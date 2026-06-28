@@ -9,3 +9,9 @@ one goal, then runs the goal-scoped evidence analysis and persists a
 
 The pipeline layer does not extract evidence directly. Nodes delegate to the
 owning Core semantic build services.
+
+Stage reuse is owned by Core facts, not by pipeline node state. If
+confirmed-goal analysis fails after an intermediate Core stage, a later run
+keeps the same pipeline order but `ResearchObjectiveService` reuses persisted
+paper frames, evidence routes, evidence units, or logic chains for the active
+objective before building the next missing stage.

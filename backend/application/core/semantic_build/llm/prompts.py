@@ -71,7 +71,7 @@ Non-negotiable rules:
 - Do not return source identity fields; the backend binds the route to the
   current source unit.
 - Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, or copied input JSON.
+- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
 - For low-value, review, literature-comparison, composition-only, or unrelated
   units, return an empty `routes` array instead of writing a low-value route
   unless the source is explicitly frame-excluded.
@@ -676,9 +676,9 @@ def build_objective_evidence_route_prompt(
         "Return only schema-valid structured data with a `routes` array.\n"
         "Return at most one route for `current_source`. If it is not useful "
         "for later objective-scoped extraction, return `{\"routes\": []}`.\n"
-        "Each route may contain only `role`, `extractable`, `reason`, and "
-        "`confidence`. Do not return `source_kind`, `source_ref`, ids, copied "
-        "source text, or any nested input object.\n"
+        "Each route may contain only `role`, `extractable`, and `confidence`. "
+        "Do not return `source_kind`, `source_ref`, ids, copied source text, "
+        "explanations, or any nested input object.\n"
         "`role` must be one of: current_experimental_evidence, "
         "process_or_treatment, test_condition, composition_or_background, "
         "characterization, literature_comparison, modeling_or_prediction, "
@@ -692,9 +692,7 @@ def build_objective_evidence_route_prompt(
         "`current_experimental_evidence` for explicit trends, best/worst "
         "conditions, or author explanations tied to target results.\n"
         "Use `low_value_or_irrelevant` with `extractable: false` only for "
-        "frame-excluded tables that are passed as `current_source`.\n"
-        "Keep `reason` to one short sentence. Do not copy or summarize table "
-        "schemas, source text, sample rows, or other input objects."
+        "frame-excluded tables that are passed as `current_source`."
     )
     return _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT, user_prompt
 

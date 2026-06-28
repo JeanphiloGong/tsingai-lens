@@ -843,7 +843,6 @@ class StructuredObjectiveEvidenceRoute(_StrictModel):
         "low_value_or_irrelevant",
     ] = "low_value_or_irrelevant"
     extractable: bool = False
-    reason: str | None = Field(default=None, max_length=240)
     confidence: float = 0.0
 
     @field_validator("role", mode="before")

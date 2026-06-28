@@ -58,8 +58,11 @@ EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
 LOGIC_CHAIN_SCOPE_VALUES: Final[frozenset[str]] = frozenset(
     {"objective", "paper", "cross_paper"}
 )
-OBJECTIVE_REPORT_STATUS_VALUES: Final[frozenset[str]] = frozenset(
-    {"generating", "ready", "ready_with_warnings", "failed"}
+CONFIRMED_GOAL_SOURCE_TYPES: Final[frozenset[str]] = frozenset(
+    {"user_input", "objective_candidate", "benchmark"}
+)
+CONFIRMED_GOAL_STATUSES: Final[frozenset[str]] = frozenset(
+    {"pending", "running", "ready", "failed"}
 )
 _QUESTION_SIGNAL_TERMS: Final[tuple[str, ...]] = (
     "how ",
@@ -194,6 +197,80 @@ class ResearchObjective:
             "excluded_document_ids": list(self.excluded_document_ids),
             "confidence": self.confidence,
             "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ConfirmedGoal:
+    goal_id: str
+    collection_id: str
+    question: str
+    source_type: str
+    material_hints: tuple[str, ...]
+    process_hints: tuple[str, ...]
+    property_hints: tuple[str, ...]
+    source_objective_id: str | None
+    status: str
+    analysis_error: str | None
+    analysis_progress: dict[str, Any] | None
+    created_at: str | None
+    updated_at: str | None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ConfirmedGoal":
+        collection_id = _normalize_text(payload.get("collection_id")) or ""
+        question = _normalize_text(payload.get("question")) or ""
+        source_objective_id = _normalize_text(payload.get("source_objective_id"))
+        goal_id = _normalize_text(payload.get("goal_id")) or build_confirmed_goal_id(
+            collection_id,
+            question,
+            source_objective_id,
+        )
+        return cls(
+            goal_id=goal_id,
+            collection_id=collection_id,
+            question=question,
+            source_type=_normalize_choice(
+                payload.get("source_type"),
+                allowed=CONFIRMED_GOAL_SOURCE_TYPES,
+                default="user_input",
+            ),
+            material_hints=normalize_objective_terms(payload.get("material_hints")),
+            process_hints=normalize_objective_terms(payload.get("process_hints")),
+            property_hints=normalize_objective_terms(payload.get("property_hints")),
+            source_objective_id=source_objective_id,
+            status=_normalize_choice(
+                payload.get("status"),
+                allowed=CONFIRMED_GOAL_STATUSES,
+                default="pending",
+            ),
+            analysis_error=_normalize_text(payload.get("analysis_error")),
+            analysis_progress=_normalize_optional_mapping(
+                payload.get("analysis_progress")
+            ),
+            created_at=_normalize_text(payload.get("created_at")),
+            updated_at=_normalize_text(payload.get("updated_at")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "goal_id": self.goal_id,
+            "collection_id": self.collection_id,
+            "question": self.question,
+            "source_type": self.source_type,
+            "material_hints": list(self.material_hints),
+            "process_hints": list(self.process_hints),
+            "property_hints": list(self.property_hints),
+            "source_objective_id": self.source_objective_id,
+            "status": self.status,
+            "analysis_error": self.analysis_error,
+            "analysis_progress": (
+                dict(self.analysis_progress)
+                if self.analysis_progress is not None
+                else None
+            ),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
 
 
@@ -547,151 +624,6 @@ class ObjectiveLogicChain:
         }
 
 
-@dataclass(frozen=True)
-class ObjectiveReportArtifact:
-    report_id: str
-    objective_id: str
-    status: str
-    stage: str
-    message: str | None
-    title: str
-    language: str
-    model: str | None
-    data_version: str
-    markdown: str | None
-    warnings: tuple[str, ...]
-    source_refs: tuple[dict[str, Any], ...]
-    created_at: str
-    updated_at: str
-    generated_at: str | None
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveReportArtifact":
-        objective_id = _normalize_text(payload.get("objective_id")) or ""
-        title = (
-            _normalize_text(payload.get("title"))
-            or _normalize_text(payload.get("question"))
-            or "Research objective report"
-        )
-        created_at = _normalize_text(payload.get("created_at")) or ""
-        updated_at = _normalize_text(payload.get("updated_at")) or created_at
-        return cls(
-            report_id=_normalize_text(payload.get("report_id"))
-            or _build_scoped_id("orp", objective_id, title),
-            objective_id=objective_id,
-            status=_normalize_choice(
-                payload.get("status"),
-                allowed=OBJECTIVE_REPORT_STATUS_VALUES,
-                default="generating",
-            ),
-            stage=_normalize_text(payload.get("stage")) or "requested",
-            message=_normalize_text(payload.get("message")),
-            title=title,
-            language=_normalize_text(payload.get("language")) or "zh",
-            model=_normalize_text(payload.get("model")),
-            data_version=_normalize_text(payload.get("data_version")) or "",
-            markdown=_normalize_text(payload.get("markdown")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-            source_refs=_normalize_mapping_sequence(payload.get("source_refs")),
-            created_at=created_at,
-            updated_at=updated_at,
-            generated_at=_normalize_text(payload.get("generated_at")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "report_id": self.report_id,
-            "objective_id": self.objective_id,
-            "status": self.status,
-            "stage": self.stage,
-            "message": self.message,
-            "title": self.title,
-            "language": self.language,
-            "model": self.model,
-            "data_version": self.data_version,
-            "markdown": self.markdown,
-            "warnings": list(self.warnings),
-            "source_refs": [dict(item) for item in self.source_refs],
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "generated_at": self.generated_at,
-        }
-
-
-@dataclass(frozen=True)
-class MaterialReportArtifact:
-    report_id: str
-    material_id: str
-    status: str
-    stage: str
-    message: str | None
-    title: str
-    language: str
-    model: str | None
-    data_version: str
-    markdown: str | None
-    warnings: tuple[str, ...]
-    source_refs: tuple[dict[str, Any], ...]
-    evidence_appendix: dict[str, Any]
-    created_at: str
-    updated_at: str
-    generated_at: str | None
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "MaterialReportArtifact":
-        material_id = _normalize_text(payload.get("material_id")) or ""
-        title = (
-            _normalize_text(payload.get("title"))
-            or _normalize_text(payload.get("canonical_name"))
-            or "Material report"
-        )
-        created_at = _normalize_text(payload.get("created_at")) or ""
-        updated_at = _normalize_text(payload.get("updated_at")) or created_at
-        return cls(
-            report_id=_normalize_text(payload.get("report_id"))
-            or _build_scoped_id("mr", material_id, title),
-            material_id=material_id,
-            status=_normalize_choice(
-                payload.get("status"),
-                allowed=OBJECTIVE_REPORT_STATUS_VALUES,
-                default="generating",
-            ),
-            stage=_normalize_text(payload.get("stage")) or "requested",
-            message=_normalize_text(payload.get("message")),
-            title=title,
-            language=_normalize_text(payload.get("language")) or "zh",
-            model=_normalize_text(payload.get("model")),
-            data_version=_normalize_text(payload.get("data_version")) or "",
-            markdown=_normalize_text(payload.get("markdown")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-            source_refs=_normalize_mapping_sequence(payload.get("source_refs")),
-            evidence_appendix=_normalize_mapping(payload.get("evidence_appendix")),
-            created_at=created_at,
-            updated_at=updated_at,
-            generated_at=_normalize_text(payload.get("generated_at")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "report_id": self.report_id,
-            "material_id": self.material_id,
-            "status": self.status,
-            "stage": self.stage,
-            "message": self.message,
-            "title": self.title,
-            "language": self.language,
-            "model": self.model,
-            "data_version": self.data_version,
-            "markdown": self.markdown,
-            "warnings": list(self.warnings),
-            "source_refs": [dict(item) for item in self.source_refs],
-            "evidence_appendix": dict(self.evidence_appendix),
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "generated_at": self.generated_at,
-        }
-
-
 def build_research_objective_id(question: str) -> str:
     normalized_question = (_normalize_text(question) or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
@@ -699,6 +631,14 @@ def build_research_objective_id(question: str) -> str:
         slug = "unspecified"
     digest = sha1(normalized_question.encode("utf-8")).hexdigest()[:8]
     return f"obj_{slug[:72].strip('-')}_{digest}"
+
+
+def build_confirmed_goal_id(
+    collection_id: str,
+    question: str,
+    source_objective_id: str | None = None,
+) -> str:
+    return _build_scoped_id("goal", collection_id, question, source_objective_id)
 
 
 def normalize_objective_terms(value: Any) -> tuple[str, ...]:
@@ -792,6 +732,12 @@ def _normalize_mapping(value: Any) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
+def _normalize_optional_mapping(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return _normalize_mapping(value)
+
+
 def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, (list, tuple)):
         return ()
@@ -819,6 +765,9 @@ def _is_missing(value: Any) -> bool:
 
 
 __all__ = [
+    "CONFIRMED_GOAL_SOURCE_TYPES",
+    "CONFIRMED_GOAL_STATUSES",
+    "ConfirmedGoal",
     "EVIDENCE_RESOLUTION_STATUS_VALUES",
     "EVIDENCE_ROUTE_ROLE_VALUES",
     "EVIDENCE_UNIT_KIND_VALUES",
@@ -833,6 +782,7 @@ __all__ = [
     "PaperSkim",
     "ResearchObjective",
     "SOURCE_KIND_VALUES",
+    "build_confirmed_goal_id",
     "build_research_objective_id",
     "is_question_shaped_objective",
     "normalize_objective_confidence",

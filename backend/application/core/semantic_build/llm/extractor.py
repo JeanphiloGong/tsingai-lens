@@ -18,6 +18,7 @@ from .schemas import (
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
+    StructuredResearchUnderstandingRelations,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableMatrixRepair,
@@ -32,6 +33,7 @@ from .prompts import (
     build_research_axis_canonicalization_prompt,
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
+    build_research_understanding_relation_prompt,
     build_table_batch_mentions_prompt,
     build_table_matrix_repair_prompt,
     build_text_window_extraction_prompt,
@@ -42,7 +44,7 @@ logger = logging.getLogger(__name__)
 _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
-_DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_JSON_TEXT
+_DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
@@ -189,6 +191,8 @@ class CoreLLMStructuredExtractor:
         self,
         payload: dict[str, Any],
     ) -> StructuredObjectiveEvidenceRoutes:
+        if not isinstance(payload.get("current_source"), dict):
+            raise ValueError("objective evidence routing requires current_source")
         system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
@@ -211,6 +215,20 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredObjectiveEvidenceUnits):
             raise TypeError("unexpected objective evidence unit response type")
+        return response
+
+    def extract_research_understanding_relations(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchUnderstandingRelations:
+        system_prompt, user_prompt = build_research_understanding_relation_prompt(payload)
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredResearchUnderstandingRelations,
+        )
+        if not isinstance(response, StructuredResearchUnderstandingRelations):
+            raise TypeError("unexpected research understanding relations response type")
         return response
 
     def _parse_structured_response(

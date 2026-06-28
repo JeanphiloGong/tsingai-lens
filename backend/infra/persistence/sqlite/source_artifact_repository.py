@@ -13,6 +13,7 @@ from domain.source import (
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
+    SourceDocumentTree,
     SourceFigure,
     SourceReferenceCandidate,
     SourceReferenceEntry,
@@ -23,6 +24,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    build_source_document_tree,
 )
 
 
@@ -73,6 +75,32 @@ class SqliteSourceArtifactRepository:
             table_rows=tuple(self.list_table_rows(collection_id)),
             table_cells=tuple(self.list_table_cells(collection_id)),
             figures=tuple(self.list_figures(collection_id)),
+        )
+
+    def read_document_tree(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SourceDocumentTree:
+        document = next(
+            (
+                item
+                for item in self.list_documents(collection_id)
+                if item.document_id == document_id
+            ),
+            None,
+        )
+        if document is None:
+            raise FileNotFoundError(
+                f"source document not found: {collection_id}/{document_id}"
+            )
+        return build_source_document_tree(
+            collection_id=collection_id,
+            document=document,
+            blocks=self.list_blocks(collection_id, document_id),
+            tables=self.list_tables(collection_id, document_id),
+            figures=self.list_figures(collection_id, document_id),
+            references=self.read_collection_references(collection_id),
         )
 
     def replace_collection_references(

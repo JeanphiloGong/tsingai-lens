@@ -5,8 +5,8 @@ This node owns browser-side helpers that are shared across frontend routes.
 ## Scope
 
 - same-origin API request helpers
-- collection, file, task, graph, goal-session, material report, material review
-  report, and workspace clients
+- collection, file, task, graph, goal-session, research-view, and workspace
+  clients
 - i18n and theme support
 - shared route notices and utility functions
 
@@ -24,12 +24,13 @@ This node owns browser-side helpers that are shared across frontend routes.
   Domain-specific API wrappers
 - `researchView.ts`
   Research-view aggregation contract helper for material summaries, material
-  profiles, material LLM conclusion report artifacts, research objectives,
-  objective paper frames, paper coverage, sample matrices, comparable groups,
-  condition series, and evidence-backed values
-- `materialReviewReport.ts`
-  Material review report status, generation, Markdown preview, and PDF artifact
-  URL helper for collection-scoped material dossiers
+  profiles, research understandings, research objectives, objective paper
+  frames, paper coverage, sample matrices, comparable groups, condition series,
+  evidence-backed values, and expert feedback/curation requests for
+  research-understanding claims. Claim feedback and curations are read back by
+  scope so the workbench can show saved expert review history and expert
+  corrections after refresh. The same helper also reads curation-derived gold
+  drafts for evaluation handoff.
 - `goalSessions.ts`
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references

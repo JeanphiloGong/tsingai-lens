@@ -80,6 +80,30 @@ export type DocumentContentResponse = {
 	warnings: string[];
 };
 
+export type DocumentMarkdownSourceMapItem = {
+	markdown_anchor: string;
+	artifact_type: string;
+	artifact_id: string;
+	block_id: string | null;
+	table_id: string | null;
+	figure_id: string | null;
+	block_type: string | null;
+	page: number | null;
+	heading_path: string | null;
+	text_unit_ids: string[];
+};
+
+export type DocumentMarkdownResponse = {
+	collection_id: string;
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	parser: string | null;
+	markdown: string;
+	source_map: DocumentMarkdownSourceMapItem[];
+	warnings: string[];
+};
+
 export type DocumentChainComparabilityStatus =
 	| 'comparable'
 	| 'limited'
@@ -696,6 +720,29 @@ function normalizeContentBlock(value: unknown, index: number): DocumentContentBl
 		page: toPositiveInteger(record.page),
 		bbox: normalizePdfBoundingBox(record.bbox),
 		charRange: normalizeTextCharRange(record.char_range ?? record.charRange)
+	};
+}
+
+function normalizeMarkdownSourceMapItem(value: unknown): DocumentMarkdownSourceMapItem | null {
+	const record = asRecord(value);
+	if (!record) return null;
+
+	const markdown_anchor = String(record.markdown_anchor ?? '').trim();
+	const artifact_type = String(record.artifact_type ?? '').trim();
+	const artifact_id = String(record.artifact_id ?? '').trim();
+	if (!markdown_anchor || !artifact_type || !artifact_id) return null;
+
+	return {
+		markdown_anchor,
+		artifact_type,
+		artifact_id,
+		block_id: toOptionalText(record.block_id),
+		table_id: toOptionalText(record.table_id),
+		figure_id: toOptionalText(record.figure_id),
+		block_type: toOptionalText(record.block_type),
+		page: toPositiveInteger(record.page),
+		heading_path: toOptionalText(record.heading_path),
+		text_unit_ids: toStringList(record.text_unit_ids)
 	};
 }
 
@@ -2246,6 +2293,75 @@ export async function fetchDocumentContent(
 		}
 	);
 	return normalizeDocumentContent(data, collectionId, documentId);
+}
+
+export function normalizeDocumentMarkdown(
+	value: unknown,
+	collectionId: string,
+	documentId: string
+): DocumentMarkdownResponse {
+	const record = asRecord(value);
+	if (!record) {
+		throw new Error('Document Markdown response is invalid.');
+	}
+
+	const markdown = String(record.markdown ?? '').trim();
+	const source_map = Array.isArray(record.source_map)
+		? record.source_map
+				.map((item) => normalizeMarkdownSourceMapItem(item))
+				.filter((item): item is DocumentMarkdownSourceMapItem => item !== null)
+		: [];
+
+	return {
+		collection_id: String(record.collection_id ?? collectionId).trim() || collectionId,
+		document_id: String(record.document_id ?? documentId).trim() || documentId,
+		title: toOptionalText(record.title),
+		source_filename: toOptionalText(record.source_filename),
+		parser: toOptionalText(record.parser),
+		markdown,
+		source_map,
+		warnings: toStringList(record.warnings)
+	};
+}
+
+export async function fetchDocumentMarkdown(
+	collectionId: string,
+	documentId: string
+): Promise<DocumentMarkdownResponse> {
+	if (USE_API_FIXTURES) {
+		return {
+			collection_id: collectionId,
+			document_id: documentId,
+			title: 'Fixture document viewer',
+			source_filename: 'fixture-paper.txt',
+			parser: 'fixture',
+			markdown:
+				'# Fixture document viewer\n\n## Experimental Section\n\nThe precursor powders were mixed in ethanol and stirred for 2 h.\n\n## Characterization\n\nXRD and SEM were used to characterize the powders.',
+			source_map: [
+				{
+					markdown_anchor: 'block-methods',
+					artifact_type: 'block',
+					artifact_id: 'methods',
+					block_id: 'methods',
+					table_id: null,
+					figure_id: null,
+					block_type: 'paragraph',
+					page: 3,
+					heading_path: 'Experimental Section',
+					text_unit_ids: ['tu-1']
+				}
+			],
+			warnings: []
+		};
+	}
+
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/markdown`,
+		{
+			method: 'GET'
+		}
+	);
+	return normalizeDocumentMarkdown(data, collectionId, documentId);
 }
 
 export async function fetchDocumentProfile(

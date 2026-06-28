@@ -8,7 +8,9 @@ export type TaskStage =
   | 'source_artifacts_started'
   | 'source_artifacts_completed'
   | 'document_profiles_started'
-  | 'research_objectives_started'
+  | 'document_profiles_completed'
+  | 'objective_candidates_started'
+  | 'objective_candidates_completed'
   | 'objective_paper_skim_started'
   | 'objective_discovery_started'
   | 'objective_paper_framing_started'
@@ -17,6 +19,8 @@ export type TaskStage =
   | 'objective_logic_chains_started'
   | 'paper_facts_started'
   | 'comparison_rows_started'
+  | 'research_understandings_started'
+  | 'research_understandings_completed'
   | 'artifacts_ready'
   | 'failed';
 

@@ -231,7 +231,12 @@ function comparisonPayload() {
 	};
 }
 
-async function mockWorkbenchApis(page: Page) {
+type WorkbenchMockOptions = {
+	extractionReady?: boolean;
+};
+
+async function mockWorkbenchApis(page: Page, options: WorkbenchMockOptions = {}) {
+	const extractionReady = options.extractionReady ?? true;
 	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
 		const path = url.pathname;
@@ -240,6 +245,17 @@ async function mockWorkbenchApis(page: Page) {
 			return route.continue();
 		}
 
+		if (path === '/api/v1/auth/me') {
+			return route.fulfill(
+				json({
+					user: {
+						user_id: 'user_1',
+						email: 'researcher@example.com',
+						display_name: 'Researcher'
+					}
+				})
+			);
+		}
 		if (path === '/api/v1/collections') {
 			return route.fulfill(json({ items: [collectionPayload()] }));
 		}
@@ -253,9 +269,22 @@ async function mockWorkbenchApis(page: Page) {
 			return route.fulfill(json(documentContentPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/research-view`) {
+			if (!extractionReady) {
+				return route.fulfill(json({ detail: 'paper research view not ready' }, 409));
+			}
 			return route.fulfill(json(researchPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/results`) {
+			if (!extractionReady) {
+				return route.fulfill(
+					json({
+						collection_id: collectionId,
+						total: 0,
+						count: 0,
+						items: []
+					})
+				);
+			}
 			return route.fulfill({
 				...json({
 					collection_id: collectionId,
@@ -265,7 +294,21 @@ async function mockWorkbenchApis(page: Page) {
 				})
 			});
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/comparison-semantics`) {
+		if (
+			path === `/api/v1/collections/${collectionId}/documents/${documentId}/comparison-semantics`
+		) {
+			if (!extractionReady) {
+				return route.fulfill(
+					json({
+						collection_id: collectionId,
+						document_id: documentId,
+						total: 0,
+						count: 0,
+						items: [],
+						variant_dossiers: []
+					})
+				);
+			}
 			return route.fulfill(json(comparisonPayload()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/source`) {
@@ -280,7 +323,11 @@ async function expectNoHorizontalOverflow(page: Page) {
 	const hasOverflow = await page.evaluate(() => {
 		const root = document.querySelector('.document-workbench-root');
 		const rootWidth = root instanceof HTMLElement ? root.scrollWidth : 0;
-		const width = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, rootWidth);
+		const width = Math.max(
+			document.documentElement.scrollWidth,
+			document.body.scrollWidth,
+			rootWidth
+		);
 		return width > window.innerWidth + 1;
 	});
 	expect(hasOverflow).toBe(false);
@@ -296,10 +343,13 @@ test('document workbench renders desktop and mobile verification screenshots', a
 	await page.goto(
 		`/collections/${collectionId}/documents/${documentId}?page=2&return_to=/collections/${collectionId}/objectives/obj_1`
 	);
-	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Paper A' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Paper scope' })).toHaveCount(0);
 	await expect(page.getByTestId('parsed-source-fallback')).toBeVisible();
 	await expect(page.getByTestId('pdf-current-page')).toHaveText('2');
+	await expect(page.getByRole('button', { name: 'Show extraction details' })).toBeEnabled();
+	await page.getByRole('button', { name: 'Show extraction details' }).click();
+	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('document-workbench-desktop.png'),
@@ -310,13 +360,31 @@ test('document workbench renders desktop and mobile verification screenshots', a
 	await page.goto(
 		`/collections/${collectionId}/documents/${documentId}?page=2&return_to=/collections/${collectionId}/objectives/obj_1`
 	);
-	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Paper A' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeInViewport();
 	await expect(page.getByTestId('parsed-source-fallback')).toBeVisible();
+	await page.getByRole('button', { name: 'Show extraction details' }).click();
+	await expect(page.getByRole('heading', { name: 'Paper scope' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
 		path: testInfo.outputPath('document-workbench-mobile.png'),
 		fullPage: true
 	});
+});
+
+test('document workbench keeps source reader available before extraction details are ready', async ({
+	page
+}) => {
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await mockWorkbenchApis(page, { extractionReady: false });
+
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto(`/collections/${collectionId}/documents/${documentId}?page=2`);
+
+	await expect(page.getByRole('heading', { name: 'Paper A' })).toBeVisible();
+	await expect(page.getByTestId('parsed-source-fallback')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Show extraction details' })).toBeDisabled();
+	await expect(page.getByText('Source view is ready')).toBeVisible();
+	await expect(page.getByText('Structured extraction is not available yet.')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Paper scope' })).toHaveCount(0);
+	await expectNoHorizontalOverflow(page);
 });

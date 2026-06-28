@@ -10,7 +10,6 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.research_view_aggregation_service import (
-    MaterialReportNotFoundError,
     ResearchViewDocumentNotFoundError,
     ResearchViewMaterialNotFoundError,
     ResearchViewNotReadyError,
@@ -193,28 +192,6 @@ def _document_material_profile_payload(
     }
 
 
-def _material_report_payload(collection_id: str = "col-1") -> dict:
-    return {
-        "collection_id": collection_id,
-        "report_id": "mr-1",
-        "material_id": "mat-316l-stainless-steel",
-        "status": "generating",
-        "stage": "requested",
-        "message": "Material report generation started.",
-        "title": "316L stainless steel 材料报告",
-        "language": "zh",
-        "model": "test-model",
-        "data_version": "v1",
-        "markdown": None,
-        "warnings": [],
-        "source_refs": [],
-        "evidence_appendix": {},
-        "created_at": "2026-05-19T00:00:00+00:00",
-        "updated_at": "2026-05-19T00:00:00+00:00",
-        "generated_at": None,
-    }
-
-
 class FakeResearchViewService:
     def get_collection_research_view(self, collection_id: str) -> dict:
         return _collection_payload(collection_id)
@@ -228,40 +205,6 @@ class FakeResearchViewService:
         material_id: str,  # noqa: ARG002
     ) -> dict:
         return _material_profile_payload(collection_id)
-
-    def request_material_report(
-        self,
-        collection_id: str,
-        material_id: str,  # noqa: ARG002
-        *,
-        language: str = "zh",  # noqa: ARG002
-        force_regenerate: bool = False,  # noqa: ARG002
-    ) -> dict:
-        return _material_report_payload(collection_id)
-
-    def get_material_report_status(
-        self,
-        collection_id: str,
-        material_id: str,  # noqa: ARG002
-    ) -> dict:
-        return {
-            **_material_report_payload(collection_id),
-            "status": "ready",
-            "stage": "ready",
-            "message": "Material report generated.",
-            "markdown": "# 316L stainless steel 材料报告\n\n结论。",
-            "generated_at": "2026-05-19T00:00:01+00:00",
-        }
-
-    def generate_material_report(
-        self,
-        collection_id: str,
-        material_id: str,
-        *,
-        language: str = "zh",  # noqa: ARG002
-        force_regenerate: bool = False,  # noqa: ARG002
-    ) -> dict:
-        return self.get_material_report_status(collection_id, material_id)
 
     def get_document_research_view(self, collection_id: str, document_id: str) -> dict:
         return _paper_payload(collection_id, document_id)
@@ -353,15 +296,6 @@ class MissingMaterialResearchViewService(FakeResearchViewService):
         raise ResearchViewMaterialNotFoundError(collection_id, material_id, document_id)
 
 
-class MissingMaterialReportService(FakeResearchViewService):
-    def get_material_report_status(
-        self,
-        collection_id: str,
-        material_id: str,
-    ) -> dict:
-        raise MaterialReportNotFoundError(collection_id, material_id)
-
-
 def test_collection_research_view_route_returns_contract_payload(monkeypatch):
     monkeypatch.setattr(
         research_view_controller,
@@ -398,68 +332,6 @@ def test_collection_material_routes_return_contract_payload(monkeypatch):
     assert materials.collection_id == "col-1"
     assert materials.materials[0].material_id == "mat-316l-stainless-steel"
     assert profile.material_id == "mat-316l-stainless-steel"
-
-
-def test_material_report_routes_request_and_read_report(monkeypatch):
-    background_tasks = []
-
-    class FakeBackgroundTasks:
-        def add_task(self, func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-            background_tasks.append((func, args, kwargs))
-
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        FakeResearchViewService(),
-    )
-    request = research_view_controller.MaterialReportRequest(language="zh")
-
-    created = asyncio.run(
-        research_view_controller.create_collection_material_report(
-            "col-1",
-            "mat-316l-stainless-steel",
-            request,
-            FakeBackgroundTasks(),
-        )
-    )
-    fetched = asyncio.run(
-        research_view_controller.get_collection_material_report(
-            "col-1",
-            "mat-316l-stainless-steel",
-        )
-    )
-
-    assert created.status == "generating"
-    assert created.markdown is None
-    assert fetched.status == "ready"
-    assert fetched.markdown == "# 316L stainless steel 材料报告\n\n结论。"
-    assert len(background_tasks) == 1
-    assert background_tasks[0][1] == (
-        "col-1",
-        "mat-316l-stainless-steel",
-        request,
-    )
-
-
-def test_material_report_route_returns_404_when_not_requested(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        MissingMaterialReportService(),
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            research_view_controller.get_collection_material_report(
-                "col-1",
-                "mat-316l-stainless-steel",
-            )
-        )
-
-    exc = exc_info.value
-    assert exc.status_code == 404
-    assert exc.detail["code"] == "material_report_not_found"
-    assert exc.detail["material_id"] == "mat-316l-stainless-steel"
 
 
 def test_collection_material_routes_run_service_in_threadpool(monkeypatch):

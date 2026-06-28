@@ -93,6 +93,37 @@ class DocumentContentResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="查看器提示")
 
 
+class DocumentMarkdownSourceMapResponse(BaseModel):
+    """Display Markdown source-map entry pointing back to Source artifacts."""
+
+    markdown_anchor: str = Field(..., description="Markdown projection anchor")
+    artifact_type: str = Field(..., description="Source artifact type")
+    artifact_id: str = Field(..., description="Source artifact ID")
+    block_id: str | None = Field(default=None, description="Source block ID")
+    table_id: str | None = Field(default=None, description="Source table ID")
+    figure_id: str | None = Field(default=None, description="Source figure ID")
+    block_type: str | None = Field(default=None, description="Source block type")
+    page: int | None = Field(default=None, description="Source page")
+    heading_path: str | None = Field(default=None, description="Source heading path")
+    text_unit_ids: list[str] = Field(default_factory=list, description="Source text unit IDs")
+
+
+class DocumentMarkdownResponse(BaseModel):
+    """Markdown-first display projection for one parsed document."""
+
+    collection_id: str = Field(..., description="集合 ID")
+    document_id: str = Field(..., description="文档 ID")
+    title: str | None = Field(default=None, description="文档标题")
+    source_filename: str | None = Field(default=None, description="源文件名")
+    parser: str | None = Field(default=None, description="Source parser")
+    markdown: str = Field(default="", description="展示用 Markdown")
+    source_map: list[DocumentMarkdownSourceMapResponse] = Field(
+        default_factory=list,
+        description="Markdown 片段到 Source artifact 的映射",
+    )
+    warnings: list[str] = Field(default_factory=list, description="展示提示")
+
+
 class DocumentComparisonBindingResponse(BaseModel):
     """Context bindings attached to one comparable result."""
 

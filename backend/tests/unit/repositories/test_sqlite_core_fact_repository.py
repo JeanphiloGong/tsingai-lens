@@ -5,22 +5,22 @@ from domain.core import (
     CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
+    ConfirmedGoal,
     ComparisonRowRecord,
     CoreFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
-    MaterialReportArtifact,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
-    ObjectiveReportArtifact,
     PaperSkim,
     PairwiseComparisonRelation,
     ResearchObjective,
+    ResearchUnderstanding,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
@@ -468,116 +468,149 @@ def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacin
     assert restored.document_profiles[0].document_id == "doc-1"
 
 
-def test_sqlite_core_fact_repository_upserts_objective_report_artifact(tmp_path):
+def test_sqlite_core_fact_repository_round_trips_research_understandings(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    objective = ResearchObjective.from_mapping(
+    objective_understanding = ResearchUnderstanding.from_mapping(
         {
-            "question": "How does energy density affect LPBF 316L mechanical properties?",
-            "material_scope": ["316L stainless steel"],
-            "process_axes": ["energy density"],
-            "property_axes": ["yield strength"],
+            "state": "ready",
+            "scope": {
+                "scope_type": "objective",
+                "collection_id": "col_test",
+                "objective_id": "obj_strength",
+                "title": "How does heat treatment affect strength?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_strength",
+                    "claim_type": "finding",
+                    "statement": "Heat treatment improves strength.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["ev_strength"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "ev_strength",
+                    "source_kind": "table",
+                    "document_id": "doc-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "Table 1"},
+                    "fact_ids": ["oeu-strength"],
+                    "traceability_status": "resolved",
+                }
+            ],
         }
     )
-    repository.replace_collection_research_objectives(
-        "col_test",
-        (),
-        (objective,),
-        (),
-        (),
-        (),
-        (),
-        (),
-    )
-    artifact = ObjectiveReportArtifact.from_mapping(
+    material_understanding = ResearchUnderstanding.from_mapping(
         {
-            "report_id": "orp_1",
-            "objective_id": objective.objective_id,
-            "status": "ready",
-            "stage": "ready",
-            "message": "Objective report generated.",
-            "title": objective.question,
-            "language": "zh",
-            "model": "gpt-4o-mini",
-            "data_version": "v1",
-            "markdown": "# 研究目标\n\n结论。",
-            "warnings": ["limited evidence"],
-            "source_refs": [{"document_id": "paper-1", "source_ref": "table-1"}],
-            "created_at": "2026-05-19T00:00:00+00:00",
-            "updated_at": "2026-05-19T00:00:01+00:00",
-            "generated_at": "2026-05-19T00:00:01+00:00",
+            "state": "limited",
+            "scope": {
+                "scope_type": "material",
+                "collection_id": "col_test",
+                "material_id": "mat-316l",
+                "title": "316L stainless steel",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "measurement",
+                    "statement": "Density is reported as 99%.",
+                    "status": "limited",
+                }
+            ],
         }
     )
 
-    repository.upsert_objective_report_artifact("col_test", artifact)
-    restored = repository.read_objective_report_artifact(
+    repository.upsert_research_understanding("col_test", objective_understanding)
+    repository.upsert_research_understanding("col_test", material_understanding)
+
+    restored = repository.read_research_understanding(
         "col_test",
-        objective.objective_id,
+        "objective",
+        "obj_strength",
     )
+    listed = repository.list_research_understandings("col_test", "material")
 
     assert restored is not None
-    assert restored.report_id == "orp_1"
-    assert restored.status == "ready"
-    assert restored.markdown == "# 研究目标\n\n结论。"
-    assert restored.warnings == ("limited evidence",)
-    assert restored.source_refs == (
-        {"document_id": "paper-1", "source_ref": "table-1"},
-    )
+    assert restored.scope.objective_id == "obj_strength"
+    assert restored.claims[0].statement == "Heat treatment improves strength."
+    assert restored.evidence_refs[0].locator == {"source_ref": "Table 1"}
+    assert [item.scope.material_id for item in listed] == ["mat-316l"]
 
-    repository.replace_collection_research_objectives(
+    repository.replace_collection_research_understandings(
         "col_test",
-        (),
-        (objective,),
-        (),
-        (),
-        (),
-        (),
-        (),
+        (material_understanding,),
     )
 
     assert (
-        repository.read_objective_report_artifact("col_test", objective.objective_id)
-        is not None
+        repository.read_research_understanding("col_test", "objective", "obj_strength")
+        is None
     )
+    assert len(repository.list_research_understandings("col_test")) == 1
 
 
-def test_sqlite_core_fact_repository_upserts_material_report_artifact(tmp_path):
+def test_sqlite_core_fact_repository_round_trips_confirmed_goals(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    artifact = MaterialReportArtifact.from_mapping(
+    goal = ConfirmedGoal.from_mapping(
         {
-            "report_id": "mr_1",
-            "material_id": "mat-316l-stainless-steel",
-            "status": "ready",
-            "stage": "ready",
-            "message": "Material report generated.",
-            "title": "316L Stainless Steel 材料报告",
-            "language": "zh",
-            "model": "gpt-4o-mini",
-            "data_version": "v1",
-            "markdown": "# 316L Stainless Steel 材料报告\n\n结论。",
-            "warnings": ["limited evidence"],
-            "source_refs": [{"document_id": "paper-1", "source_ref": "table-1"}],
-            "evidence_appendix": {"sample_matrix_row_count": 2},
-            "created_at": "2026-05-19T00:00:00+00:00",
-            "updated_at": "2026-05-19T00:00:01+00:00",
-            "generated_at": "2026-05-19T00:00:01+00:00",
+            "collection_id": "col_test",
+            "question": "How does laser power affect density in LPBF AlSi10Mg?",
+            "source_type": "user_input",
+            "material_hints": ["AlSi10Mg"],
+            "process_hints": ["LPBF", "laser power"],
+            "property_hints": ["relative density"],
+            "source_objective_id": "obj_density",
+            "status": "pending",
+            "analysis_progress": {
+                "phase": "queued",
+                "unit": "steps",
+            },
         }
     )
 
-    repository.upsert_material_report_artifact("col_test", artifact)
-    restored = repository.read_material_report_artifact(
-        "col_test",
-        "mat-316l-stainless-steel",
-    )
+    repository.upsert_confirmed_goal(goal)
+    restored = repository.read_confirmed_goal("col_test", goal.goal_id)
+    listed = repository.list_confirmed_goals("col_test")
 
     assert restored is not None
-    assert restored.report_id == "mr_1"
-    assert restored.status == "ready"
-    assert restored.markdown == "# 316L Stainless Steel 材料报告\n\n结论。"
-    assert restored.warnings == ("limited evidence",)
-    assert restored.source_refs == (
-        {"document_id": "paper-1", "source_ref": "table-1"},
+    assert restored.goal_id.startswith("goal_")
+    assert restored.collection_id == "col_test"
+    assert restored.question == "How does laser power affect density in LPBF AlSi10Mg?"
+    assert restored.source_type == "user_input"
+    assert restored.material_hints == ("AlSi10Mg",)
+    assert restored.process_hints == ("LPBF", "laser power")
+    assert restored.property_hints == ("relative density",)
+    assert restored.source_objective_id == "obj_density"
+    assert restored.status == "pending"
+    assert restored.analysis_progress == {"phase": "queued", "unit": "steps"}
+    assert listed == (restored,)
+
+    repository.upsert_confirmed_goal(
+        ConfirmedGoal.from_mapping(
+            {
+                **restored.to_record(),
+                "status": "running",
+                "analysis_error": "temporary failure",
+                "analysis_progress": {
+                    "phase": "objective_evidence_routing_started",
+                    "current": 1,
+                    "total": 2,
+                    "unit": "frames",
+                },
+            }
+        )
     )
-    assert restored.evidence_appendix == {"sample_matrix_row_count": 2}
+    updated = repository.read_confirmed_goal("col_test", goal.goal_id)
+
+    assert updated is not None
+    assert updated.status == "running"
+    assert updated.analysis_error == "temporary failure"
+    assert updated.analysis_progress == {
+        "phase": "objective_evidence_routing_started",
+        "current": 1,
+        "total": 2,
+        "unit": "frames",
+    }
 
 
 def _comparable_result(value: int = 620) -> ComparableResult:

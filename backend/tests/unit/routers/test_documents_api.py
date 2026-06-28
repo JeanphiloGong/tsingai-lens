@@ -15,6 +15,7 @@ from application.source.collection_service import CollectionService
 from application.core.comparison_service import ComparisonService
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.source.document_markdown_service import DocumentMarkdownService
 from controllers.core import documents as documents_controller
 from domain.core import (
     BaselineReference,
@@ -216,15 +217,28 @@ def document_services(monkeypatch, tmp_path):
     collection_service = CollectionService(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
     comparison_service = ComparisonService(collection_service)
+    document_markdown_service = DocumentMarkdownService(collection_service)
 
     monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
     monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
+    monkeypatch.setattr(
+        documents_controller,
+        "document_markdown_service",
+        document_markdown_service,
+    )
 
-    return collection_service, document_profile_service, comparison_service
+    return (
+        collection_service,
+        document_profile_service,
+        comparison_service,
+        document_markdown_service,
+    )
 
 
 def test_documents_route_returns_409_when_profiles_are_not_ready(document_services):
-    collection_service, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -239,7 +253,12 @@ def test_documents_route_returns_409_when_profiles_are_not_ready(document_servic
 
 
 def test_documents_route_returns_404_for_missing_collection(document_services):
-    _collection_service, _document_profile_service, _comparison_service = document_services
+    (
+        _collection_service,
+        _document_profile_service,
+        _comparison_service,
+        _markdown_service,
+    ) = document_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
@@ -252,7 +271,9 @@ def test_documents_route_returns_404_for_missing_collection(document_services):
 
 
 def test_document_profile_route_returns_single_profile(document_services):
-    collection_service, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Single Profile Collection")
     collection_id = record["collection_id"]
     _store_document_profiles(
@@ -282,7 +303,9 @@ def test_document_profile_route_returns_single_profile(document_services):
 def test_document_profile_route_normalizes_invalid_profile_status_values(
     document_services,
 ):
-    collection_service, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Invalid Profile Collection")
     collection_id = record["collection_id"]
     _store_document_profiles(
@@ -310,7 +333,9 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
 def test_document_content_route_includes_source_locators(
     document_services,
 ):
-    collection_service, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Document Locator Collection")
     collection_id = record["collection_id"]
     document_profile_service.source_artifact_repository.replace_collection_artifacts(
@@ -379,8 +404,92 @@ def test_document_content_route_includes_source_locators(
     assert first.char_range.end == 37
 
 
+def test_document_markdown_route_returns_markdown_projection(document_services):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Markdown Route Collection")
+    collection_id = record["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Markdown Paper",
+                    "text": "Abstract\nThe sample reached 12 mS/cm.",
+                    "metadata": {
+                        "source_filename": "markdown-paper.pdf",
+                        "source_parser": "docling",
+                    },
+                }
+            ],
+            blocks=[
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-abstract",
+                    "block_type": "heading",
+                    "heading_level": 1,
+                    "block_order": 1,
+                    "text": "Abstract",
+                    "page": 1,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-result",
+                    "block_type": "paragraph",
+                    "heading_path": "Abstract",
+                    "block_order": 2,
+                    "text": "The sample reached 12 mS/cm.",
+                    "text_unit_ids": ["tu-result"],
+                    "page": 1,
+                },
+            ],
+        ),
+    )
+
+    payload = asyncio.run(
+        documents_controller.get_collection_document_markdown(collection_id, "paper-1")
+    )
+
+    assert payload.collection_id == collection_id
+    assert payload.document_id == "paper-1"
+    assert payload.title == "Markdown Paper"
+    assert payload.source_filename == "markdown-paper.pdf"
+    assert payload.parser == "docling"
+    assert "# Markdown Paper" in payload.markdown
+    assert "## Abstract" in payload.markdown
+    assert "The sample reached 12 mS/cm." in payload.markdown
+    source_map = {item.artifact_id: item for item in payload.source_map}
+    assert source_map["blk-result"].text_unit_ids == ["tu-result"]
+
+
+def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
+    document_services,
+):
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Markdown Pending Collection")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_markdown(
+                record["collection_id"],
+                "paper-1",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "document_markdown_not_ready"
+    assert exc.detail["collection_id"] == record["collection_id"]
+
+
 def test_document_source_route_streams_manifest_source_file(document_services):
-    collection_service, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
     paths = collection_service.get_paths(collection_id)
@@ -418,7 +527,9 @@ def test_document_source_route_streams_manifest_source_file(document_services):
 def test_document_source_route_resolves_profile_document_id_by_source_filename(
     document_services,
 ):
-    collection_service, document_profile_service, _comparison_service = document_services
+    collection_service, document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Profile Source File Collection")
     collection_id = record["collection_id"]
     paths = collection_service.get_paths(collection_id)
@@ -471,7 +582,9 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
 
 
 def test_document_source_route_returns_409_when_source_is_unavailable(document_services):
-    collection_service, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Missing Source Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -492,7 +605,9 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     document_services,
     tmp_path,
 ):
-    collection_service, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
     outside_path = tmp_path / "outside.pdf"
@@ -527,10 +642,138 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     assert "outside.pdf" not in str(exc.detail)
 
 
+def test_document_figure_image_route_streams_extracted_asset(document_services):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Figure Image Collection")
+    collection_id = record["collection_id"]
+    paths = collection_service.get_paths(collection_id)
+    asset_path = paths.output_dir / "image_assets" / "fig-1.png"
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture\n")
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "figure_label": "Fig. 1",
+                    "caption_text": "Fig. 1. Microstructure.",
+                    "image_path": "image_assets/fig-1.png",
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    response = asyncio.run(
+        documents_controller.get_collection_document_figure_image(
+            collection_id,
+            "paper-1",
+            "fig-1",
+        )
+    )
+
+    assert Path(response.path).read_bytes() == b"\x89PNG\r\n\x1a\nfixture\n"
+    assert response.media_type == "image/png"
+    assert response.headers["content-disposition"].startswith("inline;")
+
+
+def test_document_figure_image_route_rejects_figure_from_other_document(
+    document_services,
+):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Cross Document Figure Collection")
+    collection_id = record["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {"id": "paper-1", "title": "Paper 1", "text": ""},
+                {"id": "paper-2", "title": "Paper 2", "text": ""},
+            ],
+            figures=[
+                {
+                    "document_id": "paper-2",
+                    "figure_id": "fig-2",
+                    "figure_order": 1,
+                    "image_path": "image_assets/fig-2.png",
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                collection_id,
+                "paper-1",
+                "fig-2",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 404
+    assert exc.detail["code"] == "figure_not_found"
+    assert exc.detail["document_id"] == "paper-1"
+    assert exc.detail["figure_id"] == "fig-2"
+
+
+def test_document_figure_image_route_rejects_path_outside_collection(
+    document_services,
+    tmp_path,
+):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Unsafe Figure Image Collection")
+    collection_id = record["collection_id"]
+    outside_path = tmp_path / "outside.png"
+    outside_path.write_bytes(b"outside")
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "image_path": str(outside_path),
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                collection_id,
+                "paper-1",
+                "fig-1",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "figure_image_path_invalid"
+    assert "outside.png" not in str(exc.detail)
+
+
 def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
     document_services,
 ):
-    collection_service, _document_profile_service, _comparison_service = document_services
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Pending Semantic Collection")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -550,7 +793,9 @@ def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_
 def test_document_comparison_semantics_route_returns_404_for_missing_document(
     document_services,
 ):
-    collection_service, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Missing Document Semantics")
     collection_id = record["collection_id"]
     comparison_service.core_fact_repository.replace_collection_facts(
@@ -588,7 +833,9 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
 def test_document_comparison_semantics_route_returns_semantic_items_for_document(
     document_services,
 ):
-    collection_service, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Document Semantic Drilldown")
     collection_id = record["collection_id"]
 
@@ -631,7 +878,9 @@ def test_document_comparison_semantics_route_returns_semantic_items_for_document
 def test_document_comparison_semantics_route_can_include_projected_rows(
     document_services,
 ):
-    collection_service, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Document Semantic Projection")
     collection_id = record["collection_id"]
 
@@ -665,7 +914,9 @@ def test_document_comparison_semantics_route_can_include_projected_rows(
 def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
     document_services,
 ):
-    collection_service, _document_profile_service, comparison_service = document_services
+    collection_service, _document_profile_service, comparison_service, _markdown_service = (
+        document_services
+    )
     record = collection_service.create_collection(name="Document Evidence Chain")
     collection_id = record["collection_id"]
     sample_variants = pbf_acceptance_sample_variants(collection_id)

@@ -4,6 +4,8 @@ from domain.source import (
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
+    SourceReferenceEntry,
+    SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
@@ -103,3 +105,64 @@ def test_artifact_input_service_prefers_sqlite_source_repository(monkeypatch, tm
     assert tables[0]["table_matrix"] == [["Sample", "Value"], ["A", "1"]]
     assert table_rows[0]["row_text"] == "A | 1"
     assert table_cells[0]["header_path"] == "Value"
+
+
+def test_artifact_input_service_loads_document_tree(monkeypatch, tmp_path):
+    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    repository.replace_collection_artifacts(
+        "col_source",
+        SourceArtifactSet(
+            documents=(
+                SourceDocument(
+                    document_id="doc-1",
+                    human_readable_id=0,
+                    title="Paper",
+                    text="Methods\nEvidence text",
+                ),
+            ),
+            blocks=(
+                SourceBlock(
+                    block_id="blk-heading",
+                    document_id="doc-1",
+                    block_type="heading",
+                    text="Methods",
+                    block_order=1,
+                    heading_path="Methods",
+                    heading_level=1,
+                ),
+                SourceBlock(
+                    block_id="blk-body",
+                    document_id="doc-1",
+                    block_type="paragraph",
+                    text="Evidence text",
+                    block_order=2,
+                    heading_path="Methods",
+                ),
+            ),
+        ),
+    )
+    repository.replace_collection_references(
+        "col_source",
+        SourceReferenceSet(
+            entries=(
+                SourceReferenceEntry(
+                    reference_id="ref-1",
+                    document_id="doc-1",
+                    raw_reference="Smith A. Related paper. 2024.",
+                ),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        artifact_input_service,
+        "build_source_artifact_repository",
+        lambda: repository,
+    )
+
+    tree = artifact_input_service.load_document_tree("col_source", "doc-1")
+
+    assert tree["document_id"] == "doc-1"
+    assert tree["collection_id"] == "col_source"
+    assert tree["root_node_id"] == "node_doc-1_document"
+    assert tree["nodes"]["node_doc-1_block_blk-body"]["text"] == "Evidence text"
+    assert tree["reference_records"]["ref-1"]["raw_reference"].startswith("Smith")

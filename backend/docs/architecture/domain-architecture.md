@@ -21,7 +21,7 @@ for the Lens v1 direction.
 The main problems are:
 
 - `application/` mixes collection lifecycle, task orchestration, workspace
-  assembly, graph access, and report logic in one flat namespace
+  assembly, and graph access in one flat namespace
 - transport-facing concerns and business-domain concerns are not clearly
   separated
 - frontend-facing collection workflow semantics are not clearly mirrored in code
@@ -34,7 +34,7 @@ For Lens v1, backend code should reflect the actual business loop:
 3. documents are profiled
 4. evidence is extracted
 5. comparisons are generated
-6. graph and reports remain secondary derived surfaces
+6. graph remains a secondary derived surface
 
 ## Architecture Rules
 
@@ -72,7 +72,7 @@ Owns the collection-facing summary read model:
 - workspace overview
 - workflow readiness summary
 - collection-level warnings
-- navigation links into profiles, evidence, comparisons, graph, and reports
+- navigation links into profiles, evidence, comparisons, and graph
 
 ### Goal
 
@@ -120,10 +120,6 @@ Owns comparison-semantic substrate plus collection-facing comparison views:
 
 Owns graph browsing and exports as a retained secondary surface.
 
-### Reports
-
-Owns report retrieval and browsing as a retained secondary surface.
-
 ## Target Package Layout
 
 The target direction is:
@@ -152,9 +148,6 @@ backend/
     graph/
       router.py
       schemas.py
-    reports/
-      router.py
-      schemas.py
   application/
     collections/
     indexing/
@@ -163,7 +156,6 @@ backend/
     evidence/
     comparisons/
     graph/
-    reports/
   domain/
     collections/
     indexing/
@@ -231,8 +223,8 @@ Create domain folders and relocate current files without changing behavior:
   -> `application/collections/service.py`
 - `application/task_service.py`
   -> `application/indexing/task_service.py`
-- `application/collection_build_task_runner.py`
-  -> `application/indexing/collection_build_task_runner.py`
+- `application/pipeline/collection_build/service.py`
+  owns collection build workflow entry and sequencing
 - `application/index_run_mode_service.py`
   -> `application/indexing/run_mode_service.py`
 - `application/workspace_service.py`
@@ -241,9 +233,6 @@ Create domain folders and relocate current files without changing behavior:
   -> `application/workspace/artifact_registry_service.py`
 - `application/graph_service.py`
   -> `application/graph/service.py`
-- `application/report_service.py`
-  -> `application/reports/service.py`
-
 ### Wave 2: Add the Lens v1 backbone packages
 
 Introduce new domain-local packages that match the agreed Lens v1 backbone:
@@ -252,7 +241,7 @@ Introduce new domain-local packages that match the agreed Lens v1 backbone:
 - `application/evidence/`
 - `application/comparisons/`
 
-These should be added before secondary graph and report surfaces expand.
+These should be added before secondary graph surfaces expand.
 
 ### Wave 3: Rewire controllers by domain
 
@@ -263,8 +252,7 @@ Move flat controller modules into domain packages, for example:
 - `controllers/schemas/workspace.py`
   -> `controllers/workspace/schemas.py`
 
-The same pattern should apply to collections, indexing tasks, graph, reports,
-and query.
+The same pattern should apply to collections, indexing tasks, graph, and query.
 
 ## Migration Safety Rules
 
@@ -286,7 +274,7 @@ The recommended backend order is:
 5. add `evidence` domain support for `evidence_cards`
 6. add `comparisons` domain support for `ComparableResult`,
    `CollectionComparableResult`, and row projection
-7. keep graph and reports behind the evidence-first backbone
+7. keep graph behind the evidence-first backbone
 
 ## Relationship To Root Docs
 

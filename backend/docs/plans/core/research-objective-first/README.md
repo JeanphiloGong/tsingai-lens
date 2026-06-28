@@ -18,14 +18,15 @@ The family keeps multiple live pages because this local subject now needs:
   `ObjectiveEvidenceUnit` and `ObjectiveLogicChain` the authoritative Core
   semantic fact path instead of retaining old paper-fact families as the
   primary downstream contract
-- an objective report generation slice that turns resolved objective evidence
-  and logic chains into a sectioned, verified report projection
+- a research-understanding projection slice that turns resolved objective
+  evidence and logic chains into Claim / Relation / Evidence / Context review
+  data
 - a hard cutover direction that retires collection-wide comparison rows as a
-  semantic source for graph, material, research-view, workspace, and report
+  semantic source for graph, material, research-view, and workspace
   projections
 
 This is a Core semantic-build topic family. It does not change public API
-routes, frontend contracts, Source artifact production, or downstream report
+routes, frontend contracts, Source artifact production, or downstream derived
 ownership by itself.
 
 ## Reading Order
@@ -50,10 +51,9 @@ ownership by itself.
   evidence units and logic chains, including material and comparison
   projections, without keeping a long-term compatibility surface over the old
   paper-fact families
-- [`objective-report-sectioned-generation-plan.md`](objective-report-sectioned-generation-plan.md)
-  Implementation plan for replacing one-shot objective report generation with
-  section-specific evidence packets, per-section generation, deterministic
-  claim verification, and assembled persisted report artifacts
+- [`objective-evidence-unit-cutover-plan.md`](objective-evidence-unit-cutover-plan.md)
+  Also owns the current projection boundary for building research-understanding
+  review data directly from objective evidence units and logic chains
 
 ## Related Docs
 

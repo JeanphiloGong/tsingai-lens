@@ -17,7 +17,7 @@ Install the deploy bundle with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/deploy/install.sh \
-  | sh -s -- --version v0.8.2 --ref v0.8.2
+  | sh -s -- --version v0.9.0 --ref v0.9.0
 ```
 
 Use `--ref <git-ref>` when you want the deploy files themselves to come from a
@@ -127,11 +127,11 @@ cp backend.env.example backend.env
 Edit `.env` to choose the published image tag and host port:
 
 ```bash
-LENS_VERSION=v0.8.2
+LENS_VERSION=v0.9.0
 LENS_HTTP_PORT=8080
 ```
 
-Edit `backend.env` before the first v0.8.2 start to create the initial login
+Edit `backend.env` before the first v0.9.0 start to create the initial login
 user:
 
 ```bash
@@ -183,7 +183,7 @@ http://localhost:8080
 ./scripts/lens logs
 ./scripts/lens ps
 ./scripts/lens pull
-./scripts/lens upgrade v0.8.2
+./scripts/lens upgrade v0.9.0
 ```
 
 Command mapping:
@@ -208,7 +208,7 @@ cp -a data/backend data/backend.backup.$(date +%Y%m%d%H%M%S)
 Then upgrade:
 
 ```bash
-./scripts/lens upgrade v0.8.2
+./scripts/lens upgrade v0.9.0
 ./scripts/lens doctor
 ```
 

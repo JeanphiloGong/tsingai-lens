@@ -17,11 +17,12 @@ router = APIRouter(prefix="/collections", tags=["collections"])
 collection_service = CollectionService()
 
 
-@router.post("", response_model=CollectionResponse, summary="创建论文集合")
+@router.post("", response_model=CollectionResponse, summary="create the paper collection")
 async def create_collection(
     payload: CollectionCreateRequest,
     request: Request,
 ) -> CollectionResponse:
+    # create collection of paper
     record = collection_service.create_collection(
         name=payload.name,
         description=payload.description,

@@ -1043,20 +1043,19 @@ Exit criteria:
 
 Goal:
 
-- ensure graph and reports consume the stronger comparison backbone without
-  inventing their own semantics
+- ensure graph and research-understanding projections consume the stronger
+  comparison backbone without inventing their own semantics
 
 Primary changes:
 
 - update `backend/application/graph/core_projection_service.py`
-- update `backend/application/reports/service.py`
+- update research-understanding projection inputs where needed
 - preserve Core-first downstream consumption
 
 Files expected to change:
 
 - `backend/application/graph/core_projection_service.py`
-- `backend/application/reports/service.py`
-- downstream tests for graph and report projections
+- downstream tests for graph and research-understanding projections
 
 Exit criteria:
 
@@ -1086,7 +1085,7 @@ Current implementation status against this verification plan:
 
 - backend unit and integration tests now cover Source handoff persistence,
   Wave C Core artifacts, Wave D sample/result artifacts, Wave E comparison
-  cutover, and downstream graph/report consumers
+  cutover, and downstream graph/research-understanding consumers
 - the remaining notable verification gap is environment-dependent route and
   app-layer execution where `fastapi` is not installed in the current runtime;
   those checks belong to follow-up validation rather than unfinished backbone
@@ -1107,7 +1106,8 @@ Minimum verification expected across the plan:
 - unit tests for result-to-condition cardinality and unresolved-condition
   handling
 - integration tests proving `/comparisons` returns upgraded rows after cutover
-- graph/report tests proving downstream Core consumers still function
+- graph/research-understanding tests proving downstream Core consumers still
+  function
 
 ## Remaining Follow-Up After This Plan
 

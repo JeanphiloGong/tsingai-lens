@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from application.core.research_view_aggregation_service import (
-    MaterialReportNotFoundError,
     ResearchViewAggregationService,
     ResearchViewDocumentNotFoundError,
     ResearchViewMaterialNotFoundError,
@@ -13,8 +12,6 @@ from application.core.research_view_aggregation_service import (
 from controllers.schemas.core.research_view import (
     CollectionAggregationResponse,
     DocumentMaterialProfileResponse,
-    MaterialReportRequest,
-    MaterialReportResponse,
     MaterialProfileResponse,
     MaterialSummariesResponse,
     PaperAggregationResponse,
@@ -43,30 +40,6 @@ def _research_view_material_not_found_detail(
         "document_id": exc.document_id,
         "material_id": exc.material_id,
     }
-
-
-def _material_report_not_found_detail(
-    exc: MaterialReportNotFoundError,
-) -> dict[str, str]:
-    return {
-        "code": "material_report_not_found",
-        "message": str(exc),
-        "collection_id": exc.collection_id,
-        "material_id": exc.material_id,
-    }
-
-
-def _generate_material_report_background(
-    collection_id: str,
-    material_id: str,
-    request: MaterialReportRequest,
-) -> None:
-    research_view_service.generate_material_report(
-        collection_id,
-        material_id,
-        language=request.language,
-        force_regenerate=False,
-    )
 
 
 @router.get(
@@ -143,71 +116,6 @@ async def get_collection_material_research_view(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return MaterialProfileResponse(**payload)
-
-
-@router.post(
-    "/{collection_id}/materials/{material_id}/report",
-    response_model=MaterialReportResponse,
-    summary="生成 material 科研报告",
-)
-async def create_collection_material_report(
-    collection_id: str,
-    material_id: str,
-    request: MaterialReportRequest,
-    background_tasks: BackgroundTasks,
-) -> MaterialReportResponse:
-    try:
-        payload = await run_in_threadpool(
-            research_view_service.request_material_report,
-            collection_id,
-            material_id,
-            language=request.language,
-            force_regenerate=request.force_regenerate,
-        )
-    except ResearchViewMaterialNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=_research_view_material_not_found_detail(exc),
-        ) from exc
-    except ResearchViewNotReadyError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=_research_view_not_ready_detail(exc.collection_id),
-        ) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    if payload.get("status") == "generating":
-        background_tasks.add_task(
-            _generate_material_report_background,
-            collection_id,
-            material_id,
-            request,
-        )
-    return MaterialReportResponse(**payload)
-
-
-@router.get(
-    "/{collection_id}/materials/{material_id}/report",
-    response_model=MaterialReportResponse,
-    summary="读取 material 科研报告状态",
-)
-async def get_collection_material_report(
-    collection_id: str,
-    material_id: str,
-) -> MaterialReportResponse:
-    try:
-        payload = await run_in_threadpool(
-            research_view_service.get_material_report_status,
-            collection_id,
-            material_id,
-        )
-    except MaterialReportNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=_material_report_not_found_detail(exc),
-        ) from exc
-    return MaterialReportResponse(**payload)
 
 
 @router.get(

@@ -28,6 +28,220 @@ export type EvidenceReference = {
 	traceability_status: string | null;
 };
 
+export type ResearchUnderstandingState = 'empty' | 'partial' | 'ready' | 'limited';
+export type ResearchUnderstandingScope = {
+	scope_type: string;
+	collection_id: string;
+	goal_id?: string | null;
+	material_id: string | null;
+	objective_id: string | null;
+	document_id: string | null;
+	title: string | null;
+};
+export type ResearchUnderstandingEvidenceRef = {
+	evidence_ref_id: string;
+	source_kind: string;
+	document_id: string | null;
+	label: string;
+	locator: Record<string, unknown>;
+	fact_ids: string[];
+	anchor_ids: string[];
+	confidence: number | null;
+	traceability_status: string;
+	quote: string | null;
+	href: string | null;
+};
+export type ResearchUnderstandingContext = {
+	context_id: string;
+	label: string;
+	material_scope: string[];
+	process_context: Record<string, unknown>;
+	test_condition: Record<string, unknown>;
+	property_scope: string[];
+	limitations: string[];
+};
+export type ResearchUnderstandingClaim = {
+	claim_id: string;
+	claim_type: string;
+	statement: string;
+	status: string;
+	confidence: number | null;
+	strength: string | null;
+	evidence_ref_ids: string[];
+	context_ids: string[];
+	source_object_ids: string[];
+	warnings: string[];
+};
+export type ResearchUnderstandingRelation = {
+	relation_id: string;
+	relation_type: string;
+	subject: string;
+	predicate: string;
+	object: string;
+	statement: string | null;
+	conditions: string[];
+	status: string;
+	confidence: number | null;
+	evidence_ref_ids: string[];
+	context_ids: string[];
+	source_object_ids: string[];
+	warnings: string[];
+};
+export type ResearchUnderstandingPresentationSummary = {
+	title: string;
+	material_scope: string[];
+	variable_axes: string[];
+	property_scope: string[];
+	claim_count: number;
+	relation_count: number;
+	evidence_count: number;
+	context_count: number;
+	review_queue_count: number;
+};
+export type ResearchUnderstandingPresentationEffect = {
+	effect_id: string;
+	claim_id: string;
+	title: string;
+	statement: string;
+	claim_type: string;
+	support_status: string;
+	confidence: number | null;
+	effect_direction: string;
+	variable_axis: string;
+	target_property: string;
+	paper_count: number;
+	evidence_count: number;
+	context_summary: string;
+	evidence_ref_ids: string[];
+	context_ids: string[];
+	relation_ids: string[];
+	needs_review: boolean;
+	warnings: string[];
+};
+export type ResearchUnderstandingPresentationEvidence = {
+	evidence_ref_id: string;
+	document_id: string | null;
+	title: string;
+	source_label: string;
+	source_kind: string;
+	source_ref: string | null;
+	block_type: string | null;
+	heading_path: string | null;
+	page: string | null;
+	quote: string | null;
+	source_text: string | null;
+	value_summary: string;
+	traceability_status: string;
+	confidence: number | null;
+	href: string | null;
+};
+export type ResearchUnderstandingPresentationContext = {
+	context_id: string;
+	label: string;
+	material_scope: string[];
+	property_scope: string[];
+	process_summary: string;
+	test_summary: string;
+	limitations: string[];
+};
+export type ResearchUnderstandingPresentation = {
+	summary: ResearchUnderstandingPresentationSummary;
+	effects: ResearchUnderstandingPresentationEffect[];
+	evidence_items: ResearchUnderstandingPresentationEvidence[];
+	context_summaries: ResearchUnderstandingPresentationContext[];
+};
+export type ResearchUnderstanding = {
+	schema_version: string;
+	state: ResearchUnderstandingState;
+	scope: ResearchUnderstandingScope;
+	claims: ResearchUnderstandingClaim[];
+	relations: ResearchUnderstandingRelation[];
+	evidence_refs: ResearchUnderstandingEvidenceRef[];
+	contexts: ResearchUnderstandingContext[];
+	warnings: string[];
+	summary: {
+		claim_count: number;
+		relation_count: number;
+		evidence_ref_count: number;
+		context_count: number;
+	};
+	presentation: ResearchUnderstandingPresentation;
+};
+export type ResearchUnderstandingFeedbackStatus = 'correct' | 'incorrect' | 'partial' | 'unclear';
+export type ResearchUnderstandingFeedbackIssueType =
+	| 'none'
+	| 'evidence_not_grounded'
+	| 'missing_evidence'
+	| 'wrong_context'
+	| 'wrong_relation'
+	| 'overclaim'
+	| 'unclear_statement'
+	| 'other';
+export type ResearchUnderstandingFeedbackCreate = {
+	scope_type: string;
+	scope_id: string;
+	claim_id: string;
+	review_status: ResearchUnderstandingFeedbackStatus;
+	issue_type: ResearchUnderstandingFeedbackIssueType;
+	note?: string | null;
+	reviewer?: string | null;
+};
+export type ResearchUnderstandingFeedback = ResearchUnderstandingFeedbackCreate & {
+	feedback_id: string;
+	collection_id: string;
+	created_at: string;
+};
+export type ResearchUnderstandingFeedbackFilters = {
+	scope_type?: string;
+	scope_id?: string;
+	claim_id?: string;
+};
+export type ResearchUnderstandingCurationCreate = {
+	scope_type: string;
+	scope_id: string;
+	claim_id: string;
+	curated_claim_type: string;
+	curated_status: string;
+	curated_statement: string;
+	curated_evidence_ref_ids: string[];
+	curated_context_ids: string[];
+	note?: string | null;
+	reviewer?: string | null;
+};
+export type ResearchUnderstandingCuration = ResearchUnderstandingCurationCreate & {
+	curation_id: string;
+	collection_id: string;
+	updated_at: string;
+};
+export type ResearchUnderstandingCurationFilters = {
+	scope_type?: string;
+	scope_id?: string;
+	claim_id?: string;
+};
+export type ResearchUnderstandingGoldDraftItem = {
+	gold_item_id: string;
+	document_id: string;
+	family: string;
+	item_key: string;
+	payload: Record<string, unknown>;
+	evidence_refs: Record<string, unknown>[];
+	metadata: Record<string, unknown>;
+};
+export type ResearchUnderstandingGoldDraft = {
+	collection_id: string;
+	scope_type: string;
+	scope_id: string;
+	gold_id: string;
+	target_layer: string;
+	metric_profile: string;
+	item_count: number;
+	items: ResearchUnderstandingGoldDraftItem[];
+};
+export type ResearchUnderstandingGoldDraftFilters = {
+	scope_type: string;
+	scope_id: string;
+};
+
 export type EvidenceBackedValue = {
 	display_value: string;
 	value: string | number | null;
@@ -281,276 +495,6 @@ export type ObjectiveLogicChain = {
 	confidence: number;
 };
 
-export type ObjectiveConclusionNarrativeClaim = {
-	claim: string;
-	evidence_unit_ids: string[];
-	source_refs: Record<string, unknown>[];
-	strength: string;
-};
-
-export type ObjectiveConclusionNarrativeSection = {
-	section_id: string;
-	title: string;
-	body: string;
-	claims: ObjectiveConclusionNarrativeClaim[];
-	evidence_unit_ids: string[];
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveConclusionNarrative = {
-	status: string;
-	sections: ObjectiveConclusionNarrativeSection[];
-};
-
-export type ObjectiveConclusionContribution = {
-	document_id: string;
-	title: string | null;
-	source_filename: string | null;
-	paper_role: string;
-	relevance: string;
-	background: string | null;
-	changed_variables: string[];
-	measured_property_scope: string[];
-	evidence_unit_count: number;
-	evidence_unit_ids: string[];
-};
-
-export type ObjectiveConclusionMeasurementRow = {
-	evidence_unit_id: string;
-	document_id: string | null;
-	property: string | null;
-	sample_context: Record<string, unknown>;
-	process_context: Record<string, unknown>;
-	test_condition: Record<string, unknown>;
-	value: string | number | null;
-	source_value_text: string | null;
-	unit: string | null;
-	resolution_status: string;
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveConclusionValueRangeEndpoint = {
-	evidence_unit_id: string;
-	value: string | number | null;
-	unit: string | null;
-	sample_context: Record<string, unknown>;
-	process_context: Record<string, unknown>;
-	document_id: string | null;
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveConclusionMeasurementRange = {
-	property_normalized: string;
-	min: ObjectiveConclusionValueRangeEndpoint | null;
-	max: ObjectiveConclusionValueRangeEndpoint | null;
-	unit: string | null;
-	count: number;
-};
-
-export type ObjectiveConclusionEvidenceTable = {
-	table_id: string;
-	title: string;
-	rows: ObjectiveConclusionMeasurementRow[];
-	measurement_value_ranges: ObjectiveConclusionMeasurementRange[];
-};
-
-export type ObjectiveConclusionComparison = {
-	evidence_unit_id: string;
-	document_id: string | null;
-	property: string | null;
-	comparison_axis: string | null;
-	direction: string | null;
-	summary: string | null;
-	sample_context: Record<string, unknown>;
-	process_context: Record<string, unknown>;
-	baseline_context: Record<string, unknown>;
-	source_refs: Record<string, unknown>[];
-	validity: string;
-};
-
-export type ObjectiveConclusionMechanismEvidence = {
-	evidence_unit_id: string;
-	document_id: string | null;
-	unit_kind: string;
-	property: string | null;
-	summary: string | null;
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveConclusionMechanismStep = {
-	step_role: string;
-	label: string;
-};
-
-export type ObjectiveConclusionMechanismChain = {
-	steps: ObjectiveConclusionMechanismStep[];
-	evidence: ObjectiveConclusionMechanismEvidence[];
-	evidence_unit_ids: string[];
-};
-
-export type ObjectiveConclusionStatement = {
-	claim: string;
-	evidence_unit_ids: string[];
-	strength: string;
-};
-
-export type ObjectiveConclusionLimitation = {
-	code: string;
-	message: string;
-	evidence_unit_ids: string[];
-};
-
-export type ObjectiveExpertFinding = {
-	finding_id: string;
-	statement: string;
-	strength: string;
-	evidence_unit_ids: string[];
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveExpertEvidenceMatrix = {
-	relevant_paper_count: number;
-	measurement_result_count: number;
-	measurement_property_count: number;
-	controlled_comparison_count: number;
-	mechanism_evidence_count: number;
-	limitation_count: number;
-	source_ref_count: number;
-	measurement_value_ranges: ObjectiveConclusionMeasurementRange[];
-};
-
-export type ObjectiveExpertPaperContribution = {
-	document_id: string;
-	paper_label: string | null;
-	display_title: string | null;
-	paper_role: string;
-	relevance: string;
-	contribution_summary: string | null;
-	changed_variables: string[];
-	measured_property_scope: string[];
-	evidence_unit_count: number;
-	evidence_unit_ids: string[];
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveExpertComparison = {
-	comparison_id: string;
-	evidence_unit_id: string;
-	document_id: string | null;
-	property: string | null;
-	comparison_axis: string | null;
-	direction: string | null;
-	validity: string;
-	summary: string | null;
-	sample_context: Record<string, unknown>;
-	process_context: Record<string, unknown>;
-	baseline_context: Record<string, unknown>;
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveExpertMechanismEvidence = {
-	evidence_unit_id: string;
-	document_id: string | null;
-	unit_kind: string;
-	property: string | null;
-	summary: string | null;
-	sample_context: Record<string, unknown>;
-	process_context: Record<string, unknown>;
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveExpertMechanismChain = {
-	steps: ObjectiveConclusionMechanismStep[];
-	evidence: ObjectiveExpertMechanismEvidence[];
-	evidence_unit_ids: string[];
-};
-
-export type ObjectiveExpertLimitation = {
-	code: string;
-	message: string;
-	evidence_unit_ids: string[];
-	source_refs: Record<string, unknown>[];
-};
-
-export type ObjectiveExpertReport = {
-	schema_version: string;
-	status: string;
-	headline_conclusion: string;
-	scientific_context: string;
-	key_findings: ObjectiveExpertFinding[];
-	evidence_matrix: ObjectiveExpertEvidenceMatrix;
-	paper_contribution_map: ObjectiveExpertPaperContribution[];
-	controlled_comparisons: ObjectiveExpertComparison[];
-	mechanism_chain: ObjectiveExpertMechanismChain;
-	limitations: ObjectiveExpertLimitation[];
-	source_traceback: Record<string, unknown>[];
-	traceability: Record<string, unknown>;
-};
-
-export type ObjectiveReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
-export type MaterialReportStatus = 'generating' | 'ready' | 'ready_with_warnings' | 'failed';
-
-export type ObjectiveReportArtifact = {
-	collection_id: string;
-	report_id: string;
-	objective_id: string;
-	status: ObjectiveReportStatus;
-	stage: string;
-	message: string | null;
-	title: string;
-	language: string;
-	model: string | null;
-	data_version: string;
-	markdown: string | null;
-	warnings: string[];
-	source_refs: Record<string, unknown>[];
-	created_at: string;
-	updated_at: string;
-	generated_at: string | null;
-};
-
-export type MaterialReportArtifact = {
-	collection_id: string;
-	report_id: string;
-	material_id: string;
-	status: MaterialReportStatus;
-	stage: string;
-	message: string | null;
-	title: string;
-	language: string;
-	model: string | null;
-	data_version: string;
-	markdown: string | null;
-	warnings: string[];
-	source_refs: Record<string, unknown>[];
-	evidence_appendix: Record<string, unknown>;
-	created_at: string;
-	updated_at: string;
-	generated_at: string | null;
-};
-
-export type ObjectiveConclusionPackage = {
-	schema_version: string;
-	title: string;
-	objective: {
-		objective_id: string;
-		question: string;
-		material_scope: string[];
-		process_axes: string[];
-		property_axes: string[];
-	};
-	status: string;
-	narrative: ObjectiveConclusionNarrative;
-	paper_contributions: ObjectiveConclusionContribution[];
-	primary_evidence_tables: ObjectiveConclusionEvidenceTable[];
-	controlled_comparisons: ObjectiveConclusionComparison[];
-	mechanism_chain: ObjectiveConclusionMechanismChain;
-	conclusions: ObjectiveConclusionStatement[];
-	limitations: ObjectiveConclusionLimitation[];
-	source_refs: Record<string, unknown>[];
-	expert_report: ObjectiveExpertReport | null;
-};
-
 export type ObjectiveList = {
 	collection_id: string;
 	state: ResearchViewState;
@@ -569,10 +513,45 @@ export type ObjectiveResearchView = {
 	evidence_routes: ObjectiveEvidenceRoute[];
 	evidence_units: ObjectiveEvidenceUnit[];
 	logic_chain: ObjectiveLogicChain | null;
-	conclusion_package: ObjectiveConclusionPackage | null;
-	objective_report: ObjectiveReportArtifact | null;
+	understanding: ResearchUnderstanding | null;
 	existing_comparison_rows: Record<string, unknown>[];
 	warnings: ResearchViewWarning[];
+};
+
+export type ConfirmedGoalStatus = 'pending' | 'running' | 'ready' | 'failed';
+export type GoalAnalysisProgress = {
+	phase: string;
+	current: number | null;
+	total: number | null;
+	unit: string | null;
+	message: string | null;
+	active_document_id: string | null;
+	active_document_title: string | null;
+	active_source_filename: string | null;
+	active_objective_id: string | null;
+};
+export type ConfirmedGoal = {
+	goal_id: string;
+	collection_id: string;
+	question: string;
+	source_type: string;
+	material_hints: string[];
+	process_hints: string[];
+	property_hints: string[];
+	source_objective_id: string | null;
+	status: ConfirmedGoalStatus;
+	analysis_error: string | null;
+	analysis_progress: GoalAnalysisProgress | null;
+	created_at: string | null;
+	updated_at: string | null;
+};
+export type GoalAnalysis = {
+	collection_id: string;
+	goal: ConfirmedGoal;
+	understanding: ResearchUnderstanding | null;
+	pipeline_nodes: Record<string, Record<string, unknown>>;
+	errors: string[];
+	warnings: string[];
 };
 
 export type MaterialPaperCoverage = {
@@ -624,109 +603,6 @@ export type MaterialProfileOverview = {
 	variable_axes: string[];
 };
 
-export type MaterialReportPerformanceResult = {
-	property: string;
-	display_value: string;
-	value: string | number | null;
-	unit: string | null;
-	condition: string | null;
-	status: EvidenceBackedValueStatus;
-	evidence_refs: EvidenceReference[];
-	warnings: ResearchViewWarning[];
-};
-
-export type MaterialReportStateChain = {
-	chain_id: string;
-	document_id: string | null;
-	sample_id: string;
-	sample_label: string;
-	material: string;
-	material_state: string;
-	preparation_context: Record<string, string>;
-	test_conditions: Record<string, string>;
-	performance_results: MaterialReportPerformanceResult[];
-	source_evidence: EvidenceReference[];
-	comparability_boundary: string[];
-	confidence: number | null;
-	unresolved_fields: string[];
-};
-
-export type MaterialReportPaperContribution = {
-	document_id: string;
-	title: string | null;
-	source_filename: string | null;
-	sample_count: number;
-	measured_properties: string[];
-	contribution_summary: string;
-};
-
-export type MaterialReportScope = {
-	material_system: string;
-	preparation_routes: string[];
-	source_paper_count: number;
-	sample_row_count: number;
-	evidence_count: number;
-};
-
-export type MaterialReportFinding = {
-	finding_id: string;
-	title: string;
-	body: string;
-	evidence_refs: EvidenceReference[];
-};
-
-export type MaterialReportSection = {
-	section_id: string;
-	title: string;
-	body: string;
-	key_points: string[];
-	evidence_refs: EvidenceReference[];
-};
-
-export type MaterialReportAppendix = {
-	sample_matrix_row_count: number;
-	property_count: number;
-	evidence_count: number;
-	source_table_count: number;
-};
-
-export type MaterialReportOutlineItem = {
-	level: number;
-	title: string;
-	anchor: string;
-};
-
-export type MaterialReportDocument = {
-	schema_version: string;
-	status: ResearchViewState;
-	title: string;
-	markdown: string;
-	citations: Record<string, EvidenceReference>;
-	outline: MaterialReportOutlineItem[];
-	warnings: ResearchViewWarning[];
-	evidence_appendix: MaterialReportAppendix;
-};
-
-export type MaterialReportPackage = {
-	schema_version: string;
-	status: ResearchViewState;
-	title: string;
-	material_id: string;
-	canonical_name: string;
-	summary: string;
-	executive_summary: string;
-	material_scope: MaterialReportScope;
-	paper_contributions: MaterialReportPaperContribution[];
-	key_findings: MaterialReportFinding[];
-	representative_states: MaterialReportStateChain[];
-	thematic_sections: MaterialReportSection[];
-	material_state_chains: MaterialReportStateChain[];
-	limitations: string[];
-	evidence_appendix: MaterialReportAppendix;
-	document: MaterialReportDocument | null;
-	source_refs: EvidenceReference[];
-};
-
 export type MaterialProfile = {
 	collection_id: string;
 	material_id: string;
@@ -741,7 +617,7 @@ export type MaterialProfile = {
 	comparison_groups: ComparableGroup[];
 	condition_series: ConditionSeries[];
 	evidence_refs: EvidenceReference[];
-	report_package: MaterialReportPackage | null;
+	understanding: ResearchUnderstanding | null;
 	debug_links: Record<string, string>;
 	warnings: ResearchViewWarning[];
 };
@@ -923,202 +799,6 @@ function normalizeContextRecord(value: unknown, fallbackKey: string): Record<str
 	return normalizeStringRecord(value);
 }
 
-function normalizeMaterialReportResult(value: unknown): MaterialReportPerformanceResult | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const property = toText(record.property ?? record.property_normalized ?? record.name);
-	if (!property) return null;
-
-	return {
-		property,
-		display_value: toText(record.display_value ?? record.display ?? record.value),
-		value: toScalar(record.value),
-		unit: nonEmptyText(record.unit),
-		condition: nonEmptyText(record.condition ?? record.test_condition),
-		status: normalizeEvidenceStatus(record.status),
-		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence),
-		warnings: normalizeWarnings(record.warnings)
-	};
-}
-
-function normalizeMaterialReportChain(value: unknown): MaterialReportStateChain | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const chainId = toText(record.chain_id ?? record.id);
-	const sampleId = toText(record.sample_id ?? record.variant_id ?? chainId);
-	if (!chainId && !sampleId) return null;
-
-	return {
-		chain_id: chainId || sampleId,
-		document_id: nonEmptyText(record.document_id),
-		sample_id: sampleId || chainId,
-		sample_label: toText(record.sample_label ?? record.label ?? record.material_state, sampleId),
-		material: toText(record.material ?? record.material_system, '--'),
-		material_state: toText(record.material_state ?? record.sample_label ?? record.label, sampleId),
-		preparation_context: normalizeContextRecord(
-			record.preparation_context ?? record.process_context,
-			'process'
-		),
-		test_conditions: normalizeContextRecord(
-			record.test_conditions ?? record.test_condition,
-			'condition'
-		),
-		performance_results: normalizeObjectList(record.performance_results ?? record.results, 'items')
-			.map((item) => normalizeMaterialReportResult(item))
-			.filter((item): item is MaterialReportPerformanceResult => item !== null),
-		source_evidence: normalizeEvidenceReferences(record.source_evidence ?? record.evidence_refs),
-		comparability_boundary: toStringList(record.comparability_boundary ?? record.boundaries),
-		confidence: toOptionalNumber(record.confidence),
-		unresolved_fields: toStringList(record.unresolved_fields)
-	};
-}
-
-function normalizeMaterialReportContribution(
-	value: unknown
-): MaterialReportPaperContribution | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const documentId = toText(record.document_id ?? record.id);
-	if (!documentId) return null;
-
-	return {
-		document_id: documentId,
-		title: nonEmptyText(record.title),
-		source_filename: nonEmptyText(record.source_filename),
-		sample_count: toNumber(record.sample_count),
-		measured_properties: toStringList(record.measured_properties ?? record.properties),
-		contribution_summary: toText(record.contribution_summary ?? record.summary, documentId)
-	};
-}
-
-function normalizeMaterialReportScope(value: unknown): MaterialReportScope {
-	const record = asRecord(value);
-	return {
-		material_system: toText(record?.material_system),
-		preparation_routes: toStringList(record?.preparation_routes ?? record?.routes),
-		source_paper_count: toNumber(record?.source_paper_count ?? record?.paper_count),
-		sample_row_count: toNumber(record?.sample_row_count ?? record?.sample_count),
-		evidence_count: toNumber(record?.evidence_count)
-	};
-}
-
-function normalizeMaterialReportFinding(value: unknown): MaterialReportFinding | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const title = toText(record.title);
-	const body = toText(record.body ?? record.summary);
-	if (!title && !body) return null;
-	return {
-		finding_id: toText(record.finding_id ?? record.id, title || body),
-		title: title || body,
-		body,
-		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence)
-	};
-}
-
-function normalizeMaterialReportSection(value: unknown): MaterialReportSection | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const title = toText(record.title);
-	const body = toText(record.body ?? record.summary);
-	if (!title && !body) return null;
-	return {
-		section_id: toText(record.section_id ?? record.id, title || body),
-		title: title || body,
-		body,
-		key_points: toStringList(record.key_points ?? record.points),
-		evidence_refs: normalizeEvidenceReferences(record.evidence_refs ?? record.evidence)
-	};
-}
-
-function normalizeMaterialReportAppendix(value: unknown): MaterialReportAppendix {
-	const record = asRecord(value);
-	return {
-		sample_matrix_row_count: toNumber(record?.sample_matrix_row_count),
-		property_count: toNumber(record?.property_count),
-		evidence_count: toNumber(record?.evidence_count),
-		source_table_count: toNumber(record?.source_table_count)
-	};
-}
-
-function normalizeMaterialReportOutlineItem(value: unknown): MaterialReportOutlineItem | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const title = toText(record.title);
-	if (!title) return null;
-	return {
-		level: toNumber(record.level, 2),
-		title,
-		anchor: toText(record.anchor, title.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
-	};
-}
-
-function normalizeMaterialReportCitations(value: unknown): Record<string, EvidenceReference> {
-	const record = asRecord(value);
-	if (!record) return {};
-	return Object.fromEntries(
-		Object.entries(record)
-			.map(([citationId, ref]) => [citationId, normalizeEvidenceReference(ref)] as const)
-			.filter((item): item is [string, EvidenceReference] => item[1] !== null)
-	);
-}
-
-function normalizeMaterialReportDocument(value: unknown): MaterialReportDocument | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const markdown = toText(record.markdown);
-	if (!markdown) return null;
-	return {
-		schema_version: toText(record.schema_version, 'material_report_document.v1'),
-		status: normalizeResearchState(record.status, 'partial'),
-		title: toText(record.title, 'Material report'),
-		markdown,
-		citations: normalizeMaterialReportCitations(record.citations),
-		outline: normalizeObjectList(record.outline, 'items')
-			.map((item) => normalizeMaterialReportOutlineItem(item))
-			.filter((item): item is MaterialReportOutlineItem => item !== null),
-		warnings: normalizeWarnings(record.warnings),
-		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix)
-	};
-}
-
-function normalizeMaterialReportPackage(value: unknown): MaterialReportPackage | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const chains = normalizeObjectList(record.material_state_chains ?? record.chains, 'items')
-		.map((item) => normalizeMaterialReportChain(item))
-		.filter((item): item is MaterialReportStateChain => item !== null);
-	const representativeStates = normalizeObjectList(record.representative_states, 'items')
-		.map((item) => normalizeMaterialReportChain(item))
-		.filter((item): item is MaterialReportStateChain => item !== null);
-
-	return {
-		schema_version: toText(record.schema_version, 'material_report_package.v1'),
-		status: normalizeResearchState(record.status, chains.length ? 'partial' : 'empty'),
-		title: toText(record.title, 'Material report package'),
-		material_id: toText(record.material_id),
-		canonical_name: toText(record.canonical_name),
-		summary: toText(record.summary),
-		executive_summary: toText(record.executive_summary ?? record.summary),
-		material_scope: normalizeMaterialReportScope(record.material_scope),
-		paper_contributions: normalizeObjectList(record.paper_contributions, 'items')
-			.map((item) => normalizeMaterialReportContribution(item))
-			.filter((item): item is MaterialReportPaperContribution => item !== null),
-		key_findings: normalizeObjectList(record.key_findings, 'items')
-			.map((item) => normalizeMaterialReportFinding(item))
-			.filter((item): item is MaterialReportFinding => item !== null),
-		representative_states: representativeStates.length ? representativeStates : chains,
-		thematic_sections: normalizeObjectList(record.thematic_sections, 'items')
-			.map((item) => normalizeMaterialReportSection(item))
-			.filter((item): item is MaterialReportSection => item !== null),
-		material_state_chains: chains,
-		limitations: toStringList(record.limitations),
-		evidence_appendix: normalizeMaterialReportAppendix(record.evidence_appendix),
-		document: normalizeMaterialReportDocument(record.document),
-		source_refs: normalizeEvidenceReferences(record.source_refs ?? record.evidence_refs)
-	};
-}
-
 function normalizeLinkRecord(value: unknown): Record<string, string> {
 	return normalizeStringRecord(value);
 }
@@ -1223,6 +903,283 @@ function normalizeEvidenceReferences(value: unknown): EvidenceReference[] {
 	return asArray(value)
 		.map((item) => normalizeEvidenceReference(item))
 		.filter((item): item is EvidenceReference => item !== null);
+}
+
+function normalizeUnderstandingState(value: unknown): ResearchUnderstandingState {
+	const state = toText(value) as ResearchUnderstandingState;
+	return ['empty', 'partial', 'ready', 'limited'].includes(state) ? state : 'empty';
+}
+
+function normalizeResearchUnderstanding(value: unknown): ResearchUnderstanding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const scope = normalizeResearchUnderstandingScope(record.scope);
+	const claims = asArray(record.claims)
+		.map((item) => normalizeResearchUnderstandingClaim(item))
+		.filter((item): item is ResearchUnderstandingClaim => item !== null);
+	const relations = asArray(record.relations)
+		.map((item) => normalizeResearchUnderstandingRelation(item))
+		.filter((item): item is ResearchUnderstandingRelation => item !== null);
+	const evidenceRefs = asArray(record.evidence_refs)
+		.map((item) => normalizeResearchUnderstandingEvidenceRef(item))
+		.filter((item): item is ResearchUnderstandingEvidenceRef => item !== null);
+	const contexts = asArray(record.contexts)
+		.map((item) => normalizeResearchUnderstandingContext(item))
+		.filter((item): item is ResearchUnderstandingContext => item !== null);
+	const summary = {
+		claim_count: toNumber((asRecord(record.summary) ?? {}).claim_count, claims.length),
+		relation_count: toNumber((asRecord(record.summary) ?? {}).relation_count, relations.length),
+		evidence_ref_count: toNumber(
+			(asRecord(record.summary) ?? {}).evidence_ref_count,
+			evidenceRefs.length
+		),
+		context_count: toNumber((asRecord(record.summary) ?? {}).context_count, contexts.length)
+	};
+	return {
+		schema_version: toText(record.schema_version, 'research_understanding.v1'),
+		state: normalizeUnderstandingState(record.state),
+		scope,
+		claims,
+		relations,
+		evidence_refs: evidenceRefs,
+		contexts,
+		warnings: toStringList(record.warnings),
+		summary,
+		presentation: normalizeResearchUnderstandingPresentation(record.presentation, {
+			scope,
+			summary
+		})
+	};
+}
+
+function normalizeResearchUnderstandingScope(value: unknown): ResearchUnderstandingScope {
+	const record = asRecord(value);
+	return {
+		scope_type: toText(record?.scope_type, 'collection'),
+		collection_id: toText(record?.collection_id),
+		goal_id: nonEmptyText(record?.goal_id),
+		material_id: nonEmptyText(record?.material_id),
+		objective_id: nonEmptyText(record?.objective_id),
+		document_id: nonEmptyText(record?.document_id),
+		title: nonEmptyText(record?.title)
+	};
+}
+
+function normalizeResearchUnderstandingEvidenceRef(
+	value: unknown
+): ResearchUnderstandingEvidenceRef | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const evidenceRefId = toText(record.evidence_ref_id ?? record.id);
+	if (!evidenceRefId) return null;
+	return {
+		evidence_ref_id: evidenceRefId,
+		source_kind: toText(record.source_kind, 'unknown'),
+		document_id: nonEmptyText(record.document_id),
+		label: toText(record.label, evidenceRefId),
+		locator: normalizeUnknownRecord(record.locator),
+		fact_ids: toStringList(record.fact_ids),
+		anchor_ids: toStringList(record.anchor_ids),
+		confidence: toOptionalNumber(record.confidence),
+		traceability_status: toText(record.traceability_status, 'unknown'),
+		quote: nonEmptyText(record.quote),
+		href: nonEmptyText(record.href)
+	};
+}
+
+function normalizeResearchUnderstandingContext(
+	value: unknown
+): ResearchUnderstandingContext | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const contextId = toText(record.context_id ?? record.id);
+	if (!contextId) return null;
+	return {
+		context_id: contextId,
+		label: toText(record.label, contextId),
+		material_scope: toStringList(record.material_scope),
+		process_context: normalizeUnknownRecord(record.process_context),
+		test_condition: normalizeUnknownRecord(record.test_condition),
+		property_scope: toStringList(record.property_scope),
+		limitations: toStringList(record.limitations)
+	};
+}
+
+function normalizeResearchUnderstandingClaim(value: unknown): ResearchUnderstandingClaim | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const statement = toText(record.statement ?? record.claim);
+	if (!statement) return null;
+	return {
+		claim_id: toText(record.claim_id ?? record.id, statement),
+		claim_type: toText(record.claim_type ?? record.type, 'finding'),
+		statement,
+		status: toText(record.status, 'limited'),
+		confidence: toOptionalNumber(record.confidence),
+		strength: nonEmptyText(record.strength),
+		evidence_ref_ids: toStringList(record.evidence_ref_ids),
+		context_ids: toStringList(record.context_ids),
+		source_object_ids: toStringList(record.source_object_ids),
+		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingRelation(
+	value: unknown
+): ResearchUnderstandingRelation | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const subject = toText(record.subject);
+	const object = toText(record.object);
+	if (!subject && !object) return null;
+	return {
+		relation_id: toText(record.relation_id ?? record.id, `${subject}:${object}`),
+		relation_type: toText(record.relation_type, 'compares'),
+		subject,
+		predicate: toText(record.predicate, 'compares'),
+		object,
+		statement: toText(record.statement) || null,
+		conditions: toStringList(record.conditions),
+		status: toText(record.status, 'limited'),
+		confidence: toOptionalNumber(record.confidence),
+		evidence_ref_ids: toStringList(record.evidence_ref_ids),
+		context_ids: toStringList(record.context_ids),
+		source_object_ids: toStringList(record.source_object_ids),
+		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingPresentation(
+	value: unknown,
+	fallback: {
+		scope: ResearchUnderstandingScope;
+		summary: ResearchUnderstanding['summary'];
+	}
+): ResearchUnderstandingPresentation {
+	const record = asRecord(value);
+	if (!record) return emptyResearchUnderstandingPresentation(fallback);
+	const summaryRecord = asRecord(record.summary) ?? {};
+	const effects = asArray(record.effects)
+		.map((item) => normalizeResearchUnderstandingPresentationEffect(item))
+		.filter((item): item is ResearchUnderstandingPresentationEffect => item !== null);
+	const evidenceItems = asArray(record.evidence_items)
+		.map((item) => normalizeResearchUnderstandingPresentationEvidence(item))
+		.filter((item): item is ResearchUnderstandingPresentationEvidence => item !== null);
+	const contextSummaries = asArray(record.context_summaries)
+		.map((item) => normalizeResearchUnderstandingPresentationContext(item))
+		.filter((item): item is ResearchUnderstandingPresentationContext => item !== null);
+	return {
+		summary: {
+			title: toText(summaryRecord.title, fallback.scope.title ?? 'Research understanding'),
+			material_scope: toStringList(summaryRecord.material_scope),
+			variable_axes: toStringList(summaryRecord.variable_axes),
+			property_scope: toStringList(summaryRecord.property_scope),
+			claim_count: toNumber(summaryRecord.claim_count, fallback.summary.claim_count),
+			relation_count: toNumber(summaryRecord.relation_count, fallback.summary.relation_count),
+			evidence_count: toNumber(summaryRecord.evidence_count, fallback.summary.evidence_ref_count),
+			context_count: toNumber(summaryRecord.context_count, fallback.summary.context_count),
+			review_queue_count: toNumber(summaryRecord.review_queue_count, 0)
+		},
+		effects,
+		evidence_items: evidenceItems,
+		context_summaries: contextSummaries
+	};
+}
+
+function normalizeResearchUnderstandingPresentationEffect(
+	value: unknown
+): ResearchUnderstandingPresentationEffect | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const claimId = toText(record.claim_id);
+	const statement = toText(record.statement);
+	if (!claimId && !statement) return null;
+	return {
+		effect_id: toText(record.effect_id, claimId || statement),
+		claim_id: claimId || statement,
+		title: toText(record.title, statement || 'Research finding'),
+		statement,
+		claim_type: toText(record.claim_type, 'finding'),
+		support_status: toText(record.support_status, 'limited'),
+		confidence: toOptionalNumber(record.confidence),
+		effect_direction: toText(record.effect_direction),
+		variable_axis: toText(record.variable_axis),
+		target_property: toText(record.target_property),
+		paper_count: toNumber(record.paper_count, 0),
+		evidence_count: toNumber(record.evidence_count, 0),
+		context_summary: toText(record.context_summary),
+		evidence_ref_ids: toStringList(record.evidence_ref_ids),
+		context_ids: toStringList(record.context_ids),
+		relation_ids: toStringList(record.relation_ids),
+		needs_review: Boolean(record.needs_review),
+		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationEvidence(
+	value: unknown
+): ResearchUnderstandingPresentationEvidence | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const evidenceRefId = toText(record.evidence_ref_id ?? record.id);
+	if (!evidenceRefId) return null;
+	return {
+		evidence_ref_id: evidenceRefId,
+		document_id: nonEmptyText(record.document_id),
+		title: toText(record.title, 'Evidence'),
+		source_label: toText(record.source_label, 'Evidence'),
+		source_kind: toText(record.source_kind, 'unknown'),
+		source_ref: nonEmptyText(record.source_ref),
+		block_type: nonEmptyText(record.block_type),
+		heading_path: nonEmptyText(record.heading_path),
+		page: nonEmptyText(record.page),
+		quote: nonEmptyText(record.quote),
+		source_text: nonEmptyText(record.source_text ?? record.quote),
+		value_summary: toText(record.value_summary),
+		traceability_status: toText(record.traceability_status, 'unknown'),
+		confidence: toOptionalNumber(record.confidence),
+		href: nonEmptyText(record.href)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationContext(
+	value: unknown
+): ResearchUnderstandingPresentationContext | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const contextId = toText(record.context_id ?? record.id);
+	if (!contextId) return null;
+	return {
+		context_id: contextId,
+		label: toText(record.label, 'Context'),
+		material_scope: toStringList(record.material_scope),
+		property_scope: toStringList(record.property_scope),
+		process_summary: toText(record.process_summary),
+		test_summary: toText(record.test_summary),
+		limitations: toStringList(record.limitations)
+	};
+}
+
+function emptyResearchUnderstandingPresentation(fallback: {
+	scope: ResearchUnderstandingScope;
+	summary: ResearchUnderstanding['summary'];
+}): ResearchUnderstandingPresentation {
+	return {
+		summary: {
+			title: fallback.scope.title ?? 'Research understanding',
+			material_scope: [],
+			variable_axes: [],
+			property_scope: [],
+			claim_count: fallback.summary.claim_count,
+			relation_count: fallback.summary.relation_count,
+			evidence_count: fallback.summary.evidence_ref_count,
+			context_count: fallback.summary.context_count,
+			review_queue_count: 0
+		},
+		effects: [],
+		evidence_items: [],
+		context_summaries: []
+	};
 }
 
 export function normalizeEvidenceBackedValue(value: unknown): EvidenceBackedValue {
@@ -1542,488 +1499,6 @@ function normalizeObjectiveLogicChain(value: unknown): ObjectiveLogicChain | nul
 		chain_payload: normalizeUnknownRecord(record.chain_payload),
 		summary: nonEmptyText(record.summary),
 		confidence: toNumber(record.confidence)
-	};
-}
-
-function normalizeConclusionMeasurementRow(
-	value: unknown,
-	index: number
-): ObjectiveConclusionMeasurementRow | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id, `measurement_${index + 1}`);
-	return {
-		evidence_unit_id: evidenceUnitId,
-		document_id: nonEmptyText(record.document_id),
-		property: nonEmptyText(record.property ?? record.property_normalized),
-		sample_context: normalizeUnknownRecord(record.sample_context),
-		process_context: normalizeUnknownRecord(record.process_context),
-		test_condition: normalizeUnknownRecord(record.test_condition),
-		value: toScalar(record.value ?? record.observed_value),
-		source_value_text: nonEmptyText(record.source_value_text ?? record.display_value),
-		unit: nonEmptyText(record.unit),
-		resolution_status: toText(record.resolution_status, 'unknown'),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeConclusionRangeEndpoint(
-	value: unknown
-): ObjectiveConclusionValueRangeEndpoint | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
-	if (!evidenceUnitId && toScalar(record.value) === null) return null;
-
-	return {
-		evidence_unit_id: evidenceUnitId,
-		value: toScalar(record.value),
-		unit: nonEmptyText(record.unit),
-		sample_context: normalizeUnknownRecord(record.sample_context),
-		process_context: normalizeUnknownRecord(record.process_context),
-		document_id: nonEmptyText(record.document_id),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeConclusionMeasurementRange(
-	value: unknown
-): ObjectiveConclusionMeasurementRange | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const property = toText(record.property_normalized ?? record.property);
-	if (!property) return null;
-
-	return {
-		property_normalized: property,
-		min: normalizeConclusionRangeEndpoint(record.min),
-		max: normalizeConclusionRangeEndpoint(record.max),
-		unit: nonEmptyText(record.unit),
-		count: toNumber(record.count)
-	};
-}
-
-function normalizeConclusionEvidenceTable(value: unknown): ObjectiveConclusionEvidenceTable | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const tableId = toText(record.table_id ?? record.id);
-	if (!tableId) return null;
-
-	return {
-		table_id: tableId,
-		title: toText(record.title, tableId),
-		rows: asArray(record.rows)
-			.map((item, index) => normalizeConclusionMeasurementRow(item, index))
-			.filter((item): item is ObjectiveConclusionMeasurementRow => item !== null),
-		measurement_value_ranges: asArray(record.measurement_value_ranges)
-			.map((item) => normalizeConclusionMeasurementRange(item))
-			.filter((item): item is ObjectiveConclusionMeasurementRange => item !== null)
-	};
-}
-
-function normalizeConclusionContribution(value: unknown): ObjectiveConclusionContribution | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const documentId = toText(record.document_id ?? record.paper_id);
-	if (!documentId) return null;
-
-	return {
-		document_id: documentId,
-		title: nonEmptyText(record.title ?? record.paper_title),
-		source_filename: nonEmptyText(record.source_filename),
-		paper_role: toText(record.paper_role, 'uncertain'),
-		relevance: toText(record.relevance, 'uncertain'),
-		background: nonEmptyText(record.background),
-		changed_variables: toStringList(record.changed_variables),
-		measured_property_scope: toStringList(record.measured_property_scope),
-		evidence_unit_count: toNumber(record.evidence_unit_count),
-		evidence_unit_ids: toStringList(record.evidence_unit_ids)
-	};
-}
-
-function normalizeConclusionComparison(value: unknown): ObjectiveConclusionComparison | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
-	if (!evidenceUnitId) return null;
-
-	return {
-		evidence_unit_id: evidenceUnitId,
-		document_id: nonEmptyText(record.document_id),
-		property: nonEmptyText(record.property ?? record.property_normalized),
-		comparison_axis: nonEmptyText(record.comparison_axis),
-		direction: nonEmptyText(record.direction),
-		summary: nonEmptyText(record.summary ?? record.statement),
-		sample_context: normalizeUnknownRecord(record.sample_context),
-		process_context: normalizeUnknownRecord(record.process_context),
-		baseline_context: normalizeUnknownRecord(record.baseline_context),
-		source_refs: normalizeUnknownRecordList(record.source_refs),
-		validity: toText(record.validity, 'directional')
-	};
-}
-
-function normalizeConclusionMechanismEvidence(
-	value: unknown
-): ObjectiveConclusionMechanismEvidence | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
-	if (!evidenceUnitId) return null;
-
-	return {
-		evidence_unit_id: evidenceUnitId,
-		document_id: nonEmptyText(record.document_id),
-		unit_kind: toText(record.unit_kind, 'interpretation'),
-		property: nonEmptyText(record.property ?? record.property_normalized),
-		summary: nonEmptyText(record.summary ?? record.statement ?? record.interpretation),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeConclusionMechanismStep(value: unknown): ObjectiveConclusionMechanismStep | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const label = toText(record.label ?? record.summary);
-	if (!label) return null;
-
-	return {
-		step_role: toText(record.step_role ?? record.role, 'mechanism_step'),
-		label
-	};
-}
-
-function normalizeConclusionMechanismChain(value: unknown): ObjectiveConclusionMechanismChain {
-	const record = asRecord(value);
-	return {
-		steps: asArray(record?.steps)
-			.map((item) => normalizeConclusionMechanismStep(item))
-			.filter((item): item is ObjectiveConclusionMechanismStep => item !== null),
-		evidence: asArray(record?.evidence)
-			.map((item) => normalizeConclusionMechanismEvidence(item))
-			.filter((item): item is ObjectiveConclusionMechanismEvidence => item !== null),
-		evidence_unit_ids: toStringList(record?.evidence_unit_ids)
-	};
-}
-
-function normalizeConclusionStatement(value: unknown): ObjectiveConclusionStatement | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const claim = toText(record.claim ?? record.message ?? record.summary);
-	if (!claim) return null;
-
-	return {
-		claim,
-		evidence_unit_ids: toStringList(record.evidence_unit_ids),
-		strength: toText(record.strength, 'statement')
-	};
-}
-
-function normalizeConclusionLimitation(value: unknown): ObjectiveConclusionLimitation | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const message = toText(record.message ?? record.detail ?? record.code);
-	if (!message) return null;
-
-	return {
-		code: toText(record.code, 'limitation'),
-		message,
-		evidence_unit_ids: toStringList(record.evidence_unit_ids)
-	};
-}
-
-function normalizeObjectiveExpertFinding(value: unknown): ObjectiveExpertFinding | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const statement = toText(record.statement ?? record.claim ?? record.summary);
-	if (!statement) return null;
-
-	return {
-		finding_id: toText(record.finding_id ?? record.id, statement),
-		statement,
-		strength: toText(record.strength, 'evidence'),
-		evidence_unit_ids: toStringList(record.evidence_unit_ids),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeObjectiveExpertEvidenceMatrix(value: unknown): ObjectiveExpertEvidenceMatrix {
-	const record = asRecord(value);
-	return {
-		relevant_paper_count: toNumber(record?.relevant_paper_count),
-		measurement_result_count: toNumber(record?.measurement_result_count),
-		measurement_property_count: toNumber(record?.measurement_property_count),
-		controlled_comparison_count: toNumber(record?.controlled_comparison_count),
-		mechanism_evidence_count: toNumber(record?.mechanism_evidence_count),
-		limitation_count: toNumber(record?.limitation_count),
-		source_ref_count: toNumber(record?.source_ref_count),
-		measurement_value_ranges: asArray(record?.measurement_value_ranges)
-			.map((item) => normalizeConclusionMeasurementRange(item))
-			.filter((item): item is ObjectiveConclusionMeasurementRange => item !== null)
-	};
-}
-
-function normalizeObjectiveExpertPaperContribution(
-	value: unknown
-): ObjectiveExpertPaperContribution | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const documentId = toText(record.document_id ?? record.paper_id);
-	if (!documentId) return null;
-
-	return {
-		document_id: documentId,
-		paper_label: nonEmptyText(record.paper_label),
-		display_title: nonEmptyText(record.display_title ?? record.title),
-		paper_role: toText(record.paper_role, 'uncertain'),
-		relevance: toText(record.relevance, 'uncertain'),
-		contribution_summary: nonEmptyText(record.contribution_summary ?? record.summary),
-		changed_variables: toStringList(record.changed_variables),
-		measured_property_scope: toStringList(record.measured_property_scope),
-		evidence_unit_count: toNumber(record.evidence_unit_count),
-		evidence_unit_ids: toStringList(record.evidence_unit_ids),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeObjectiveExpertComparison(value: unknown): ObjectiveExpertComparison | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
-	const comparisonId = toText(record.comparison_id ?? record.id, evidenceUnitId);
-	if (!evidenceUnitId && !comparisonId) return null;
-
-	return {
-		comparison_id: comparisonId || evidenceUnitId,
-		evidence_unit_id: evidenceUnitId,
-		document_id: nonEmptyText(record.document_id),
-		property: nonEmptyText(record.property ?? record.property_normalized),
-		comparison_axis: nonEmptyText(record.comparison_axis),
-		direction: nonEmptyText(record.direction),
-		validity: toText(record.validity, 'directional'),
-		summary: nonEmptyText(record.summary ?? record.statement),
-		sample_context: normalizeUnknownRecord(record.sample_context),
-		process_context: normalizeUnknownRecord(record.process_context),
-		baseline_context: normalizeUnknownRecord(record.baseline_context),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeObjectiveExpertMechanismEvidence(
-	value: unknown
-): ObjectiveExpertMechanismEvidence | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const evidenceUnitId = toText(record.evidence_unit_id ?? record.id);
-	if (!evidenceUnitId) return null;
-
-	return {
-		evidence_unit_id: evidenceUnitId,
-		document_id: nonEmptyText(record.document_id),
-		unit_kind: toText(record.unit_kind, 'interpretation'),
-		property: nonEmptyText(record.property ?? record.property_normalized),
-		summary: nonEmptyText(record.summary ?? record.statement ?? record.interpretation),
-		sample_context: normalizeUnknownRecord(record.sample_context),
-		process_context: normalizeUnknownRecord(record.process_context),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeObjectiveExpertMechanismChain(value: unknown): ObjectiveExpertMechanismChain {
-	const record = asRecord(value);
-	return {
-		steps: asArray(record?.steps)
-			.map((item) => normalizeConclusionMechanismStep(item))
-			.filter((item): item is ObjectiveConclusionMechanismStep => item !== null),
-		evidence: asArray(record?.evidence)
-			.map((item) => normalizeObjectiveExpertMechanismEvidence(item))
-			.filter((item): item is ObjectiveExpertMechanismEvidence => item !== null),
-		evidence_unit_ids: toStringList(record?.evidence_unit_ids)
-	};
-}
-
-function normalizeObjectiveExpertLimitation(value: unknown): ObjectiveExpertLimitation | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const message = toText(record.message ?? record.detail ?? record.code);
-	if (!message) return null;
-
-	return {
-		code: toText(record.code, 'limitation'),
-		message,
-		evidence_unit_ids: toStringList(record.evidence_unit_ids),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeObjectiveExpertReport(value: unknown): ObjectiveExpertReport | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const headlineConclusion = toText(record.headline_conclusion ?? record.answer);
-	const scientificContext = toText(record.scientific_context ?? record.context);
-	if (!headlineConclusion && !scientificContext) return null;
-
-	return {
-		schema_version: toText(record.schema_version, 'objective_expert_report.v1'),
-		status: toText(record.status, 'empty'),
-		headline_conclusion: headlineConclusion,
-		scientific_context: scientificContext,
-		key_findings: asArray(record.key_findings)
-			.map((item) => normalizeObjectiveExpertFinding(item))
-			.filter((item): item is ObjectiveExpertFinding => item !== null),
-		evidence_matrix: normalizeObjectiveExpertEvidenceMatrix(record.evidence_matrix),
-		paper_contribution_map: asArray(record.paper_contribution_map)
-			.map((item) => normalizeObjectiveExpertPaperContribution(item))
-			.filter((item): item is ObjectiveExpertPaperContribution => item !== null),
-		controlled_comparisons: asArray(record.controlled_comparisons)
-			.map((item) => normalizeObjectiveExpertComparison(item))
-			.filter((item): item is ObjectiveExpertComparison => item !== null),
-		mechanism_chain: normalizeObjectiveExpertMechanismChain(record.mechanism_chain),
-		limitations: asArray(record.limitations)
-			.map((item) => normalizeObjectiveExpertLimitation(item))
-			.filter((item): item is ObjectiveExpertLimitation => item !== null),
-		source_traceback: normalizeUnknownRecordList(record.source_traceback),
-		traceability: normalizeUnknownRecord(record.traceability)
-	};
-}
-
-function normalizeConclusionNarrativeClaim(
-	value: unknown
-): ObjectiveConclusionNarrativeClaim | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const claim = toText(record.claim ?? record.message ?? record.summary);
-	if (!claim) return null;
-
-	return {
-		claim,
-		evidence_unit_ids: toStringList(record.evidence_unit_ids),
-		source_refs: normalizeUnknownRecordList(record.source_refs),
-		strength: toText(record.strength, 'statement')
-	};
-}
-
-function normalizeConclusionNarrativeSection(
-	value: unknown
-): ObjectiveConclusionNarrativeSection | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const sectionId = toText(record.section_id ?? record.id);
-	const title = toText(record.title ?? record.heading, sectionId);
-	const body = toText(record.body ?? record.summary ?? record.text);
-	if (!sectionId || (!title && !body)) return null;
-
-	return {
-		section_id: sectionId,
-		title,
-		body,
-		claims: asArray(record.claims)
-			.map((item) => normalizeConclusionNarrativeClaim(item))
-			.filter((item): item is ObjectiveConclusionNarrativeClaim => item !== null),
-		evidence_unit_ids: toStringList(record.evidence_unit_ids),
-		source_refs: normalizeUnknownRecordList(record.source_refs)
-	};
-}
-
-function normalizeObjectiveConclusionPackage(value: unknown): ObjectiveConclusionPackage | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const objectiveRecord = asRecord(record.objective);
-	const title = toText(record.title ?? objectiveRecord?.question);
-	if (!title) return null;
-	const narrativeRecord = asRecord(record.narrative);
-
-	return {
-		schema_version: toText(record.schema_version, 'objective_conclusion_package.v1'),
-		title,
-		objective: {
-			objective_id: toText(objectiveRecord?.objective_id ?? objectiveRecord?.id),
-			question: toText(objectiveRecord?.question, title),
-			material_scope: toStringList(objectiveRecord?.material_scope),
-			process_axes: toStringList(objectiveRecord?.process_axes),
-			property_axes: toStringList(objectiveRecord?.property_axes)
-		},
-		status: toText(record.status, 'empty'),
-		narrative: {
-			status: toText(narrativeRecord?.status, 'not_generated'),
-			sections: asArray(narrativeRecord?.sections)
-				.map((item) => normalizeConclusionNarrativeSection(item))
-				.filter((item): item is ObjectiveConclusionNarrativeSection => item !== null)
-		},
-		paper_contributions: asArray(record.paper_contributions)
-			.map((item) => normalizeConclusionContribution(item))
-			.filter((item): item is ObjectiveConclusionContribution => item !== null),
-		primary_evidence_tables: asArray(record.primary_evidence_tables)
-			.map((item) => normalizeConclusionEvidenceTable(item))
-			.filter((item): item is ObjectiveConclusionEvidenceTable => item !== null),
-		controlled_comparisons: asArray(record.controlled_comparisons)
-			.map((item) => normalizeConclusionComparison(item))
-			.filter((item): item is ObjectiveConclusionComparison => item !== null),
-		mechanism_chain: normalizeConclusionMechanismChain(record.mechanism_chain),
-		conclusions: asArray(record.conclusions)
-			.map((item) => normalizeConclusionStatement(item))
-			.filter((item): item is ObjectiveConclusionStatement => item !== null),
-		limitations: asArray(record.limitations)
-			.map((item) => normalizeConclusionLimitation(item))
-			.filter((item): item is ObjectiveConclusionLimitation => item !== null),
-		source_refs: normalizeUnknownRecordList(record.source_refs),
-		expert_report: normalizeObjectiveExpertReport(record.expert_report)
-	};
-}
-
-function normalizeObjectiveReportArtifact(value: unknown): ObjectiveReportArtifact | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const reportId = toText(record.report_id);
-	const objectiveId = toText(record.objective_id);
-	if (!reportId || !objectiveId) return null;
-
-	const status = toText(record.status, 'generating') as ObjectiveReportStatus;
-	const normalizedStatus: ObjectiveReportStatus = [
-		'generating',
-		'ready',
-		'ready_with_warnings',
-		'failed'
-	].includes(status)
-		? status
-		: 'generating';
-
-	return {
-		collection_id: toText(record.collection_id),
-		report_id: reportId,
-		objective_id: objectiveId,
-		status: normalizedStatus,
-		stage: toText(record.stage, normalizedStatus),
-		message: nonEmptyText(record.message),
-		title: toText(record.title, 'Research objective report'),
-		language: toText(record.language, 'zh'),
-		model: nonEmptyText(record.model),
-		data_version: toText(record.data_version),
-		markdown: nonEmptyText(record.markdown),
-		warnings: toStringList(record.warnings),
-		source_refs: normalizeUnknownRecordList(record.source_refs),
-		created_at: toText(record.created_at),
-		updated_at: toText(record.updated_at),
-		generated_at: nonEmptyText(record.generated_at)
 	};
 }
 
@@ -2365,7 +1840,7 @@ export function normalizeMaterialProfile(
 			.map((item) => normalizeConditionSeries(item))
 			.filter((item): item is ConditionSeries => item !== null),
 		evidence_refs: normalizeEvidenceReferences(record?.evidence_refs ?? record?.evidence),
-		report_package: normalizeMaterialReportPackage(record?.report_package),
+		understanding: normalizeResearchUnderstanding(record?.understanding),
 		debug_links: normalizeLinkRecord(record?.debug_links),
 		warnings: normalizeWarnings(record?.warnings)
 	};
@@ -2534,49 +2009,9 @@ export function normalizeObjectiveResearchView(
 		evidence_routes: evidenceRoutes,
 		evidence_units: evidenceUnits,
 		logic_chain: normalizeObjectiveLogicChain(record?.logic_chain),
-		conclusion_package: normalizeObjectiveConclusionPackage(record?.conclusion_package),
-		objective_report: normalizeObjectiveReportArtifact(record?.objective_report),
+		understanding: normalizeResearchUnderstanding(record?.understanding),
 		existing_comparison_rows: normalizeUnknownRecordList(record?.existing_comparison_rows),
 		warnings: normalizeWarnings(record?.warnings)
-	};
-}
-
-function normalizeMaterialReportArtifact(value: unknown): MaterialReportArtifact | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const reportId = toText(record.report_id);
-	const materialId = toText(record.material_id);
-	if (!reportId || !materialId) return null;
-
-	const status = toText(record.status, 'generating') as MaterialReportStatus;
-	const normalizedStatus: MaterialReportStatus = [
-		'generating',
-		'ready',
-		'ready_with_warnings',
-		'failed'
-	].includes(status)
-		? status
-		: 'generating';
-
-	return {
-		collection_id: toText(record.collection_id),
-		report_id: reportId,
-		material_id: materialId,
-		status: normalizedStatus,
-		stage: toText(record.stage, normalizedStatus),
-		message: nonEmptyText(record.message),
-		title: toText(record.title, 'Material report'),
-		language: toText(record.language, 'zh'),
-		model: nonEmptyText(record.model),
-		data_version: toText(record.data_version),
-		markdown: nonEmptyText(record.markdown),
-		warnings: toStringList(record.warnings),
-		source_refs: normalizeUnknownRecordList(record.source_refs),
-		evidence_appendix: asRecord(record.evidence_appendix) ?? {},
-		created_at: toText(record.created_at),
-		updated_at: toText(record.updated_at),
-		generated_at: nonEmptyText(record.generated_at)
 	};
 }
 
@@ -2638,84 +2073,176 @@ export async function fetchObjectiveResearchView(
 	return normalizeObjectiveResearchView(data, collectionId, objectiveId);
 }
 
-export async function fetchObjectiveReport(
-	collectionId: string,
-	objectiveId: string
-): Promise<ObjectiveReportArtifact> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedObjective = encodeURIComponent(objectiveId);
-	const data = await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/report`
-	);
-	const report = normalizeObjectiveReportArtifact(data);
-	if (!report) {
-		throw new Error('Invalid objective report response');
-	}
-	return report;
+function normalizeConfirmedGoal(value: unknown): ConfirmedGoal {
+	const record = asRecord(value) ?? {};
+	return {
+		goal_id: toText(record.goal_id),
+		collection_id: toText(record.collection_id),
+		question: toText(record.question),
+		source_type: toText(record.source_type, 'user_input'),
+		material_hints: toStringList(record.material_hints),
+		process_hints: toStringList(record.process_hints),
+		property_hints: toStringList(record.property_hints),
+		source_objective_id: nonEmptyText(record.source_objective_id),
+		status: normalizeConfirmedGoalStatus(record.status),
+		analysis_error: nonEmptyText(record.analysis_error),
+		analysis_progress: normalizeGoalAnalysisProgress(record.analysis_progress),
+		created_at: nonEmptyText(record.created_at),
+		updated_at: nonEmptyText(record.updated_at)
+	};
 }
 
-export async function createObjectiveReport(
-	collectionId: string,
-	objectiveId: string,
-	options: { language?: 'zh' | 'en'; force_regenerate?: boolean } = {}
-): Promise<ObjectiveReportArtifact> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedObjective = encodeURIComponent(objectiveId);
-	const data = await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/report`,
-		{
-			method: 'POST',
-			body: JSON.stringify({
-				language: options.language ?? 'zh',
-				force_regenerate: options.force_regenerate ?? false
-			})
-		}
-	);
-	const report = normalizeObjectiveReportArtifact(data);
-	if (!report) {
-		throw new Error('Invalid objective report response');
-	}
-	return report;
+function normalizeGoalAnalysisProgress(value: unknown): GoalAnalysisProgress | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const phase = toText(record.phase);
+	if (!phase) return null;
+	return {
+		phase,
+		current: toOptionalNumber(record.current),
+		total: toOptionalNumber(record.total),
+		unit: nonEmptyText(record.unit),
+		message: nonEmptyText(record.message),
+		active_document_id: nonEmptyText(record.active_document_id),
+		active_document_title: nonEmptyText(record.active_document_title),
+		active_source_filename: nonEmptyText(record.active_source_filename),
+		active_objective_id: nonEmptyText(record.active_objective_id)
+	};
 }
 
-export async function fetchMaterialReport(
-	collectionId: string,
-	materialId: string
-): Promise<MaterialReportArtifact> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedMaterial = encodeURIComponent(materialId);
-	const data = await requestJson(
-		`/collections/${encodedCollection}/materials/${encodedMaterial}/report`
-	);
-	const report = normalizeMaterialReportArtifact(data);
-	if (!report) {
-		throw new Error('Invalid material report response');
-	}
-	return report;
+function normalizeConfirmedGoalStatus(value: unknown): ConfirmedGoalStatus {
+	const status = toText(value) as ConfirmedGoalStatus;
+	return ['pending', 'running', 'ready', 'failed'].includes(status) ? status : 'pending';
 }
 
-export async function createMaterialReport(
-	collectionId: string,
-	materialId: string,
-	options: { language?: 'zh' | 'en'; force_regenerate?: boolean } = {}
-): Promise<MaterialReportArtifact> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedMaterial = encodeURIComponent(materialId);
-	const data = await requestJson(
-		`/collections/${encodedCollection}/materials/${encodedMaterial}/report`,
-		{
-			method: 'POST',
-			body: JSON.stringify({
-				language: options.language ?? 'zh',
-				force_regenerate: options.force_regenerate ?? false
-			})
-		}
+function normalizeGoalAnalysis(value: unknown, collectionId: string): GoalAnalysis {
+	const record = asRecord(value) ?? {};
+	return {
+		collection_id: toText(record.collection_id, collectionId),
+		goal: normalizeConfirmedGoal(record.goal),
+		understanding: normalizeResearchUnderstanding(record.understanding),
+		pipeline_nodes: normalizePipelineNodes(record.pipeline_nodes),
+		errors: toStringList(record.errors),
+		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizePipelineNodes(value: unknown): Record<string, Record<string, unknown>> {
+	const record = normalizeUnknownRecord(value);
+	return Object.fromEntries(
+		Object.entries(record)
+			.map(([key, node]) => [key, normalizeUnknownRecord(node)])
+			.filter(([key]) => Boolean(key))
 	);
-	const report = normalizeMaterialReportArtifact(data);
-	if (!report) {
-		throw new Error('Invalid material report response');
-	}
-	return report;
+}
+
+export async function createConfirmedGoalFromObjective(
+	collectionId: string,
+	objective: ObjectiveListItem
+): Promise<ConfirmedGoal> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const data = await requestJson(`/collections/${encodedCollection}/goals`, {
+		method: 'POST',
+		body: JSON.stringify({
+			question: objective.question,
+			source_type: 'objective_candidate',
+			source_objective_id: objective.objective_id,
+			material_hints: objective.material_scope,
+			process_hints: objective.process_axes,
+			property_hints: objective.property_axes
+		})
+	});
+	return normalizeConfirmedGoal(data);
+}
+
+export async function runGoalAnalysis(
+	collectionId: string,
+	goalId: string
+): Promise<GoalAnalysis> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedGoal = encodeURIComponent(goalId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/goals/${encodedGoal}/analysis`,
+		{ method: 'POST' }
+	);
+	return normalizeGoalAnalysis(data, collectionId);
+}
+
+export async function fetchGoalAnalysis(
+	collectionId: string,
+	goalId: string
+): Promise<GoalAnalysis> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedGoal = encodeURIComponent(goalId);
+	const data = await requestJson(`/collections/${encodedCollection}/goals/${encodedGoal}/analysis`);
+	return normalizeGoalAnalysis(data, collectionId);
+}
+
+export async function createResearchUnderstandingFeedback(
+	collectionId: string,
+	payload: ResearchUnderstandingFeedbackCreate
+): Promise<ResearchUnderstandingFeedback> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	return requestJson(`/collections/${encodedCollection}/research-understanding/feedback`, {
+		method: 'POST',
+		body: JSON.stringify(payload)
+	}) as Promise<ResearchUnderstandingFeedback>;
+}
+
+export async function fetchResearchUnderstandingFeedback(
+	collectionId: string,
+	filters: ResearchUnderstandingFeedbackFilters = {}
+): Promise<ResearchUnderstandingFeedback[]> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	if (filters.scope_type) params.set('scope_type', filters.scope_type);
+	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.claim_id) params.set('claim_id', filters.claim_id);
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	const data = (await requestJson(
+		`/collections/${encodedCollection}/research-understanding/feedback${suffix}`
+	)) as { items?: ResearchUnderstandingFeedback[] };
+	return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function createResearchUnderstandingCuration(
+	collectionId: string,
+	payload: ResearchUnderstandingCurationCreate
+): Promise<ResearchUnderstandingCuration> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	return requestJson(`/collections/${encodedCollection}/research-understanding/curations`, {
+		method: 'POST',
+		body: JSON.stringify(payload)
+	}) as Promise<ResearchUnderstandingCuration>;
+}
+
+export async function fetchResearchUnderstandingCurations(
+	collectionId: string,
+	filters: ResearchUnderstandingCurationFilters = {}
+): Promise<ResearchUnderstandingCuration[]> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	if (filters.scope_type) params.set('scope_type', filters.scope_type);
+	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.claim_id) params.set('claim_id', filters.claim_id);
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	const data = (await requestJson(
+		`/collections/${encodedCollection}/research-understanding/curations${suffix}`
+	)) as { items?: ResearchUnderstandingCuration[] };
+	return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function exportResearchUnderstandingGoldDraft(
+	collectionId: string,
+	filters: ResearchUnderstandingGoldDraftFilters
+): Promise<ResearchUnderstandingGoldDraft> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	params.set('scope_id', filters.scope_id);
+	return requestJson(
+		`/collections/${encodedCollection}/research-understanding/gold-draft?${params.toString()}`
+	) as Promise<ResearchUnderstandingGoldDraft>;
 }
 
 export async function fetchDocumentMaterials(

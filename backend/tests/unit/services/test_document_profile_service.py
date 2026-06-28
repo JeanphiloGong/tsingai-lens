@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from application.core.semantic_build.document_profile_service import DocumentProfileService
+import pytest
+
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+    DocumentProfilesNotReadyError,
+)
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceArtifactSet
@@ -94,6 +99,8 @@ def test_document_profile_service_builds_profiles_and_summary(tmp_path):
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
+    profile_service.build_document_profiles(collection_id)
+
     payload = profile_service.list_document_profiles(collection_id)
 
     assert payload["count"] == 3
@@ -147,6 +154,8 @@ def test_document_profile_service_returns_source_filename_from_file_mapping(tmp_
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
+    profile_service.build_document_profiles(collection_id)
+
     payload = profile_service.list_document_profiles(collection_id)
 
     item = payload["items"][0]
@@ -171,6 +180,8 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
+    profile_service.build_document_profiles(collection_id)
+
     payload = profile_service.list_document_profiles(collection_id)
 
     item = payload["items"][0]
@@ -196,6 +207,20 @@ def test_document_profile_service_normalizes_numpy_array_columns():
     normalized = profile_service._normalize_profile_records(profiles, "col-1")
 
     assert normalized[0].to_record()["parsing_warnings"] == ["condition_context_weak"]
+
+
+def test_document_profile_read_does_not_build_missing_profiles(tmp_path, monkeypatch):
+    collection_service, profile_service = _build_profile_service(tmp_path)
+    collection = collection_service.create_collection("Read Only Profiles")
+    collection_id = collection["collection_id"]
+
+    def fail_build(collection_id: str):  # noqa: ANN001
+        raise AssertionError(f"build should not run from read path: {collection_id}")
+
+    monkeypatch.setattr(profile_service, "build_document_profiles", fail_build)
+
+    with pytest.raises(DocumentProfilesNotReadyError):
+        profile_service.read_document_profiles(collection_id)
 
 
 def test_document_profile_service_round_trips_repository_storage_fields(tmp_path):

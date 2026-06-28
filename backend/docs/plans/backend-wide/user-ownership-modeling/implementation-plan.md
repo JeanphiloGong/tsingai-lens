@@ -3,7 +3,7 @@
 ## Summary
 
 Lens should add user ownership now, before goal sessions, collection-bound AI
-chat, and review-report generation create more user-scoped records.
+chat, and other saved research state create more user-scoped records.
 
 The first backend step should be deliberately small:
 
@@ -38,7 +38,6 @@ once Lens adds:
 
 - collection-bound AI conversations
 - persistent goal sessions
-- generated material review reports
 - personal saved research state
 - later multi-user or team access
 
@@ -91,23 +90,6 @@ GoalSession
 
 `GoalSession.user_id` records the session owner. `collection_id` still defines
 which knowledge base the session can use.
-
-### Review Reports
-
-Review reports are generated user actions over collection-owned Core outputs.
-
-```text
-MaterialReviewReport
-- report_id
-- collection_id
-- material_id
-- created_by_user_id
-- status
-- generated_at
-```
-
-`created_by_user_id` records who generated the report. The report's data
-access still flows through the collection permission check.
 
 ### Core Artifacts
 
@@ -185,9 +167,8 @@ visible.
 
 ### Derived Actions
 
-Derived endpoints such as graph, material research view, and review-report
-generation should keep calling the collection ownership check before loading
-Core outputs.
+Derived endpoints such as graph and material research view should keep calling
+the collection ownership check before loading Core outputs.
 
 ## Persistence Shape
 
@@ -282,22 +263,11 @@ Behavior:
 - goal handoff remains collection-backed
 - no research conclusion is generated in the Goal Brief layer
 
-### Slice 5: Review Report Generation
-
-Review report generation should record the requesting user without changing
-Core artifact ownership.
-
-Planned files:
-
-- `backend/application/derived/material_review_report_service.py`
-- `backend/controllers/derived/material_review_report.py`
-- related unit tests
-
 Behavior:
 
 - generation checks access through the collection
 - report metadata records `created_by_user_id`
-- report context still reads Core artifacts by `collection_id`
+- derived context still reads Core artifacts by `collection_id`
 
 ## Verification
 
@@ -308,7 +278,7 @@ Focused verification should cover:
 - listing hides collections owned by other users
 - get/delete/upload/task endpoints reject non-owned collections
 - goal intake creates a collection owned by the current user
-- review-report generation records `created_by_user_id`
+- goal sessions remain scoped to collections owned by the current user
 
 Suggested commands:
 
@@ -317,7 +287,6 @@ cd backend
 uv run pytest tests/unit/domains/test_source_collection_domain.py
 uv run pytest tests/unit/services/test_collection_service.py
 uv run pytest tests/unit/services/test_goal_brief_service.py
-uv run pytest tests/unit/services/test_material_review_report_service.py
 ```
 
 Adjust the exact test paths to the files touched in the implementation wave.

@@ -16,6 +16,18 @@ SourceBlockType = Literal[
     "table_caption",
 ]
 
+SourceDocumentNodeType = Literal[
+    "document",
+    "section",
+    "paragraph",
+    "list_item",
+    "table",
+    "figure",
+    "caption",
+    "references_section",
+    "reference_entry",
+]
+
 _UNIT_HINT_PATTERN = re.compile(
     r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK|wt%|vol%)\b",
     re.IGNORECASE,
@@ -713,6 +725,120 @@ class SourceReferenceSet:
     candidates: tuple[SourceReferenceCandidate, ...] = ()
 
 
+@dataclass(frozen=True)
+class SourceDocumentNode:
+    node_id: str
+    document_id: str
+    parent_id: str | None
+    child_ids: tuple[str, ...]
+    node_type: SourceDocumentNodeType | str
+    order: int
+    title: str | None = None
+    text: str | None = None
+    semantic_role: str | None = None
+    level: int | None = None
+    heading_path: tuple[str, ...] = ()
+    source_ref_kind: str | None = None
+    source_ref_id: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    bbox: SourceBoundingBox | None = None
+    text_unit_ids: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def with_children(self, child_ids: Iterable[str]) -> "SourceDocumentNode":
+        return SourceDocumentNode(
+            node_id=self.node_id,
+            document_id=self.document_id,
+            parent_id=self.parent_id,
+            child_ids=tuple(child_ids),
+            node_type=self.node_type,
+            order=self.order,
+            title=self.title,
+            text=self.text,
+            semantic_role=self.semantic_role,
+            level=self.level,
+            heading_path=self.heading_path,
+            source_ref_kind=self.source_ref_kind,
+            source_ref_id=self.source_ref_id,
+            page_start=self.page_start,
+            page_end=self.page_end,
+            bbox=self.bbox,
+            text_unit_ids=self.text_unit_ids,
+            warnings=self.warnings,
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "document_id": self.document_id,
+            "parent_id": self.parent_id,
+            "child_ids": list(self.child_ids),
+            "node_type": str(self.node_type),
+            "semantic_role": self.semantic_role,
+            "title": self.title,
+            "text": self.text,
+            "level": self.level,
+            "order": self.order,
+            "heading_path": list(self.heading_path),
+            "source_ref_kind": self.source_ref_kind,
+            "source_ref_id": self.source_ref_id,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
+            "bbox": self.bbox.to_payload() if self.bbox else None,
+            "text_unit_ids": list(self.text_unit_ids),
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class SourceDocumentTree:
+    document_id: str
+    collection_id: str | None
+    root_node_id: str
+    nodes: Mapping[str, SourceDocumentNode]
+    reference_records: Mapping[str, SourceReferenceEntry] = field(default_factory=dict)
+
+    @property
+    def root(self) -> SourceDocumentNode:
+        return self.nodes[self.root_node_id]
+
+    def children_of(self, node_id: str) -> tuple[SourceDocumentNode, ...]:
+        node = self.nodes[node_id]
+        return tuple(self.nodes[child_id] for child_id in node.child_ids)
+
+    def node_for_source_ref(
+        self,
+        source_ref_kind: str,
+        source_ref_id: str,
+    ) -> SourceDocumentNode | None:
+        for node in self.nodes.values():
+            if (
+                node.source_ref_kind == source_ref_kind
+                and node.source_ref_id == source_ref_id
+            ):
+                return node
+        return None
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "document_id": self.document_id,
+            "collection_id": self.collection_id,
+            "root_node_id": self.root_node_id,
+            "nodes": {
+                node_id: node.to_record()
+                for node_id, node in sorted(
+                    self.nodes.items(),
+                    key=lambda item: item[1].order,
+                )
+            },
+            "reference_records": {
+                reference_id: reference.to_record()
+                for reference_id, reference in self.reference_records.items()
+            },
+        }
+
+
 def build_heading_blocks(
     blocks: Iterable[SourceBlock | Mapping[str, Any]],
 ) -> list[SourceLayoutBlock]:
@@ -862,6 +988,29 @@ def build_source_table_rows_from_cells(
                 )
             )
     return rows
+
+
+def build_source_document_tree(
+    *,
+    document: SourceDocument,
+    blocks: Iterable[SourceBlock] = (),
+    tables: Iterable[SourceTable] = (),
+    figures: Iterable[SourceFigure] = (),
+    references: SourceReferenceSet | None = None,
+    collection_id: str | None = None,
+) -> SourceDocumentTree:
+    """Project flat Source artifacts into a section-oriented document tree."""
+
+    builder = _SourceDocumentTreeBuilder(
+        document=document,
+        collection_id=collection_id,
+        references=references or SourceReferenceSet(),
+    )
+    builder.add_blocks(blocks)
+    builder.add_tables(tables)
+    builder.add_figures(figures)
+    builder.add_references()
+    return builder.build()
 
 
 def render_markdown_table(matrix: list[list[str]], column_headers: list[str]) -> str | None:
@@ -1092,6 +1241,328 @@ def _uses_top_left_origin(*payloads: SourceBoundingBox) -> bool:
     return any("top" in payload.coord_origin.lower() for payload in payloads)
 
 
+def _source_node_id(document_id: str, kind: str, source_id: str) -> str:
+    safe_source = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(source_id or "")).strip("_")
+    return f"node_{document_id}_{kind}_{safe_source}"
+
+
+def _tree_order(kind: str, source_order: int) -> int:
+    base = {
+        "block": 100_000,
+        "table": 200_000,
+        "figure": 300_000,
+        "reference_section": 800_000,
+        "reference": 810_000,
+    }.get(kind, 900_000)
+    return base + int(source_order or 0) * 10
+
+
+def _heading_path_tuple(value: str | None) -> tuple[str, ...]:
+    text = normalize_optional_text(value)
+    if text is None:
+        return ()
+    return tuple(part.strip() for part in text.split(">") if part.strip())
+
+
+def _section_semantic_role(title: str | None) -> str:
+    text = _semantic_text(title)
+    if not text:
+        return "unknown"
+    if "abstract" in text:
+        return "abstract"
+    if "introduction" in text:
+        return "introduction"
+    if any(token in text for token in ("method", "material", "experimental")):
+        return "methods"
+    if any(token in text for token in ("result", "discussion")):
+        return "results"
+    if "conclusion" in text:
+        return "conclusion"
+    if "reference" in text:
+        return "references"
+    return "unknown"
+
+
+def _semantic_text(value: str | None) -> str:
+    return re.sub(r"[^a-z]+", " ", str(value or "").lower()).strip()
+
+
+def _block_node_type(block: SourceBlock) -> str:
+    if block.block_type in {"paragraph", "list_item", "caption"}:
+        return str(block.block_type)
+    if block.block_type in {"figure_caption", "table_caption"}:
+        return "caption"
+    return "paragraph"
+
+
+class _SourceDocumentTreeBuilder:
+    def __init__(
+        self,
+        *,
+        document: SourceDocument,
+        collection_id: str | None,
+        references: SourceReferenceSet,
+    ) -> None:
+        self.document = document
+        self.collection_id = collection_id
+        self.references = references
+        self.root_node_id = f"node_{document.document_id}_document"
+        self.nodes: dict[str, SourceDocumentNode] = {}
+        self.children_by_parent: dict[str, list[str]] = {}
+        self.section_stack: list[tuple[int, str]] = []
+        self.sections_by_heading_path: dict[str, str] = {}
+        self.references_section_id: str | None = None
+        self.nodes[self.root_node_id] = SourceDocumentNode(
+            node_id=self.root_node_id,
+            document_id=document.document_id,
+            parent_id=None,
+            child_ids=(),
+            node_type="document",
+            order=0,
+            title=document.title,
+            text=None,
+            level=0,
+            source_ref_kind="document",
+            source_ref_id=document.document_id,
+            text_unit_ids=document.text_unit_ids,
+        )
+
+    def add_blocks(self, blocks: Iterable[SourceBlock]) -> None:
+        for block in sorted(blocks, key=lambda item: (item.block_order, item.block_id)):
+            if block.document_id != self.document.document_id:
+                continue
+            if block.block_type == "title":
+                continue
+            if block.block_type == "heading":
+                self._add_heading(block)
+                continue
+            self._add_block_leaf(block)
+
+    def add_tables(self, tables: Iterable[SourceTable]) -> None:
+        for table in sorted(tables, key=lambda item: (item.table_order, item.table_id)):
+            if table.document_id != self.document.document_id:
+                continue
+            parent_id = self._parent_for_heading_path(table.heading_path)
+            node_id = _source_node_id(self.document.document_id, "table", table.table_id)
+            node = SourceDocumentNode(
+                node_id=node_id,
+                document_id=self.document.document_id,
+                parent_id=parent_id,
+                child_ids=(),
+                node_type="table",
+                order=_tree_order("table", table.table_order),
+                title=table.caption_text,
+                text=render_plain_table_text([list(row) for row in table.table_matrix]),
+                heading_path=_heading_path_tuple(table.heading_path),
+                source_ref_kind="table",
+                source_ref_id=table.table_id,
+                page_start=table.page,
+                page_end=table.page,
+                bbox=table.bbox,
+            )
+            self._insert_node(node)
+            if table.caption_text:
+                self._insert_node(
+                    SourceDocumentNode(
+                        node_id=_source_node_id(
+                            self.document.document_id,
+                            "table_caption",
+                            table.table_id,
+                        ),
+                        document_id=self.document.document_id,
+                        parent_id=node_id,
+                        child_ids=(),
+                        node_type="caption",
+                        order=node.order + 1,
+                        text=table.caption_text,
+                        heading_path=node.heading_path,
+                        source_ref_kind="table",
+                        source_ref_id=table.table_id,
+                        page_start=table.page,
+                        page_end=table.page,
+                    )
+                )
+
+    def add_figures(self, figures: Iterable[SourceFigure]) -> None:
+        for figure in sorted(figures, key=lambda item: (item.figure_order, item.figure_id)):
+            if figure.document_id != self.document.document_id:
+                continue
+            parent_id = self._parent_for_heading_path(figure.heading_path)
+            node_id = _source_node_id(self.document.document_id, "figure", figure.figure_id)
+            node = SourceDocumentNode(
+                node_id=node_id,
+                document_id=self.document.document_id,
+                parent_id=parent_id,
+                child_ids=(),
+                node_type="figure",
+                order=_tree_order("figure", figure.figure_order),
+                title=figure.figure_label or figure.caption_text,
+                text=figure.caption_text,
+                heading_path=_heading_path_tuple(figure.heading_path),
+                source_ref_kind="figure",
+                source_ref_id=figure.figure_id,
+                page_start=figure.page,
+                page_end=figure.page,
+                bbox=figure.bbox,
+            )
+            self._insert_node(node)
+            if figure.caption_text:
+                self._insert_node(
+                    SourceDocumentNode(
+                        node_id=_source_node_id(
+                            self.document.document_id,
+                            "figure_caption",
+                            figure.figure_id,
+                        ),
+                        document_id=self.document.document_id,
+                        parent_id=node_id,
+                        child_ids=(),
+                        node_type="caption",
+                        order=node.order + 1,
+                        text=figure.caption_text,
+                        heading_path=node.heading_path,
+                        source_ref_kind="figure",
+                        source_ref_id=figure.figure_id,
+                        page_start=figure.page,
+                        page_end=figure.page,
+                    )
+                )
+
+    def add_references(self) -> None:
+        for position, reference in enumerate(self.references.entries, start=1):
+            if reference.document_id != self.document.document_id:
+                continue
+            parent_id = self._ensure_references_section()
+            self._insert_node(
+                SourceDocumentNode(
+                    node_id=_source_node_id(
+                        self.document.document_id,
+                        "reference",
+                        reference.reference_id,
+                    ),
+                    document_id=self.document.document_id,
+                    parent_id=parent_id,
+                    child_ids=(),
+                    node_type="reference_entry",
+                    semantic_role="references",
+                    order=_tree_order("reference", position),
+                    title=reference.title,
+                    text=reference.raw_reference,
+                    heading_path=("References",),
+                    source_ref_kind="reference",
+                    source_ref_id=reference.reference_id,
+                    page_start=reference.page,
+                    page_end=reference.page,
+                )
+            )
+
+    def build(self) -> SourceDocumentTree:
+        for node_id, node in list(self.nodes.items()):
+            child_ids = sorted(
+                self.children_by_parent.get(node_id, []),
+                key=lambda child_id: (self.nodes[child_id].order, child_id),
+            )
+            self.nodes[node_id] = node.with_children(child_ids)
+        return SourceDocumentTree(
+            document_id=self.document.document_id,
+            collection_id=self.collection_id,
+            root_node_id=self.root_node_id,
+            nodes=dict(self.nodes),
+            reference_records={
+                reference.reference_id: reference
+                for reference in self.references.entries
+                if reference.document_id == self.document.document_id
+            },
+        )
+
+    def _add_heading(self, block: SourceBlock) -> None:
+        semantic_role = _section_semantic_role(block.text)
+        node_type = "references_section" if semantic_role == "references" else "section"
+        level = max(1, block.heading_level or len(self.section_stack) + 1)
+        while self.section_stack and self.section_stack[-1][0] >= level:
+            self.section_stack.pop()
+        parent_id = self.section_stack[-1][1] if self.section_stack else self.root_node_id
+        node_id = _source_node_id(self.document.document_id, "block", block.block_id)
+        node = SourceDocumentNode(
+            node_id=node_id,
+            document_id=self.document.document_id,
+            parent_id=parent_id,
+            child_ids=(),
+            node_type=node_type,
+            semantic_role=semantic_role,
+            order=_tree_order("block", block.block_order),
+            title=block.text,
+            text=None,
+            level=level,
+            heading_path=_heading_path_tuple(block.heading_path or block.text),
+            source_ref_kind="block",
+            source_ref_id=block.block_id,
+            page_start=block.page,
+            page_end=block.page,
+            bbox=block.bbox,
+            text_unit_ids=block.text_unit_ids,
+        )
+        self._insert_node(node)
+        self.section_stack.append((level, node_id))
+        if block.heading_path:
+            self.sections_by_heading_path[block.heading_path] = node_id
+        if semantic_role == "references":
+            self.references_section_id = node_id
+
+    def _add_block_leaf(self, block: SourceBlock) -> None:
+        parent_id = self._parent_for_heading_path(block.heading_path)
+        node_id = _source_node_id(self.document.document_id, "block", block.block_id)
+        self._insert_node(
+            SourceDocumentNode(
+                node_id=node_id,
+                document_id=self.document.document_id,
+                parent_id=parent_id,
+                child_ids=(),
+                node_type=_block_node_type(block),
+                order=_tree_order("block", block.block_order),
+                text=block.text,
+                heading_path=_heading_path_tuple(block.heading_path),
+                source_ref_kind="block",
+                source_ref_id=block.block_id,
+                page_start=block.page,
+                page_end=block.page,
+                bbox=block.bbox,
+                text_unit_ids=block.text_unit_ids,
+            )
+        )
+
+    def _ensure_references_section(self) -> str:
+        if self.references_section_id is not None:
+            return self.references_section_id
+        node_id = _source_node_id(self.document.document_id, "section", "references")
+        self.references_section_id = node_id
+        self._insert_node(
+            SourceDocumentNode(
+                node_id=node_id,
+                document_id=self.document.document_id,
+                parent_id=self.root_node_id,
+                child_ids=(),
+                node_type="references_section",
+                semantic_role="references",
+                order=_tree_order("reference_section", 0),
+                title="References",
+                level=1,
+                heading_path=("References",),
+            )
+        )
+        return node_id
+
+    def _parent_for_heading_path(self, heading_path: str | None) -> str:
+        if heading_path and heading_path in self.sections_by_heading_path:
+            return self.sections_by_heading_path[heading_path]
+        return self.section_stack[-1][1] if self.section_stack else self.root_node_id
+
+    def _insert_node(self, node: SourceDocumentNode) -> None:
+        self.nodes[node.node_id] = node
+        if node.parent_id is not None:
+            self.children_by_parent.setdefault(node.parent_id, []).append(node.node_id)
+
+
 def _normalize_table_row(row: list[str], col_count: int) -> list[str]:
     values = [" ".join(str(value or "").split()) for value in row[:col_count]]
     if len(values) < col_count:
@@ -1109,6 +1580,9 @@ __all__ = [
     "SourceBoundingBox",
     "SourceCharRange",
     "SourceDocument",
+    "SourceDocumentNode",
+    "SourceDocumentNodeType",
+    "SourceDocumentTree",
     "SourceFigure",
     "SourceReferenceCandidate",
     "SourceReferenceEntry",
@@ -1123,6 +1597,7 @@ __all__ = [
     "SourceTextUnit",
     "build_figure_caption_blocks",
     "build_heading_blocks",
+    "build_source_document_tree",
     "build_source_table_rows_from_cells",
     "build_table_caption_blocks",
     "extract_unit_hint",

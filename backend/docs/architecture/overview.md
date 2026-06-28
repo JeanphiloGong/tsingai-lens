@@ -11,8 +11,8 @@ delivery sequencing or plan-family routing.
 ## Backend Role In The System
 
 The backend turns collection material into document profiles, a paper-facts
-layer, derived evidence/comparison views, Core-derived graph/report artifacts,
-and exposes those results through the public HTTP contract.
+layer, derived evidence/comparison views, Core-derived graph artifacts, and
+exposes those results through the public HTTP contract.
 
 Within the repository-wide system:
 
@@ -27,10 +27,10 @@ Within the repository-wide system:
 
 - `controllers/`
   Current HTTP route surface for collections, tasks, workspace, graph,
-  reports, documents, evidence, and comparisons
+  documents, evidence, and comparisons
 - `application/`
-  Use-case orchestration layer with active business-domain packages plus some
-  remaining legacy flat services
+  Use-case orchestration layer with active business-domain packages, explicit
+  pipeline orchestration, and some remaining legacy flat services
 - `domain/`
   Domain models and port definitions
 - `infra/`
@@ -49,7 +49,7 @@ The backend is still in transition, but its intended shape is already visible:
 - the Lens v1 semantic backbone is now
   `document_profiles -> paper facts family -> evidence_cards plus
   comparable_results / collection_comparable_results -> row projection`
-- graph and reports are Core-derived secondary surfaces
+- graph is a Core-derived secondary surface
 - query now crosses a Source-owned runtime facade rather than importing
   GraphRAG internals from product-facing application code
 - historical GraphRAG engine code is being retired rather than preserved as a
@@ -61,13 +61,13 @@ larger flat service bag.
 ## Main Runtime Flow
 
 1. collection material enters through collection and ingestion surfaces
-2. indexing orchestration runs Source-side indexing/runtime preparation plus
-   the Lens backbone
+2. collection build pipeline orchestration runs Source-side runtime preparation
+   plus the Lens backbone
 3. document profiling produces coarse document-type and review-risk signals
 4. paper-facts extraction produces the primary research objects
 5. evidence and comparable-result generation produce the primary collection
    reading and workspace views, with comparison rows projected downstream
-6. graph and report surfaces derive from or sit beside that primary backbone
+6. graph surfaces derive from or sit beside that primary backbone
 
 ## Boundary Rules
 
@@ -77,7 +77,7 @@ larger flat service bag.
 - external integrations stay in `infra/`
 - route code should not bypass application-owned orchestration with ad hoc
   engine imports
-- product graph and report semantics should stay derived from Core artifacts
+- product graph semantics should stay derived from Core artifacts
 - GraphRAG should remain behind Source-owned seams rather than defining
   product-facing contracts
 - shared product meaning and cross-module contracts should stay in root `docs/`

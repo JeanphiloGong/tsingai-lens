@@ -25,7 +25,10 @@ The frontend should align to the shared Lens v1 direction:
 - `evidence` is a support layer that should primarily appear inside result and
   document flows
 - `protocol/*` is a conditional branch
-- `graph` and `reports` remain secondary surfaces
+- `graph` remains a secondary surface
+- report-style Markdown generation is retired from the target collection UI;
+  research understanding and evidence audit are the review surfaces for
+  synthesized claims
 
 The frontend should therefore stop treating protocol steps, SOP generation, or
 standalone evidence inspection as the default main path through a collection.
@@ -39,8 +42,8 @@ The current frontend still reflects the older product center:
   assumptions
 - evidence is still too close to the center of the collection hierarchy
 - the workspace contract still has to normalize older artifact-first fields
-- reports must stay visually contained as workspace context unless a stable
-  product reports surface is intentionally reintroduced
+- retired report entry points must not return as workspace shortcuts or a
+  parallel Markdown answer path
 
 This means the frontend can still mislead users about the intended product
 flow even though the shared product direction is now:
@@ -118,8 +121,8 @@ Rules:
   belongs inside document and result verification flows
 - `Protocol` is visible but visually secondary
 - `Graph` remains available but should not be styled as the main end state
-- `Reports` should stay hidden or secondary until a stable collection-scoped
-  reports contract exists
+- `Reports` should not appear in navigation; Research understanding plus
+  evidence audit owns the synthesized review path
 
 ## Page-Level Spec
 
@@ -512,8 +515,8 @@ Completed cleanup:
 - redirect-only `/steps`, `/sop`, `/search`, `/tasks`, `/reports`, and
   `/settings` collection pages have been removed
 - the unused frontend reports API client has been removed because the current
-  browser workflow keeps reports as a non-fetching workspace note, not as a
-  standalone page or primary contract
+  browser workflow has no report page, report workspace note, or primary
+  report contract
 
 ## Copy and UX Rules
 

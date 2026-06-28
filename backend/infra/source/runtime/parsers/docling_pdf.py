@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import os
 from typing import Any
 
 import pandas as pd
@@ -111,10 +112,14 @@ def build_pdf_bundle(
 
 def build_pdf_converter() -> Any:
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.pipeline_options import AcceleratorOptions, PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    options = PdfPipelineOptions(do_ocr=False)
+    device = os.getenv("DOCLING_DEVICE", "").strip()
+    options = PdfPipelineOptions(
+        do_ocr=False,
+        accelerator_options=AcceleratorOptions(device=device or "auto"),
+    )
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
     )

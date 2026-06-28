@@ -344,7 +344,6 @@ Exit criteria:
 
 - `application/protocol/`
 - `application/graph/`
-- `application/reports/`
 
 ## Verification
 

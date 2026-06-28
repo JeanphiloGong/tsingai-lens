@@ -426,7 +426,7 @@ def test_request_id_is_generated_and_echoed(app_client):
 
 
 def test_request_id_is_echoed_and_propagated_to_background_build(app_client, monkeypatch):
-    import application.source.collection_build_task_runner as task_runner_module
+    import application.pipeline.collection_build.service as task_runner_module
     from utils.logger import REQUEST_ID_HEADER, get_request_id
 
     captured: dict[str, str | None] = {}
@@ -471,7 +471,7 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
     release = threading.Event()
     finished = threading.Event()
 
-    def fake_run_build_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
+    def fake_run_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
         captured["args"] = args
         captured["kwargs"] = kwargs
         started.set()
@@ -479,18 +479,18 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
         finished.set()
         return {"task_id": args[0], "collection_id": args[1], "status": "queued"}
 
-    def fail_run_build_task(*args, **kwargs):  # noqa: ANN002, ANN003
+    def fail_run_task(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("async build entry should not be scheduled directly")
 
     monkeypatch.setattr(
-        tasks_controller.build_task_runner,
-        "run_build_task_blocking",
-        fake_run_build_task_blocking,
+        tasks_controller.build_pipeline_service,
+        "run_task_blocking",
+        fake_run_task_blocking,
     )
     monkeypatch.setattr(
-        tasks_controller.build_task_runner,
-        "run_build_task",
-        fail_run_build_task,
+        tasks_controller.build_pipeline_service,
+        "run_task",
+        fail_run_task,
     )
 
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Blocking Entry Set"})
@@ -578,24 +578,21 @@ def app_client(monkeypatch, tmp_path):
     from controllers.derived import graph as graph_controller
     from controllers.source import tasks as tasks_controller
     from controllers.core import workspace as workspace_controller
-    from controllers.schemas.derived.report import (
-        ReportCommunityDetailResponse,
-        ReportCommunityListResponse,
-        ReportPatternsResponse,
-    )
     import application.derived.graph_service as graph_service_module
-    import application.source.collection_build_task_runner as task_runner_module
-    import application.derived.report_service as report_service_module
+    import application.pipeline.collection_build.service as task_runner_module
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.research_objective_service import (
+        ResearchObjectiveService,
+    )
     from application.core.research_view_aggregation_service import (
         ResearchViewAggregationService,
     )
     from application.goal.brief_service import GoalService
-    from application.source.collection_build_task_runner import CollectionBuildTaskRunner
+    from application.pipeline.collection_build.service import CollectionBuildPipelineService
     from application.source.task_service import TaskService
     from application.core.workspace_overview_service import WorkspaceService
     from main import create_app
@@ -629,13 +626,18 @@ def app_client(monkeypatch, tmp_path):
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
     )
-    runner = CollectionBuildTaskRunner(
-        collection_service,
-        task_service,
-        artifact_registry,
-        document_profile_service,
-        paper_facts_service,
-        comparison_service,
+    research_objective_service = ResearchObjectiveService(
+        collection_service=collection_service,
+        document_profile_service=document_profile_service,
+        core_fact_repository=core_fact_repository,
+        source_artifact_repository=source_artifact_repository,
+    )
+    runner = CollectionBuildPipelineService(
+        collection_service=collection_service,
+        task_service=task_service,
+        artifact_registry_service=artifact_registry,
+        document_profile_service=document_profile_service,
+        research_objective_service=research_objective_service,
     )
     workspace_service = WorkspaceService(
         collection_service=collection_service,
@@ -667,52 +669,6 @@ def app_client(monkeypatch, tmp_path):
         )
         return [DummyWorkflowOutput()]
 
-    def fake_list_community_reports(  # noqa: ANN001
-        collection_id, level, limit, offset, min_size, sort
-    ):
-        return ReportCommunityListResponse(
-            collection_id=collection_id,
-            level=level,
-            total=0,
-            count=0,
-            items=[],
-        )
-
-    def fake_get_community_report_detail(  # noqa: ANN001
-        collection_id, community_id, level, entity_limit, relationship_limit, document_limit
-    ):
-        parsed_community_id = int(community_id) if str(community_id).isdigit() else None
-        return ReportCommunityDetailResponse(
-            collection_id=collection_id,
-            community_id=parsed_community_id,
-            human_readable_id=parsed_community_id,
-            level=level,
-            parent=None,
-            children=None,
-            title=None,
-            summary=None,
-            findings=None,
-            rating=None,
-            size=None,
-            document_count=0,
-            text_unit_count=0,
-            entities=[],
-            relationships=[],
-            documents=[],
-        )
-
-    def fake_list_patterns(collection_id, level, limit, sort):  # noqa: ANN001
-        return ReportPatternsResponse(
-            collection_id=collection_id,
-            level=level,
-            total_communities=0,
-            total_entities=0,
-            total_relationships=0,
-            total_documents=0,
-            count=0,
-            items=[],
-        )
-
     monkeypatch.setattr(collections_controller, "collection_service", collection_service)
     monkeypatch.setattr(goals_controller, "goal_service", goal_service)
     monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
@@ -725,7 +681,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(tasks_controller, "build_task_runner", runner)
+    monkeypatch.setattr(tasks_controller, "build_pipeline_service", runner)
     monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
@@ -744,18 +700,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(research_view_controller, "research_view_service", research_view_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(
-        report_service_module,
-        "list_community_reports",
-        fake_list_community_reports,
-    )
-    monkeypatch.setattr(
-        report_service_module,
-        "get_community_report_detail",
-        fake_get_community_report_detail,
-    )
-    monkeypatch.setattr(report_service_module, "list_patterns", fake_list_patterns)
-
     client = TestClient(create_app())
     login_response = client.post(
         f"{API_V1_PREFIX}/auth/login",
@@ -796,19 +740,19 @@ def test_collection_task_flow(app_client):
     assert body["documents_ready"] is True
     assert body["document_profiles_generated"] is True
     assert body["document_profiles_ready"] is True
-    assert body["evidence_cards_generated"] is True
-    assert body["evidence_cards_ready"] is True
-    assert body["characterization_observations_generated"] is True
+    assert body["evidence_cards_generated"] is False
+    assert body["evidence_cards_ready"] is False
+    assert body["characterization_observations_generated"] is False
     assert body["characterization_observations_ready"] is False
-    assert body["structure_features_generated"] is True
+    assert body["structure_features_generated"] is False
     assert body["structure_features_ready"] is False
-    assert body["test_conditions_generated"] is True
-    assert body["test_conditions_ready"] is True
-    assert body["baseline_references_generated"] is True
+    assert body["test_conditions_generated"] is False
+    assert body["test_conditions_ready"] is False
+    assert body["baseline_references_generated"] is False
     assert body["baseline_references_ready"] is False
-    assert body["sample_variants_generated"] is True
+    assert body["sample_variants_generated"] is False
     assert body["sample_variants_ready"] is False
-    assert body["measurement_results_generated"] is True
+    assert body["measurement_results_generated"] is False
     assert body["measurement_results_ready"] is False
     assert body["comparable_results_generated"] is False
     assert body["comparable_results_ready"] is False
@@ -845,10 +789,7 @@ def test_collection_task_flow(app_client):
     assert profiles_body["items"][0]["doc_type"] == "experimental"
 
     evidence = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards")
-    assert evidence.status_code == 200
-    evidence_body = evidence.json()
-    assert evidence_body["count"] == 0
-    assert evidence_body["items"] == []
+    assert evidence.status_code == 409
 
     comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
     assert comparisons.status_code == 409
@@ -1427,7 +1368,7 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
 
 
 def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.source.collection_build_task_runner as task_runner_module
+    import application.pipeline.collection_build.service as task_runner_module
 
     captured: dict[str, object] = {}
 
@@ -1476,30 +1417,3 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
-
-
-def test_reports_routes_are_exposed(app_client):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Reports Collection"},
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    reports_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/reports/communities"
-    )
-    assert reports_resp.status_code == 200
-    assert reports_resp.json()["collection_id"] == collection_id
-
-    detail_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/reports/communities/42"
-    )
-    assert detail_resp.status_code == 200
-    assert detail_resp.json()["community_id"] == 42
-
-    patterns_resp = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/reports/patterns"
-    )
-    assert patterns_resp.status_code == 200
-    assert patterns_resp.json()["collection_id"] == collection_id

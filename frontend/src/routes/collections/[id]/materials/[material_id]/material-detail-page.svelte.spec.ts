@@ -57,8 +57,8 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
-function requestMethod(input: string | URL | Request, init?: RequestInit) {
-	return input instanceof Request ? input.method : (init?.method ?? 'GET');
+function requestPaths() {
+	return fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request));
 }
 
 function materialProfilePayload() {
@@ -352,316 +352,84 @@ function materialProfilePayload() {
 				}
 			}
 		],
-		report_package: {
-			schema_version: 'material_report_package.v1',
-			status: 'partial',
-			title: '316L stainless steel material-state report',
-			material_id: 'mat_316l',
-			canonical_name: '316L stainless steel',
-			summary:
-				'316L stainless steel has 2 resolved material-state chains covering density and mechanical response.',
-			executive_summary:
-				'316L stainless steel is best read as a scoped material report rather than a global parameter ranking.',
-			material_scope: {
-				material_system: '316L stainless steel',
-				preparation_routes: ['LPBF', 'SLM'],
-				source_paper_count: 1,
-				sample_row_count: 2,
-				evidence_count: 1
+		understanding: {
+			schema_version: 'research_understanding.v1',
+			state: 'ready',
+			scope: {
+				scope_type: 'material',
+				collection_id: 'col_123',
+				material_id: 'mat_316l',
+				objective_id: null,
+				document_id: null,
+				title: '316L stainless steel'
 			},
-			paper_contributions: [
+			claims: [
 				{
-					document_id: 'doc_1',
-					title: 'Paper A',
-					source_filename: '316L Stainless Steel Process Study.pdf',
-					sample_count: 2,
-					measured_properties: ['relative density', 'hardness', 'yield strength'],
-					contribution_summary:
-						'Paper A contributes 2 material-state sample(s) with relative density, hardness, yield strength measurements.'
-				}
-			],
-			key_findings: [
-				{
-					finding_id: 'finding:S001',
-					title: 'S001 links preparation, testing, and response',
-					body: 'S001 keeps hardness tied to tensile testing and table evidence.',
-					evidence_refs: [
-						{
-							evidence_ref_id: 'ev_hardness_s001',
-							document_id: 'doc_1',
-							source_kind: 'table',
-							locator: 'Table 2',
-							confidence: 0.95
-						}
-					]
-				}
-			],
-			thematic_sections: [
-				{
-					section_id: 'strength-ductility-hardness',
-					title: 'Strength, ductility, and hardness',
-					body: 'Hardness and tensile values are scoped to Paper A testing conditions.',
-					key_points: ['S001: hardness 215.6'],
-					evidence_refs: [
-						{
-							evidence_ref_id: 'ev_hardness_s001',
-							document_id: 'doc_1',
-							source_kind: 'table',
-							locator: 'Table 2',
-							confidence: 0.95
-						}
-					]
-				}
-			],
-			material_state_chains: [
-				{
-					chain_id: 'material-chain:S001',
-					document_id: 'doc_1',
-					sample_id: 'S001',
-					sample_label: 'S001',
-					material: '316L stainless steel',
-					material_state: 'S001',
-					preparation_context: {
-						scan_strategy: 'Alternating strategy A',
-						laser_power_w: '200',
-						scan_speed_mm_s: '800'
-					},
-					test_conditions: {
-						method: 'Tensile testing',
-						standard: 'ASTM E8'
-					},
-					performance_results: [
-						{
-							property: 'hardness',
-							display_value: '215.6',
-							status: 'observed',
-							evidence_refs: [
-								{
-									evidence_ref_id: 'ev_hardness_s001',
-									document_id: 'doc_1',
-									source_kind: 'table',
-									locator: 'Table 2',
-									confidence: 0.95
-								}
-							]
-						}
-					],
-					source_evidence: [
-						{
-							evidence_ref_id: 'ev_hardness_s001',
-							document_id: 'doc_1',
-							source_kind: 'table',
-							locator: 'Table 2',
-							confidence: 0.95
-						}
-					],
-					comparability_boundary: ['Compare only within Paper A tensile and hardness conditions.'],
+					claim_id: 'claim_material_hardness',
+					claim_type: 'finding',
+					statement: 'S001 keeps hardness tied to tensile testing and table evidence.',
+					status: 'supported',
 					confidence: 0.95,
-					unresolved_fields: []
+					strength: null,
+					evidence_ref_ids: ['ev_hardness_s001'],
+					context_ids: ['ctx_material_scope'],
+					source_object_ids: ['finding:S001'],
+					warnings: []
 				}
 			],
-			representative_states: [
+			relations: [
 				{
-					chain_id: 'material-chain:S001',
-					document_id: 'doc_1',
-					sample_id: 'S001',
-					sample_label: 'S001',
-					material: '316L stainless steel',
-					material_state: 'S001',
-					preparation_context: {
-						scan_strategy: 'Alternating strategy A',
-						laser_power_w: '200',
-						scan_speed_mm_s: '800'
-					},
-					test_conditions: {
-						method: 'Tensile testing',
-						standard: 'ASTM E8'
-					},
-					performance_results: [
-						{
-							property: 'hardness',
-							display_value: '215.6',
-							status: 'observed',
-							evidence_refs: [
-								{
-									evidence_ref_id: 'ev_hardness_s001',
-									document_id: 'doc_1',
-									source_kind: 'table',
-									locator: 'Table 2',
-									confidence: 0.95
-								}
-							]
-						}
-					],
-					source_evidence: [
-						{
-							evidence_ref_id: 'ev_hardness_s001',
-							document_id: 'doc_1',
-							source_kind: 'table',
-							locator: 'Table 2',
-							confidence: 0.95
-						}
-					],
-					comparability_boundary: ['Compare only within Paper A tensile and hardness conditions.'],
-					confidence: 0.95,
-					unresolved_fields: []
+					relation_id: 'rel_scan_strategy_hardness',
+					relation_type: 'compares',
+					subject: 'scan strategy',
+					predicate: 'comparable',
+					object: 'hardness',
+					status: 'supported',
+					confidence: null,
+					evidence_ref_ids: ['ev_hardness_s001'],
+					context_ids: ['ctx_material_scope'],
+					source_object_ids: ['grp_1'],
+					warnings: []
 				}
 			],
-			limitations: ['S002 is missing test_conditions.'],
-			evidence_appendix: {
-				sample_matrix_row_count: 2,
-				property_count: 3,
-				evidence_count: 1,
-				source_table_count: 1
-			},
-			document: {
-				schema_version: 'material_report_document.v1',
-				status: 'partial',
-				title: '316L stainless steel Material Report',
-				markdown: [
-					'# 316L stainless steel Material Report',
-					'',
-					'## 摘要',
-					'',
-					'316L stainless steel is best read as a scoped material report rather than a global parameter ranking.',
-					'',
-					'## 1. 材料范围',
-					'',
-					'| 材料状态 | 主要来源 | 关注问题 |',
-					'|---|---|---|',
-					'| as-SLM 316L | P001, P004 | SLM 参数如何影响致密化和拉伸性能 [E001] |',
-					'| HT-SLM 316L | P004 | 热处理是否改变强度、塑性和硬度 |',
-					'',
-					'```text',
-					'制备工艺 / 后处理',
-					'-> 样品状态',
-					'-> 性能结果',
-					'-> 材料学解释',
-					'```',
-					'',
-					'## 3. 代表性材料状态',
-					'',
-					'### S001',
-					'',
-					'- Preparation: scan_strategy: Alternating strategy A, laser_power_w: 200',
-					'- Testing: method: Tensile testing, standard: ASTM E8',
-					'- Response: hardness 215.6 [E001]',
-					'- Comparability: Compare only within Paper A tensile and hardness conditions.',
-					'',
-					'## 8. 可比较性',
-					'',
-					'1. 同一论文、同一材料、同一测试体系内的数据最适合直接比较。',
-					'2. 不同论文不能直接做全局最佳参数。',
-					'',
-					'> 多篇论文共同支持：SLM/LPBF 316L 的性能由能量输入和孔隙共同控制。',
-					'',
-					'---',
-					'',
-					'## 9. 证据与不确定性',
-					'',
-					'- S002 is missing test_conditions.'
-				].join('\n'),
-				citations: {
-					E001: {
-						evidence_ref_id: 'ev_hardness_s001',
-						document_id: 'doc_1',
-						source_kind: 'table',
-						locator: 'Table 2',
-						confidence: 0.95
-					}
-				},
-				outline: [
-					{
-						level: 1,
-						title: '316L stainless steel Material Report',
-						anchor: '316l-stainless-steel-material-report'
-					},
-					{
-						level: 2,
-						title: '3. 代表性材料状态',
-						anchor: '3-代表性材料状态'
-					}
-				],
-				warnings: [],
-				evidence_appendix: {
-					sample_matrix_row_count: 2,
-					property_count: 3,
-					evidence_count: 1,
-					source_table_count: 1
-				}
-			},
-			source_refs: [
+			evidence_refs: [
 				{
 					evidence_ref_id: 'ev_hardness_s001',
 					document_id: 'doc_1',
 					source_kind: 'table',
-					locator: 'Table 2',
-					confidence: 0.95
+					label: 'Paper A · Table 2',
+					locator: {
+						source_ref: 'Table 2'
+					},
+					fact_ids: ['finding:S001'],
+					anchor_ids: [],
+					confidence: 0.95,
+					traceability_status: 'traceable',
+					quote: null,
+					href: null
 				}
-			]
+			],
+			contexts: [
+				{
+					context_id: 'ctx_material_scope',
+					label: 'Material scope',
+					material_scope: ['316L stainless steel'],
+					process_context: {
+						process_families: ['LPBF/SLM']
+					},
+					test_condition: {},
+					property_scope: ['hardness'],
+					limitations: ['S002 is missing test_conditions.']
+				}
+			],
+			warnings: [],
+			summary: {
+				claim_count: 1,
+				relation_count: 1,
+				evidence_ref_count: 1,
+				context_count: 1
+			}
 		}
-	};
-}
-
-function materialReviewReportPayload(overrides: Record<string, unknown> = {}) {
-	return {
-		report_id: 'mrp_mat_316l',
-		collection_id: 'col_123',
-		material_id: 'mat_316l',
-		status: 'ready',
-		message: 'Review draft is ready.',
-		title: '316L stainless steel review draft',
-		language: 'en',
-		report_type: 'review_draft',
-		include_appendix: true,
-		readiness: 'preliminary',
-		readiness_reason: '1 paper and 2 samples are available.',
-		data_version: 'material_profile_v1',
-		warnings: [],
-		created_at: '2026-05-05T15:32:00',
-		updated_at: '2026-05-05T15:33:00',
-		generated_at: '2026-05-05T15:33:00',
-		pdf_url: '/api/v1/collections/col_123/materials/mat_316l/review-report.pdf',
-		markdown_url: '/api/v1/collections/col_123/materials/mat_316l/review-report.md',
-		...overrides
-	};
-}
-
-function materialReportPayload(overrides: Record<string, unknown> = {}) {
-	return {
-		report_id: 'mr_mat_316l',
-		collection_id: 'col_123',
-		material_id: 'mat_316l',
-		status: 'ready',
-		stage: 'ready',
-		message: 'Material report generated.',
-		title: '316L stainless steel 材料报告',
-		language: 'zh',
-		model: 'test-model',
-		data_version: 'material_report_v1',
-		markdown: [
-			'# 316L stainless steel 材料报告',
-			'',
-			'## 摘要',
-			'',
-			'LLM conclusion: 316L stainless steel should be read through evidence-backed material states.',
-			'',
-			'## 10. 结论',
-			'',
-			'- LLM keeps S001, 215.6 and source citation [E001] tied together.'
-		].join('\n'),
-		warnings: [],
-		source_refs: [],
-		evidence_appendix: {
-			sample_matrix_row_count: 2,
-			property_count: 3,
-			evidence_count: 1,
-			source_table_count: 1
-		},
-		created_at: '2026-05-20T00:00:00+00:00',
-		updated_at: '2026-05-20T00:00:01+00:00',
-		generated_at: '2026-05-20T00:00:01+00:00',
-		...overrides
 	};
 }
 
@@ -672,25 +440,18 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/materials/mat_316l')
 		});
 		fetchMock.mockReset();
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
-			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(materialProfilePayload());
 			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
+			if (path === '/api/v1/collections/col_123/research-understanding/curations') {
+				return jsonResponse({ collection_id: 'col_123', items: [] });
 			}
-
-			if (
-				path === '/api/v1/collections/col_123/materials/mat_316l/review-report' &&
-				method === 'GET'
-			) {
-				return jsonResponse({ detail: { code: 'material_review_report_not_found' } }, 404);
+			if (path === '/api/v1/collections/col_123/research-understanding/feedback') {
+				return jsonResponse({ collection_id: 'col_123', items: [] });
 			}
-
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
 		});
 	});
@@ -702,198 +463,47 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Material report overview' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel Material Report' }))
+			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('heading', { name: '摘要' })).toBeInTheDocument();
 		await expect
 			.element(
-				browserPage.getByText('scoped material report rather than a global parameter ranking')
+				browserPage
+					.getByText('S001 keeps hardness tied to tensile testing and table evidence.')
+					.first()
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('材料状态').first()).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('cell', { name: 'as-SLM 316L' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('-> 样品状态')).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('S001 links preparation, testing, and response'))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Thematic analysis' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Hardness and tensile values are scoped to Paper A testing conditions.'
-				)
-			)
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: '3. 代表性材料状态' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText(/Response: hardness 215\.6/)).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: '[E001]' }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('不同论文不能直接做全局最佳参数。'))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText(/多篇论文共同支持：SLM\/LPBF 316L/))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper A · Table 2').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material questions' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText(/scan_strategy: Alternating strategy A/).first())
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText(/studied through LPBF\/SLM/).first())
-			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('ASTM E8').first()).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('This long method paragraph should stay out'))
-			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('hardness').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByText('215.6').first()).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('Compare only within Paper A tensile and hardness conditions.')
-			)
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Traceback').first()).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Comparable groups' }))
-			.not.toBeInTheDocument();
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Supporting data matrix' }))
-			.not.toBeInTheDocument();
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence locator' }))
-			.not.toBeInTheDocument();
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S001 · Alternating strategy A').first())
-			.not.toBeInTheDocument();
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('S002 · Island strategy B').first())
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Densification and porosity' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Strength, ductility, and hardness' }))
-			.not.toBeInTheDocument();
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '95.4%' }).first())
-			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('+2 more').first()).not.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Select a material, process variable, sample, property, or finding to reveal related evidence anchors.'
-				)
-			)
-			.not.toBeInTheDocument();
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('215.6').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Research chain map')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Best parameter chain')).not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-		).toEqual([
-			'/api/v1/collections/col_123/materials/mat_316l/research-view',
-			'/api/v1/collections/col_123/materials/mat_316l/report'
-		]);
-	});
-
-	it('renders a persisted LLM material report before the deterministic draft', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
-				return jsonResponse(materialProfilePayload());
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse(materialReportPayload());
-			}
-
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel 材料报告' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('LLM conclusion: 316L stainless steel should be read'))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('test-model')).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('scoped material report rather than a global parameter ranking')
-			)
-			.not.toBeInTheDocument();
-	});
-
-	it('requests LLM material report generation when no persisted report exists', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
-				return jsonResponse(materialProfilePayload());
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'POST') {
-				return jsonResponse({
-					...materialReportPayload({
-						status: 'generating',
-						stage: 'requested',
-						message: 'Material report generation started.',
-						markdown: null,
-						generated_at: null
-					})
-				});
-			}
-
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
-		});
-
-		render(Page);
-
-		const reportGenerateButton = browserPage
-			.getByRole('button', { name: 'Generate report' })
-			.last();
-		await expect.element(reportGenerateButton).toBeInTheDocument();
-		await reportGenerateButton.click();
-
-		const postCall = fetchMock.mock.calls.find(
-			([input, init]) =>
-				requestPath(input as string | URL | Request) ===
-					'/api/v1/collections/col_123/materials/mat_316l/report' &&
-				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+		expect(requestPaths()).toContain(
+			'/api/v1/collections/col_123/materials/mat_316l/research-view'
 		);
-		expect(JSON.parse(String((postCall?.[1] as RequestInit | undefined)?.body))).toEqual({
-			language: 'zh',
-			force_regenerate: false
-		});
-		await expect
-			.element(browserPage.getByText('Material report generation started.'))
-			.toBeInTheDocument();
 	});
 
-	it('cleans table-origin labels in the representative material state report', async () => {
+	it('cleans table-origin labels in the supporting data matrix', async () => {
 		const payload: any = materialProfilePayload();
-		payload.report_package.document = null;
 		payload.sample_matrix.rows = [
 			{
 				row_id: 'row_table_origin',
@@ -926,25 +536,19 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				evidence_refs: []
 			}
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
-			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
 			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
-			}
-
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
 		});
 
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Representative material states' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting data matrix' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('as-SLM(140/100)').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Energy density').first()).toBeInTheDocument();
@@ -953,15 +557,12 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('140 W').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Scan speed').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('280 mm/s').first()).toBeInTheDocument();
-		const processStep = Array.from(document.querySelectorAll('.chain-step')).find((step) =>
-			step.textContent?.includes('Preparation and post-treatment')
-		);
-		expect(processStep?.textContent).not.toContain('Table 2');
+		const matrix = document.querySelector('#performance-results');
+		expect(matrix?.textContent).not.toContain('Table 2 (continued)');
 	});
 
 	it('renders top-level measured property evidence when sample rows have no value cells', async () => {
 		const payload: any = materialProfilePayload();
-		payload.report_package.document = null;
 		payload.overview.measured_properties = ['elongation', 'ultimate tensile strength'];
 		payload.sample_matrix.columns = [];
 		payload.sample_matrix.rows = payload.sample_matrix.rows.map((row: Record<string, unknown>) => ({
@@ -1002,16 +603,11 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				]
 			}
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
-			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -1024,7 +620,7 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('610 MPa').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Strength, ductility, and hardness' }))
+			.element(browserPage.getByRole('heading', { name: 'Supporting data matrix' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText(/Collection summary: Tensile strength 610 MPa/))
@@ -1051,17 +647,13 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('1 sample(s), 2 measured property column(s).'))
 			.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request))
-		).toEqual([
-			'/api/v1/collections/col_123/materials/mat_316l/research-view',
-			'/api/v1/collections/col_123/materials/mat_316l/report'
-		]);
+		expect(requestPaths()).toContain(
+			'/api/v1/collections/col_123/materials/mat_316l/research-view'
+		);
 	});
 
 	it('focuses sparse objective-derived material matrices on populated sample values', async () => {
 		const payload: any = materialProfilePayload();
-		payload.report_package.document = null;
 		payload.sample_matrix.rows = [
 			{
 				row_id: 'row_non_preheated',
@@ -1119,16 +711,11 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				evidence_refs: []
 			}))
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
-			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -1149,7 +736,6 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 
 	it('caps large performance matrices to high-signal rows', async () => {
 		const payload: any = materialProfilePayload();
-		payload.report_package.document = null;
 		payload.sample_matrix.rows = [
 			...payload.sample_matrix.rows,
 			...Array.from({ length: 24 }, (_, index) => ({
@@ -1168,16 +754,11 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 				evidence_refs: []
 			}))
 		];
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
-			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
@@ -1197,159 +778,13 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 	});
 
-	it('does not promote narrative observations with embedded numbers into representative material states', async () => {
-		const payload: any = materialProfilePayload();
-		payload.sample_matrix.columns = [{ value_key: 'elongation', label: 'Elongation', unit: '%' }];
-		payload.sample_matrix.rows = [
-			{
-				row_id: 'row_text_observation',
-				sample_id: 'text_observation',
-				sample_label: '135 W-750 mm/s',
-				material: '316L stainless steel',
-				process_context: {},
-				values: {
-					elongation: {
-						display_value:
-							'The relatively low porosity levels in the 135 W-750 mm/s sample increase ductility by about 10%.',
-						status: 'observed',
-						confidence: 0.89,
-						evidence_refs: [{ evidence_ref_id: 'ev_text_observation', document_id: 'doc_1' }]
-					}
-				},
-				evidence_refs: []
-			}
-		];
-		payload.measured_properties = [];
-		payload.report_package = null;
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
-				return jsonResponse(payload);
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
-			}
-
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('Material report package has not been generated for this material.')
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('leading in this matrix · E01'))
-			.not.toBeInTheDocument();
-	});
-
-	it('generates a material review report and exposes Markdown and PDF artifacts', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
-				return jsonResponse(materialProfilePayload());
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
-			}
-
-			if (
-				path === '/api/v1/collections/col_123/materials/mat_316l/review-report' &&
-				method === 'GET'
-			) {
-				return jsonResponse({ detail: { code: 'material_review_report_not_found' } }, 404);
-			}
-
-			if (
-				path === '/api/v1/collections/col_123/materials/mat_316l/review-report' &&
-				method === 'POST'
-			) {
-				return jsonResponse(materialReviewReportPayload());
-			}
-
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
-			.toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Generate review PDF' }).click();
-		await browserPage.getByRole('button', { name: 'Generate review', exact: true }).click();
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Material review PDF' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Preview Markdown' }))
-			.toHaveAttribute('href', '/api/v1/collections/col_123/materials/mat_316l/review-report.md');
-		await expect
-			.element(browserPage.getByRole('link', { name: 'View PDF' }))
-			.toHaveAttribute('href', '/api/v1/collections/col_123/materials/mat_316l/review-report.pdf');
-
-		const postCall = fetchMock.mock.calls.find(
-			([input, init]) =>
-				requestPath(input as string | URL | Request) ===
-					'/api/v1/collections/col_123/materials/mat_316l/review-report' &&
-				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-		);
-		expect(JSON.parse(String((postCall?.[1] as RequestInit | undefined)?.body))).toMatchObject({
-			report_type: 'review_draft',
-			include_appendix: true,
-			force_regenerate: false
-		});
-	});
-
-	it('renders the narrative research tab from the same material profile data', async () => {
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: '316L stainless steel', exact: true }))
-			.toBeInTheDocument();
-		await browserPage.getByRole('tab', { name: 'Narrative research' }).click();
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'What does this literature set study?' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'How are the samples designed?' }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByRole('heading', { name: 'What are the main performance findings?' })
-			)
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText(/mainly through LPBF\/SLM/)).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: /Relative density/ }).first())
-			.toBeInTheDocument();
-	});
-
 	it('opens evidence details from a performance value', async () => {
 		const payload: any = materialProfilePayload();
-		payload.report_package.document = null;
-		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const path = requestPath(input);
-			const method = requestMethod(input, init);
 
 			if (path === '/api/v1/collections/col_123/materials/mat_316l/research-view') {
 				return jsonResponse(payload);
-			}
-
-			if (path === '/api/v1/collections/col_123/materials/mat_316l/report' && method === 'GET') {
-				return jsonResponse({ detail: { code: 'material_report_not_found' } }, 404);
 			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');

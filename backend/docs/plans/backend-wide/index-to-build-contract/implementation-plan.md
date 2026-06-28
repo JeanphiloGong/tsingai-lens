@@ -89,7 +89,7 @@ This plan does not cover:
 
 - redesign of Goal intake or collection creation
 - protocol branch redesign
-- graph/report route-family renaming
+- graph route-family renaming or report retirement
 - parser or extraction algorithm changes
 - adding compatibility routes, aliases, wrappers, or dual-path payload fields
 
@@ -310,10 +310,9 @@ Exit criteria:
 
 Primary backend changes:
 
-- rename
-  [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
-  to a build-oriented name such as `collection_build_task_runner.py`
-- rename `IndexTaskRunner` to `CollectionBuildTaskRunner`
+- move collection build orchestration to
+  [`../../../application/pipeline/collection_build/service.py`](../../../../application/pipeline/collection_build/service.py)
+- use `CollectionBuildPipelineService` as the build workflow entry
 - rename `run_index_task()` to `run_build_task()`
 - update logs to say `build task` instead of `index task`
 - update any tests that still assert `index` naming

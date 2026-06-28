@@ -57,8 +57,8 @@ The completed cleanup slice deleted the redirect-only frontend page files:
 The same slice updated collection-route docs that described transitional
 aliases, especially references that said `/steps` and `/sop` may remain as
 compatibility routes. A follow-on frontend cleanup also removed the unused
-reports API client from `_shared/` because the current browser workflow only
-keeps reports as a non-fetching workspace note.
+reports API client from `_shared/` because the current browser workflow no
+longer exposes reports as a page, workspace note, or primary contract.
 
 ## Backend Boundary
 
@@ -73,10 +73,8 @@ capabilities, not route-alias residue:
 - document, result, comparison, and evidence APIs used by source verification
   and evidence-chain review
 
-Reports should be treated as a separate API-retirement decision if the product
-chooses to remove that capability. The current frontend workspace already
-keeps reports degraded and out of the primary workflow, but that is not the
-same as proving every reports backend path is dead.
+Reports have since been retired from the browser-facing product contract.
+Research understanding plus evidence audit is the replacement review surface.
 
 ## Expected Result
 

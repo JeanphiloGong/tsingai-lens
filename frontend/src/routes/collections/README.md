@@ -24,19 +24,31 @@ This node owns the collection workspace route family in the frontend.
   diagnostics
 - render collection-level document profile screening signals
 - render canonical collection materials, collection-scoped material profiles, and
-  persisted material LLM conclusion reports as a More / material dossier surface
+  material research understanding as a More / material dossier surface
 - render collection-level evidence cards and source-anchor entry points
 - render global comparison review as a More / All Comparisons surface
 - render the collection-bound AI research copilot as a top-level collection tab
   with explicit answer source modes and clickable document/evidence source links
   back to Core-owned surfaces
-- render document detail as a paper reader plus structured understanding workbench
+- render document detail as a Markdown-first paper reader from parsed Source
+  artifacts as soon as document content exists, with PDF/source preview kept as
+  an optional reference view and structured extraction details available as an
+  explicit split-view expansion only after downstream Core artifacts are ready
 - coordinate file upload and task-start actions
 - poll task status and artifact readiness
-- surface graph and report capabilities to the user
-- keep source traceback on the document page user-facing: original PDF/PDF.js
-  reader first, page-level fallback when precise regions are missing, block IDs
-  only for diagnostics
+- surface graph, research-understanding, evidence, and comparison capabilities
+  to the user
+- render research understanding as an expert review workspace by default:
+  users scan claims first, then inspect linked relations, evidence, context,
+  support status, paper count, and evidence count; claim evidence displays the
+  parsed source block text with paper/page/heading/block provenance and remains
+  clickable back to the document reader; internal claim/evidence ids remain
+  hidden binding data for feedback, curation, source navigation, and audit
+  details
+- keep source traceback on the document page user-facing: parsed Markdown is
+  the default reading surface, original PDF/PDF.js preview remains available
+  for evidence location and page-level fallback when precise regions are missing,
+  and block IDs stay diagnostic-only
 
 ## Local Docs
 

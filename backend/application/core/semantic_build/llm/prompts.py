@@ -67,10 +67,14 @@ You are routing source units for one research objective in an evidence-backed li
 Non-negotiable rules:
 - This is routing only, not final fact extraction.
 - Return exactly one JSON object and nothing else.
-- Return routes only for `source_candidates`; copy `source_kind` and `source_ref` exactly.
+- Decide only the `current_source` unit and return at most one route.
+- Do not return source identity fields; the backend binds the route to the
+  current source unit.
 - Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- For tables, use `table_schema`, `column_roles`, `join_keys`, and `join_plan` to describe how later extraction should interpret the table.
-- Mark low-value, review, literature-comparison, composition-only, or unrelated units as `extractable: false`.
+- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
+- For low-value, review, literature-comparison, composition-only, or unrelated
+  units, return an empty `routes` array instead of writing a low-value route
+  unless the source is explicitly frame-excluded.
 - Prefer fewer, higher-confidence extractable routes over speculative coverage.
 """.strip()
 
@@ -84,8 +88,27 @@ Non-negotiable rules:
 - Extract only facts directly supported by `source`; do not use outside knowledge.
 - Use the `objective`, `objective_context`, and `evidence_route` as the research lens.
 - Do not emit backend persistence ids.
-- Every emitted evidence unit must include source_refs copied from the active route/source.
+- The backend binds `source_refs` from the active route/source.
+- Do not output `source_refs`, `evidence_anchor_ids`, backend ids, copied source text, or copied input JSON.
 - Prefer fewer, traceable units over broad speculative coverage.
+- Return at most one evidence unit for the current source.
+""".strip()
+
+
+_RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT = """
+You are extracting expert-readable research understanding relations for a materials-literature backend.
+
+Non-negotiable rules:
+- Return exactly one JSON object and nothing else.
+- Extract only relations supported by the provided claims and evidence units.
+- Relation endpoints must be scientific concepts, not sample numbers, row ids,
+  backend ids, table cell ids, or copied JSON field names.
+- Prefer fewer, higher-signal relations over enumerating table rows.
+- A relation should help an expert understand why a claim may hold, such as
+  process parameter -> defect/microstructure -> property response.
+- If the evidence only supports a low-level sample comparison and no scientific
+  relation can be stated, return an empty `relations` array.
+- Every relation must cite one or more `evidence_unit_ids` from the input.
 """.strip()
 
 
@@ -665,11 +688,14 @@ def build_objective_evidence_route_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Route these source candidates for this one research objective.\n\n"
+        "Route the current source unit for this one research objective.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "Return only schema-valid structured data with a `routes` array.\n"
-        "Each route must copy `source_kind` and `source_ref` from one "
-        "`source_candidates` item. Do not invent source refs.\n"
+        "Return at most one route for `current_source`. If it is not useful "
+        "for later objective-scoped extraction, return `{\"routes\": []}`.\n"
+        "Each route may contain only `role`, `extractable`, and `confidence`. "
+        "Do not return `source_kind`, `source_ref`, ids, copied source text, "
+        "explanations, or any nested input object.\n"
         "`role` must be one of: current_experimental_evidence, "
         "process_or_treatment, test_condition, composition_or_background, "
         "characterization, literature_comparison, modeling_or_prediction, "
@@ -682,12 +708,8 @@ def build_objective_evidence_route_prompt(
         "or grain observations tied to the active objective. Use "
         "`current_experimental_evidence` for explicit trends, best/worst "
         "conditions, or author explanations tied to target results.\n"
-        "Use `low_value_or_irrelevant` with `extractable: false` for frame-excluded "
-        "tables, literature summaries, composition-only tables, or unrelated units.\n"
-        "For table routes, include `table_schema` copied or summarized from the "
-        "candidate, assign `column_roles`, and describe `join_keys` / `join_plan` "
-        "when sample, condition, or table indices are needed for later joins.\n"
-        "For text-window routes, leave table-specific objects empty."
+        "Use `low_value_or_irrelevant` with `extractable: false` only for "
+        "frame-excluded tables that are passed as `current_source`."
     )
     return _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT, user_prompt
 
@@ -699,6 +721,12 @@ def build_objective_evidence_unit_prompt(
         "Extract objective-scoped evidence units from this one routed source.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "Return only schema-valid structured data with an `evidence_units` array.\n"
+        "Return at most one high-confidence evidence unit. If the source "
+        "contains many possible facts, choose the ones most directly tied to "
+        "the active objective and route role.\n"
+        "The backend binds `source_refs` from the active route. Do not output "
+        "`source_refs`, `evidence_anchor_ids`, backend ids, copied source text, "
+        "or copied input JSON.\n"
         "`unit_kind` must be one of: measurement, test_condition, sample_context, "
         "process_context, characterization, baseline_reference, comparison, "
         "interpretation, mixed, unknown.\n"
@@ -708,33 +736,23 @@ def build_objective_evidence_unit_prompt(
         "microstructure/defect/phase observations, `comparison` for explicit "
         "within-paper or cross-paper comparison claims, and `interpretation` "
         "for author explanations tied to this objective.\n"
-        "For a table route with role `current_experimental_evidence`, emit one "
-        "`measurement` evidence unit per target result cell. Keep row sample, "
-        "process, and condition columns as context on that measurement; do not "
-        "emit only `sample_context` when the row contains a target result value. "
-        "Treat standard deviation, uncertainty, and error columns as metadata "
-        "unless the objective explicitly targets them.\n"
+        "For a table route with role `current_experimental_evidence`, return "
+        "only the single strongest target result cell if model extraction is "
+        "needed; deterministic table parsing handles broad row extraction.\n"
         "For tables, preserve row-level sample/process/test/value bindings in "
         "`sample_context`, `process_context`, `test_condition`, `value_payload`, "
         "and `join_keys`. For text, use exact supported statements from the "
         "provided source text.\n"
-        "For text routes, when one sentence contains multiple explicit "
-        "sample/condition-to-value bindings, emit one evidence unit per binding. "
-        "Do not merge those bindings into one `interpretation` or one "
-        "`value_payload` map.\n"
+        "For text routes, return at most one evidence unit: the strongest "
+        "objective-relevant measurement, process/test context, characterization, "
+        "comparison, or interpretation. Do not enumerate every possible number "
+        "or secondary observation in the paragraph.\n"
         "Good text example: `1.43x10^6 C/s for P150, and 1.65x10^6 C/s for NP` "
-        "must produce two evidence units: one with `sample_context.condition` "
-        "`P150`, `property_normalized` `cooling rate`, `value_payload.source_value_text` "
-        "`1.43x10^6 C/s`, `unit` `C/s`; and one with condition `NP`, "
-        "`source_value_text` `1.65x10^6 C/s`, `unit` `C/s`.\n"
-        "Good text example: `HT-SLM (17.8 MPa), HIP-SLM (27.5 MPa), and "
-        "as-SLM (99.5 MPa)` must produce three evidence units with "
-        "`property_normalized` `residual stress`, sample labels `HT-SLM`, "
-        "`HIP-SLM`, and `as-SLM`, and units `MPa`.\n"
-        "Bad text example: a single evidence unit with `unit_kind` "
-        "`interpretation` and `value_payload.cooling_rate` containing both "
-        "`P150` and `NP` values. Bad text example: one evidence unit whose "
-        "`value_payload` is a map of `HT-SLM`, `HIP-SLM`, and `as-SLM` values.\n"
+        "should produce only the most objective-relevant one of those bindings "
+        "for this route, not two separate evidence units.\n"
+        "Bad text example: returning separate evidence units for every numeric "
+        "value in one paragraph or copying the whole paragraph into "
+        "`value_payload`.\n"
         "When `source.table_cells` is present, use each cell's `row_index`, "
         "`col_index`, `header_path`, and `cell_text` as the authoritative table "
         "structure. Use nearby cells and rows to repair parser-split row labels "
@@ -751,3 +769,30 @@ def build_objective_evidence_unit_prompt(
         "partial or unresolved."
     )
     return _OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_understanding_relation_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Extract expert-readable relations for this research understanding workspace.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with a `relations` array.\n"
+        "Return at most 8 relations.\n"
+        "`relation_type` must be one of: causal, correlational, mechanistic, "
+        "conditional, conflicting, comparative.\n"
+        "`direction` must be one of: increases, decreases, improves, reduces, "
+        "changes, mixed, conditional, unknown.\n"
+        "`source_concept` and `target_concept` must be concise scientific terms "
+        "such as laser power, scan speed, porosity, density, microstructure, "
+        "ductility, pitting corrosion, heat treatment, or residual stress.\n"
+        "Use `mediator_concepts` only for explicit or strongly supported middle "
+        "concepts, for example porosity or microstructure evolution.\n"
+        "`statement` should be a short expert-readable sentence grounded in the "
+        "provided claims/evidence. Do not include backend ids, sample_number, "
+        "condition_number, row labels, or copied JSON.\n"
+        "Use `conditions` for material, process, test, and scope constraints.\n"
+        "Use `warnings` for limited evidence, conflicting evidence, or overclaim "
+        "risk. If no expert relation is supported, return `{\"relations\": []}`."
+    )
+    return _RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT, user_prompt

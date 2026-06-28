@@ -13,6 +13,7 @@ const {
 	buildDocumentTypeStats,
 	buildProfileConclusion,
 	fetchDocumentComparisonSemantics,
+	fetchDocumentMarkdown,
 	formatConfidence,
 	getDocumentNextActions,
 	getDocumentTypeBadge
@@ -131,6 +132,52 @@ describe('documents shared helpers', () => {
 		expect(response.variant_dossiers[0].series[0].chains[0].assessment.comparability_status).toBe(
 			'limited'
 		);
+	});
+
+	it('fetches and normalizes document Markdown projections', async () => {
+		requestJson.mockResolvedValue({
+			collection_id: 'col_123',
+			document_id: 'doc_1',
+			title: 'Paper A',
+			source_filename: 'paper-a.pdf',
+			parser: 'docling',
+			markdown: '  # Paper A\n\n## Abstract\n\nText.  ',
+			source_map: [
+				{
+					markdown_anchor: 'block-abstract',
+					artifact_type: 'block',
+					artifact_id: 'abstract',
+					block_id: 'abstract',
+					block_type: 'paragraph',
+					page: 1,
+					heading_path: 'Abstract',
+					text_unit_ids: ['tu-1']
+				},
+				{
+					markdown_anchor: '',
+					artifact_type: 'block',
+					artifact_id: 'invalid'
+				}
+			],
+			warnings: ['layout_warning']
+		});
+
+		const response = await fetchDocumentMarkdown('col_123', 'doc_1');
+
+		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/documents/doc_1/markdown', {
+			method: 'GET'
+		});
+		expect(response.markdown).toBe('# Paper A\n\n## Abstract\n\nText.');
+		expect(response.parser).toBe('docling');
+		expect(response.source_map).toHaveLength(1);
+		expect(response.source_map[0]).toMatchObject({
+			artifact_id: 'abstract',
+			block_id: 'abstract',
+			page: 1,
+			heading_path: 'Abstract',
+			text_unit_ids: ['tu-1']
+		});
+		expect(response.warnings).toEqual(['layout_warning']);
 	});
 
 	it('builds document profile stats with percentages and dominant rows', () => {

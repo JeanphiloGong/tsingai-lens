@@ -222,6 +222,30 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					warnings: []
 				});
 			}
+			if (url.pathname === '/api/v1/collections/col_123/documents/doc_1/markdown') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					document_id: 'doc_1',
+					title: 'Paper A',
+					source_filename: 'paper-a.pdf',
+					parser: 'docling',
+					markdown:
+						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n![Fig. 1](/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image)\n\n**Figure.** Fig. 1. Microstructure after annealing.\n\n| Sample | Conductivity |\n| --- | --- |\n| A | 12 mS/cm |',
+					source_map: [
+						{
+							markdown_anchor: 'block-abstract',
+							artifact_type: 'block',
+							artifact_id: 'abstract',
+							block_id: 'abstract',
+							block_type: 'paragraph',
+							page: 1,
+							heading_path: 'Abstract',
+							text_unit_ids: []
+						}
+					],
+					warnings: []
+				});
+			}
 			if (
 				url.pathname === '/api/v1/collections/col_123/documents/doc_1/research-view' &&
 				researchPayload
@@ -410,6 +434,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		expect(tracebackCallPaths()).toEqual([]);
+		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
 		await expect.element(browserPage.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('tab', { name: 'Methods' })).not.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('tab', { name: 'Q&A' })).not.toBeInTheDocument();
@@ -421,8 +446,16 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Parsed source fallback')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('heading', { name: 'Abstract' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('img', { name: 'Fig. 1' })).toHaveAttribute(
+			'src',
+			'/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image'
+		);
+		await expect
+			.element(browserPage.getByText('Figure. Fig. 1. Microstructure after annealing.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).not.toBeInTheDocument();
 
 		await browserPage.getByRole('tab', { name: 'Results' }).click();
 		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
@@ -458,6 +491,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		render(Page);
 
+		await browserPage.getByRole('tab', { name: 'PDF Preview' }).click();
 		await expect.element(browserPage.getByText('Parsed source fallback')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
@@ -465,9 +499,28 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Source preview unavailable')).not.toBeInTheDocument();
 	});
 
+	it('lets the user view parsed source text while the PDF is available', async () => {
+		render(Page);
+
+		await browserPage.getByRole('tab', { name: 'PDF Preview' }).click();
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('parsed-source-fallback')).not.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'View source text' }).click();
+
+		await expect.element(browserPage.getByTestId('parsed-source-fallback')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('The sample was annealed at 700 C.')).toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'View PDF' }).click();
+
+		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('parsed-source-fallback')).not.toBeInTheDocument();
+	});
+
 	it('renders paper research sample matrix when research view is ready', async () => {
 		render(Page);
 
+		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Paper research view' }))
 			.toBeInTheDocument();
@@ -486,6 +539,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	it('organizes structured understanding in scientific reading order', async () => {
 		render(Page);
 
+		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Paper scope' }))
 			.toBeInTheDocument();
@@ -508,11 +562,15 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		render(Page);
 
+		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Paper research view is unavailable' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))
 			.not.toBeInTheDocument();
 	});
 
@@ -528,6 +586,22 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
+	});
+
+	it('keeps research-understanding evidence links in parsed paper mode', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&evidence_id=ev_1&anchor_id=anc_1&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 	});
 

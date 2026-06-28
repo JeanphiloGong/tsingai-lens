@@ -233,9 +233,8 @@ Current child execution entrypoint:
 
 Primary changes:
 
-- align protocol, graph, and report positioning language around Core
-  dependency
-- keep protocol conditional and graph/report secondary
+- align protocol and graph positioning language around Core dependency
+- keep protocol conditional and graph secondary
 
 Exit criteria:
 
@@ -303,7 +302,7 @@ Exit criteria:
   only.
 - Core remains the only producer of evidence/comparison artifacts.
 - Goal Consumer outputs remain downstream of Core artifacts.
-- protocol, graph, and reports remain downstream of Core.
+- protocol and graph remain downstream of Core.
 - readiness semantics remain stable with `generated` and `ready` split.
 
 ## Risks

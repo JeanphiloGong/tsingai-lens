@@ -19,12 +19,8 @@ Core outputs.
   canonical comparison drilldown filters
 - [`query-retirement-and-graphrag-query-decoupling-plan.md`](query-retirement-and-graphrag-query-decoupling-plan.md)
   Retained retirement plan for the removed query surface
-- [`material-review-report-quality-pipeline-plan.md`](material-review-report-quality-pipeline-plan.md)
-  Staged generation, evidence binding, review, revision, and rendering plan for
-  AI-assisted material review reports
-
 ## Boundary Rule
 
-Keep graph, reports, material review reports, protocol, and retired
-derived-surface cleanup here. If a page is only retained for lineage and is no
-longer a live execution entry, mark that status clearly in the page body.
+Keep graph, protocol, and retired derived-surface cleanup here. Report and
+material-review-report execution plans are retired; use ResearchUnderstanding
+and evidence audit for claim synthesis instead.

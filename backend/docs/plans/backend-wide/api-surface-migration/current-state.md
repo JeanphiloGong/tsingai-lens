@@ -45,10 +45,9 @@ evidence-first/comparison-first implementation:
    projection are served from Core artifacts
 5. `protocol` remains a conditional downstream branch
 
-Graph and report surfaces now consume the same Core artifacts as derived
-secondary views. The main remaining mixed area is Source-internal GraphRAG
-generation/runtime ownership plus a few compatibility route names that still
-carry old `community_*` vocabulary.
+Graph now consumes the same Core artifacts as a derived secondary view. Report
+routes have been retired from the public product surface. The main remaining
+mixed area is Source-internal GraphRAG generation/runtime ownership.
 
 ## Current Surface Map
 
@@ -84,13 +83,6 @@ These endpoints are the current Lens v1 primary acceptance backbone.
   paper-facts-backed document, evidence, and comparison artifacts.
 - `GET /api/v1/collections/{collection_id}/graphml`
   Exports the same Core-derived graph projection.
-- `GET /api/v1/collections/{collection_id}/reports/communities`
-  Remains a compatibility route name, but now lists Core-derived pattern
-  groups rather than GraphRAG community reports.
-- `GET /api/v1/collections/{collection_id}/reports/communities/{community_id}`
-  Returns Core-derived pattern-group detail payloads.
-- `GET /api/v1/collections/{collection_id}/reports/patterns`
-  Exposes the same Core-derived report family with more direct naming.
 
 These endpoints are not primary acceptance surfaces, but they are no longer
 legacy product semantics either.
@@ -126,11 +118,10 @@ from the paper-facts/evidence/comparison backbone.
 
 ### Public routes are more converged than internal runtimes
 
-The FastAPI app still exposes primary surfaces together with protocol, graph,
-and reports in one application. That no longer means graph/report are legacy.
+The FastAPI app still exposes primary surfaces together with protocol and graph
+in one application. That no longer means graph is legacy.
 The remaining mixed state is mostly internal:
 
-- some report route names still carry compatibility `community_*` vocabulary
 - protocol remains a downstream conditional branch rather than a fully rebuilt
   Core-native derivative
 - Source may still retain GraphRAG-shaped generation/runtime code internally
@@ -154,15 +145,16 @@ Collection pages that need task history should use
 - indexing orchestration reordered around the new backbone
 - protocol generation skipped for protocol-unsuitable collections
 - graph product surface cut over to Core-derived projection
-- report product surface cut over to Core-derived pattern grouping
+- report product surface retired in favor of research understanding plus
+  evidence audit
 - workspace graph readiness cut over to Core inputs
 - public task vocabulary cut over from `graphrag_*` to `source_index_*`
 - public query surface and app/source query runtime retired
-- authority docs aligned to the current Core-first graph/report/task wording
+- authority docs aligned to the current Core-first graph/task wording
 
 ### Next
 
-- add contract guard tests for Core-first graph/report/readiness/task semantics
+- add contract guard tests for Core-first graph/readiness/task semantics
 - run real app-layer route verification in an environment with FastAPI
   available
 
@@ -175,7 +167,7 @@ Collection pages that need task history should use
 
 ## Recommended Execution Order
 
-1. Add regression guards for graph/report/readiness/task vocabulary drift.
+1. Add regression guards for graph/readiness/task vocabulary drift.
 2. Verify the full real path:
    create collection, upload file, start index, poll task, open workspace,
    inspect document profiles, inspect evidence cards, inspect comparisons,

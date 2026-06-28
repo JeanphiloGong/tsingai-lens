@@ -533,9 +533,6 @@ class GoalSessionService:
             or self._has_non_empty_path(objectives, ("objectives",))
             or self._has_non_empty_path(objective_research_view, ("evidence_units",))
             or self._has_non_empty_path(objective_research_view, ("logic_chain",))
-            or self._has_non_empty_path(
-                objective_research_view, ("conclusion_package",)
-            )
             or self._has_non_empty_path(collection_research_view, ("materials",))
             or self._has_non_empty_path(
                 collection_research_view, ("comparable_groups",)

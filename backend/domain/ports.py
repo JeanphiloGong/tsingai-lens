@@ -13,26 +13,35 @@ from domain.core.comparison import (
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
+    ConfirmedGoal,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
-    ObjectiveReportArtifact,
-    MaterialReportArtifact,
     PaperSkim,
     ResearchObjective,
 )
+from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
+    SourceDocumentTree,
     SourceFigure,
     SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+)
+from domain.evaluation import (
+    EvaluationGoldItem,
+    EvaluationGoldSet,
+    EvaluationPredictionSnapshot,
+    EvaluationRun,
+    ResearchUnderstandingCuration,
+    ResearchUnderstandingFeedback,
 )
 
 
@@ -123,6 +132,12 @@ class SourceArtifactRepository(Protocol):
 
     def read_collection_artifacts(self, collection_id: str) -> SourceArtifactSet: ...
 
+    def read_document_tree(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SourceDocumentTree: ...
+
     def replace_collection_references(
         self,
         collection_id: str,
@@ -209,26 +224,93 @@ class CoreFactRepository(Protocol):
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...
 
-    def upsert_objective_report_artifact(
+    def replace_collection_research_understandings(
         self,
         collection_id: str,
-        artifact: ObjectiveReportArtifact,
+        understandings: tuple[ResearchUnderstanding, ...],
     ) -> None: ...
 
-    def read_objective_report_artifact(
+    def upsert_research_understanding(
         self,
         collection_id: str,
-        objective_id: str,
-    ) -> ObjectiveReportArtifact | None: ...
-
-    def upsert_material_report_artifact(
-        self,
-        collection_id: str,
-        artifact: MaterialReportArtifact,
+        understanding: ResearchUnderstanding,
     ) -> None: ...
 
-    def read_material_report_artifact(
+    def read_research_understanding(
         self,
         collection_id: str,
-        material_id: str,
-    ) -> MaterialReportArtifact | None: ...
+        scope_type: str,
+        scope_id: str,
+    ) -> ResearchUnderstanding | None: ...
+
+    def list_research_understandings(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+    ) -> tuple[ResearchUnderstanding, ...]: ...
+
+    def upsert_confirmed_goal(self, goal: ConfirmedGoal) -> ConfirmedGoal: ...
+
+    def read_confirmed_goal(
+        self,
+        collection_id: str,
+        goal_id: str,
+    ) -> ConfirmedGoal | None: ...
+
+    def list_confirmed_goals(self, collection_id: str) -> tuple[ConfirmedGoal, ...]: ...
+
+
+class EvaluationRepository(Protocol):
+    backend_name: str
+
+    def upsert_gold_set(
+        self,
+        gold_set: EvaluationGoldSet,
+        gold_items: tuple[EvaluationGoldItem, ...],
+    ) -> None: ...
+
+    def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None: ...
+
+    def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]: ...
+
+    def upsert_prediction_snapshot(
+        self,
+        snapshot: EvaluationPredictionSnapshot,
+    ) -> None: ...
+
+    def read_prediction_snapshot(
+        self,
+        snapshot_id: str,
+    ) -> EvaluationPredictionSnapshot | None: ...
+
+    def upsert_evaluation_run(self, run: EvaluationRun) -> None: ...
+
+    def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None: ...
+
+    def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]: ...
+
+    def upsert_research_understanding_feedback(
+        self,
+        feedback: ResearchUnderstandingFeedback,
+    ) -> ResearchUnderstandingFeedback: ...
+
+    def list_research_understanding_feedback(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
+
+    def upsert_research_understanding_curation(
+        self,
+        curation: ResearchUnderstandingCuration,
+    ) -> ResearchUnderstandingCuration: ...
+
+    def list_research_understanding_curations(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingCuration, ...]: ...

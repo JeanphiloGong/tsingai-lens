@@ -4,14 +4,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from controllers.schemas.core.research_understanding import (
+    ResearchUnderstandingResponse,
+)
+
 
 ResearchViewState = Literal["empty", "processing", "partial", "ready", "failed"]
-MaterialReportStatus = Literal[
-    "generating",
-    "ready",
-    "ready_with_warnings",
-    "failed",
-]
 ResearchViewSeverity = Literal["info", "warning", "error"]
 EvidenceBackedValueStatus = Literal[
     "observed",
@@ -370,221 +368,6 @@ class PropertySummaryResponse(BaseModel):
     )
 
 
-class MaterialReportPerformanceResultResponse(BaseModel):
-    """One measured response inside a material-state report chain."""
-
-    property: str = Field(..., description="性能指标")
-    display_value: str | None = Field(default=None, description="展示值")
-    value: float | int | str | None = Field(default=None, description="原始或数值值")
-    unit: str | None = Field(default=None, description="单位")
-    condition: str | None = Field(default=None, description="测试条件摘要")
-    status: EvidenceBackedValueStatus = Field(..., description="值状态")
-    evidence_refs: list[EvidenceReferenceResponse] = Field(
-        default_factory=list,
-        description="支撑证据",
-    )
-    warnings: list[ResearchViewWarningResponse] = Field(
-        default_factory=list,
-        description="结果级 warning",
-    )
-
-
-class MaterialReportStateChainResponse(BaseModel):
-    """Traceable preparation-test-result chain for one material state."""
-
-    chain_id: str = Field(..., description="材料状态链 ID")
-    document_id: str | None = Field(default=None, description="来源文档 ID")
-    sample_id: str = Field(..., description="样品或 variant ID")
-    sample_label: str | None = Field(default=None, description="样品展示名")
-    material: str | None = Field(default=None, description="材料体系")
-    material_state: str | None = Field(default=None, description="材料状态")
-    preparation_context: dict[str, Any] = Field(
-        default_factory=dict,
-        description="制备/工艺上下文",
-    )
-    test_conditions: dict[str, Any] = Field(default_factory=dict, description="测试条件")
-    performance_results: list[MaterialReportPerformanceResultResponse] = Field(
-        default_factory=list,
-        description="性能结果",
-    )
-    source_evidence: list[EvidenceReferenceResponse] = Field(
-        default_factory=list,
-        description="链路证据",
-    )
-    comparability_boundary: list[str] = Field(
-        default_factory=list,
-        description="可比性边界",
-    )
-    confidence: float | None = Field(default=None, description="链路置信度")
-    unresolved_fields: list[str] = Field(default_factory=list, description="未解析字段")
-
-
-class MaterialReportPaperContributionResponse(BaseModel):
-    """One paper's contribution to a material report package."""
-
-    document_id: str = Field(..., description="文档 ID")
-    title: str | None = Field(default=None, description="标题")
-    source_filename: str | None = Field(default=None, description="源文件名")
-    sample_count: int = Field(default=0, description="样品数")
-    measured_properties: list[str] = Field(default_factory=list, description="性能指标")
-    contribution_summary: str = Field(..., description="贡献摘要")
-
-
-class MaterialReportScopeResponse(BaseModel):
-    """Collection-level material report scope."""
-
-    material_system: str = Field(..., description="材料体系")
-    preparation_routes: list[str] = Field(default_factory=list, description="主要制备路线")
-    source_paper_count: int = Field(default=0, description="来源文献数")
-    sample_row_count: int = Field(default=0, description="支撑矩阵行数")
-    evidence_count: int = Field(default=0, description="证据引用数")
-
-
-class MaterialReportFindingResponse(BaseModel):
-    """One evidence-backed finding in the material report."""
-
-    finding_id: str = Field(..., description="finding ID")
-    title: str = Field(..., description="finding 标题")
-    body: str = Field(..., description="finding 内容")
-    evidence_refs: list[EvidenceReferenceResponse] = Field(
-        default_factory=list,
-        description="支撑证据",
-    )
-
-
-class MaterialReportSectionResponse(BaseModel):
-    """One thematic report section."""
-
-    section_id: str = Field(..., description="章节 ID")
-    title: str = Field(..., description="章节标题")
-    body: str = Field(..., description="章节正文")
-    key_points: list[str] = Field(default_factory=list, description="关键点")
-    evidence_refs: list[EvidenceReferenceResponse] = Field(
-        default_factory=list,
-        description="章节证据",
-    )
-
-
-class MaterialReportAppendixResponse(BaseModel):
-    """Supporting evidence appendix summary."""
-
-    sample_matrix_row_count: int = Field(default=0, description="完整样品矩阵行数")
-    property_count: int = Field(default=0, description="性能指标数")
-    evidence_count: int = Field(default=0, description="证据数")
-    source_table_count: int = Field(default=0, description="来源表格数")
-
-
-class MaterialReportOutlineItemResponse(BaseModel):
-    """One heading in the material report document outline."""
-
-    level: int = Field(..., description="Markdown heading level")
-    title: str = Field(..., description="章节标题")
-    anchor: str = Field(..., description="前端可使用的章节 anchor")
-
-
-class MaterialReportDocumentResponse(BaseModel):
-    """Markdown-first material report document with clickable citations."""
-
-    schema_version: str = Field(..., description="文档 schema 版本")
-    status: ResearchViewState = Field(..., description="文档状态")
-    title: str = Field(..., description="报告标题")
-    markdown: str = Field(..., description="证据引用 Markdown 正文")
-    citations: dict[str, EvidenceReferenceResponse] = Field(
-        default_factory=dict,
-        description="Markdown 引用 ID 到证据引用的映射",
-    )
-    outline: list[MaterialReportOutlineItemResponse] = Field(
-        default_factory=list,
-        description="Markdown 章节目录",
-    )
-    warnings: list[ResearchViewWarningResponse] = Field(
-        default_factory=list,
-        description="文档级 warning",
-    )
-    evidence_appendix: MaterialReportAppendixResponse = Field(
-        ...,
-        description="文档引用的证据附录摘要",
-    )
-
-
-class MaterialReportPackageResponse(BaseModel):
-    """Backend-built package for rendering the material research report."""
-
-    schema_version: str = Field(..., description="报告包 schema 版本")
-    status: ResearchViewState = Field(..., description="报告包状态")
-    title: str = Field(..., description="报告包标题")
-    material_id: str = Field(..., description="材料 ID")
-    canonical_name: str = Field(..., description="规范材料名")
-    summary: str = Field(..., description="确定性摘要")
-    executive_summary: str = Field(..., description="报告摘要")
-    material_scope: MaterialReportScopeResponse = Field(..., description="材料范围")
-    paper_contributions: list[MaterialReportPaperContributionResponse] = Field(
-        default_factory=list,
-        description="文献贡献",
-    )
-    key_findings: list[MaterialReportFindingResponse] = Field(
-        default_factory=list,
-        description="关键发现",
-    )
-    representative_states: list[MaterialReportStateChainResponse] = Field(
-        default_factory=list,
-        description="精选代表材料状态",
-    )
-    thematic_sections: list[MaterialReportSectionResponse] = Field(
-        default_factory=list,
-        description="主题分析章节",
-    )
-    material_state_chains: list[MaterialReportStateChainResponse] = Field(
-        default_factory=list,
-        description="精选材料状态链；完整矩阵在 sample_matrix 中",
-    )
-    limitations: list[str] = Field(default_factory=list, description="限制和不确定性")
-    evidence_appendix: MaterialReportAppendixResponse = Field(..., description="证据附录摘要")
-    document: MaterialReportDocumentResponse | None = Field(
-        default=None,
-        description="Markdown-first 报告文档",
-    )
-    source_refs: list[EvidenceReferenceResponse] = Field(
-        default_factory=list,
-        description="包级证据引用",
-    )
-
-
-class MaterialReportRequest(BaseModel):
-    """Request body for generating a material detail report."""
-
-    language: Literal["zh", "en"] = Field(default="zh", description="报告语言")
-    force_regenerate: bool = Field(default=False, description="是否强制重新生成")
-
-
-class MaterialReportResponse(BaseModel):
-    """Persisted LLM-generated material report artifact."""
-
-    collection_id: str = Field(..., description="Collection ID")
-    report_id: str = Field(..., description="Report ID")
-    material_id: str = Field(..., description="Material ID")
-    status: MaterialReportStatus = Field(..., description="Report generation status")
-    stage: str = Field(..., description="Report generation stage")
-    message: str | None = Field(default=None, description="Status message")
-    title: str = Field(..., description="Report title")
-    language: str = Field(default="zh", description="Report language")
-    model: str | None = Field(default=None, description="LLM model")
-    data_version: str = Field(..., description="Material report context version")
-    markdown: str | None = Field(default=None, description="Persisted Markdown report")
-    warnings: list[str] = Field(default_factory=list, description="Report warnings")
-    source_refs: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Source references used by the report",
-    )
-    evidence_appendix: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Evidence appendix summary used by the report",
-    )
-    created_at: str = Field(..., description="Created timestamp")
-    updated_at: str = Field(..., description="Updated timestamp")
-    generated_at: str | None = Field(default=None, description="Generated timestamp")
-
-
 class DocumentMaterialProfileResponse(BaseModel):
     """One paper's view of one material."""
 
@@ -699,9 +482,9 @@ class MaterialProfileResponse(BaseModel):
         default_factory=list,
         description="支撑证据",
     )
-    report_package: MaterialReportPackageResponse | None = Field(
+    understanding: ResearchUnderstandingResponse | None = Field(
         default=None,
-        description="材料科研报告数据包",
+        description="Claim/relation/evidence/context projection for review and AI grounding",
     )
     debug_links: dict[str, str | None] = Field(default_factory=dict, description="调试链接")
     warnings: list[ResearchViewWarningResponse] = Field(

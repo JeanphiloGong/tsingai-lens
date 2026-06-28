@@ -50,6 +50,7 @@
 	let pdfDocument: PDFDocumentProxy | null = null;
 	let loadingTask: PdfLoadingTask | null = null;
 	let pdfPageStates: PdfPageState[] = [];
+	let readerView: 'pdf' | 'source' = 'pdf';
 	let pendingSourceJump: SourceAnchor | null = null;
 	let appliedSourceJumpKey = '';
 	let sourceSearchOpen = false;
@@ -71,6 +72,8 @@
 	);
 	$: hasParsedSource = pages.some((page) => page.paragraphs.length > 0);
 	$: showParsedSourceFallback = hasParsedSource && (!hasPdfSource || Boolean(pdfError));
+	$: showParsedSourceView = hasParsedSource && (readerView === 'source' || showParsedSourceFallback);
+	$: showPdfView = hasPdfSource && readerView === 'pdf' && !pdfError;
 	$: totalPages = pdfPageStates.length || pages.length || 1;
 	$: thumbnailPageNumbers = pageNumbersForReader(totalPages);
 	$: sourceSearchMatches = sourceSearchResults(pages, sourceSearchQuery);
@@ -630,6 +633,19 @@
 		<div class="pdf-toolbar" aria-label={$t('workbench.readerToolbarLabel')}>
 			<div class="page-control" data-testid="pdf-current-page">{currentPage}</div>
 			<span class="toolbar-muted">/ {totalPages}</span>
+			{#if hasParsedSource && hasPdfSource && !pdfError}
+				<button
+					type="button"
+					class="reader-view-toggle"
+					aria-pressed={readerView === 'source'}
+					aria-label={readerView === 'source'
+						? $t('workbench.viewPdf')
+						: $t('workbench.viewSourceText')}
+					on:click={() => (readerView = readerView === 'source' ? 'pdf' : 'source')}
+				>
+					{readerView === 'source' ? $t('workbench.pdfView') : $t('workbench.sourceTextView')}
+				</button>
+			{/if}
 			<button
 				type="button"
 				class="icon-button"
@@ -705,25 +721,27 @@
 			bind:this={pdfScrollContainer}
 			on:scroll={updateCurrentPageFromScroll}
 		>
-			<div class="reader-tool-rail" aria-label={$t('workbench.readerToolsLabel')}>
-				<button type="button" aria-label={$t('workbench.selectTool')}>
-					<span class="toolbar-icon toolbar-icon--select" aria-hidden="true"></span>
-				</button>
-				<button type="button" aria-label={$t('workbench.panTool')}>
-					<span class="toolbar-icon toolbar-icon--pan" aria-hidden="true"></span>
-				</button>
-				<button type="button" aria-label={$t('workbench.commentTool')}>
-					<span class="toolbar-icon toolbar-icon--comment" aria-hidden="true"></span>
-				</button>
-				<button type="button" aria-label={$t('workbench.penTool')}>
-					<span class="toolbar-icon toolbar-icon--pen" aria-hidden="true"></span>
-				</button>
-				<button type="button" aria-label={$t('workbench.searchTool')}>
-					<span class="toolbar-icon toolbar-icon--search" aria-hidden="true"></span>
-				</button>
-			</div>
+			{#if showPdfView}
+				<div class="reader-tool-rail" aria-label={$t('workbench.readerToolsLabel')}>
+					<button type="button" aria-label={$t('workbench.selectTool')}>
+						<span class="toolbar-icon toolbar-icon--select" aria-hidden="true"></span>
+					</button>
+					<button type="button" aria-label={$t('workbench.panTool')}>
+						<span class="toolbar-icon toolbar-icon--pan" aria-hidden="true"></span>
+					</button>
+					<button type="button" aria-label={$t('workbench.commentTool')}>
+						<span class="toolbar-icon toolbar-icon--comment" aria-hidden="true"></span>
+					</button>
+					<button type="button" aria-label={$t('workbench.penTool')}>
+						<span class="toolbar-icon toolbar-icon--pen" aria-hidden="true"></span>
+					</button>
+					<button type="button" aria-label={$t('workbench.searchTool')}>
+						<span class="toolbar-icon toolbar-icon--search" aria-hidden="true"></span>
+					</button>
+				</div>
+			{/if}
 
-			{#if hasPdfSource && pdfPageStates.length}
+			{#if showPdfView && pdfPageStates.length}
 				{#each pdfPageStates as page}
 					<section
 						class="pdf-page-shell"
@@ -755,17 +773,29 @@
 						{/if}
 					</section>
 				{/each}
-			{:else if hasPdfSource && pdfLoading}
+			{:else if showPdfView && pdfLoading}
 				<div class="empty-state empty-state--reader">
 					<div class="skeleton skeleton--wide"></div>
 					<div class="skeleton"></div>
 					<p>{$t('workbench.pdfLoading')}</p>
 				</div>
-			{:else if showParsedSourceFallback}
+			{:else if showParsedSourceView}
 				<div class="parsed-source-fallback" data-testid="parsed-source-fallback">
 					<header>
-						<h3>{$t('workbench.parsedSourceFallback')}</h3>
-						<p>{pdfError ? $t('workbench.pdfLoadFailed') : $t('workbench.sourceUnavailableBody')}</p>
+						<h3>
+							{showParsedSourceFallback
+								? $t('workbench.parsedSourceFallback')
+								: $t('workbench.parsedSourceView')}
+						</h3>
+						<p>
+							{#if pdfError}
+								{$t('workbench.pdfLoadFailed')}
+							{:else if showParsedSourceFallback}
+								{$t('workbench.sourceUnavailableBody')}
+							{:else}
+								{$t('workbench.parsedSourceViewBody')}
+							{/if}
+						</p>
 					</header>
 					{#each pages as page}
 						<section
@@ -1214,6 +1244,27 @@
 		font-size: 13px;
 	}
 
+	.reader-view-toggle {
+		display: inline-flex;
+		height: 32px;
+		align-items: center;
+		padding: 0 10px;
+		border: 1px solid #dbeafe;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #2563eb;
+		font-size: 12px;
+		font-weight: 800;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.reader-view-toggle[aria-pressed='true'] {
+		border-color: #60a5fa;
+		background: #eff6ff;
+		color: #1d4ed8;
+	}
+
 	.source-pending-badge {
 		display: inline-flex;
 		height: 26px;
@@ -1550,10 +1601,86 @@
 	@media (max-width: 1024px) {
 		.paper-reader-grid {
 			grid-template-columns: 1fr;
+			grid-template-rows: auto minmax(0, 1fr);
 		}
 
 		.thumbnail-rail {
+			width: 100%;
+			height: auto;
+			min-height: 0;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: 10px;
+			padding: 8px;
+			overflow: hidden;
+		}
+
+		.thumbnail-tabs {
+			width: 96px;
+			margin-bottom: 0;
+		}
+
+		.page-thumbnails,
+		.outline-list {
+			display: flex;
+			gap: 10px;
+			overflow-x: auto;
+			padding-bottom: 2px;
+			scrollbar-width: none;
+		}
+
+		.page-thumbnails::-webkit-scrollbar,
+		.outline-list::-webkit-scrollbar {
 			display: none;
+		}
+
+		.page-thumbnail {
+			flex: 0 0 72px;
+			width: 72px;
+		}
+
+		.thumbnail-paper {
+			width: 64px;
+			height: 78px;
+			gap: 6px;
+			padding: 10px 9px;
+		}
+
+		.rail-bottom {
+			display: none;
+		}
+
+		.pdf-header {
+			height: auto;
+			min-height: 92px;
+			padding: 18px 16px 10px;
+		}
+
+		.pdf-header h1,
+		.paper-meta {
+			max-width: 100%;
+		}
+
+		.paper-meta {
+			flex-wrap: wrap;
+			overflow: visible;
+			white-space: normal;
+		}
+
+		.pdf-toolbar {
+			min-height: 52px;
+			overflow-x: auto;
+			overflow-y: hidden;
+			padding: 0 12px;
+			scrollbar-width: none;
+		}
+
+		.pdf-toolbar::-webkit-scrollbar {
+			display: none;
+		}
+
+		.pdf-toolbar > * {
+			flex: 0 0 auto;
 		}
 	}
 </style>

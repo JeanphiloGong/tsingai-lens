@@ -43,7 +43,7 @@ Current leakage points include:
   exposes `method` and `is_update_run`
 - [`../../../application/source/collection_service.py`](../../../../application/source/collection_service.py)
   persists `default_method` as collection metadata
-- [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
+- [`../../../application/pipeline/collection_build/service.py`](../../../../application/pipeline/collection_build/service.py)
   accepts a caller-provided indexing method
 - [`../../../infra/source/config/pipeline_mode.py`](../../../../infra/source/config/pipeline_mode.py)
   defines `IndexingMethod.Standard` and `IndexingMethod.Fast` as engine-level
@@ -74,7 +74,7 @@ This cleanup covers:
 This cleanup does not cover:
 
 - redesign of Goal Brief or Goal Consumer payloads
-- graph/report semantic cutover
+- graph semantic cutover or report retirement
 - query runtime redesign
 - evidence id stabilization
 - frontend page IA redesign
@@ -259,7 +259,7 @@ Backend decides whether to:
 
 The current mode-selection and downgrade policy now lives across:
 
-- [`../../../application/source/collection_build_task_runner.py`](../../../../application/source/collection_build_task_runner.py)
+- [`../../../application/pipeline/collection_build/service.py`](../../../../application/pipeline/collection_build/service.py)
 - [`../../../infra/source/config/pipeline_mode.py`](../../../../infra/source/config/pipeline_mode.py)
 
 That logic should remain backend-owned rather than frontend-owned.

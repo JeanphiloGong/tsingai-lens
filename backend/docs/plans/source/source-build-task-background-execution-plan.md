@@ -29,10 +29,10 @@ how the build work executes after task creation.
 Current backend facts:
 
 - `controllers/source/tasks.py` creates a build task and schedules the real
-  work through `CollectionBuildTaskRunner`
-- `application/source/collection_build_task_runner.py` runs a long chain that
-  includes Source artifact generation, document profiles, paper facts,
-  comparison rows, and conditional protocol work
+  work through the collection build pipeline service
+- `application/pipeline/collection_build/service.py` owns the long chain that
+  includes Source artifact generation, document profiles, paper facts, and
+  comparison rows
 - several steps in that chain are synchronous heavy work even when they are
   called from an `async` route or wrapper
 - synchronous LLM calls or CPU-heavy dataframe work inside the main request
@@ -192,9 +192,9 @@ No new compatibility route should be added in this wave.
 
 ### Phase 2: Offload The Real Build Chain
 
-Keep `CollectionBuildTaskRunner` as the owning application-layer runner, but
-ensure the route schedules an entrypoint that executes outside the main
-request loop.
+Keep the collection build pipeline service as the owning application-layer
+runner, but ensure the route schedules an entrypoint that executes outside the
+main request loop.
 
 The execution rule is:
 

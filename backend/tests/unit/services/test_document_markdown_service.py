@@ -196,6 +196,70 @@ def test_document_markdown_service_falls_back_to_document_text(tmp_path):
     assert payload["warnings"] == ["block_structure_missing"]
 
 
+def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Garbled Markdown Collection")
+    collection_id = collection["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Paper With Encoded Headers",
+                    "text": "ignored when block structure is available",
+                }
+            ],
+            blocks=[
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-heading",
+                    "block_type": "heading",
+                    "block_order": 1,
+                    "heading_level": 1,
+                    "text": "Introduction",
+                    "page": 1,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-garbled-header",
+                    "block_type": "paragraph",
+                    "block_order": 2,
+                    "text": "4DWHULDOV xFLHQFH c (QJLQHHULQJ E OiU iSiUG lnyfvf",
+                    "page": 1,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-good",
+                    "block_type": "paragraph",
+                    "block_order": 3,
+                    "heading_path": "Introduction",
+                    "text": "Readable scientific content remains visible.",
+                    "page": 1,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-garbled-footer",
+                    "block_type": "paragraph",
+                    "block_order": 4,
+                    "text": "SOil,USOIt\x8b iSiU 9KH EXWKRUVK 3XEOLVKHG E\\ (OVHYLHU",
+                    "page": 1,
+                },
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert "Readable scientific content remains visible." in payload["markdown"]
+    assert "4DWHULDOV" not in payload["markdown"]
+    assert "SOil,USOIt" not in payload["markdown"]
+    assert payload["warnings"] == ["garbled_text_blocks_skipped"]
+    source_map = {item["artifact_id"]: item for item in payload["source_map"]}
+    assert "blk-good" in source_map
+    assert "blk-garbled-header" not in source_map
+
+
 def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Stored Filename Collection")

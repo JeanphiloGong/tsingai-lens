@@ -17,6 +17,7 @@ from infra.source.runtime.mapping.layout_binding import (
     serialize_char_range,
     serialize_prov_bbox,
 )
+from infra.source.runtime.mapping.text_quality import is_garbled_pdf_text
 
 
 def build_pdf_blocks(
@@ -125,7 +126,7 @@ def collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for index, item in enumerate(getattr(document, "texts", []) or []):
         text = str(getattr(item, "text", "") or "").strip()
-        if not text:
+        if not text or is_garbled_pdf_text(text):
             continue
         rows.append(
             {

@@ -16,6 +16,10 @@ from domain.source import (
     render_markdown_table,
 )
 from infra.persistence.factory import build_source_artifact_repository
+from infra.source.runtime.mapping.text_quality import (
+    is_garbled_pdf_text,
+    normalize_display_text,
+)
 
 
 class DocumentMarkdownNotReadyError(RuntimeError):
@@ -162,6 +166,7 @@ class DocumentMarkdownService:
                     document_tree=document_tree,
                     parts=parts,
                     source_map=source_map,
+                    warnings=warnings,
                     tables_by_id=tables_by_id,
                     figures_by_id=figures_by_id,
                     has_document_title=bool(title),
@@ -182,6 +187,7 @@ class DocumentMarkdownService:
         document_tree: SourceDocumentTree,
         parts: list[str],
         source_map: list[dict[str, Any]],
+        warnings: list[str],
         tables_by_id: Mapping[str, SourceTable],
         figures_by_id: Mapping[str, SourceFigure],
         has_document_title: bool,
@@ -200,6 +206,7 @@ class DocumentMarkdownService:
                         document_tree=document_tree,
                         parts=parts,
                         source_map=source_map,
+                        warnings=warnings,
                         tables_by_id=tables_by_id,
                         figures_by_id=figures_by_id,
                         has_document_title=has_document_title,
@@ -211,6 +218,9 @@ class DocumentMarkdownService:
         if node_type in {"paragraph", "list_item"}:
             text = self._normalize_text(node.text)
             if not text:
+                return False
+            if is_garbled_pdf_text(text):
+                self._append_warning(warnings, "garbled_text_blocks_skipped")
                 return False
             parts.append(f"- {text}" if node_type == "list_item" else text)
             self._append_node_source_map(source_map, node, block_type=node_type)
@@ -254,6 +264,10 @@ class DocumentMarkdownService:
             return False
 
         return False
+
+    def _append_warning(self, warnings: list[str], warning: str) -> None:
+        if warning not in warnings:
+            warnings.append(warning)
 
     def _render_section_node(
         self,
@@ -437,10 +451,7 @@ class DocumentMarkdownService:
         return self._normalize_text(metadata.get(key))
 
     def _normalize_text(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        text = " ".join(str(value).strip().split())
-        return text or None
+        return normalize_display_text(value)
 
     def _anchor(self, prefix: str, value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip()).strip("-")

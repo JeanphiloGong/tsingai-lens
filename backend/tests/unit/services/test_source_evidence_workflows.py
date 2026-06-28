@@ -325,6 +325,58 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     assert "MPa" in set(bundle.table_cells["unit_hint"].dropna())
 
 
+def test_build_pdf_bundle_skips_garbled_pdf_text_items(monkeypatch, tmp_path):
+    class FakeProv:
+        def __init__(self, page_no: int, start: int, end: int) -> None:
+            self.page_no = page_no
+            self.charspan = (start, end)
+            self.bbox = None
+
+    class FakeTextItem:
+        def __init__(self, text: str, label: str, start: int, end: int) -> None:
+            self.text = text
+            self.label = label
+            self.prov = [FakeProv(1, start, end)]
+
+    class FakeDocument:
+        def __init__(self) -> None:
+            self.texts = [
+                FakeTextItem("4DWHULDOV xFLHQFH c (QJLQHHULQJ E OiU iSiUG lnyfvf", "text", 0, 50),
+                FakeTextItem("Readable methods text remains.", "text", 51, 81),
+            ]
+            self.tables = []
+            self.pictures = []
+
+        def export_to_text(self) -> str:
+            return "\n".join(item.text for item in self.texts)
+
+    monkeypatch.setattr(
+        "infra.source.runtime.parsers.docling_pdf.convert_pdf_document",
+        lambda **_: FakeDocument(),
+    )
+
+    bundle = build_pdf_bundle(
+        row=pd.Series(
+            {
+                "id": "doc-1",
+                "title": "paper.pdf",
+                "source_path": "paper.pdf",
+                "source_type": "pdf",
+            }
+        ),
+        payload=b"%PDF-1.4 test",
+        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+        converter=object(),
+    )
+
+    block_text = "\n".join(bundle.blocks["text"].astype(str).tolist())
+    text_unit_text = "\n".join(bundle.text_units["text"].astype(str).tolist())
+    assert "Readable methods text remains." in block_text
+    assert "Readable methods text remains." in text_unit_text
+    assert "4DWHULDOV" not in block_text
+    assert "4DWHULDOV" not in text_unit_text
+
+
 def _pdf_pipeline_device(converter) -> str:  # noqa: ANN001
     from docling.datamodel.base_models import InputFormat
 

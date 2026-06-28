@@ -675,7 +675,11 @@ class ResearchObjectiveService:
         payload = source_candidate.to_record() if source_candidate is not None else {}
         payload.update(
             {
-                "objective_id": goal.goal_id,
+                "objective_id": (
+                    source_candidate.objective_id
+                    if source_candidate is not None
+                    else build_research_objective_id(goal.question)
+                ),
                 "question": goal.question,
                 "material_scope": list(
                     goal.material_hints

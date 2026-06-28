@@ -25,6 +25,7 @@ from application.core.semantic_build.research_objective_service import (
 )
 from application.source.collection_service import CollectionService
 from domain.core import (
+    ConfirmedGoal,
     DocumentProfile,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
@@ -33,6 +34,7 @@ from domain.core import (
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
+    build_research_objective_id,
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
 from infra.persistence.sqlite import SqliteCoreFactRepository
@@ -8022,6 +8024,61 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     assert len(objectives) == 1
     facts = service.core_fact_repository.read_collection_facts(collection_id)
     assert len(facts.research_objectives) == 1
+
+
+def test_confirmed_goal_analysis_keeps_source_objective_id():
+    service = ResearchObjectiveService(structured_extractor=_ObjectiveExtractor())
+    source_objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj_source",
+            "question": "How does heat treatment affect strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["strength"],
+            "comparison_intent": "Compare heat treatment effects on strength.",
+            "confidence": 0.9,
+        }
+    )
+    goal = ConfirmedGoal.from_mapping(
+        {
+            "collection_id": "col_1",
+            "goal_id": "goal_strength",
+            "question": "How does heat treatment affect strength?",
+            "source_objective_id": "obj_source",
+            "status": "pending",
+        }
+    )
+
+    objective = service._objective_from_confirmed_goal(
+        goal,
+        candidates=(source_objective,),
+    )
+
+    assert objective.objective_id == "obj_source"
+    assert objective.objective_id != goal.goal_id
+
+
+def test_confirmed_goal_analysis_builds_objective_id_for_user_input_goal():
+    service = ResearchObjectiveService(structured_extractor=_ObjectiveExtractor())
+    goal = ConfirmedGoal.from_mapping(
+        {
+            "collection_id": "col_1",
+            "goal_id": "goal_custom",
+            "question": "Which coating improves corrosion resistance?",
+            "material_hints": ["316L stainless steel"],
+            "process_hints": ["coating"],
+            "property_hints": ["corrosion resistance"],
+            "status": "pending",
+        }
+    )
+
+    objective = service._objective_from_confirmed_goal(goal, candidates=())
+
+    assert objective.objective_id == build_research_objective_id(goal.question)
+    assert objective.objective_id != goal.goal_id
+    assert objective.material_scope == ("316L stainless steel",)
+    assert objective.process_axes == ("coating",)
+    assert objective.property_axes == ("corrosion resistance",)
 
 
 def _build_duplicate_paper_objectives(

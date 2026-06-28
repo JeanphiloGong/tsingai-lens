@@ -432,6 +432,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByText('Context: 316L stainless steel, LPBF')).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('1 low-level relation(s) are hidden until normalized.')).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('sample_number: 2')).not.toBeInTheDocument();
+		await expect.element(claimDetail.getByRole('button', { name: 'Expert feedback' })).toBeInTheDocument();
+		await expect.element(claimDetail.getByRole('button', { name: 'Expert curation' })).toBeInTheDocument();
+		await expect.element(claimDetail.getByLabelText('Review result')).not.toBeInTheDocument();
 
 		await browserPage.getByRole('button', { name: 'Back to claims' }).click();
 		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
@@ -459,6 +462,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByLabelText('Issue type').selectOptions('evidence_not_grounded');
 		await claimDetail
@@ -496,6 +500,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
 
@@ -523,6 +528,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
 		await claimDetail.getByLabelText('Curated type').selectOptions('mechanism');
 		await claimDetail.getByLabelText('Curated support status').selectOptions('limited');
 		await claimDetail
@@ -598,6 +604,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const claimDetail = await openMechanismClaimDetail();
 
+		await expect.element(claimDetail.getByLabelText('Curated statement')).not.toBeInTheDocument();
+		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
 		await expect
 			.element(claimDetail.getByLabelText('Curated statement'))
 			.toHaveValue('Existing expert curation: mechanism evidence remains limited.');

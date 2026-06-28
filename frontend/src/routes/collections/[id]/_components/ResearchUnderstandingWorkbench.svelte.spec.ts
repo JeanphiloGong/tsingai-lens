@@ -260,7 +260,7 @@ function understandingFixture(): ResearchUnderstanding {
 				{
 					evidence_ref_id: 'ev_section_3',
 					document_id: 'doc_1',
-					title: 'P001 Section 3.2 / p. 7',
+					title: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_P001 Section 3.2 / p. 7',
 					source_label: 'P001 Section 3.2',
 					source_kind: 'text_window',
 					source_ref: 'blk_section_3_2',
@@ -408,6 +408,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Back to claims' })).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('P001 Section 3.2').first()).toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'))
+			.not.toBeInTheDocument();
 		await expect
 			.element(
 				claimDetail.getByText(

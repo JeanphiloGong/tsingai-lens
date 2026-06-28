@@ -58,6 +58,7 @@
 	let selectedClaimStatus = 'all';
 	let selectedEffectId = '';
 	let detailMode = false;
+	let activeReviewPanel: 'feedback' | 'curation' | '' = '';
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
 	let curationStatement = '';
@@ -153,6 +154,7 @@
 	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
 	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
 		lastCurationClaimId = selectedClaim?.claim_id ?? '';
+		activeReviewPanel = '';
 		resetCurationForm();
 		curationMessage = '';
 		curationError = '';
@@ -255,6 +257,20 @@
 		return `${normalized.slice(0, limit).trim()}...`;
 	}
 
+	function stripSourcePrefix(value: string) {
+		return value
+			.replace(/^[a-f0-9]{24,}[_-]/i, '')
+			.replace(/\s*\/\s*p\.\s*\d+\s*$/i, '')
+			.replace(/\.(pdf|md|txt)\b/gi, '')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	function readableEvidenceTitle(value: string, limit = 120) {
+		const cleaned = stripSourcePrefix(value).replace(/^(P\d{3})[-_](?=\S)/i, '$1 · ');
+		return compactText(cleaned || value, limit);
+	}
+
 	function readableRelationSide(value: string) {
 		const normalized = compactText(value);
 		if (!normalized) return '';
@@ -295,6 +311,11 @@
 	function closeClaimDetail() {
 		detailMode = false;
 		selectedEffectId = '';
+		activeReviewPanel = '';
+	}
+
+	function toggleReviewPanel(panel: 'feedback' | 'curation') {
+		activeReviewPanel = activeReviewPanel === panel ? '' : panel;
 	}
 
 	function confidenceLabel(value: number | null) {
@@ -349,7 +370,9 @@
 
 	function evidenceLabelsForIds(evidenceIds: string[], limit = 3) {
 		return evidenceIds
-			.map((id) => presentationEvidenceById.get(id)?.title || evidenceById.get(id)?.label || '')
+			.map((id) =>
+				readableEvidenceTitle(presentationEvidenceById.get(id)?.title || evidenceById.get(id)?.label || '')
+			)
 			.filter(Boolean)
 			.slice(0, limit);
 	}
@@ -685,10 +708,13 @@
 								</small>
 							{/if}
 							{#if labels.length}
-								<div class="research-understanding-workbench__chips">
-									{#each labels as label, index (`${effect.effect_id}-${index}-${label}`)}
-										<span>{label}</span>
-									{/each}
+								<div class="research-understanding-workbench__source-list">
+									<span>{$t('research.understanding.keyEvidence')}</span>
+									<ul>
+										{#each labels as label, index (`${effect.effect_id}-${index}-${label}`)}
+											<li>{label}</li>
+										{/each}
+									</ul>
 								</div>
 							{/if}
 							{#if effect.context_summary}
@@ -721,32 +747,219 @@
 					</div>
 					{#if selectedEffect && selectedClaim}
 						<article class="research-understanding-workbench__detail">
-							<div class="research-understanding-workbench__meta">
-								<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
-								<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
-								{#if selectedClaim.confidence !== null}
-									<span>{confidenceLabel(selectedClaim.confidence)}</span>
+							<header class="research-understanding-workbench__claim-header">
+								<div class="research-understanding-workbench__meta">
+									<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
+									<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
+									{#if selectedClaim.confidence !== null}
+										<span>{confidenceLabel(selectedClaim.confidence)}</span>
+									{/if}
+									{#if selectedClaim.strength}
+										<span>{selectedClaim.strength}</span>
+									{/if}
+									{#if selectedCuration}
+										<span>{$t('research.understanding.curatedBadge')}</span>
+									{/if}
+									{#if selectedFeedback.length}
+										<span>
+											{$t('research.understanding.feedbackCount', {
+												count: selectedFeedback.length
+											})}
+										</span>
+									{/if}
+								</div>
+								<strong>{displayClaim?.statement ?? selectedClaim.statement}</strong>
+								{#if selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
+									<p>{selectedEffect.title}</p>
 								{/if}
-								{#if selectedClaim.strength}
-									<span>{selectedClaim.strength}</span>
-								{/if}
-								{#if selectedCuration}
-									<span>{$t('research.understanding.curatedBadge')}</span>
-								{/if}
-								{#if selectedFeedback.length}
-									<span>
-										{$t('research.understanding.feedbackCount', {
-											count: selectedFeedback.length
-										})}
-									</span>
-								{/if}
-							</div>
-							<strong>{displayClaim?.statement ?? selectedClaim.statement}</strong>
-							{#if selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
-								<p>{selectedEffect.title}</p>
+								<div
+									class="research-understanding-workbench__review-actions"
+									aria-label={$t('research.understanding.reviewActions')}
+								>
+									<button
+										type="button"
+										class:research-understanding-workbench__review-action--active={activeReviewPanel ===
+											'feedback'}
+										aria-pressed={activeReviewPanel === 'feedback'}
+										on:click={() => toggleReviewPanel('feedback')}
+									>
+										{$t('research.understanding.feedbackTitle')}
+									</button>
+									<button
+										type="button"
+										class:research-understanding-workbench__review-action--active={activeReviewPanel ===
+											'curation'}
+										aria-pressed={activeReviewPanel === 'curation'}
+										on:click={() => toggleReviewPanel('curation')}
+									>
+										{$t('research.understanding.curationTitle')}
+									</button>
+								</div>
+							</header>
+
+							{#if activeReviewPanel === 'feedback'}
+								<form
+									class="research-understanding-workbench__feedback research-understanding-workbench__feedback--primary"
+									on:submit|preventDefault={submitClaimFeedback}
+								>
+									<h5>{$t('research.understanding.feedbackTitle')}</h5>
+									<label>
+										<span>{$t('research.understanding.feedbackStatus')}</span>
+										<select
+											id={`${titleId}-feedback-status`}
+											name="feedback_status"
+											bind:value={feedbackStatus}
+											disabled={feedbackSubmitting}
+										>
+											{#each FEEDBACK_STATUS_OPTIONS as status (status)}
+												<option value={status}>{feedbackStatusLabel(status)}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{$t('research.understanding.feedbackIssue')}</span>
+										<select
+											id={`${titleId}-feedback-issue`}
+											name="feedback_issue"
+											bind:value={feedbackIssue}
+											disabled={feedbackSubmitting}
+										>
+											{#each FEEDBACK_ISSUE_OPTIONS as issue (issue)}
+												<option value={issue}>{feedbackIssueLabel(issue)}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{$t('research.understanding.feedbackNote')}</span>
+										<textarea
+											id={`${titleId}-feedback-note`}
+											name="feedback_note"
+											bind:value={feedbackNote}
+											disabled={feedbackSubmitting}
+											maxlength="2000"
+											rows="3"
+										></textarea>
+									</label>
+									<label>
+										<span>{$t('research.understanding.feedbackReviewer')}</span>
+										<input
+											id={`${titleId}-feedback-reviewer`}
+											name="feedback_reviewer"
+											bind:value={feedbackReviewer}
+											disabled={feedbackSubmitting}
+											maxlength="120"
+										/>
+									</label>
+									<button type="submit" disabled={feedbackSubmitting || !collectionId}>
+										{feedbackSubmitting
+											? $t('research.understanding.feedbackSaving')
+											: $t('research.understanding.feedbackSubmit')}
+									</button>
+									{#if feedbackMessage}
+										<p class="research-understanding-workbench__feedback-state" role="status">
+											{feedbackMessage}
+										</p>
+									{/if}
+									{#if feedbackError}
+										<p
+											class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+											role="alert"
+										>
+											{feedbackError}
+										</p>
+									{/if}
+								</form>
+							{:else if activeReviewPanel === 'curation'}
+								<form
+									class="research-understanding-workbench__feedback research-understanding-workbench__feedback--primary"
+									on:submit|preventDefault={submitClaimCuration}
+								>
+									<h5>{$t('research.understanding.curationTitle')}</h5>
+									<label>
+										<span>{$t('research.understanding.curationClaimType')}</span>
+										<select
+											id={`${titleId}-curation-type`}
+											name="curation_claim_type"
+											bind:value={curationClaimType}
+											disabled={curationSubmitting}
+										>
+											{#each CURATION_CLAIM_TYPE_OPTIONS as type (type)}
+												<option value={type}>{claimTypeLabel(type)}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationStatus')}</span>
+										<select
+											id={`${titleId}-curation-status`}
+											name="curation_status"
+											bind:value={curationStatus}
+											disabled={curationSubmitting}
+										>
+											{#each CURATION_STATUS_OPTIONS as status (status)}
+												<option value={status}>{statusLabel(status)}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationStatement')}</span>
+										<textarea
+											id={`${titleId}-curation-statement`}
+											name="curation_statement"
+											bind:value={curationStatement}
+											disabled={curationSubmitting}
+											maxlength="4000"
+											rows="4"
+											required
+										></textarea>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationNote')}</span>
+										<textarea
+											id={`${titleId}-curation-note`}
+											name="curation_note"
+											bind:value={curationNote}
+											disabled={curationSubmitting}
+											maxlength="2000"
+											rows="3"
+										></textarea>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationReviewer')}</span>
+										<input
+											id={`${titleId}-curation-reviewer`}
+											name="curation_reviewer"
+											bind:value={curationReviewer}
+											disabled={curationSubmitting}
+											maxlength="120"
+										/>
+									</label>
+									<button
+										type="submit"
+										disabled={curationSubmitting || !collectionId || !curationStatement.trim()}
+									>
+										{curationSubmitting
+											? $t('research.understanding.curationSaving')
+											: $t('research.understanding.curationSubmit')}
+									</button>
+									{#if curationMessage}
+										<p class="research-understanding-workbench__feedback-state" role="status">
+											{curationMessage}
+										</p>
+									{/if}
+									{#if curationError}
+										<p
+											class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+											role="alert"
+										>
+											{curationError}
+										</p>
+									{/if}
+								</form>
 							{/if}
+
 							{#if selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction}
-								<div class="research-understanding-workbench__context">
+								<div class="research-understanding-workbench__context research-understanding-workbench__context--compact">
 									{#if selectedEffect.variable_axis}
 										<div>
 											<span>{$t('research.understanding.variableAxis')}</span>
@@ -768,39 +981,6 @@
 								</div>
 							{/if}
 
-							{#if selectedCuration}
-								<div class="research-understanding-workbench__detail-section">
-									<h5>{$t('research.understanding.curationApplied')}</h5>
-									<div class="research-understanding-workbench__context">
-										<div>
-											<span>{$t('research.understanding.originalClaim')}</span>
-											<p>{selectedClaim.statement}</p>
-										</div>
-										<div>
-											<span>{$t('research.understanding.originalClassification')}</span>
-											<p>
-												{claimTypeLabel(selectedClaim.claim_type)}
-												·
-												{statusLabel(selectedClaim.status)}
-											</p>
-										</div>
-										{#if selectedCuration.note}
-											<div>
-												<span>{$t('research.understanding.curationNote')}</span>
-												<p>{selectedCuration.note}</p>
-											</div>
-										{/if}
-										{#if selectedCuration.reviewer || selectedCuration.updated_at}
-											<small>
-												{[selectedCuration.reviewer, selectedCuration.updated_at]
-													.filter(Boolean)
-													.join(' · ')}
-											</small>
-										{/if}
-									</div>
-								</div>
-							{/if}
-
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.evidenceRefs')}</h5>
 								{#each selectedEvidenceRefs as ref (ref.evidence_ref_id)}
@@ -808,7 +988,7 @@
 									{@const sourceText = evidenceSourceText(ref)}
 									{#if href}
 										<a class="research-understanding-workbench__evidence" {href}>
-											<strong>{ref.title}</strong>
+											<strong>{readableEvidenceTitle(ref.title)}</strong>
 											<span>{evidenceMeta(ref)}</span>
 											{#if sourceText}
 												<p>{sourceText}</p>
@@ -818,7 +998,7 @@
 										</a>
 									{:else}
 										<div class="research-understanding-workbench__evidence">
-											<strong>{ref.title}</strong>
+											<strong>{readableEvidenceTitle(ref.title)}</strong>
 											<span>{evidenceMeta(ref)}</span>
 											{#if sourceText}
 												<p>{sourceText}</p>
@@ -919,111 +1099,38 @@
 								{/if}
 							</div>
 
-							{#if selectedClaim.warnings.length || selectedClaim.source_object_ids.length}
+							{#if selectedCuration}
 								<div class="research-understanding-workbench__detail-section">
-									<h5>{$t('research.warnings')}</h5>
-									{#if selectedClaim.warnings.length}
-										<div class="research-understanding-workbench__chips">
-											{#each selectedClaim.warnings as warning (`${selectedClaim.claim_id}-${warning}`)}
-												<span>{humanizeCode(warning)}</span>
-											{/each}
+									<h5>{$t('research.understanding.curationApplied')}</h5>
+									<div class="research-understanding-workbench__context">
+										<div>
+											<span>{$t('research.understanding.originalClaim')}</span>
+											<p>{selectedClaim.statement}</p>
 										</div>
-									{/if}
-									{#if selectedClaim.source_object_ids.length}
-										<details class="research-understanding-workbench__debug">
-											<summary>{$t('research.understanding.auditBinding')}</summary>
-											<small>{listLabel(selectedClaim.source_object_ids)}</small>
-										</details>
-									{/if}
+										<div>
+											<span>{$t('research.understanding.originalClassification')}</span>
+											<p>
+												{claimTypeLabel(selectedClaim.claim_type)}
+												·
+												{statusLabel(selectedClaim.status)}
+											</p>
+										</div>
+										{#if selectedCuration.note}
+											<div>
+												<span>{$t('research.understanding.curationNote')}</span>
+												<p>{selectedCuration.note}</p>
+											</div>
+										{/if}
+										{#if selectedCuration.reviewer || selectedCuration.updated_at}
+											<small>
+												{[selectedCuration.reviewer, selectedCuration.updated_at]
+													.filter(Boolean)
+													.join(' · ')}
+											</small>
+										{/if}
+									</div>
 								</div>
 							{/if}
-
-							<form
-								class="research-understanding-workbench__feedback"
-								on:submit|preventDefault={submitClaimCuration}
-							>
-								<h5>{$t('research.understanding.curationTitle')}</h5>
-								<label>
-									<span>{$t('research.understanding.curationClaimType')}</span>
-									<select
-										id={`${titleId}-curation-type`}
-										name="curation_claim_type"
-										bind:value={curationClaimType}
-										disabled={curationSubmitting}
-									>
-										{#each CURATION_CLAIM_TYPE_OPTIONS as type (type)}
-											<option value={type}>{claimTypeLabel(type)}</option>
-										{/each}
-									</select>
-								</label>
-								<label>
-									<span>{$t('research.understanding.curationStatus')}</span>
-									<select
-										id={`${titleId}-curation-status`}
-										name="curation_status"
-										bind:value={curationStatus}
-										disabled={curationSubmitting}
-									>
-										{#each CURATION_STATUS_OPTIONS as status (status)}
-											<option value={status}>{statusLabel(status)}</option>
-										{/each}
-									</select>
-								</label>
-								<label>
-									<span>{$t('research.understanding.curationStatement')}</span>
-									<textarea
-										id={`${titleId}-curation-statement`}
-										name="curation_statement"
-										bind:value={curationStatement}
-										disabled={curationSubmitting}
-										maxlength="4000"
-										rows="4"
-										required
-									></textarea>
-								</label>
-								<label>
-									<span>{$t('research.understanding.curationNote')}</span>
-									<textarea
-										id={`${titleId}-curation-note`}
-										name="curation_note"
-										bind:value={curationNote}
-										disabled={curationSubmitting}
-										maxlength="2000"
-										rows="3"
-									></textarea>
-								</label>
-								<label>
-									<span>{$t('research.understanding.curationReviewer')}</span>
-									<input
-										id={`${titleId}-curation-reviewer`}
-										name="curation_reviewer"
-										bind:value={curationReviewer}
-										disabled={curationSubmitting}
-										maxlength="120"
-									/>
-								</label>
-								<button
-									type="submit"
-									disabled={curationSubmitting || !collectionId || !curationStatement.trim()}
-								>
-									{curationSubmitting
-										? $t('research.understanding.curationSaving')
-										: $t('research.understanding.curationSubmit')}
-								</button>
-								{#if curationMessage}
-									<p class="research-understanding-workbench__feedback-state" role="status">
-										{curationMessage}
-									</p>
-								{/if}
-								{#if curationError}
-									<p
-										class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
-										role="alert"
-									>
-										{curationError}
-									</p>
-								{/if}
-							</form>
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.feedbackHistory')}</h5>
@@ -1052,77 +1159,24 @@
 								{/each}
 							</div>
 
-							<form
-								class="research-understanding-workbench__feedback"
-								on:submit|preventDefault={submitClaimFeedback}
-							>
-								<h5>{$t('research.understanding.feedbackTitle')}</h5>
-								<label>
-									<span>{$t('research.understanding.feedbackStatus')}</span>
-									<select
-										id={`${titleId}-feedback-status`}
-										name="feedback_status"
-										bind:value={feedbackStatus}
-										disabled={feedbackSubmitting}
-									>
-										{#each FEEDBACK_STATUS_OPTIONS as status (status)}
-											<option value={status}>{feedbackStatusLabel(status)}</option>
-										{/each}
-									</select>
-								</label>
-								<label>
-									<span>{$t('research.understanding.feedbackIssue')}</span>
-									<select
-										id={`${titleId}-feedback-issue`}
-										name="feedback_issue"
-										bind:value={feedbackIssue}
-										disabled={feedbackSubmitting}
-									>
-										{#each FEEDBACK_ISSUE_OPTIONS as issue (issue)}
-											<option value={issue}>{feedbackIssueLabel(issue)}</option>
-										{/each}
-									</select>
-								</label>
-								<label>
-									<span>{$t('research.understanding.feedbackNote')}</span>
-									<textarea
-										id={`${titleId}-feedback-note`}
-										name="feedback_note"
-										bind:value={feedbackNote}
-										disabled={feedbackSubmitting}
-										maxlength="2000"
-										rows="3"
-									></textarea>
-								</label>
-								<label>
-									<span>{$t('research.understanding.feedbackReviewer')}</span>
-									<input
-										id={`${titleId}-feedback-reviewer`}
-										name="feedback_reviewer"
-										bind:value={feedbackReviewer}
-										disabled={feedbackSubmitting}
-										maxlength="120"
-									/>
-								</label>
-								<button type="submit" disabled={feedbackSubmitting || !collectionId}>
-									{feedbackSubmitting
-										? $t('research.understanding.feedbackSaving')
-										: $t('research.understanding.feedbackSubmit')}
-								</button>
-								{#if feedbackMessage}
-									<p class="research-understanding-workbench__feedback-state" role="status">
-										{feedbackMessage}
-									</p>
-								{/if}
-								{#if feedbackError}
-									<p
-										class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
-										role="alert"
-									>
-										{feedbackError}
-									</p>
-								{/if}
-							</form>
+							{#if selectedClaim.warnings.length || selectedClaim.source_object_ids.length}
+								<div class="research-understanding-workbench__detail-section">
+									<h5>{$t('research.warnings')}</h5>
+									{#if selectedClaim.warnings.length}
+										<div class="research-understanding-workbench__chips">
+											{#each selectedClaim.warnings as warning (`${selectedClaim.claim_id}-${warning}`)}
+												<span>{humanizeCode(warning)}</span>
+											{/each}
+										</div>
+									{/if}
+									{#if selectedClaim.source_object_ids.length}
+										<details class="research-understanding-workbench__debug">
+											<summary>{$t('research.understanding.auditBinding')}</summary>
+											<small>{listLabel(selectedClaim.source_object_ids)}</small>
+										</details>
+									{/if}
+								</div>
+							{/if}
 						</article>
 					{:else}
 						<div class="research-understanding-workbench__empty">
@@ -1299,7 +1353,7 @@
 
 	.research-understanding-workbench__column--list,
 	.research-understanding-workbench__detail-view {
-		max-width: 980px;
+		max-width: 1180px;
 	}
 
 	.research-understanding-workbench__column h4 {
@@ -1358,7 +1412,7 @@
 	}
 
 	.research-understanding-workbench__card > strong,
-	.research-understanding-workbench__detail > strong {
+	.research-understanding-workbench__claim-header > strong {
 		color: var(--text-primary);
 		font-size: 14px;
 		line-height: 20px;
@@ -1366,6 +1420,7 @@
 	}
 
 	.research-understanding-workbench__detail,
+	.research-understanding-workbench__claim-header,
 	.research-understanding-workbench__detail-section,
 	.research-understanding-workbench__context,
 	.research-understanding-workbench__feedback {
@@ -1383,20 +1438,78 @@
 		line-height: 18px;
 	}
 
+	.research-understanding-workbench__source-list {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__source-list > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__source-list ul {
+		display: grid;
+		gap: 3px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__source-list li {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.research-understanding-workbench__detail {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
-		padding: 13px;
+		padding: 14px;
 		background: var(--bg-subtle);
 	}
 
-	.research-understanding-workbench__detail > p,
+	.research-understanding-workbench__claim-header > p,
 	.research-understanding-workbench__context p {
 		margin: 0;
 		color: var(--text-primary);
 		font-size: 14px;
 		line-height: 22px;
 		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__review-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-actions button {
+		min-height: 34px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 7px 12px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__review-actions button:hover,
+	.research-understanding-workbench__review-actions button:focus-visible,
+	.research-understanding-workbench__review-action--active {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
 	}
 
 	.research-understanding-workbench__detail-section {
@@ -1410,8 +1523,15 @@
 	}
 
 	.research-understanding-workbench__feedback {
-		padding-top: 10px;
-		border-top: 1px solid var(--border-default);
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__feedback--primary {
+		border-color: rgba(37, 99, 235, 0.36);
+		box-shadow: inset 3px 0 0 var(--color-accent);
 	}
 
 	.research-understanding-workbench__feedback h5 {
@@ -1510,6 +1630,10 @@
 		background: var(--surface-card);
 	}
 
+	.research-understanding-workbench__context--compact {
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	}
+
 	.research-understanding-workbench__evidence {
 		display: grid;
 		gap: 7px;
@@ -1581,5 +1705,6 @@
 		.research-understanding-workbench__summary {
 			grid-template-columns: 1fr;
 		}
+
 	}
 </style>

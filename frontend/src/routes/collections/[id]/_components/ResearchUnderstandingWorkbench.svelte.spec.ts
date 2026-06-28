@@ -246,8 +246,12 @@ function understandingFixture(): ResearchUnderstanding {
 					title: 'P001 Table 2 / p. 5',
 					source_label: 'P001 Table 2',
 					source_kind: 'table',
+					source_ref: 'tbl_2',
+					block_type: 'table',
+					heading_path: 'Results / Mechanical testing',
 					page: '5',
 					quote: null,
+					source_text: null,
 					value_summary: 'P001 Table 2',
 					traceability_status: 'traceable',
 					confidence: 0.9,
@@ -259,8 +263,13 @@ function understandingFixture(): ResearchUnderstanding {
 					title: 'P001 Section 3.2 / p. 7',
 					source_label: 'P001 Section 3.2',
 					source_kind: 'text_window',
+					source_ref: 'blk_section_3_2',
+					block_type: 'paragraph',
+					heading_path: 'Results / Microstructure',
 					page: '7',
 					quote: 'Annealing reduced cellular substructure.',
+					source_text:
+						'Annealing reduced cellular substructure after LPBF processing. This paragraph is the original parsed source block used as evidence.',
 					value_summary: 'P001 Section 3.2',
 					traceability_status: 'traceable',
 					confidence: 0.64,
@@ -272,8 +281,12 @@ function understandingFixture(): ResearchUnderstanding {
 					title: 'P002 Table 4 / p. 9',
 					source_label: 'P002 Table 4',
 					source_kind: 'table',
+					source_ref: 'tbl_4',
+					block_type: 'table',
+					heading_path: 'Results / Heat treatment comparison',
 					page: '9',
 					quote: null,
+					source_text: null,
 					value_summary: 'P002 Table 4',
 					traceability_status: 'traceable',
 					confidence: 0.51,
@@ -396,8 +409,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(browserPage.getByRole('button', { name: 'Back to claims' })).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('P001 Section 3.2').first()).toBeInTheDocument();
 		await expect
-			.element(claimDetail.getByText('Annealing reduced cellular substructure.'))
+			.element(
+				claimDetail.getByText(
+					'Annealing reduced cellular substructure after LPBF processing. This paragraph is the original parsed source block used as evidence.'
+				)
+			)
 			.toBeInTheDocument();
+		await expect.element(claimDetail.getByText('paragraph · p. 7 · Results / Microstructure · traceable')).toBeInTheDocument();
 		const evidenceLink = claimDetail.getByRole('link', { name: /P001 Section 3.2/ }).element();
 		expect(evidenceLink.getAttribute('href')).toContain('view=parsed-paper');
 		await expect

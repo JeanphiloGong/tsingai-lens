@@ -334,12 +334,17 @@
 
 	function evidenceMeta(ref: ResearchUnderstandingPresentationEvidence) {
 		return [
-			ref.source_kind,
-			ref.traceability_status,
-			ref.page ? `p. ${ref.page}` : ''
+			ref.block_type || ref.source_kind,
+			ref.page ? `p. ${ref.page}` : '',
+			ref.heading_path,
+			ref.traceability_status
 		]
 			.filter(Boolean)
 			.join(' · ');
+	}
+
+	function evidenceSourceText(ref: ResearchUnderstandingPresentationEvidence) {
+		return ref.source_text || ref.quote || '';
 	}
 
 	function evidenceLabelsForIds(evidenceIds: string[], limit = 3) {
@@ -800,20 +805,25 @@
 								<h5>{$t('research.understanding.evidenceRefs')}</h5>
 								{#each selectedEvidenceRefs as ref (ref.evidence_ref_id)}
 									{@const href = evidenceHref(ref)}
+									{@const sourceText = evidenceSourceText(ref)}
 									{#if href}
 										<a class="research-understanding-workbench__evidence" {href}>
 											<strong>{ref.title}</strong>
 											<span>{evidenceMeta(ref)}</span>
-											{#if ref.quote}
-												<small>{ref.quote}</small>
+											{#if sourceText}
+												<p>{sourceText}</p>
+											{:else}
+												<small>{$t('research.understanding.noEvidenceSourceText')}</small>
 											{/if}
 										</a>
 									{:else}
 										<div class="research-understanding-workbench__evidence">
 											<strong>{ref.title}</strong>
 											<span>{evidenceMeta(ref)}</span>
-											{#if ref.quote}
-												<small>{ref.quote}</small>
+											{#if sourceText}
+												<p>{sourceText}</p>
+											{:else}
+												<small>{$t('research.understanding.noEvidenceSourceText')}</small>
 											{/if}
 										</div>
 									{/if}
@@ -1502,7 +1512,7 @@
 
 	.research-understanding-workbench__evidence {
 		display: grid;
-		gap: 4px;
+		gap: 7px;
 		color: inherit;
 	}
 
@@ -1529,6 +1539,17 @@
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 18px;
+	}
+
+	.research-understanding-workbench__evidence p {
+		margin: 0;
+		border-left: 3px solid var(--border-default);
+		padding-left: 10px;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 21px;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
 	}
 
 	.research-understanding-workbench__empty {

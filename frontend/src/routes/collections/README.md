@@ -40,9 +40,11 @@ This node owns the collection workspace route family in the frontend.
   to the user
 - render research understanding as an expert review workspace by default:
   users scan claims first, then inspect linked relations, evidence, context,
-  support status, paper count, and evidence count; internal claim/evidence ids
-  remain hidden binding data for feedback, curation, source navigation, and
-  audit details
+  support status, paper count, and evidence count; claim evidence displays the
+  parsed source block text with paper/page/heading/block provenance and remains
+  clickable back to the document reader; internal claim/evidence ids remain
+  hidden binding data for feedback, curation, source navigation, and audit
+  details
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

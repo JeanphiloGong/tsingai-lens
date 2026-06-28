@@ -124,8 +124,12 @@ export type ResearchUnderstandingPresentationEvidence = {
 	title: string;
 	source_label: string;
 	source_kind: string;
+	source_ref: string | null;
+	block_type: string | null;
+	heading_path: string | null;
 	page: string | null;
 	quote: string | null;
+	source_text: string | null;
 	value_summary: string;
 	traceability_status: string;
 	confidence: number | null;
@@ -1125,8 +1129,12 @@ function normalizeResearchUnderstandingPresentationEvidence(
 		title: toText(record.title, 'Evidence'),
 		source_label: toText(record.source_label, 'Evidence'),
 		source_kind: toText(record.source_kind, 'unknown'),
+		source_ref: nonEmptyText(record.source_ref),
+		block_type: nonEmptyText(record.block_type),
+		heading_path: nonEmptyText(record.heading_path),
 		page: nonEmptyText(record.page),
 		quote: nonEmptyText(record.quote),
+		source_text: nonEmptyText(record.source_text ?? record.quote),
 		value_summary: toText(record.value_summary),
 		traceability_status: toText(record.traceability_status, 'unknown'),
 		confidence: toOptionalNumber(record.confidence),

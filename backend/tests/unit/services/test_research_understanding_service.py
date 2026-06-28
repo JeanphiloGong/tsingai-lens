@@ -4,6 +4,24 @@ from application.core.research_understanding_service import (
     ResearchUnderstandingService,
 )
 from domain.core import ResearchUnderstanding
+from domain.source import SourceBlock, SourceDocument
+
+
+class _FakeSourceArtifactRepository:
+    def __init__(
+        self,
+        *,
+        blocks: list[SourceBlock] | None = None,
+        documents: list[SourceDocument] | None = None,
+    ) -> None:
+        self.blocks = blocks or []
+        self.documents = documents or []
+
+    def list_blocks(self, collection_id: str) -> list[SourceBlock]:
+        return self.blocks
+
+    def list_documents(self, collection_id: str) -> list[SourceDocument]:
+        return self.documents
 
 
 class _FakeSemanticExtractor:
@@ -265,7 +283,30 @@ def test_objective_understanding_does_not_project_low_level_comparisons_as_relat
 
 
 def test_with_presentation_backfills_existing_understanding_without_internal_labels():
-    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-1",
+                    human_readable_id=1,
+                    title="LPBF 316L density study",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk_7483b2607cdb4_7",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text="Relative density is reported as 99.1% for the LPBF sample.",
+                    block_order=7,
+                    page=4,
+                    heading_path="Results / Density",
+                )
+            ],
+        ),
+    )
     stored = ResearchUnderstanding.from_mapping(
         {
             "state": "ready",
@@ -318,4 +359,11 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
         understanding["presentation"]["effects"][0]["title"]
         == "Relative density is reported as 99.1%."
     )
-    assert understanding["presentation"]["evidence_items"][0]["title"] == "Text evidence"
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["title"] == "LPBF 316L density study / p. 4"
+    assert evidence_item["block_type"] == "paragraph"
+    assert evidence_item["heading_path"] == "Results / Density"
+    assert (
+        evidence_item["source_text"]
+        == "Relative density is reported as 99.1% for the LPBF sample."
+    )

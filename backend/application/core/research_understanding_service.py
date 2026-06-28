@@ -957,6 +957,9 @@ class ResearchUnderstandingService:
         quote = _text(ref.get("quote"))
         if not quote and block:
             quote = _short_text(block.text, limit=420)
+        source_text = _text(block.text if block else None) or quote
+        heading_path = _text(block.heading_path if block else None)
+        block_type = _text(block.block_type if block else None)
         value_summary = (
             _block_context_label(block)
             or (label if _looks_user_facing(label) else "")
@@ -967,8 +970,12 @@ class ResearchUnderstandingService:
             "title": title,
             "source_label": source_label,
             "source_kind": source_kind,
+            "source_ref": source_ref,
+            "block_type": block_type,
+            "heading_path": heading_path,
             "page": page,
             "quote": quote,
+            "source_text": source_text,
             "value_summary": value_summary,
             "traceability_status": _text(ref.get("traceability_status")) or "unknown",
             "confidence": ref.get("confidence"),

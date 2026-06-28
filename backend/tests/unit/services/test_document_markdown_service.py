@@ -196,6 +196,54 @@ def test_document_markdown_service_falls_back_to_document_text(tmp_path):
     assert payload["warnings"] == ["block_structure_missing"]
 
 
+def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Stored Filename Collection")
+    collection_id = collection["collection_id"]
+    collection_service.repository.write_files(
+        collection_id,
+        [
+            {
+                "original_filename": "P001-Readable Paper.pdf",
+                "stored_filename": "abc123_P001-Readable Paper.pdf",
+            }
+        ],
+    )
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "abc123_P001-Readable Paper.pdf",
+                    "text": "ignored when block structure is available",
+                    "metadata": {
+                        "source_path": "abc123_P001-Readable Paper.pdf",
+                        "source_parser": "docling",
+                    },
+                }
+            ],
+            blocks=[
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-good",
+                    "block_type": "paragraph",
+                    "block_order": 1,
+                    "text": "Readable paper body.",
+                    "page": 1,
+                }
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert payload["title"] == "P001-Readable Paper.pdf"
+    assert payload["source_filename"] == "P001-Readable Paper.pdf"
+    assert payload["markdown"].startswith("# P001-Readable Paper.pdf")
+    assert "abc123_P001" not in payload["markdown"]
+
+
 def test_document_markdown_service_reports_not_ready(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Markdown Pending Collection")

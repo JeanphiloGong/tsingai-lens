@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 from application.source.collection_service import CollectionService
@@ -62,12 +63,14 @@ class DocumentMarkdownService:
             collection_id,
             document_id,
         )
+        display_names = self._document_display_names(collection_id, document)
 
         markdown, source_map, warnings = self._project_markdown_from_tree(
             document=document,
             document_tree=document_tree,
             tables_by_id=self._document_tables_by_id(artifacts, document_id),
             figures_by_id=self._document_figures_by_id(artifacts, document_id),
+            display_title=display_names["title"],
         )
 
         if not markdown.strip():
@@ -76,8 +79,8 @@ class DocumentMarkdownService:
         return {
             "collection_id": collection_id,
             "document_id": document.document_id,
-            "title": self._normalize_text(document.title),
-            "source_filename": self._source_filename(document),
+            "title": display_names["title"],
+            "source_filename": display_names["source_filename"],
             "parser": self._parser_name(document),
             "markdown": markdown,
             "source_map": source_map,
@@ -132,12 +135,13 @@ class DocumentMarkdownService:
         document_tree: SourceDocumentTree,
         tables_by_id: Mapping[str, SourceTable],
         figures_by_id: Mapping[str, SourceFigure],
+        display_title: str | None,
     ) -> tuple[str, list[dict[str, Any]], list[str]]:
         parts: list[str] = []
         source_map: list[dict[str, Any]] = []
         warnings: list[str] = []
 
-        title = self._normalize_text(document.title)
+        title = self._normalize_text(display_title)
         if title:
             parts.append(f"# {title}")
             source_map.append(
@@ -369,11 +373,54 @@ class DocumentMarkdownService:
         }
 
     def _source_filename(self, document: SourceDocument) -> str | None:
-        for key in ("source_filename", "original_filename", "stored_filename"):
+        for key in (
+            "source_filename",
+            "original_filename",
+            "stored_filename",
+            "source_path",
+        ):
             value = self._metadata_text(document.metadata, key)
             if value:
-                return value
+                return Path(value).name
         return None
+
+    def _document_display_names(
+        self,
+        collection_id: str,
+        document: SourceDocument,
+    ) -> dict[str, str | None]:
+        stored_to_original = self._stored_to_original_filenames(collection_id)
+        source_filename = self._source_filename(document)
+        display_source_filename = (
+            stored_to_original.get(source_filename, source_filename)
+            if source_filename
+            else None
+        )
+        title = self._normalize_text(document.title)
+        display_title = (
+            stored_to_original.get(title, title)
+            if title
+            else display_source_filename
+        )
+        if display_source_filename and display_title == display_source_filename:
+            display_title = display_source_filename
+        return {
+            "title": display_title,
+            "source_filename": display_source_filename,
+        }
+
+    def _stored_to_original_filenames(self, collection_id: str) -> dict[str, str]:
+        try:
+            file_records = self.collection_service.list_files(collection_id)
+        except FileNotFoundError:
+            return {}
+        filenames: dict[str, str] = {}
+        for record in file_records:
+            original = self._normalize_text(record.get("original_filename"))
+            stored = self._normalize_text(record.get("stored_filename"))
+            if original and stored:
+                filenames[Path(stored).name] = Path(original).name
+        return filenames
 
     def _heading_path_text(self, heading_path: tuple[str, ...]) -> str | None:
         text = " > ".join(part.strip() for part in heading_path if part.strip())

@@ -91,6 +91,15 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert understanding["evidence_refs"][0]["fact_ids"] == ["oeu-corrosion"]
     assert understanding["evidence_refs"][0]["label"] == "P001 Table 1"
     assert understanding["contexts"][0]["material_scope"] == ["316L stainless steel"]
+    presentation = understanding["presentation"]
+    assert presentation["summary"]["title"] == "How does heat treatment affect corrosion resistance?"
+    assert presentation["summary"]["material_scope"] == ["316L stainless steel"]
+    assert presentation["summary"]["property_scope"] == ["corrosion resistance"]
+    assert presentation["summary"]["review_queue_count"] == 0
+    assert presentation["effects"][0]["claim_id"] == understanding["claims"][0]["claim_id"]
+    assert presentation["effects"][0]["target_property"] == "corrosion resistance"
+    assert presentation["effects"][0]["evidence_count"] == 1
+    assert presentation["evidence_items"][0]["title"] == "table-1"
 
 
 def test_material_understanding_projects_findings_measurements_and_relations():
@@ -147,6 +156,8 @@ def test_material_understanding_projects_findings_measurements_and_relations():
     assert understanding["evidence_refs"][0]["label"] == "P001 Table 1"
     assert understanding["evidence_refs"][0]["locator"] == {"source_ref": "P001 Table 1"}
     assert understanding["contexts"][0]["property_scope"] == ["relative density"]
+    assert understanding["presentation"]["effects"][0]["title"] == "energy density -> relative density"
+    assert understanding["presentation"]["evidence_items"][0]["title"] == "P001 Table 1"
 
 
 def test_understanding_deduplicates_claims_without_blank_records():
@@ -165,3 +176,57 @@ def test_understanding_deduplicates_claims_without_blank_records():
     assert [claim["statement"] for claim in understanding["claims"]] == [
         "Processing improves strength."
     ]
+
+
+def test_with_presentation_backfills_existing_understanding_without_internal_labels():
+    service = ResearchUnderstandingService()
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does LPBF affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "measurement",
+                    "statement": "Relative density is reported as 99.1%.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_block"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_block",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "blk_7483b2607cdb4_7",
+                    "locator": {"source_ref": "blk_7483b2607cdb4_7"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "partial",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"variable_process_axes": ["laser power"]},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    assert understanding["presentation"]["summary"]["title"] == "How does LPBF affect density?"
+    assert understanding["presentation"]["effects"][0]["title"] == "laser power -> relative density"
+    assert understanding["presentation"]["evidence_items"][0]["title"] == "Text evidence"

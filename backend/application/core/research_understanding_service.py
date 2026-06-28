@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 from domain.core import ResearchUnderstanding
@@ -7,6 +8,20 @@ from domain.core import ResearchUnderstanding
 
 class ResearchUnderstandingService:
     """Project existing Core research views into claim/relation/evidence form."""
+
+    def with_presentation(
+        self,
+        understanding: ResearchUnderstanding | Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if understanding is None:
+            return None
+        record = (
+            understanding.to_record()
+            if isinstance(understanding, ResearchUnderstanding)
+            else dict(understanding)
+        )
+        record["presentation"] = self._presentation_for(record)
+        return ResearchUnderstanding.from_mapping(record).to_record()
 
     def build_objective_understanding(
         self,
@@ -57,23 +72,25 @@ class ResearchUnderstandingService:
             context_ids=context_ids,
         )
         state = self._state_for(claims, relations, evidence_refs)
-        return ResearchUnderstanding.from_mapping(
-            {
-                "state": state,
-                "scope": {
-                    "scope_type": scope_type,
-                    "collection_id": collection_id,
-                    "goal_id": goal_id if scope_type == "goal" else None,
-                    "objective_id": objective_id if scope_type != "goal" else None,
-                    "title": question,
-                },
-                "claims": claims,
-                "relations": relations,
-                "evidence_refs": evidence_refs,
-                "contexts": contexts,
-                "warnings": self._understanding_warnings(claims, evidence_refs),
-            }
-        ).to_record()
+        return self.with_presentation(
+            ResearchUnderstanding.from_mapping(
+                {
+                    "state": state,
+                    "scope": {
+                        "scope_type": scope_type,
+                        "collection_id": collection_id,
+                        "goal_id": goal_id if scope_type == "goal" else None,
+                        "objective_id": objective_id if scope_type != "goal" else None,
+                        "title": question,
+                    },
+                    "claims": claims,
+                    "relations": relations,
+                    "evidence_refs": evidence_refs,
+                    "contexts": contexts,
+                    "warnings": self._understanding_warnings(claims, evidence_refs),
+                }
+            )
+        ) or {}
 
     def build_material_understanding(
         self,
@@ -97,22 +114,24 @@ class ResearchUnderstandingService:
             context_ids=context_ids,
         )
         state = self._state_for(claims, relations, evidence_refs)
-        return ResearchUnderstanding.from_mapping(
-            {
-                "state": state,
-                "scope": {
-                    "scope_type": "material",
-                    "collection_id": collection_id,
-                    "material_id": material_id,
-                    "title": canonical_name,
-                },
-                "claims": claims,
-                "relations": relations,
-                "evidence_refs": evidence_refs,
-                "contexts": contexts,
-                "warnings": self._understanding_warnings(claims, evidence_refs),
-            }
-        ).to_record()
+        return self.with_presentation(
+            ResearchUnderstanding.from_mapping(
+                {
+                    "state": state,
+                    "scope": {
+                        "scope_type": "material",
+                        "collection_id": collection_id,
+                        "material_id": material_id,
+                        "title": canonical_name,
+                    },
+                    "claims": claims,
+                    "relations": relations,
+                    "evidence_refs": evidence_refs,
+                    "contexts": contexts,
+                    "warnings": self._understanding_warnings(claims, evidence_refs),
+                }
+            )
+        ) or {}
 
     def _objective_contexts(
         self,
@@ -568,6 +587,277 @@ class ResearchUnderstandingService:
             warnings.append("some_claims_missing_evidence_refs")
         return warnings
 
+    def _presentation_for(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        claims = _mapping_list(record.get("claims"))
+        relations = _mapping_list(record.get("relations"))
+        evidence_refs = _mapping_list(record.get("evidence_refs"))
+        contexts = _mapping_list(record.get("contexts"))
+        scope = _mapping(record.get("scope"))
+        evidence_by_id = {
+            _text(ref.get("evidence_ref_id")): ref
+            for ref in evidence_refs
+            if _text(ref.get("evidence_ref_id"))
+        }
+        contexts_by_id = {
+            _text(context.get("context_id")): context
+            for context in contexts
+            if _text(context.get("context_id"))
+        }
+        evidence_items = [
+            self._presentation_evidence_item(ref)
+            for ref in evidence_refs
+        ]
+        effects = [
+            self._presentation_effect(
+                claim,
+                relations=relations,
+                evidence_by_id=evidence_by_id,
+                contexts_by_id=contexts_by_id,
+            )
+            for claim in claims
+            if _text(claim.get("statement"))
+        ]
+        context_summaries = [
+            self._presentation_context_summary(context)
+            for context in contexts
+        ]
+        material_scope = _dedupe_strings(
+            [
+                value
+                for context in contexts
+                for value in _strings(context.get("material_scope"))
+            ]
+        )
+        property_scope = _dedupe_strings(
+            [
+                value
+                for context in contexts
+                for value in _strings(context.get("property_scope"))
+            ]
+        )
+        variable_axes = _dedupe_strings(
+            [
+                value
+                for context in contexts
+                for value in _display_values(_mapping(context.get("process_context")))
+            ]
+        )
+        review_queue_count = sum(
+            1
+            for claim in claims
+            if self._needs_review(claim)
+        )
+        return {
+            "summary": {
+                "title": _text(scope.get("title")) or "Research understanding",
+                "material_scope": material_scope,
+                "variable_axes": variable_axes,
+                "property_scope": property_scope,
+                "claim_count": len(claims),
+                "relation_count": len(relations),
+                "evidence_count": len(evidence_refs),
+                "context_count": len(contexts),
+                "review_queue_count": review_queue_count,
+            },
+            "effects": effects,
+            "evidence_items": evidence_items,
+            "context_summaries": context_summaries,
+        }
+
+    def _presentation_effect(
+        self,
+        claim: Mapping[str, Any],
+        *,
+        relations: list[dict[str, Any]],
+        evidence_by_id: dict[str, dict[str, Any]],
+        contexts_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        claim_id = _text(claim.get("claim_id")) or "claim"
+        evidence_ref_ids = _strings(claim.get("evidence_ref_ids"))
+        context_ids = _strings(claim.get("context_ids"))
+        source_object_ids = _strings(claim.get("source_object_ids"))
+        direct_relations = [
+            relation
+            for relation in relations
+            if _intersects(evidence_ref_ids, _strings(relation.get("evidence_ref_ids")))
+            or _intersects(source_object_ids, _strings(relation.get("source_object_ids")))
+        ]
+        related_relations = [
+            relation
+            for relation in relations
+            if relation in direct_relations
+            or _intersects(context_ids, _strings(relation.get("context_ids")))
+        ]
+        primary_relation = direct_relations[0] if direct_relations else {}
+        contexts = [
+            contexts_by_id[context_id]
+            for context_id in context_ids
+            if context_id in contexts_by_id
+        ]
+        variable_axis = self._variable_axis_for(primary_relation, contexts)
+        target_property = self._target_property_for(claim, primary_relation, contexts)
+        evidence_refs = [
+            evidence_by_id[ref_id]
+            for ref_id in evidence_ref_ids
+            if ref_id in evidence_by_id
+        ]
+        paper_count = len(
+            {
+                _text(ref.get("document_id"))
+                for ref in evidence_refs
+                if _text(ref.get("document_id"))
+            }
+        )
+        relation_ids = [
+            _text(relation.get("relation_id"))
+            for relation in related_relations
+            if _text(relation.get("relation_id"))
+        ]
+        statement = _text(claim.get("statement")) or ""
+        return {
+            "effect_id": f"effect_{claim_id}",
+            "claim_id": claim_id,
+            "title": self._effect_title(
+                variable_axis=variable_axis,
+                target_property=target_property,
+                fallback=statement,
+            ),
+            "statement": statement,
+            "claim_type": _text(claim.get("claim_type")) or "finding",
+            "support_status": _text(claim.get("status")) or "limited",
+            "confidence": claim.get("confidence"),
+            "effect_direction": _text(primary_relation.get("relation_type"))
+            or _text(primary_relation.get("predicate"))
+            or "",
+            "variable_axis": variable_axis,
+            "target_property": target_property,
+            "paper_count": paper_count,
+            "evidence_count": len(evidence_refs),
+            "context_summary": self._context_summary_text(contexts),
+            "evidence_ref_ids": evidence_ref_ids,
+            "context_ids": context_ids,
+            "relation_ids": relation_ids,
+            "needs_review": self._needs_review(claim),
+            "warnings": _strings(claim.get("warnings")),
+        }
+
+    def _presentation_evidence_item(self, ref: Mapping[str, Any]) -> dict[str, Any]:
+        locator = _locator_mapping(ref.get("locator"))
+        source_ref = _text(locator.get("source_ref"))
+        label = _text(ref.get("label"))
+        source_kind = _text(ref.get("source_kind")) or "unknown"
+        source_label = (
+            source_ref
+            if _looks_user_facing(source_ref)
+            else label
+            if _looks_user_facing(label)
+            else _source_kind_label(source_kind)
+        )
+        page = _text(locator.get("page")) or _text(locator.get("page_no"))
+        title_parts = [source_label]
+        if page:
+            title_parts.append(f"p. {page}")
+        title = " / ".join(title_parts)
+        return {
+            "evidence_ref_id": _text(ref.get("evidence_ref_id")) or "",
+            "document_id": _text(ref.get("document_id")),
+            "title": title,
+            "source_label": source_label,
+            "source_kind": source_kind,
+            "page": page,
+            "quote": _text(ref.get("quote")),
+            "value_summary": label if _looks_user_facing(label) else "",
+            "traceability_status": _text(ref.get("traceability_status")) or "unknown",
+            "confidence": ref.get("confidence"),
+            "href": _text(ref.get("href")),
+        }
+
+    def _presentation_context_summary(self, context: Mapping[str, Any]) -> dict[str, Any]:
+        context_id = _text(context.get("context_id")) or "context"
+        material_scope = _strings(context.get("material_scope"))
+        property_scope = _strings(context.get("property_scope"))
+        process_values = _display_values(_mapping(context.get("process_context")))
+        test_values = _display_values(_mapping(context.get("test_condition")))
+        return {
+            "context_id": context_id,
+            "label": _text(context.get("label")) or "Context",
+            "material_scope": material_scope,
+            "property_scope": property_scope,
+            "process_summary": _join_display_values(process_values),
+            "test_summary": _join_display_values(test_values),
+            "limitations": _strings(context.get("limitations")),
+        }
+
+    def _variable_axis_for(
+        self,
+        relation: Mapping[str, Any],
+        contexts: list[dict[str, Any]],
+    ) -> str:
+        subject = _text(relation.get("subject"))
+        if subject and _looks_user_facing(subject):
+            return subject
+        predicate = _text(relation.get("predicate"))
+        if predicate and _looks_user_facing(predicate):
+            return predicate
+        for context in contexts:
+            values = _display_values(_mapping(context.get("process_context")))
+            if values:
+                return values[0]
+        return ""
+
+    def _target_property_for(
+        self,
+        claim: Mapping[str, Any],
+        relation: Mapping[str, Any],
+        contexts: list[dict[str, Any]],
+    ) -> str:
+        for context in contexts:
+            properties = _strings(context.get("property_scope"))
+            if properties:
+                return properties[0]
+        object_text = _text(relation.get("object"))
+        if object_text and _looks_user_facing(object_text):
+            return object_text
+        statement = _text(claim.get("statement")) or ""
+        if "density" in statement.lower():
+            return "density"
+        if "microstructure" in statement.lower():
+            return "microstructure"
+        return ""
+
+    def _effect_title(
+        self,
+        *,
+        variable_axis: str,
+        target_property: str,
+        fallback: str,
+    ) -> str:
+        if variable_axis and target_property:
+            return f"{variable_axis} -> {target_property}"
+        if target_property:
+            return target_property
+        if variable_axis:
+            return variable_axis
+        return _short_text(fallback, limit=96) or "Research finding"
+
+    def _context_summary_text(self, contexts: list[dict[str, Any]]) -> str:
+        parts: list[str] = []
+        for context in contexts:
+            parts.extend(_strings(context.get("material_scope")))
+            parts.extend(_display_values(_mapping(context.get("process_context"))))
+            parts.extend(_display_values(_mapping(context.get("test_condition"))))
+        return _join_display_values(_dedupe_strings(parts), limit=5)
+
+    def _needs_review(self, claim: Mapping[str, Any]) -> bool:
+        status = _text(claim.get("status")) or ""
+        confidence = _confidence_or_none(claim.get("confidence"))
+        return (
+            status in {"limited", "conflicted", "unsupported"}
+            or (confidence is not None and confidence < 0.7)
+            or bool(_strings(claim.get("warnings")))
+            or not bool(_strings(claim.get("evidence_ref_ids")))
+        )
+
 
 def _stable_ref_id(
     source_kind: str | None,
@@ -626,6 +916,70 @@ def _display_mapping(payload: Mapping[str, Any]) -> str:
     return ", ".join(parts)
 
 
+def _display_values(payload: Mapping[str, Any]) -> list[str]:
+    values: list[str] = []
+    for value in payload.values():
+        if isinstance(value, Mapping):
+            values.extend(_display_values(value))
+        elif isinstance(value, (list, tuple, set)):
+            values.extend(
+                text for item in value if (text := _text(item))
+            )
+        elif text := _text(value):
+            values.append(text)
+    return _dedupe_strings(values)
+
+
+def _join_display_values(values: list[str] | tuple[str, ...], *, limit: int = 6) -> str:
+    cleaned = [
+        value
+        for value in _dedupe_strings(values)
+        if _looks_user_facing(value)
+    ]
+    if len(cleaned) > limit:
+        return ", ".join((*cleaned[:limit], f"+{len(cleaned) - limit} more"))
+    return ", ".join(cleaned)
+
+
+def _short_text(value: str, *, limit: int) -> str:
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 1)].rstrip()}..."
+
+
+def _intersects(left: list[str] | tuple[str, ...], right: list[str] | tuple[str, ...]) -> bool:
+    right_set = set(right)
+    return any(item in right_set for item in left)
+
+
+def _looks_user_facing(value: Any) -> bool:
+    text = _text(value)
+    if not text:
+        return False
+    lower = text.lower()
+    return not (
+        lower.startswith(("blk_", "tbl_", "fig_", "evref_", "claim_", "rel_", "ctx_"))
+        or lower.startswith(("sample_number:", "sample_id:", "row_id:", "document_id:"))
+        or "sample_context:" in lower
+        or "process_context:" in lower
+        or "test_condition:" in lower
+        or "{" in lower
+        or "}" in lower
+    )
+
+
+def _source_kind_label(source_kind: str) -> str:
+    normalized = source_kind.replace("_", " ").strip().lower()
+    if "table" in normalized:
+        return "Table evidence"
+    if "figure" in normalized:
+        return "Figure evidence"
+    if "text" in normalized or "paragraph" in normalized:
+        return "Text evidence"
+    return "Evidence"
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -660,3 +1014,15 @@ def _text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _confidence_or_none(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        numeric = float(value)
+        if math.isnan(numeric):
+            return None
+        return round(min(1.0, max(0.0, numeric)), 2)
+    except (TypeError, ValueError):
+        return None

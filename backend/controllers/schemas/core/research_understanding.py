@@ -122,6 +122,88 @@ class ResearchUnderstandingSummaryResponse(BaseModel):
     context_count: int = Field(default=0)
 
 
+class ResearchUnderstandingPresentationSummaryResponse(BaseModel):
+    """Expert-readable summary for the default review workspace."""
+
+    title: str = Field(default="Research understanding")
+    material_scope: list[str] = Field(default_factory=list)
+    variable_axes: list[str] = Field(default_factory=list)
+    property_scope: list[str] = Field(default_factory=list)
+    claim_count: int = Field(default=0)
+    relation_count: int = Field(default=0)
+    evidence_count: int = Field(default=0)
+    context_count: int = Field(default=0)
+    review_queue_count: int = Field(default=0)
+
+
+class ResearchUnderstandingPresentationEffectResponse(BaseModel):
+    """Expert-readable effect row backed by a hidden claim binding."""
+
+    effect_id: str
+    claim_id: str
+    title: str
+    statement: str
+    claim_type: str = Field(default="finding")
+    support_status: str = Field(default="limited")
+    confidence: float | None = Field(default=None)
+    effect_direction: str = Field(default="")
+    variable_axis: str = Field(default="")
+    target_property: str = Field(default="")
+    paper_count: int = Field(default=0)
+    evidence_count: int = Field(default=0)
+    context_summary: str = Field(default="")
+    evidence_ref_ids: list[str] = Field(default_factory=list)
+    context_ids: list[str] = Field(default_factory=list)
+    relation_ids: list[str] = Field(default_factory=list)
+    needs_review: bool = Field(default=False)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ResearchUnderstandingPresentationEvidenceResponse(BaseModel):
+    """Expert-readable evidence card used by the presentation workspace."""
+
+    evidence_ref_id: str
+    document_id: str | None = Field(default=None)
+    title: str
+    source_label: str
+    source_kind: str = Field(default="unknown")
+    page: str | None = Field(default=None)
+    quote: str | None = Field(default=None)
+    value_summary: str = Field(default="")
+    traceability_status: str = Field(default="unknown")
+    confidence: float | None = Field(default=None)
+    href: str | None = Field(default=None)
+
+
+class ResearchUnderstandingPresentationContextResponse(BaseModel):
+    """Expert-readable condition summary for a claim or effect."""
+
+    context_id: str
+    label: str
+    material_scope: list[str] = Field(default_factory=list)
+    property_scope: list[str] = Field(default_factory=list)
+    process_summary: str = Field(default="")
+    test_summary: str = Field(default="")
+    limitations: list[str] = Field(default_factory=list)
+
+
+class ResearchUnderstandingPresentationResponse(BaseModel):
+    """Default presentation projection for materials-expert review."""
+
+    summary: ResearchUnderstandingPresentationSummaryResponse = Field(
+        default_factory=ResearchUnderstandingPresentationSummaryResponse
+    )
+    effects: list[ResearchUnderstandingPresentationEffectResponse] = Field(
+        default_factory=list
+    )
+    evidence_items: list[ResearchUnderstandingPresentationEvidenceResponse] = Field(
+        default_factory=list
+    )
+    context_summaries: list[ResearchUnderstandingPresentationContextResponse] = Field(
+        default_factory=list
+    )
+
+
 class ResearchUnderstandingResponse(BaseModel):
     """Claim / relation / evidence / context projection for review and AI grounding."""
 
@@ -135,6 +217,10 @@ class ResearchUnderstandingResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     summary: ResearchUnderstandingSummaryResponse = Field(
         default_factory=ResearchUnderstandingSummaryResponse
+    )
+    presentation: ResearchUnderstandingPresentationResponse = Field(
+        default_factory=ResearchUnderstandingPresentationResponse,
+        description="Expert-readable presentation projection for the default UI",
     )
 
 

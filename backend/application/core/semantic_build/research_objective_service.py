@@ -432,8 +432,8 @@ class ResearchObjectiveService:
             "objective",
             objective_id,
         )
-        payload["understanding"] = (
-            understanding.to_record() if understanding is not None else None
+        payload["understanding"] = self.research_understanding_service.with_presentation(
+            understanding
         )
         return payload
 

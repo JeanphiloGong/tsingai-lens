@@ -375,7 +375,7 @@ class ResearchViewAggregationService:
                 profile["material_id"],
             )
             profile["understanding"] = (
-                understanding.to_record() if understanding is not None else None
+                self.research_understanding_service.with_presentation(understanding)
             )
             return self._clean_value(profile)
 

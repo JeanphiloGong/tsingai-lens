@@ -408,6 +408,10 @@ Objective research-view 最小返回结构：
   artifact，由 objective evidence units、logic chain、evidence refs 和 context
   直接确定性投影，用于前端展示 Claim / Relation / Evidence / Context
   工作区；GET 请求只读取已持久化 artifact，不触发新的 LLM 调用或重建
+- `understanding.presentation` 是面向材料专家默认界面的展示投影，包含
+  `summary`、`effects`、`evidence_items` 和 `context_summaries`；前端应优先用
+  `effects` 展示变量轴、目标性能、证据数量、文献数量和待复核状态，内部
+  `claim_id` / `evidence_ref_id` 只用于反馈、校正、跳转和审计绑定
 - confirmed goal analysis 的 `POST` 是显式深度分析入口；失败只更新该
   `goal_id` 的 `status=failed` 和 `analysis_error`，不应让 collection build
   整体失败
@@ -555,6 +559,17 @@ empty | processing | partial | ready | failed
 - `warnings`
 - `summary`：`claim_count`、`relation_count`、`evidence_ref_count`、
   `context_count`
+- `presentation`：默认材料专家工作区使用的用户可读投影
+  - `presentation.summary` 至少包含 `material_scope`、`variable_axes`、
+    `property_scope`、`evidence_count` 和 `review_queue_count`
+  - `presentation.effects` 是默认 UI 主列表，每行包含 `effect_id`、
+    `claim_id`、`title`、`statement`、`variable_axis`、`target_property`、
+    `support_status`、`confidence`、`paper_count`、`evidence_count`、
+    `evidence_ref_ids` 和 `context_ids`
+  - `presentation.evidence_items` 是用户可读证据卡片，内部 block/table id
+    不应作为默认标题；精确 source locator 只能用于跳转参数或审计
+  - `presentation.context_summaries` 是用户可读条件摘要，不直接暴露原始
+    `process_context` / `test_condition` 字典 dump
 
 Research understanding 专家反馈资源：
 

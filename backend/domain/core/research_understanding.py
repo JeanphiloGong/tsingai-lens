@@ -271,6 +271,7 @@ class ResearchUnderstanding:
     evidence_refs: tuple[ResearchEvidenceRef, ...]
     contexts: tuple[ResearchContext, ...]
     warnings: tuple[str, ...]
+    presentation: dict[str, Any]
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstanding":
@@ -295,6 +296,7 @@ class ResearchUnderstanding:
                 for item in _mapping_list(payload.get("contexts"))
             ),
             warnings=_strings(payload.get("warnings")),
+            presentation=_mapping(payload.get("presentation")),
         )
 
     @classmethod
@@ -340,6 +342,7 @@ class ResearchUnderstanding:
                 "evidence_ref_count": len(self.evidence_refs),
                 "context_count": len(self.contexts),
             },
+            "presentation": dict(self.presentation),
         }
 
     @property

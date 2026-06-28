@@ -20,7 +20,12 @@
 		headers: string[];
 		rows: string[][];
 	};
-	type MarkdownNode = MarkdownHeading | MarkdownParagraph | MarkdownList | MarkdownTable;
+	type MarkdownImage = {
+		type: 'image';
+		alt: string;
+		src: string;
+	};
+	type MarkdownNode = MarkdownHeading | MarkdownParagraph | MarkdownList | MarkdownTable | MarkdownImage;
 
 	export let markdown: DocumentMarkdownResponse | null = null;
 	export let sourceFileUrl = '';
@@ -66,6 +71,18 @@
 				flushList();
 				parsed.push(table.node);
 				index = table.nextIndex;
+				continue;
+			}
+
+			const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(line);
+			if (image) {
+				flushParagraph();
+				flushList();
+				parsed.push({
+					type: 'image',
+					alt: stripInlineMarkdown(image[1]),
+					src: image[2].trim()
+				});
 				continue;
 			}
 
@@ -179,6 +196,10 @@
 					{/if}
 				{:else if node.type === 'paragraph'}
 					<p>{node.text}</p>
+				{:else if node.type === 'image'}
+					<figure class="markdown-figure">
+						<img src={node.src} alt={node.alt} loading="lazy" />
+					</figure>
 				{:else if node.type === 'list'}
 					<ul>
 						{#each node.items as item}
@@ -335,6 +356,22 @@
 
 	.markdown-reader__body li + li {
 		margin-top: 6px;
+	}
+
+	.markdown-figure {
+		max-width: 920px;
+		margin: 20px auto;
+	}
+
+	.markdown-figure img {
+		display: block;
+		width: auto;
+		max-width: 100%;
+		max-height: 720px;
+		margin: 0 auto;
+		border: 1px solid #e2e8f0;
+		background: #ffffff;
+		object-fit: contain;
 	}
 
 	.markdown-table-wrapper {

@@ -642,6 +642,132 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     assert "outside.pdf" not in str(exc.detail)
 
 
+def test_document_figure_image_route_streams_extracted_asset(document_services):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Figure Image Collection")
+    collection_id = record["collection_id"]
+    paths = collection_service.get_paths(collection_id)
+    asset_path = paths.output_dir / "image_assets" / "fig-1.png"
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture\n")
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "figure_label": "Fig. 1",
+                    "caption_text": "Fig. 1. Microstructure.",
+                    "image_path": "image_assets/fig-1.png",
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    response = asyncio.run(
+        documents_controller.get_collection_document_figure_image(
+            collection_id,
+            "paper-1",
+            "fig-1",
+        )
+    )
+
+    assert Path(response.path).read_bytes() == b"\x89PNG\r\n\x1a\nfixture\n"
+    assert response.media_type == "image/png"
+    assert response.headers["content-disposition"].startswith("inline;")
+
+
+def test_document_figure_image_route_rejects_figure_from_other_document(
+    document_services,
+):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Cross Document Figure Collection")
+    collection_id = record["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {"id": "paper-1", "title": "Paper 1", "text": ""},
+                {"id": "paper-2", "title": "Paper 2", "text": ""},
+            ],
+            figures=[
+                {
+                    "document_id": "paper-2",
+                    "figure_id": "fig-2",
+                    "figure_order": 1,
+                    "image_path": "image_assets/fig-2.png",
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                collection_id,
+                "paper-1",
+                "fig-2",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 404
+    assert exc.detail["code"] == "figure_not_found"
+    assert exc.detail["document_id"] == "paper-1"
+    assert exc.detail["figure_id"] == "fig-2"
+
+
+def test_document_figure_image_route_rejects_path_outside_collection(
+    document_services,
+    tmp_path,
+):
+    collection_service, _document_profile_service, _comparison_service, markdown_service = (
+        document_services
+    )
+    record = collection_service.create_collection(name="Unsafe Figure Image Collection")
+    collection_id = record["collection_id"]
+    outside_path = tmp_path / "outside.png"
+    outside_path.write_bytes(b"outside")
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "image_path": str(outside_path),
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                collection_id,
+                "paper-1",
+                "fig-1",
+            )
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.detail["code"] == "figure_image_path_invalid"
+    assert "outside.png" not in str(exc.detail)
+
+
 def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
     document_services,
 ):

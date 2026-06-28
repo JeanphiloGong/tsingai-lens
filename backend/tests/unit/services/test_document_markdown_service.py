@@ -173,6 +173,79 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     assert source_map["tbl-1"]["table_id"] == "tbl-1"
 
 
+def test_document_markdown_service_projects_figure_images(tmp_path):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Figure Markdown Collection")
+    collection_id = collection["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Figure Paper",
+                    "text": "ignored when figure structure is available",
+                }
+            ],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "figure_label": "Fig. 1",
+                    "caption_text": "Fig. 1. Microstructure after annealing.",
+                    "page": 4,
+                    "heading_path": "Results",
+                    "image_path": "image_assets/fig-1.png",
+                    "image_mime_type": "image/png",
+                    "image_width": 640,
+                    "image_height": 360,
+                }
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert (
+        f"![Fig. 1](/api/v1/collections/{collection_id}/documents/"
+        "paper-1/figures/fig-1/image)"
+    ) in payload["markdown"]
+    assert "**Figure.** Fig. 1. Microstructure after annealing." in payload["markdown"]
+    source_map = {item["artifact_id"]: item for item in payload["source_map"]}
+    assert source_map["fig-1"]["artifact_type"] == "figure"
+    assert source_map["fig-1"]["figure_id"] == "fig-1"
+
+
+def test_document_markdown_service_keeps_caption_when_figure_image_is_missing(tmp_path):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Figure Caption Collection")
+    collection_id = collection["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "figure_label": "Fig. 1",
+                    "caption_text": "Fig. 1. Microstructure after annealing.",
+                    "page": 4,
+                    "heading_path": "Results",
+                    "image_path": None,
+                }
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert "![Fig. 1]" not in payload["markdown"]
+    assert "**Figure.** Fig. 1. Microstructure after annealing." in payload["markdown"]
+
+
 def test_document_markdown_service_falls_back_to_document_text(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Markdown Fallback Collection")

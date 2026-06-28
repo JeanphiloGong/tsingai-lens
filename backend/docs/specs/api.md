@@ -716,6 +716,7 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/markdown`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/source`
+- `GET /api/v1/collections/{collection_id}/documents/{document_id}/figures/{figure_id}/image`
 - `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
 
 其中 `/profile` 返回与 list item 同语义的单项 document profile，`/content`
@@ -735,6 +736,15 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
 - `markdown`
 - `source_map`
 - `warnings`
+
+当 Source figure 包含已抽取的图片 asset 时，`markdown` 正文应在对应 figure
+位置包含同源图片引用：
+
+- Markdown 图片语法：图片 alt 文本使用 figure label 或 caption，URL 使用下方图片接口
+- 图片 URL：`/api/v1/collections/{collection_id}/documents/{document_id}/figures/{figure_id}/image`
+
+图片引用只用于展示解析结果，不替代 `figures` artifact。没有图片 asset 的
+figure 仍应保留图注文本。
 
 `source_map` 用于把 Markdown 展示片段回指到 Source artifact，至少包含：
 
@@ -774,6 +784,16 @@ response 返回该 document 的原始上传文件，供浏览器 PDF/source read
   structured detail
 - endpoint 不接受任何 request path；文件路径只能从 collection-owned
   metadata 解析，且必须位于 collection input 目录内
+
+`/figures/{figure_id}/image` 行为：
+
+- 成功时返回 `200`，`Content-Disposition` 为 inline，`Content-Type` 优先使用
+  `source_figures.image_mime_type`，否则按文件名推断
+- collection、document 或当前 document 下的 figure 无法解析时返回 `404`
+- figure 存在但 image asset 缺失、路径不安全或无法读取时返回 `409`
+  structured detail
+- endpoint 不接受任何 request path；文件路径只能来自当前 collection/document
+  下已登记的 Source figure `image_path`，且必须位于 collection output 目录内
 
 文档页语义要求：
 

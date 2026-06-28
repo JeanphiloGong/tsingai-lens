@@ -20,6 +20,8 @@ from application.source.collection_service import DocumentSourceUnavailableError
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
     DocumentMarkdownService,
+    SourceFigureImageNotFoundError,
+    SourceFigureImageUnavailableError,
     SourceDocumentNotFoundError,
 )
 from controllers.schemas.core.documents import (
@@ -97,6 +99,30 @@ def _source_not_found_detail(
         "message": "Document not found in this collection.",
         "collection_id": collection_id,
         "document_id": document_id,
+    }
+
+
+def _figure_image_not_found_detail(
+    exc: SourceFigureImageNotFoundError,
+) -> dict[str, str]:
+    return {
+        "code": "figure_not_found",
+        "message": "Figure image not found in this document.",
+        "collection_id": exc.collection_id,
+        "document_id": exc.document_id,
+        "figure_id": exc.figure_id,
+    }
+
+
+def _figure_image_unavailable_detail(
+    exc: SourceFigureImageUnavailableError,
+) -> dict[str, str]:
+    return {
+        "code": exc.code,
+        "message": exc.message,
+        "collection_id": exc.collection_id,
+        "document_id": exc.document_id,
+        "figure_id": exc.figure_id,
     }
 
 
@@ -253,6 +279,48 @@ async def get_collection_document_source(
             status_code=404,
             detail=_source_not_found_detail(collection_id, document_id, exc),
         ) from exc
+
+    filename = str(payload["filename"])
+    media_type = (
+        str(payload.get("media_type") or "").strip()
+        or mimetypes.guess_type(filename)[0]
+        or "application/octet-stream"
+    )
+    return FileResponse(
+        payload["path"],
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
+
+
+@router.get(
+    "/{collection_id}/documents/{document_id}/figures/{figure_id}/image",
+    summary="Stream an extracted figure image for one parsed document",
+)
+async def get_collection_document_figure_image(
+    collection_id: str,
+    document_id: str,
+    figure_id: str,
+) -> FileResponse:
+    try:
+        payload = document_markdown_service.resolve_figure_image_file(
+            collection_id,
+            document_id,
+            figure_id,
+        )
+    except SourceFigureImageNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=_figure_image_not_found_detail(exc),
+        ) from exc
+    except SourceFigureImageUnavailableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_figure_image_unavailable_detail(exc),
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     filename = str(payload["filename"])
     media_type = (

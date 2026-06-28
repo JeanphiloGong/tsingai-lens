@@ -230,7 +230,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					source_filename: 'paper-a.pdf',
 					parser: 'docling',
 					markdown:
-						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n| Sample | Conductivity |\n| --- | --- |\n| A | 12 mS/cm |',
+						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n![Fig. 1](/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image)\n\n**Figure.** Fig. 1. Microstructure after annealing.\n\n| Sample | Conductivity |\n| --- | --- |\n| A | 12 mS/cm |',
 					source_map: [
 						{
 							markdown_anchor: 'block-abstract',
@@ -448,6 +448,13 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('heading', { name: 'Abstract' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('img', { name: 'Fig. 1' })).toHaveAttribute(
+			'src',
+			'/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image'
+		);
+		await expect
+			.element(browserPage.getByText('Figure. Fig. 1. Microstructure after annealing.'))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).not.toBeInTheDocument();
 
 		await browserPage.getByRole('tab', { name: 'Results' }).click();

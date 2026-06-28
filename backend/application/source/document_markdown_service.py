@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from application.source.collection_service import CollectionService
 from domain.ports import SourceArtifactRepository
@@ -39,6 +40,36 @@ class SourceDocumentNotFoundError(FileNotFoundError):
         super().__init__(f"document not found: {collection_id}/{document_id}")
 
 
+class SourceFigureImageNotFoundError(FileNotFoundError):
+    """Raised when a Source figure image cannot be found for a document."""
+
+    def __init__(self, collection_id: str, document_id: str, figure_id: str) -> None:
+        self.collection_id = collection_id
+        self.document_id = document_id
+        self.figure_id = figure_id
+        super().__init__(f"figure image not found: {collection_id}/{document_id}/{figure_id}")
+
+
+class SourceFigureImageUnavailableError(RuntimeError):
+    """Raised when a figure exists but its extracted image cannot be served."""
+
+    def __init__(
+        self,
+        collection_id: str,
+        document_id: str,
+        figure_id: str,
+        *,
+        code: str = "figure_image_unavailable",
+        message: str = "The extracted figure image is not available for this document.",
+    ) -> None:
+        self.collection_id = collection_id
+        self.document_id = document_id
+        self.figure_id = figure_id
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
 class DocumentMarkdownService:
     """Build display-only Markdown projections from Source document artifacts."""
 
@@ -70,6 +101,7 @@ class DocumentMarkdownService:
         display_names = self._document_display_names(collection_id, document)
 
         markdown, source_map, warnings = self._project_markdown_from_tree(
+            collection_id=collection_id,
             document=document,
             document_tree=document_tree,
             tables_by_id=self._document_tables_by_id(artifacts, document_id),
@@ -89,6 +121,68 @@ class DocumentMarkdownService:
             "markdown": markdown,
             "source_map": source_map,
             "warnings": warnings,
+        }
+
+    def resolve_figure_image_file(
+        self,
+        collection_id: str,
+        document_id: str,
+        figure_id: str,
+    ) -> dict[str, Any]:
+        self.collection_service.get_collection(collection_id)
+        document_key = str(document_id or "").strip()
+        figure_key = str(figure_id or "").strip()
+        if not document_key or not figure_key:
+            raise SourceFigureImageNotFoundError(
+                collection_id,
+                document_key,
+                figure_key,
+            )
+
+        figure = next(
+            (
+                item
+                for item in self.source_artifact_repository.list_figures(
+                    collection_id,
+                    document_key,
+                )
+                if item.figure_id == figure_key
+            ),
+            None,
+        )
+        if figure is None:
+            raise SourceFigureImageNotFoundError(collection_id, document_key, figure_key)
+        image_path = self._normalize_text(figure.image_path)
+        if not image_path:
+            raise SourceFigureImageUnavailableError(collection_id, document_key, figure_key)
+
+        paths = self.collection_service.get_paths(collection_id)
+        output_dir = paths.output_dir.resolve()
+        candidate = Path(image_path)
+        if candidate.is_absolute():
+            asset_path = candidate.resolve()
+        else:
+            asset_path = (paths.output_dir / candidate).resolve()
+        try:
+            asset_path.relative_to(output_dir)
+        except ValueError as exc:
+            raise SourceFigureImageUnavailableError(
+                collection_id,
+                document_key,
+                figure_key,
+                code="figure_image_path_invalid",
+                message="The extracted figure image path is invalid.",
+            ) from exc
+        if not asset_path.is_file():
+            raise SourceFigureImageUnavailableError(collection_id, document_key, figure_key)
+        media_type = (
+            self._normalize_text(figure.image_mime_type)
+            or "application/octet-stream"
+        )
+        return {
+            "path": asset_path,
+            "filename": asset_path.name,
+            "media_type": media_type,
         }
 
     def _load_source_artifacts(self, collection_id: str) -> SourceArtifactSet:
@@ -135,6 +229,7 @@ class DocumentMarkdownService:
     def _project_markdown_from_tree(
         self,
         *,
+        collection_id: str,
         document: SourceDocument,
         document_tree: SourceDocumentTree,
         tables_by_id: Mapping[str, SourceTable],
@@ -169,6 +264,8 @@ class DocumentMarkdownService:
                     warnings=warnings,
                     tables_by_id=tables_by_id,
                     figures_by_id=figures_by_id,
+                    collection_id=collection_id,
+                    document_id=document.document_id,
                     has_document_title=bool(title),
                 )
                 or content_rendered
@@ -190,6 +287,8 @@ class DocumentMarkdownService:
         warnings: list[str],
         tables_by_id: Mapping[str, SourceTable],
         figures_by_id: Mapping[str, SourceFigure],
+        collection_id: str,
+        document_id: str,
         has_document_title: bool,
     ) -> bool:
         node_type = str(node.node_type or "").strip()
@@ -209,6 +308,8 @@ class DocumentMarkdownService:
                         warnings=warnings,
                         tables_by_id=tables_by_id,
                         figures_by_id=figures_by_id,
+                        collection_id=collection_id,
+                        document_id=document_id,
                         has_document_title=has_document_title,
                     )
                     or rendered_child
@@ -245,7 +346,11 @@ class DocumentMarkdownService:
             figure = figures_by_id.get(str(node.source_ref_id or ""))
             if figure is None:
                 return False
-            figure_markdown = self._render_figure(figure)
+            figure_markdown = self._render_figure(
+                figure,
+                collection_id=collection_id,
+                document_id=document_id,
+            )
             if not figure_markdown:
                 return False
             parts.append(figure_markdown)
@@ -311,16 +416,50 @@ class DocumentMarkdownService:
             list(table.column_headers),
         )
 
-    def _render_figure(self, figure: SourceFigure) -> str | None:
+    def _render_figure(
+        self,
+        figure: SourceFigure,
+        *,
+        collection_id: str,
+        document_id: str,
+    ) -> str | None:
         caption = self._normalize_text(figure.caption_text)
         label = self._normalize_text(figure.figure_label)
+        image_markdown = None
+        if self._normalize_text(figure.image_path):
+            alt_text = label or caption or "Figure"
+            image_markdown = (
+                f"![{self._escape_markdown_image_alt(alt_text)}]"
+                f"({self._figure_image_url(collection_id, document_id, figure.figure_id)})"
+            )
+        caption_markdown = None
         if caption and label and not caption.casefold().startswith(label.casefold()):
-            return f"**{label}.** {caption}"
-        if caption:
-            return f"**Figure.** {caption}"
-        if label:
-            return f"**{label}.**"
-        return None
+            caption_markdown = f"**{label}.** {caption}"
+        elif caption:
+            caption_markdown = f"**Figure.** {caption}"
+        elif label:
+            caption_markdown = f"**{label}.**"
+        return "\n\n".join(
+            part for part in (image_markdown, caption_markdown) if part
+        ) or None
+
+    def _figure_image_url(
+        self,
+        collection_id: str,
+        document_id: str,
+        figure_id: str,
+    ) -> str:
+        encoded_collection_id = quote(collection_id, safe="")
+        encoded_document_id = quote(document_id, safe="")
+        encoded_figure_id = quote(figure_id, safe="")
+        return (
+            "/api/v1/collections/"
+            f"{encoded_collection_id}/documents/{encoded_document_id}/figures/"
+            f"{encoded_figure_id}/image"
+        )
+
+    def _escape_markdown_image_alt(self, value: str) -> str:
+        return value.replace("\\", "\\\\").replace("]", "\\]")
 
     def _markdown_heading_level(
         self,

@@ -719,7 +719,7 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batc
     assert parse_call["max_completion_tokens"] == 4096
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_routes(
+def test_core_llm_extractor_does_not_cap_provider_parse_completion_tokens_for_objective_routes(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
@@ -738,10 +738,10 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
     assert routes == StructuredObjectiveEvidenceRoutes()
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredObjectiveEvidenceRoutes
-    assert parse_call["max_completion_tokens"] == 1536
+    assert "max_completion_tokens" not in parse_call
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_units(
+def test_core_llm_extractor_does_not_cap_provider_parse_completion_tokens_for_objective_units(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
@@ -760,7 +760,7 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
     assert units == StructuredObjectiveEvidenceUnits()
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredObjectiveEvidenceUnits
-    assert parse_call["max_completion_tokens"] == 768
+    assert "max_completion_tokens" not in parse_call
 
 
 def test_core_llm_extractor_validates_lightweight_table_batch_mentions():

@@ -64,6 +64,7 @@ class CollectionService:
     def get_paths(self, collection_id: str) -> CollectionPaths:
         return self.repository.get_paths(collection_id)
 
+    # define a method for creating a document collection
     def create_collection(
         self,
         name: str,

@@ -14,7 +14,7 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
-from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle
+from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
 
 
 def test_default_source_pipeline_uses_structure_first_handoff_workflow():
@@ -162,6 +162,22 @@ def test_build_blocks_marks_figure_caption_lines_for_plain_text_inputs():
     assert figure_captions.iloc[0]["text"] == "Figure 1 SEM image of the annealed powder."
 
 
+def test_build_pdf_converter_uses_auto_docling_device_by_default(monkeypatch):
+    monkeypatch.delenv("DOCLING_DEVICE", raising=False)
+
+    converter = build_pdf_converter()
+
+    assert _pdf_pipeline_device(converter) == "auto"
+
+
+def test_build_pdf_converter_uses_docling_device_env(monkeypatch):
+    monkeypatch.setenv("DOCLING_DEVICE", "cpu")
+
+    converter = build_pdf_converter()
+
+    assert _pdf_pipeline_device(converter) == "cpu"
+
+
 def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch, tmp_path):
     class FakeBBox:
         def __init__(self) -> None:
@@ -307,6 +323,12 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
     assert set(bundle.tables["table_id"]) == set(bundle.table_rows["table_id"])
     assert "Strength (MPa)" in set(bundle.table_cells["header_path"].dropna())
     assert "MPa" in set(bundle.table_cells["unit_hint"].dropna())
+
+
+def _pdf_pipeline_device(converter) -> str:  # noqa: ANN001
+    from docling.datamodel.base_models import InputFormat
+
+    return str(converter.format_to_options[InputFormat.PDF].pipeline_options.accelerator_options.device)
 
 
 def test_heading_path_binding_prefers_same_page_bbox_heading_above_target():

@@ -1,26 +1,35 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
-	import type { DocumentMarkdownResponse } from '../../../../../_shared/documents';
+	import type {
+		DocumentMarkdownResponse,
+		DocumentMarkdownSourceMapItem,
+		WorkbenchSourceSpan
+	} from '../../../../../_shared/documents';
 
-	type MarkdownHeading = {
+	type MarkdownNodeBase = {
+		sourceMap: DocumentMarkdownSourceMapItem | null;
+	};
+	type MarkdownHeading = MarkdownNodeBase & {
 		type: 'heading';
 		level: number;
 		text: string;
 	};
-	type MarkdownParagraph = {
+	type MarkdownParagraph = MarkdownNodeBase & {
 		type: 'paragraph';
 		text: string;
 	};
-	type MarkdownList = {
+	type MarkdownList = MarkdownNodeBase & {
 		type: 'list';
 		items: string[];
 	};
-	type MarkdownTable = {
+	type MarkdownTable = MarkdownNodeBase & {
 		type: 'table';
 		headers: string[];
 		rows: string[][];
 	};
-	type MarkdownImage = {
+	type MarkdownImage = MarkdownNodeBase & {
 		type: 'image';
 		alt: string;
 		src: string;
@@ -29,6 +38,8 @@
 
 	export let markdown: DocumentMarkdownResponse | null = null;
 	export let sourceFileUrl = '';
+	export let activeSourceRef = '';
+	export let activeSourceSpan: WorkbenchSourceSpan | null = null;
 	export let onShowPdf: () => void = () => {};
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
@@ -38,21 +49,26 @@
 		markdown?.parser ? `${$t('workbench.parserLabel')}: ${markdown.parser}` : '',
 		markdown?.source_map.length ? `${$t('workbench.sourceMapLabel')}: ${markdown.source_map.length}` : ''
 	].filter(Boolean);
+	$: activeNodeKey = activeMarkdownNodeKey(nodes, activeSourceRef, activeSourceSpan);
+	$: if (activeNodeKey) {
+		void scrollActiveNodeIntoView(activeNodeKey);
+	}
 
 	function parseMarkdown(value: string): MarkdownNode[] {
 		const lines = value.replace(/\r\n/g, '\n').split('\n');
 		const parsed: MarkdownNode[] = [];
+		const usedSourceMapIndexes = new Set<number>();
 		let paragraph: string[] = [];
 		let listItems: string[] = [];
 
 		function flushParagraph() {
 			const text = paragraph.join(' ').trim();
-			if (text) parsed.push({ type: 'paragraph', text });
+			if (text) parsed.push({ type: 'paragraph', text, sourceMap: null });
 			paragraph = [];
 		}
 
 		function flushList() {
-			if (listItems.length) parsed.push({ type: 'list', items: listItems });
+			if (listItems.length) parsed.push({ type: 'list', items: listItems, sourceMap: null });
 			listItems = [];
 		}
 
@@ -65,7 +81,7 @@
 				continue;
 			}
 
-			const table = tryReadTable(lines, index);
+			const table = tryReadTable(lines, index, usedSourceMapIndexes);
 			if (table) {
 				flushParagraph();
 				flushList();
@@ -81,7 +97,8 @@
 				parsed.push({
 					type: 'image',
 					alt: stripInlineMarkdown(image[1]),
-					src: image[2].trim()
+					src: image[2].trim(),
+					sourceMap: nextSourceMapForArtifacts(['figure'], usedSourceMapIndexes)
 				});
 				continue;
 			}
@@ -93,7 +110,8 @@
 				parsed.push({
 					type: 'heading',
 					level: heading[1].length,
-					text: stripInlineMarkdown(heading[2])
+					text: stripInlineMarkdown(heading[2]),
+					sourceMap: null
 				});
 				continue;
 			}
@@ -114,7 +132,7 @@
 		return parsed;
 	}
 
-	function tryReadTable(lines: string[], startIndex: number) {
+	function tryReadTable(lines: string[], startIndex: number, usedSourceMapIndexes: Set<number>) {
 		const headerLine = lines[startIndex]?.trim() ?? '';
 		const separatorLine = lines[startIndex + 1]?.trim() ?? '';
 		if (!isTableLine(headerLine) || !/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(separatorLine)) {
@@ -129,7 +147,12 @@
 			cursor += 1;
 		}
 		return {
-			node: { type: 'table' as const, headers, rows },
+			node: {
+				type: 'table' as const,
+				headers,
+				rows,
+				sourceMap: nextSourceMapForArtifacts(['table'], usedSourceMapIndexes)
+			},
 			nextIndex: cursor - 1
 		};
 	}
@@ -155,6 +178,87 @@
 			.replace(/\*([^*]+)\*/g, '$1')
 			.replace(/_([^_]+)_/g, '$1')
 			.trim();
+	}
+
+	function nextSourceMapForArtifacts(
+		artifactTypes: string[],
+		usedIndexes: Set<number>
+	): DocumentMarkdownSourceMapItem | null {
+		const sourceMap = markdown?.source_map ?? [];
+		for (const [index, item] of sourceMap.entries()) {
+			if (usedIndexes.has(index)) continue;
+			if (!artifactTypes.includes(item.artifact_type)) continue;
+			usedIndexes.add(index);
+			return item;
+		}
+		return null;
+	}
+
+	function activeMarkdownNodeKey(
+		currentNodes: MarkdownNode[],
+		sourceRef: string,
+		sourceSpan: WorkbenchSourceSpan | null
+	) {
+		const targetKeys = [
+			sourceRef,
+			sourceSpan?.block_id,
+			sourceSpan?.anchor_id,
+			sourceSpan?.target.sectionId,
+			sourceSpan?.target.headingPath,
+			sourceSpan?.target.label
+		]
+			.map(normalizeMatchKey)
+			.filter(Boolean);
+		const sourceQuote = normalizeMatchKey(sourceSpan?.quote || sourceSpan?.target.quote || '');
+		for (const [index, node] of currentNodes.entries()) {
+			const nodeMapValues = [
+				node.sourceMap?.markdown_anchor,
+				node.sourceMap?.artifact_id,
+				node.sourceMap?.block_id,
+				node.sourceMap?.table_id,
+				node.sourceMap?.figure_id,
+				node.sourceMap?.heading_path
+			].map(normalizeMatchKey);
+			if (targetKeys.some((target) => nodeMapValues.includes(target))) {
+				return markdownNodeKey(node, index);
+			}
+			const text = normalizeMatchKey(nodeText(node));
+			if (sourceQuote && text.includes(sourceQuote.slice(0, 80))) {
+				return markdownNodeKey(node, index);
+			}
+		}
+		return '';
+	}
+
+	function markdownNodeKey(node: MarkdownNode, index: number) {
+		return [
+			node.type,
+			node.sourceMap?.markdown_anchor,
+			node.sourceMap?.artifact_id,
+			nodeText(node).slice(0, 64),
+			index
+		]
+			.filter(Boolean)
+			.join(':');
+	}
+
+	function nodeText(node: MarkdownNode) {
+		if (node.type === 'heading' || node.type === 'paragraph') return node.text;
+		if (node.type === 'image') return node.alt;
+		if (node.type === 'list') return node.items.join(' ');
+		return [...node.headers, ...node.rows.flat()].join(' ');
+	}
+
+	function normalizeMatchKey(value: string | null | undefined) {
+		return (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+	}
+
+	async function scrollActiveNodeIntoView(nodeKey: string) {
+		if (!browser) return;
+		await tick();
+		document
+			.querySelector<HTMLElement>(`[data-markdown-node-key="${CSS.escape(nodeKey)}"]`)
+			?.scrollIntoView({ block: 'center' });
 	}
 </script>
 
@@ -183,31 +287,76 @@
 
 	<div class="markdown-reader__body" data-testid="markdown-paper-reader">
 		{#if nodes.length}
-			{#each nodes as node}
+			{#each nodes as node, index (markdownNodeKey(node, index))}
+				{@const nodeKey = markdownNodeKey(node, index)}
 				{#if node.type === 'heading'}
 					{#if node.level <= 1}
-						<h1>{node.text}</h1>
+						<h1
+							class:markdown-node--active={activeNodeKey === nodeKey}
+							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+							data-markdown-node-key={nodeKey}
+						>
+							{node.text}
+						</h1>
 					{:else if node.level === 2}
-						<h2>{node.text}</h2>
+						<h2
+							class:markdown-node--active={activeNodeKey === nodeKey}
+							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+							data-markdown-node-key={nodeKey}
+						>
+							{node.text}
+						</h2>
 					{:else if node.level === 3}
-						<h3>{node.text}</h3>
+						<h3
+							class:markdown-node--active={activeNodeKey === nodeKey}
+							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+							data-markdown-node-key={nodeKey}
+						>
+							{node.text}
+						</h3>
 					{:else}
-						<h4>{node.text}</h4>
+						<h4
+							class:markdown-node--active={activeNodeKey === nodeKey}
+							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+							data-markdown-node-key={nodeKey}
+						>
+							{node.text}
+						</h4>
 					{/if}
 				{:else if node.type === 'paragraph'}
-					<p>{node.text}</p>
+					<p
+						class:markdown-node--active={activeNodeKey === nodeKey}
+						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+						data-markdown-node-key={nodeKey}
+					>
+						{node.text}
+					</p>
 				{:else if node.type === 'image'}
-					<figure class="markdown-figure">
+					<figure
+						class="markdown-figure"
+						class:markdown-node--active={activeNodeKey === nodeKey}
+						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+						data-markdown-node-key={nodeKey}
+					>
 						<img src={node.src} alt={node.alt} loading="lazy" />
 					</figure>
 				{:else if node.type === 'list'}
-					<ul>
+					<ul
+						class:markdown-node--active={activeNodeKey === nodeKey}
+						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+						data-markdown-node-key={nodeKey}
+					>
 						{#each node.items as item}
 							<li>{item}</li>
 						{/each}
 					</ul>
 				{:else if node.type === 'table'}
-					<div class="markdown-table-wrapper">
+					<div
+						class="markdown-table-wrapper"
+						class:markdown-node--active={activeNodeKey === nodeKey}
+						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
+						data-markdown-node-key={nodeKey}
+					>
 						<table>
 							<thead>
 								<tr>
@@ -356,6 +505,13 @@
 
 	.markdown-reader__body li + li {
 		margin-top: 6px;
+	}
+
+	.markdown-reader__body .markdown-node--active {
+		border-radius: 8px;
+		outline: 2px solid #2563eb;
+		outline-offset: 4px;
+		background: #eff6ff;
 	}
 
 	.markdown-figure {

@@ -9,6 +9,7 @@
 		fetchDocumentMarkdown,
 		type DocumentComparisonSemanticsResponse,
 		type DocumentContentResponse,
+		type DocumentMarkdownSourceMapItem,
 		type DocumentMarkdownResponse,
 		type DocumentWorkbenchModel,
 		type SourceAnchor,
@@ -70,11 +71,13 @@
 	$: requestedResultId = $page.url.searchParams.get('result_id')?.trim() ?? '';
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
+	$: requestedSourceRef = $page.url.searchParams.get('source_ref')?.trim() ?? '';
 	$: requestedPageNumber = positivePageParam($page.url.searchParams.get('page'));
 	$: requestedReaderMode = readerModeParam($page.url.searchParams.get('view'));
 	$: requestedReturnTo = safeReturnTo($page.url.searchParams.get('return_to'));
 	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
-	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedPageNumber ?? ''}:${requestedReaderMode ?? ''}`;
+	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedSourceRef}:${requestedPageNumber ?? ''}:${requestedReaderMode ?? ''}`;
+	$: sourceReviewOnly = requestedReaderMode === 'parsed-paper' && Boolean(requestedSourceRef);
 	$: hasMarkdownSource = Boolean(markdownForReader?.markdown);
 	$: hasDocumentSource = Boolean(contentForModel || markdownForReader?.markdown);
 	$: hasExtractionDetails = Boolean(
@@ -85,6 +88,8 @@
 	);
 	$: selectedGraph = graphForSelection(model, selectedItemId);
 	$: selectedSourceAnchor = sourceAnchorForSelection(model, selectedSourceSpanId);
+	$: selectedSourceSpan =
+		model?.source_spans.find((span) => span.id === selectedSourceSpanId) ?? null;
 	$: paperMaterialRows = paperAggregation?.materials ?? [];
 	$: activePaperMaterial =
 		paperMaterialRows.find((material) => material.material_id === selectedPaperMaterialId) ??
@@ -123,6 +128,7 @@
 		const currentCollectionId = collectionId;
 		const currentDocumentId = routeDocumentId;
 		const currentRequestedEvidenceId = requestedEvidenceId;
+		const currentSourceReviewOnly = sourceReviewOnly;
 
 		loading = true;
 		model = null;
@@ -144,28 +150,36 @@
 				: 'parsed-paper');
 
 		const researchPromise = loadPaperResearchView(currentCollectionId, currentDocumentId);
-		const [contentResult, markdownResult, resultsResult, semanticsResult] = await Promise.allSettled([
+		const basePromises = [
 			fetchDocumentContent(currentCollectionId, currentDocumentId),
-			fetchDocumentMarkdown(currentCollectionId, currentDocumentId),
-			fetchCollectionResults(currentCollectionId, {
-				source_document_id: currentDocumentId,
-				limit: 20
-			}),
-			fetchDocumentComparisonSemantics(currentCollectionId, currentDocumentId, {
-				includeGroupedProjections: true
-			})
-		]);
+			fetchDocumentMarkdown(currentCollectionId, currentDocumentId)
+		] as const;
+		const extractionPromises = currentSourceReviewOnly
+			? null
+			: ([
+					fetchCollectionResults(currentCollectionId, {
+						source_document_id: currentDocumentId,
+						limit: 20
+					}),
+					fetchDocumentComparisonSemantics(currentCollectionId, currentDocumentId, {
+						includeGroupedProjections: true
+					})
+				] as const);
+		const [contentResult, markdownResult] = await Promise.allSettled(basePromises);
+		const [resultsResult, semanticsResult] = extractionPromises
+			? await Promise.allSettled(extractionPromises)
+			: [null, null];
 		await researchPromise;
 		if (generation !== loadGeneration) return;
 
 		contentForModel = contentResult.status === 'fulfilled' ? contentResult.value : null;
 		markdownForReader = markdownResult.status === 'fulfilled' ? markdownResult.value : null;
-		relatedResultsForModel = resultsResult.status === 'fulfilled' ? resultsResult.value.items : [];
+		relatedResultsForModel = resultsResult?.status === 'fulfilled' ? resultsResult.value.items : [];
 		comparisonSemanticsForModel =
-			semanticsResult.status === 'fulfilled' ? semanticsResult.value : null;
+			semanticsResult?.status === 'fulfilled' ? semanticsResult.value : null;
 
 		let requestedTraceback: EvidenceTracebackResponse | null = null;
-		if (currentRequestedEvidenceId) {
+		if (currentRequestedEvidenceId && !currentSourceReviewOnly) {
 			try {
 				requestedTraceback = await fetchEvidenceTraceback(
 					currentCollectionId,
@@ -207,6 +221,15 @@
 		return true;
 	}
 
+	function selectRequestedSourceRef(nextModel: DocumentWorkbenchModel) {
+		const sourceSpan = sourceSpanForSourceRef(nextModel, markdownForReader, requestedSourceRef);
+		if (!sourceSpan) return false;
+		selectedSourceSpanId = sourceSpan.id;
+		readerMode = requestedReaderMode ?? 'parsed-paper';
+		sourceJumpToken += 1;
+		return true;
+	}
+
 	function selectRequestedPage(nextModel: DocumentWorkbenchModel) {
 		if (!requestedPageNumber) return false;
 		const sourceSpan = nextModel.source_spans.find((span) => span.page === requestedPageNumber);
@@ -244,7 +267,7 @@
 			model.selectable_items.find((item) => item.id === requestedEvidenceId)?.id ||
 			model.default_item_id;
 		selectItem(requestedItemId);
-		if (!selectRequestedAnchor(model)) selectRequestedPage(model);
+		if (!selectRequestedAnchor(model) && !selectRequestedSourceRef(model)) selectRequestedPage(model);
 	}
 
 	function selectItem(itemId: string, tab?: WorkbenchTab, options: SelectItemOptions = {}) {
@@ -307,7 +330,12 @@
 			preserveGraphNodeId: graphNodeId,
 			skipTracebackFetch: true
 		});
-		if (model && requestedEvidenceId === evidenceId && !selectRequestedAnchor(model)) {
+		if (
+			model &&
+			requestedEvidenceId === evidenceId &&
+			!selectRequestedAnchor(model) &&
+			!selectRequestedSourceRef(model)
+		) {
 			selectRequestedPage(model);
 		}
 	}
@@ -441,6 +469,63 @@
 		return null;
 	}
 
+	function normalizeSourceRefMatchKey(value: string | null | undefined) {
+		return (value ?? '').trim().toLowerCase();
+	}
+
+	function sourceSpanForSourceRef(
+		currentModel: DocumentWorkbenchModel,
+		markdown: DocumentMarkdownResponse | null,
+		sourceRef: string
+	) {
+		const target = normalizeSourceRefMatchKey(sourceRef);
+		if (!target) return null;
+
+		const exactSpan = currentModel.source_spans.find((span) =>
+			[
+				span.id,
+				span.block_id,
+				span.anchor_id,
+				span.target.sectionId,
+				span.target.headingPath,
+				span.target.label
+			].some((value) => normalizeSourceRefMatchKey(value) === target)
+		);
+		if (exactSpan) return exactSpan;
+
+		const sourceMapItem = markdownSourceMapItemForRef(markdown, target);
+		if (sourceMapItem?.block_id) {
+			const span = currentModel.source_spans.find(
+				(candidate) =>
+					normalizeSourceRefMatchKey(candidate.block_id) ===
+					normalizeSourceRefMatchKey(sourceMapItem.block_id)
+			);
+			if (span) return span;
+		}
+		if (sourceMapItem?.page) {
+			return currentModel.source_spans.find((span) => span.page === sourceMapItem.page) ?? null;
+		}
+		return null;
+	}
+
+	function markdownSourceMapItemForRef(
+		markdown: DocumentMarkdownResponse | null,
+		target: string
+	): DocumentMarkdownSourceMapItem | null {
+		return (
+			markdown?.source_map.find((item) =>
+				[
+					item.markdown_anchor,
+					item.artifact_id,
+					item.block_id,
+					item.table_id,
+					item.figure_id,
+					item.heading_path
+				].some((value) => normalizeSourceRefMatchKey(value) === target)
+			) ?? null
+		);
+	}
+
 	function safeReturnTo(rawValue: string | null) {
 		const value = rawValue?.trim() ?? '';
 		if (!value || !value.startsWith('/') || value.startsWith('//')) return '';
@@ -544,6 +629,8 @@
 						<MarkdownPaperReader
 							markdown={markdownForReader}
 							sourceFileUrl={model.sourceFileUrl}
+							activeSourceRef={requestedSourceRef}
+							activeSourceSpan={selectedSourceSpan}
 							onShowPdf={showPdfPreview}
 						/>
 					{:else}

@@ -73,6 +73,10 @@ function tracebackCallPaths() {
 		.filter((path) => path.endsWith('/traceback'));
 }
 
+function callPaths() {
+	return fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request));
+}
+
 function buildResearchPayload() {
 	return {
 		collection_id: 'col_123',
@@ -240,6 +244,28 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							block_type: 'paragraph',
 							page: 1,
 							heading_path: 'Abstract',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-results',
+							artifact_type: 'block',
+							artifact_id: 'results',
+							block_id: 'results',
+							block_type: 'paragraph',
+							page: 3,
+							heading_path: 'Results',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'figure-fig-1',
+							artifact_type: 'figure',
+							artifact_id: 'fig_1',
+							block_id: null,
+							table_id: null,
+							figure_id: 'fig_1',
+							block_type: null,
+							page: 3,
+							heading_path: 'Results',
 							text_unit_ids: []
 						}
 					],
@@ -603,6 +629,29 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
+	});
+
+	it('highlights the parsed paper source when a source_ref deep link is present', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=results&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
+		expect(callPaths()).not.toContain('/api/v1/collections/col_123/results');
+		expect(callPaths()).not.toContain(
+			'/api/v1/collections/col_123/documents/doc_1/comparison-semantics'
+		);
+		expect(tracebackCallPaths()).toEqual([]);
 	});
 
 	it('honors page and return_to query parameters for source review links', async () => {

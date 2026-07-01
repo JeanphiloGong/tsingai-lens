@@ -370,6 +370,74 @@ def test_objective_understanding_binds_claim_specific_context_boundaries():
     )
 
 
+def test_objective_understanding_prioritizes_high_value_evidence_refs():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power"],
+            "property_axes": ["relative density"],
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "value_payload": {"source_value_text": "99.1 %"},
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "abstract",
+                        "display_label": "P001 Abstract",
+                        "quote": "The abstract mentions density.",
+                    },
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-results",
+                        "display_label": "P001 Table 2 Results",
+                        "quote": "Relative density is measured as 99.1 %.",
+                    },
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "results-paragraph",
+                        "display_label": "P001 Results paragraph",
+                        "quote": "The results section reports relative density.",
+                    },
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        ],
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    claim = understanding["claims"][0]
+    evidence_by_id = {
+        ref["evidence_ref_id"]: ref for ref in understanding["evidence_refs"]
+    }
+    claim_labels = [
+        evidence_by_id[evidence_ref_id]["label"]
+        for evidence_ref_id in claim["evidence_ref_ids"]
+    ]
+    assert claim_labels == [
+        "P001 Table 2 Results",
+        "P001 Results paragraph",
+        "P001 Abstract",
+    ]
+    presentation_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    first_item = presentation_by_id[claim["evidence_ref_ids"][0]]
+    assert first_item["title"] == "table-results"
+    assert first_item["quote"] == "Relative density is measured as 99.1 %."
+
+
 def test_material_understanding_projects_findings_measurements_and_relations():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     evidence_ref = {

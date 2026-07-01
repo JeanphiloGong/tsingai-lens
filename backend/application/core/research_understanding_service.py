@@ -640,7 +640,7 @@ class ResearchUnderstandingService:
         for group in _mapping_list(payload.get("comparison_groups")):
             for ref in _mapping_list(group.get("evidence_refs")):
                 refs.append(self._normalize_existing_evidence_ref(ref))
-        return _dedupe_by_id(refs, "evidence_ref_id")
+        return self._sort_evidence_refs_for_review(refs)
 
     def _normalize_existing_evidence_ref(self, ref: Mapping[str, Any]) -> dict[str, Any]:
         locator = _locator_mapping(ref.get("locator"))
@@ -683,7 +683,54 @@ class ResearchUnderstandingService:
                 refs.append(self._evidence_ref_from_unit(unit, source_ref=source_ref))
             if unit_id and _strings(unit.get("evidence_anchor_ids")):
                 refs.append(self._evidence_ref_from_unit(unit, source_ref=None))
-        return _dedupe_by_id(refs, "evidence_ref_id")
+        return self._sort_evidence_refs_for_review(refs)
+
+    def _sort_evidence_refs_for_review(
+        self,
+        refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        deduped = _dedupe_by_id(refs, "evidence_ref_id")
+        return [
+            ref
+            for _, ref in sorted(
+                enumerate(deduped),
+                key=lambda item: (*self._evidence_ref_priority(item[1]), item[0]),
+            )
+        ]
+
+    def _evidence_ref_priority(self, ref: Mapping[str, Any]) -> tuple[int, int]:
+        source_kind = (_text(ref.get("source_kind")) or "").lower()
+        priority = 40
+        if "table" in source_kind:
+            priority = 0
+        elif "figure" in source_kind:
+            priority = 1
+        text = self._evidence_priority_text(ref).lower()
+        if any(term in text for term in ("result", "discussion", "conclusion")):
+            priority = min(priority, 2)
+        if any(term in text for term in ("table", "figure", "value", "measured")):
+            priority = min(priority, 3)
+        if any(term in text for term in ("abstract", "introduction", "background")):
+            priority = max(priority, 80)
+        if not _text(ref.get("quote")) and source_kind in {"unknown", "text_window"}:
+            priority = max(priority, 60)
+        traceability_status = _text(ref.get("traceability_status")) or ""
+        traceability_rank = 0 if traceability_status in {"resolved", "traceable"} else 1
+        return (priority, traceability_rank)
+
+    def _evidence_priority_text(self, ref: Mapping[str, Any]) -> str:
+        locator = _locator_mapping(ref.get("locator"))
+        return " ".join(
+            value
+            for value in (
+                _text(ref.get("label")),
+                _text(locator.get("source_ref")),
+                _text(locator.get("source_kind")),
+                _text(ref.get("quote")),
+                _text(ref.get("source_kind")),
+            )
+            if value
+        )
 
     def _evidence_ref_from_unit(
         self,

@@ -567,6 +567,39 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('submits expert curation with corrected evidence and context bindings', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
+		await expect.element(claimDetail.getByText('Curated evidence')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Curated context')).toBeInTheDocument();
+		await claimDetail.getByLabelText(/P001 Section 3\.2/).click();
+		await claimDetail.getByLabelText(/Heat treatment scope/).click();
+		await claimDetail
+			.getByLabelText('Curated statement')
+			.fill('Annealing may reduce cellular substructure, but current evidence should be removed.');
+		await claimDetail.getByRole('button', { name: 'Save curation' }).click();
+
+		await expect.element(claimDetail.getByText(/Curation saved:/)).toBeInTheDocument();
+		const curationPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith(
+					'/research-understanding/curations'
+				) && (init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(curationPostCall).toBeTruthy();
+		const [, init] = curationPostCall!;
+		expect(JSON.parse(String(init.body))).toMatchObject({
+			curated_evidence_ref_ids: [],
+			curated_context_ids: []
+		});
+	});
+
 	it('loads existing expert curation into the selected claim form', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

@@ -62,6 +62,8 @@
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
 	let curationStatement = '';
+	let curationEvidenceRefIds: string[] = [];
+	let curationContextIds: string[] = [];
 	let curationNote = '';
 	let curationReviewer = '';
 	let curationSubmitting = false;
@@ -152,6 +154,18 @@
 		: null;
 	$: selectedEvidenceRefs = displayClaim ? presentationEvidenceForIds(displayClaim.evidence_ref_ids) : [];
 	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
+	$: selectedCurationEvidenceOptions = selectedClaim
+		? presentationEvidenceForIds([
+				...selectedClaim.evidence_ref_ids,
+				...(selectedCuration?.curated_evidence_ref_ids ?? [])
+			])
+		: [];
+	$: selectedCurationContextOptions = selectedClaim
+		? presentationContextsForIds([
+				...selectedClaim.context_ids,
+				...(selectedCuration?.curated_context_ids ?? [])
+			])
+		: [];
 	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
 		lastCurationClaimId = selectedClaim?.claim_id ?? '';
 		activeReviewPanel = '';
@@ -409,15 +423,26 @@
 	}
 
 	function presentationEvidenceForIds(ids: string[]) {
-		return ids
+		return [...new Set(ids)]
 			.map((id) => presentationEvidenceById.get(id))
 			.filter((ref): ref is ResearchUnderstandingPresentationEvidence => Boolean(ref));
 	}
 
 	function presentationContextsForIds(ids: string[]) {
-		return ids
+		return [...new Set(ids)]
 			.map((id) => presentationContextById.get(id))
 			.filter((context): context is ResearchUnderstandingPresentationContext => Boolean(context));
+	}
+
+	function contextCurationMeta(context: ResearchUnderstandingPresentationContext) {
+		return [
+			listLabel(context.material_scope),
+			listLabel(context.property_scope),
+			context.process_summary,
+			context.test_summary
+		]
+			.filter((value) => value && value !== $t('research.emptyValue'))
+			.join(' · ');
 	}
 
 	function scopeId(currentUnderstanding: ResearchUnderstanding | null) {
@@ -437,8 +462,24 @@
 		curationClaimType = curation?.curated_claim_type ?? selectedClaim?.claim_type ?? 'finding';
 		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'limited';
 		curationStatement = curation?.curated_statement ?? selectedClaim?.statement ?? '';
+		curationEvidenceRefIds = [
+			...(curation?.curated_evidence_ref_ids ?? selectedClaim?.evidence_ref_ids ?? [])
+		];
+		curationContextIds = [...(curation?.curated_context_ids ?? selectedClaim?.context_ids ?? [])];
 		curationNote = curation?.note ?? '';
 		curationReviewer = curation?.reviewer ?? '';
+	}
+
+	function toggleCurationEvidence(evidenceId: string) {
+		curationEvidenceRefIds = curationEvidenceRefIds.includes(evidenceId)
+			? curationEvidenceRefIds.filter((id) => id !== evidenceId)
+			: [...curationEvidenceRefIds, evidenceId];
+	}
+
+	function toggleCurationContext(contextId: string) {
+		curationContextIds = curationContextIds.includes(contextId)
+			? curationContextIds.filter((id) => id !== contextId)
+			: [...curationContextIds, contextId];
 	}
 
 	async function loadCurationsForScope(scopeKey: string) {
@@ -519,8 +560,8 @@
 				curated_claim_type: curationClaimType,
 				curated_status: curationStatus,
 				curated_statement: curationStatement.trim(),
-				curated_evidence_ref_ids: selectedClaim.evidence_ref_ids,
-				curated_context_ids: selectedClaim.context_ids,
+				curated_evidence_ref_ids: curationEvidenceRefIds,
+				curated_context_ids: curationContextIds,
 				note: curationNote.trim() || null,
 				reviewer: curationReviewer.trim() || null
 			});
@@ -913,6 +954,65 @@
 											required
 										></textarea>
 									</label>
+									<fieldset class="research-understanding-workbench__curation-picker">
+										<legend>{$t('research.understanding.curationEvidenceRefs')}</legend>
+										{#if selectedCurationEvidenceOptions.length}
+											<div class="research-understanding-workbench__check-list">
+												{#each selectedCurationEvidenceOptions as ref (ref.evidence_ref_id)}
+													{@const sourceText = evidenceSourceText(ref)}
+													<label class="research-understanding-workbench__check-item">
+														<input
+															type="checkbox"
+															checked={curationEvidenceRefIds.includes(ref.evidence_ref_id)}
+															disabled={curationSubmitting}
+															on:change={() => toggleCurationEvidence(ref.evidence_ref_id)}
+														/>
+														<span>
+															<strong>{readableEvidenceTitle(ref.title)}</strong>
+															<small>{evidenceMeta(ref)}</small>
+															{#if sourceText}
+																<em>{compactText(sourceText, 220)}</em>
+															{:else}
+																<em>{$t('research.understanding.noEvidenceSourceText')}</em>
+															{/if}
+														</span>
+													</label>
+												{/each}
+											</div>
+										{:else}
+											<p class="research-understanding-workbench__picker-empty">
+												{$t('research.understanding.curationNoEvidenceRefs')}
+											</p>
+										{/if}
+									</fieldset>
+									<fieldset class="research-understanding-workbench__curation-picker">
+										<legend>{$t('research.understanding.curationContextRefs')}</legend>
+										{#if selectedCurationContextOptions.length}
+											<div class="research-understanding-workbench__check-list">
+												{#each selectedCurationContextOptions as context (context.context_id)}
+													<label class="research-understanding-workbench__check-item">
+														<input
+															type="checkbox"
+															checked={curationContextIds.includes(context.context_id)}
+															disabled={curationSubmitting}
+															on:change={() => toggleCurationContext(context.context_id)}
+														/>
+														<span>
+															<strong>{context.label}</strong>
+															<small>{contextCurationMeta(context)}</small>
+															{#if context.limitations.length}
+																<em>{listLabel(context.limitations)}</em>
+															{/if}
+														</span>
+													</label>
+												{/each}
+											</div>
+										{:else}
+											<p class="research-understanding-workbench__picker-empty">
+												{$t('research.understanding.curationNoContextRefs')}
+											</p>
+										{/if}
+									</fieldset>
 									<label>
 										<span>{$t('research.understanding.curationNote')}</span>
 										<textarea
@@ -1571,6 +1671,81 @@
 
 	.research-understanding-workbench__feedback textarea {
 		resize: vertical;
+	}
+
+	.research-understanding-workbench__curation-picker {
+		display: grid;
+		gap: 8px;
+		margin: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__curation-picker legend {
+		padding: 0 4px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__check-list {
+		display: grid;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__check-item {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: start;
+		gap: 9px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__feedback .research-understanding-workbench__check-item input {
+		width: 16px;
+		min-width: 16px;
+		height: 16px;
+		margin-top: 2px;
+		padding: 0;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__check-item > span {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__check-item strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__check-item small,
+	.research-understanding-workbench__check-item em,
+	.research-understanding-workbench__picker-empty {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__check-item em {
+		display: block;
+		font-style: normal;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__picker-empty {
+		margin: 0;
 	}
 
 	.research-understanding-workbench__feedback button {

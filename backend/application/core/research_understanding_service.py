@@ -949,11 +949,10 @@ class ResearchUnderstandingService:
         ]
         related_relations = [
             relation
-            for relation in relations
-            if relation in direct_relations
-            or _intersects(context_ids, _strings(relation.get("context_ids")))
+            for relation in direct_relations
+            if self._reviewable_presentation_relation(relation)
         ]
-        primary_relation = direct_relations[0] if direct_relations else {}
+        primary_relation = related_relations[0] if related_relations else {}
         contexts = [
             contexts_by_id[context_id]
             for context_id in context_ids
@@ -1006,6 +1005,45 @@ class ResearchUnderstandingService:
             "needs_review": self._needs_review(claim),
             "warnings": _strings(claim.get("warnings")),
         }
+
+    def _reviewable_presentation_relation(self, relation: Mapping[str, Any]) -> bool:
+        return bool(self._presentation_relation_summary(relation))
+
+    def _presentation_relation_summary(self, relation: Mapping[str, Any]) -> str:
+        statement = _text(relation.get("statement"))
+        if statement and _looks_user_facing(statement):
+            return statement
+        subject = self._presentation_relation_side(relation.get("subject"))
+        object_text = self._presentation_relation_side(relation.get("object"))
+        predicate = _text(relation.get("predicate")) or _text(relation.get("relation_type"))
+        if subject and object_text and _looks_user_facing(predicate):
+            return f"{subject} -> {predicate} -> {object_text}"
+        return ""
+
+    def _presentation_relation_side(self, value: Any) -> str:
+        text = _text(value)
+        if not text or not _looks_user_facing(text):
+            return ""
+        lower = text.lower()
+        if (
+            "sample_context" in lower
+            or "process_context" in lower
+            or "test_condition" in lower
+            or "source_object_ids" in lower
+            or "evidence_ref_ids" in lower
+            or lower.startswith(
+                (
+                    "sample_number:",
+                    "condition_number:",
+                    "sample id:",
+                    "condition id:",
+                    "sample number:",
+                    "condition number:",
+                )
+            )
+        ):
+            return ""
+        return text
 
     def _presentation_evidence_item(
         self,

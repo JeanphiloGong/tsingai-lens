@@ -460,3 +460,103 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
         evidence_item["source_text"]
         == "Relative density is reported as 99.1% for the LPBF sample."
     )
+
+
+def test_with_presentation_keeps_only_reviewable_direct_relations():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does LPBF affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "comparison",
+                    "statement": "Laser power increases relative density.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_laser_density",
+                    "relation_type": "increases",
+                    "subject": "laser power",
+                    "predicate": "increases",
+                    "object": "relative density",
+                    "statement": None,
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                },
+                {
+                    "relation_id": "rel_internal_sample",
+                    "relation_type": "increases",
+                    "subject": "sample_number: 2",
+                    "predicate": "increases",
+                    "object": "sample_context: {'sample': 2}",
+                    "statement": None,
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                },
+                {
+                    "relation_id": "rel_context_only",
+                    "relation_type": "explains",
+                    "subject": "build orientation",
+                    "predicate": "explains",
+                    "object": "texture",
+                    "statement": "Build orientation explains texture changes.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_texture"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_texture"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                },
+                {
+                    "evidence_ref_id": "evref_texture",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Results",
+                    "locator": {"source_ref": "blk-texture"},
+                    "fact_ids": ["unit_texture"],
+                    "traceability_status": "resolved",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"variable_process_axes": ["laser power"]},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    effect = understanding["presentation"]["effects"][0]
+    assert effect["relation_ids"] == ["rel_laser_density"]
+    assert effect["effect_direction"] == "increases"

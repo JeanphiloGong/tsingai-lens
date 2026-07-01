@@ -75,13 +75,19 @@ class ResearchUnderstandingService:
         evidence_units = _mapping_list(payload.get("evidence_units"))
         evidence_refs = self._evidence_refs_from_evidence_units(evidence_units)
         evidence_ref_ids_by_unit = self._evidence_ref_ids_by_fact(evidence_refs)
-        contexts = self._objective_contexts(context, objective)
+        contexts = self._objective_contexts(
+            context,
+            objective,
+            evidence_units=evidence_units,
+        )
         context_ids = [item["context_id"] for item in contexts]
+        context_ids_by_unit = self._objective_context_ids_by_unit(contexts)
         claims = self._objective_claims(
             payload,
             evidence_units=evidence_units,
             evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
             context_ids=context_ids,
+            context_ids_by_unit=context_ids_by_unit,
         )
         relations = self._objective_relations(
             payload,
@@ -157,10 +163,12 @@ class ResearchUnderstandingService:
         self,
         context: Mapping[str, Any],
         objective: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not context and not objective:
+        if not context and not objective and not evidence_units:
             return []
-        return [
+        contexts = [
             {
                 "context_id": "ctx_objective_scope",
                 "label": "Objective scope",
@@ -184,6 +192,121 @@ class ResearchUnderstandingService:
                 "limitations": [],
             }
         ]
+        for unit in evidence_units:
+            unit_context = self._objective_context_from_evidence_unit(
+                unit,
+                objective_context=context,
+                objective=objective,
+            )
+            if unit_context:
+                contexts.append(unit_context)
+        return _dedupe_by_id(contexts, "context_id")
+
+    def _objective_context_ids_by_unit(
+        self,
+        contexts: list[dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        for context in contexts:
+            unit_id = _text(context.get("source_evidence_unit_id"))
+            context_id = _text(context.get("context_id"))
+            if unit_id and context_id:
+                result.setdefault(unit_id, []).append(context_id)
+        return {key: _dedupe_strings(value) for key, value in result.items()}
+
+    def _context_ids_for_evidence_unit(
+        self,
+        unit: Mapping[str, Any],
+        context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
+    ) -> list[str]:
+        unit_id = _text(unit.get("evidence_unit_id"))
+        if unit_id:
+            specific = context_ids_by_unit.get(unit_id, [])
+            if specific:
+                return specific
+        return context_ids[:1]
+
+    def _objective_context_from_evidence_unit(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        unit_id = _text(unit.get("evidence_unit_id"))
+        if not unit_id:
+            return {}
+        material_scope = self._context_material_scope(
+            unit,
+            objective_context,
+            objective,
+        )
+        process_context = self._context_process_scope(unit)
+        test_condition = _mapping(unit.get("test_condition"))
+        property_scope = self._context_property_scope(
+            unit,
+            objective_context,
+            objective,
+        )
+        has_unit_boundary = bool(
+            _display_values(_mapping(unit.get("material_system")))
+            or _display_values(process_context)
+            or _display_values(test_condition)
+            or _text(unit.get("property_normalized"))
+        )
+        if not has_unit_boundary:
+            return {}
+        return {
+            "context_id": f"ctx_{unit_id}_boundary",
+            "source_evidence_unit_id": unit_id,
+            "label": "Claim applicability",
+            "material_scope": material_scope,
+            "process_context": process_context,
+            "test_condition": test_condition,
+            "property_scope": property_scope,
+            "limitations": [],
+        }
+
+    def _context_material_scope(
+        self,
+        unit: Mapping[str, Any],
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> list[str]:
+        material_values = _display_values(_mapping(unit.get("material_system")))
+        if material_values:
+            return material_values
+        return _strings(
+            objective_context.get("material_scope") or objective.get("material_scope")
+        )
+
+    def _context_process_scope(self, unit: Mapping[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key in (
+            "process_context",
+            "sample_context",
+            "resolved_condition",
+            "baseline_context",
+        ):
+            value = _mapping(unit.get(key))
+            if _display_values(value):
+                result[key] = value
+        return result
+
+    def _context_property_scope(
+        self,
+        unit: Mapping[str, Any],
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> list[str]:
+        property_name = _text(unit.get("property_normalized"))
+        if property_name:
+            return [property_name]
+        return _strings(
+            objective_context.get("target_property_axes")
+            or objective.get("property_axes")
+        )
 
     def _material_contexts(self, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         overview = _mapping(payload.get("overview"))
@@ -213,6 +336,7 @@ class ResearchUnderstandingService:
         evidence_units: list[dict[str, Any]],
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
     ) -> list[dict[str, Any]]:
         claims: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -225,6 +349,11 @@ class ResearchUnderstandingService:
                 continue
             unit_id = _text(unit.get("evidence_unit_id"))
             evidence_unit_ids = [unit_id] if unit_id else []
+            claim_context_ids = self._context_ids_for_evidence_unit(
+                unit,
+                context_ids,
+                context_ids_by_unit,
+            )
             _append_claim(
                 claims,
                 self._claim(
@@ -232,7 +361,7 @@ class ResearchUnderstandingService:
                     statement=statement,
                     source_object_ids=evidence_unit_ids,
                     evidence_ref_ids=self._ref_ids_for(evidence_unit_ids, evidence_ref_ids_by_unit),
-                    context_ids=context_ids,
+                    context_ids=claim_context_ids,
                     confidence=unit.get("confidence"),
                     seen=seen,
                 ),
@@ -886,24 +1015,30 @@ class ResearchUnderstandingService:
             self._presentation_context_summary(context)
             for context in contexts
         ]
+        summary_contexts = [
+            context
+            for context in contexts
+            if not _text(context.get("source_evidence_unit_id"))
+            and not (_text(context.get("context_id")) or "").endswith("_boundary")
+        ] or contexts
         material_scope = _dedupe_strings(
             [
                 value
-                for context in contexts
+                for context in summary_contexts
                 for value in _strings(context.get("material_scope"))
             ]
         )
         property_scope = _dedupe_strings(
             [
                 value
-                for context in contexts
+                for context in summary_contexts
                 for value in _strings(context.get("property_scope"))
             ]
         )
         variable_axes = _dedupe_strings(
             [
                 value
-                for context in contexts
+                for context in summary_contexts
                 for value in _display_values(_mapping(context.get("process_context")))
             ]
         )

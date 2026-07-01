@@ -164,7 +164,7 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["summary"]["property_scope"] == ["corrosion resistance"]
     assert presentation["summary"]["review_queue_count"] == 0
     assert presentation["effects"][0]["claim_id"] == understanding["claims"][0]["claim_id"]
-    assert presentation["effects"][0]["target_property"] == "corrosion resistance"
+    assert presentation["effects"][0]["target_property"] == "corrosion current density"
     assert presentation["effects"][0]["evidence_count"] == 1
     assert presentation["evidence_items"][0]["title"] == "table-1"
 
@@ -260,6 +260,114 @@ def test_objective_understanding_filters_weak_claim_fragments():
     assert "laser power increases relative density" in statements
     assert "Optimized laser power improves relative density." in statements
     assert all(claim["claim_type"] != "context" for claim in understanding["claims"])
+
+
+def test_objective_understanding_binds_claim_specific_context_boundaries():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power"],
+            "property_axes": ["relative density"],
+        },
+        "objective_context": {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["laser power"],
+            "target_property_axes": ["relative density"],
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "material_system": {"alloy": "316L stainless steel"},
+                "process_context": {"process": "LPBF", "laser_power": "200 W"},
+                "sample_context": {"sample": "S2"},
+                "test_condition": {"method": "Archimedes"},
+                "value_payload": {"source_value_text": "99.1 %"},
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-density",
+                        "display_label": "P001 Table 2",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            },
+            {
+                "evidence_unit_id": "oeu-comparison",
+                "document_id": "paper-1",
+                "unit_kind": "comparison",
+                "property_normalized": "relative density",
+                "process_context": {"process": "LPBF", "scan_speed": "800 mm/s"},
+                "value_payload": {
+                    "comparison_axis": "scan speed",
+                    "direction": "decreases",
+                    "source_value_text": "scan speed decreases relative density",
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "paragraph",
+                        "source_ref": "blk-density",
+                        "display_label": "P001 Results",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.82,
+            },
+        ],
+        "logic_chain": {
+            "evidence_unit_ids": ["oeu-density", "oeu-comparison"],
+            "summary": "Laser parameters affect relative density.",
+        },
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    contexts_by_id = {
+        context["context_id"]: context for context in understanding["contexts"]
+    }
+    density_claim = next(
+        claim
+        for claim in understanding["claims"]
+        if claim["statement"] == "relative density is reported as 99.1 %."
+    )
+    density_context_ids = density_claim["context_ids"]
+    assert density_context_ids == ["ctx_oeu-density_boundary"]
+    density_context = contexts_by_id[density_context_ids[0]]
+    assert density_context["label"] == "Claim applicability"
+    assert density_context["material_scope"] == ["316L stainless steel"]
+    assert density_context["process_context"] == {
+        "process_context": {"process": "LPBF", "laser_power": "200 W"},
+        "sample_context": {"sample": "S2"},
+    }
+    assert density_context["test_condition"] == {"method": "Archimedes"}
+    assert density_context["property_scope"] == ["relative density"]
+
+    summary_claim = next(
+        claim
+        for claim in understanding["claims"]
+        if claim["statement"] == "Laser parameters affect relative density."
+    )
+    assert "ctx_objective_scope" in summary_claim["context_ids"]
+    assert "ctx_oeu-density_boundary" in summary_claim["context_ids"]
+    assert "ctx_oeu-comparison_boundary" in summary_claim["context_ids"]
+    density_effect = next(
+        effect
+        for effect in understanding["presentation"]["effects"]
+        if effect["claim_id"] == density_claim["claim_id"]
+    )
+    assert (
+        density_effect["context_summary"]
+        == "316L stainless steel, LPBF, 200 W, S2, Archimedes"
+    )
 
 
 def test_material_understanding_projects_findings_measurements_and_relations():

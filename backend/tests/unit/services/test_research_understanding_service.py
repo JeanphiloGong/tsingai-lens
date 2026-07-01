@@ -169,6 +169,99 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["evidence_items"][0]["title"] == "table-1"
 
 
+def test_objective_understanding_filters_weak_claim_fragments():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How do process parameters affect density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power"],
+            "property_axes": ["relative density"],
+        },
+        "objective_context": {
+            "objective_id": "obj-density",
+            "question": "How do process parameters affect density?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["laser power"],
+            "target_property_axes": ["relative density"],
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-weak-process",
+                "document_id": "paper-1",
+                "unit_kind": "process_context",
+                "value_payload": {
+                    "source_value_text": "Achieved through optimized process parameters",
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            },
+            {
+                "evidence_unit_id": "oeu-weak-context",
+                "document_id": "paper-1",
+                "unit_kind": "context",
+                "value_payload": {
+                    "source_value_text": "density level and ultimate microstructure",
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            },
+            {
+                "evidence_unit_id": "oeu-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "value_payload": {"source_value_text": "99.1 %"},
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-density",
+                        "display_label": "P001 Table 2",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            },
+            {
+                "evidence_unit_id": "oeu-comparison",
+                "document_id": "paper-1",
+                "unit_kind": "comparison",
+                "property_normalized": "relative density",
+                "value_payload": {
+                    "comparison_axis": "laser power",
+                    "direction": "increases",
+                    "source_value_text": "laser power increases relative density",
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "paragraph",
+                        "source_ref": "blk-density",
+                        "display_label": "P001 Results",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.82,
+            },
+        ],
+        "logic_chain": {
+            "evidence_unit_ids": ["oeu-density", "oeu-comparison"],
+            "summary": "Optimized laser power improves relative density.",
+        },
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert "Achieved through optimized process parameters" not in statements
+    assert "density level and ultimate microstructure" not in statements
+    assert "relative density is reported as 99.1 %." in statements
+    assert "laser power increases relative density" in statements
+    assert "Optimized laser power improves relative density." in statements
+    assert all(claim["claim_type"] != "context" for claim in understanding["claims"])
+
+
 def test_material_understanding_projects_findings_measurements_and_relations():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     evidence_ref = {

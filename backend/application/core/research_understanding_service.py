@@ -220,12 +220,15 @@ class ResearchUnderstandingService:
             statement = self._statement_from_evidence_unit(unit)
             if not statement:
                 continue
+            claim_type = self._reviewable_objective_claim_type(unit, statement)
+            if not claim_type:
+                continue
             unit_id = _text(unit.get("evidence_unit_id"))
             evidence_unit_ids = [unit_id] if unit_id else []
             _append_claim(
                 claims,
                 self._claim(
-                    claim_type=self._claim_type_from_unit(unit),
+                    claim_type=claim_type,
                     statement=statement,
                     source_object_ids=evidence_unit_ids,
                     evidence_ref_ids=self._ref_ids_for(evidence_unit_ids, evidence_ref_ids_by_unit),
@@ -236,7 +239,7 @@ class ResearchUnderstandingService:
             )
         logic_chain = _mapping(payload.get("logic_chain"))
         summary = _text(logic_chain.get("summary"))
-        if summary:
+        if summary and self._looks_complete_claim_statement(summary):
             evidence_unit_ids = _strings(logic_chain.get("evidence_unit_ids"))
             _append_claim(
                 claims,
@@ -624,6 +627,107 @@ class ResearchUnderstandingService:
             return f"{property_name} is reported as {source_value}{suffix}."
         return source_value
 
+    def _reviewable_objective_claim_type(
+        self,
+        unit: Mapping[str, Any],
+        statement: str,
+    ) -> str | None:
+        if not self._looks_complete_claim_statement(statement):
+            return None
+        unit_kind = _text(unit.get("unit_kind"))
+        property_name = _text(unit.get("property_normalized"))
+        if unit_kind == "measurement":
+            return (
+                "measurement"
+                if property_name and self._has_source_value(unit)
+                else None
+            )
+        if unit_kind == "comparison":
+            return (
+                "comparison"
+                if property_name and self._has_comparison_signal(unit)
+                else None
+            )
+        if unit_kind in {"characterization", "interpretation"}:
+            return "mechanism"
+        return None
+
+    def _has_source_value(self, unit: Mapping[str, Any]) -> bool:
+        value_payload = _mapping(unit.get("value_payload"))
+        return bool(
+            _text(value_payload.get("source_value_text"))
+            or _text(value_payload.get("value"))
+            or _text(value_payload.get("statement"))
+        )
+
+    def _has_comparison_signal(self, unit: Mapping[str, Any]) -> bool:
+        value_payload = _mapping(unit.get("value_payload"))
+        return bool(
+            _text(value_payload.get("comparison_axis"))
+            or _text(value_payload.get("direction"))
+            or _text(value_payload.get("trend"))
+            or _text(value_payload.get("summary"))
+            or _text(value_payload.get("source_value_text"))
+            or _text(value_payload.get("statement"))
+            or _text(unit.get("interpretation"))
+        )
+
+    def _looks_complete_claim_statement(self, statement: str) -> bool:
+        text = _text(statement)
+        if not text or not _looks_user_facing(text):
+            return False
+        lower = f" {text.lower()} "
+        if lower.strip().startswith(
+            (
+                "achieved through ",
+                "based on ",
+                "under ",
+                "using ",
+                "with ",
+                "without ",
+            )
+        ):
+            return False
+        claim_signals = (
+            " is ",
+            " are ",
+            " was ",
+            " were ",
+            " has ",
+            " have ",
+            " shows ",
+            " show ",
+            " improves",
+            " improve",
+            " reduces",
+            " reduce",
+            " increases",
+            " increase",
+            " decreases",
+            " decrease",
+            " affects",
+            " affect",
+            " correlates",
+            " correlate",
+            " explains",
+            " explain",
+            " indicates",
+            " indicate",
+            " suggests",
+            " suggest",
+            " leads to ",
+            " led to ",
+            " results in ",
+            " resulted in ",
+            " associated with ",
+            " reported as ",
+            " observed ",
+            " formed ",
+            " exhibits ",
+            " exhibit ",
+        )
+        return any(signal in lower for signal in claim_signals)
+
     def _comparison_statement(
         self,
         value_payload: Mapping[str, Any],
@@ -640,16 +744,6 @@ class ResearchUnderstandingService:
         if property_name and direction:
             return f"{property_name} shows {direction}."
         return None
-
-    def _claim_type_from_unit(self, unit: Mapping[str, Any]) -> str:
-        unit_kind = _text(unit.get("unit_kind"))
-        if unit_kind == "comparison":
-            return "comparison"
-        if unit_kind in {"characterization", "interpretation"}:
-            return "mechanism"
-        if unit_kind == "measurement":
-            return "measurement"
-        return "context"
 
     def _claim(
         self,

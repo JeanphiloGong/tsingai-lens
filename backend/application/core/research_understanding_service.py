@@ -1089,11 +1089,7 @@ class ResearchUnderstandingService:
                 for value in _display_values(_mapping(context.get("process_context")))
             ]
         )
-        review_queue_count = sum(
-            1
-            for claim in claims
-            if self._needs_review(claim)
-        )
+        review_queue_count = sum(1 for effect in effects if effect.get("needs_review"))
         return {
             "summary": {
                 "title": _text(scope.get("title")) or "Research understanding",
@@ -1184,9 +1180,36 @@ class ResearchUnderstandingService:
             "evidence_ref_ids": evidence_ref_ids,
             "context_ids": context_ids,
             "relation_ids": relation_ids,
-            "needs_review": self._needs_review(claim),
+            "needs_review": self._effect_needs_review(
+                claim,
+                evidence_count=len(evidence_refs),
+                relation_ids=relation_ids,
+                context_summary=self._context_summary_text(contexts),
+            ),
             "warnings": _strings(claim.get("warnings")),
         }
+
+    def _effect_needs_review(
+        self,
+        claim: Mapping[str, Any],
+        *,
+        evidence_count: int,
+        relation_ids: list[str],
+        context_summary: str,
+    ) -> bool:
+        if self._needs_review(claim):
+            return True
+        claim_type = _text(claim.get("claim_type")) or "finding"
+        if evidence_count < 2 and claim_type in {"comparison", "mechanism", "finding"}:
+            return True
+        if self._claim_type_requires_relation(claim_type) and not relation_ids:
+            return True
+        if not context_summary:
+            return True
+        return False
+
+    def _claim_type_requires_relation(self, claim_type: str) -> bool:
+        return claim_type in {"comparison", "mechanism", "finding"}
 
     def _reviewable_presentation_relation(self, relation: Mapping[str, Any]) -> bool:
         return bool(self._presentation_relation_summary(relation))

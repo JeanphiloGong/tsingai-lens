@@ -162,10 +162,11 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["summary"]["title"] == "How does heat treatment affect corrosion resistance?"
     assert presentation["summary"]["material_scope"] == ["316L stainless steel"]
     assert presentation["summary"]["property_scope"] == ["corrosion resistance"]
-    assert presentation["summary"]["review_queue_count"] == 0
+    assert presentation["summary"]["review_queue_count"] == 1
     assert presentation["effects"][0]["claim_id"] == understanding["claims"][0]["claim_id"]
     assert presentation["effects"][0]["target_property"] == "corrosion current density"
     assert presentation["effects"][0]["evidence_count"] == 1
+    assert presentation["effects"][0]["needs_review"] is False
     assert presentation["evidence_items"][0]["title"] == "table-1"
 
 
@@ -736,3 +737,82 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
     effect = understanding["presentation"]["effects"][0]
     assert effect["relation_ids"] == ["rel_laser_density"]
     assert effect["effect_direction"] == "increases"
+
+
+def test_with_presentation_review_queue_uses_effect_level_risks():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does LPBF affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_measurement",
+                    "claim_type": "measurement",
+                    "statement": "Relative density is reported as 99.1%.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_density"],
+                    "source_object_ids": ["unit_density"],
+                },
+                {
+                    "claim_id": "claim_comparison",
+                    "claim_type": "comparison",
+                    "statement": "Laser power increases relative density.",
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_comparison"],
+                    "context_ids": ["ctx_density"],
+                    "source_object_ids": ["unit_comparison"],
+                },
+            ],
+            "relations": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                },
+                {
+                    "evidence_ref_id": "evref_comparison",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_comparison"],
+                    "traceability_status": "resolved",
+                    "quote": "Laser power increases relative density.",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_density",
+                    "label": "Claim applicability",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    effects_by_claim_id = {
+        effect["claim_id"]: effect
+        for effect in understanding["presentation"]["effects"]
+    }
+    assert effects_by_claim_id["claim_measurement"]["needs_review"] is False
+    assert effects_by_claim_id["claim_comparison"]["needs_review"] is True
+    assert understanding["presentation"]["summary"]["review_queue_count"] == 1

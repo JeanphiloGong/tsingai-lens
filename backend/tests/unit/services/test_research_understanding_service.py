@@ -36,6 +36,11 @@ class _FakeSemanticExtractor:
         return _FakeSemanticRelations(self.relations)
 
 
+class _FailingSemanticExtractor:
+    def extract_research_understanding_relations(self, payload: dict):
+        raise RuntimeError("relation extractor unavailable")
+
+
 class _FakeSemanticRelations:
     def __init__(self, relations: list[dict]) -> None:
         self.relations = [_FakeSemanticRelation(item) for item in relations]
@@ -308,6 +313,18 @@ def test_objective_relation_payload_prioritizes_relation_worthy_units():
     assert "oeu-late-comparison" in selected_ids[:8]
     assert "oeu-late-interpretation" in selected_ids[:8]
     assert selected_ids.index("oeu-late-comparison") < selected_ids.index("oeu-density-1")
+
+
+def test_objective_relation_extraction_failure_is_visible_in_warnings():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FailingSemanticExtractor(),
+    )
+
+    understanding = service.build_objective_understanding(_oversized_relation_payload())
+
+    assert understanding["relations"] == []
+    assert "relation_extraction_failed" in understanding["warnings"]
+    assert understanding["presentation"]["summary"]["relation_count"] == 0
 
 
 def test_objective_understanding_filters_weak_claim_fragments():

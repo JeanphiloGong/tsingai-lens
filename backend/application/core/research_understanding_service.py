@@ -92,7 +92,7 @@ class ResearchUnderstandingService:
             context_ids=context_ids,
             context_ids_by_unit=context_ids_by_unit,
         )
-        relations = self._objective_relations(
+        relations, relation_warnings = self._objective_relations(
             payload,
             evidence_units,
             claims=claims,
@@ -116,7 +116,11 @@ class ResearchUnderstandingService:
                     "relations": relations,
                     "evidence_refs": evidence_refs,
                     "contexts": contexts,
-                    "warnings": self._understanding_warnings(claims, evidence_refs),
+                    "warnings": self._understanding_warnings(
+                        claims,
+                        evidence_refs,
+                        extra_warnings=relation_warnings,
+                    ),
                 }
             )
         ) or {}
@@ -398,7 +402,7 @@ class ResearchUnderstandingService:
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
         contexts: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[str]]:
         relation_payload = self._semantic_relation_payload(
             payload,
             evidence_units=evidence_units,
@@ -411,7 +415,7 @@ class ResearchUnderstandingService:
             )
         except Exception:  # noqa: BLE001
             logger.warning("research understanding semantic relation extraction failed", exc_info=True)
-            return []
+            return [], ["relation_extraction_failed"]
         relations: list[dict[str, Any]] = []
         for item in getattr(extracted, "relations", []):
             relation = self._semantic_relation_from_model(
@@ -421,7 +425,7 @@ class ResearchUnderstandingService:
             )
             if relation:
                 relations.append(relation)
-        return _dedupe_by_id(relations, "relation_id")
+        return _dedupe_by_id(relations, "relation_id"), []
 
     def _material_claims(
         self,
@@ -1118,13 +1122,16 @@ class ResearchUnderstandingService:
         self,
         claims: list[dict[str, Any]],
         evidence_refs: list[dict[str, Any]],
+        *,
+        extra_warnings: list[str] | tuple[str, ...] = (),
     ) -> list[str]:
         warnings: list[str] = []
         if claims and not evidence_refs:
             warnings.append("claims_without_evidence_refs")
         if any("missing_evidence_ref" in claim.get("warnings", []) for claim in claims):
             warnings.append("some_claims_missing_evidence_refs")
-        return warnings
+        warnings.extend(_strings(extra_warnings))
+        return _dedupe_strings(warnings)
 
     def _presentation_for(self, record: Mapping[str, Any]) -> dict[str, Any]:
         claims = _mapping_list(record.get("claims"))

@@ -2244,6 +2244,7 @@ class PaperFactsService:
             "process_context_axes": list(objective_context.process_context_axes),
             "target_property_axes": list(objective_context.target_property_axes),
             "excluded_property_axes": list(objective_context.excluded_property_axes),
+            "objective_evidence_lens": dict(objective_context.objective_evidence_lens),
             "routing_hints": [route_payload] if route_payload else [],
             "extraction_guidance": dict(objective_context.extraction_guidance),
             "confidence": objective_context.confidence,

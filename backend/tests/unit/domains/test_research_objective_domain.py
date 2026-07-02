@@ -108,6 +108,16 @@ def test_objective_context_round_trips_routing_and_guidance() -> None:
             "process_context_axes": ["LPBF"],
             "target_property_axes": ["relative density"],
             "excluded_property_axes": ["yield strength"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["relative density"],
+                "mediator_axes": ["porosity"],
+                "variable_process_axes": ["scan speed"],
+                "context_axes": ["316L stainless steel", "LPBF"],
+                "excluded_axes": ["yield strength"],
+                "direct_support_rules": [
+                    "Direct support must explicitly report relative density."
+                ],
+            },
             "routing_hints": [
                 {
                     "table_id": "table_1",
@@ -125,11 +135,39 @@ def test_objective_context_round_trips_routing_and_guidance() -> None:
     record = context.to_record()
     assert record["variable_process_axes"] == ["scan speed"]
     assert record["process_context_axes"] == ["LPBF"]
+    assert record["objective_evidence_lens"]["target_outcome_axes"] == [
+        "relative density"
+    ]
+    assert record["objective_evidence_lens"]["mediator_axes"] == ["porosity"]
     assert record["routing_hints"][0]["table_id"] == "table_1"
     assert record["extraction_guidance"]["do_not_extract_as_target_results"] == [
         "yield strength"
     ]
     assert record["confidence"] == 0.82
+
+
+def test_objective_context_derives_default_evidence_lens_for_old_records() -> None:
+    context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj_legacy",
+            "question": "How does scan speed affect density of LPBF 316L?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scan speed"],
+            "process_context_axes": ["LPBF"],
+            "target_property_axes": ["relative density"],
+            "excluded_property_axes": ["yield strength"],
+        }
+    )
+
+    assert context.objective_evidence_lens["target_outcome_axes"] == [
+        "relative density"
+    ]
+    assert context.objective_evidence_lens["variable_process_axes"] == ["scan speed"]
+    assert context.objective_evidence_lens["context_axes"] == [
+        "316L stainless steel",
+        "LPBF",
+    ]
+    assert context.objective_evidence_lens["excluded_axes"] == ["yield strength"]
 
 
 @pytest.mark.parametrize(

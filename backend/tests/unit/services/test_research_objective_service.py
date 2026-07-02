@@ -4524,6 +4524,72 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     ]
 
 
+def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "question": (
+                "How do laser power, porosity, and pore size affect pitting "
+                "corrosion behavior of SLM 316L?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "SLM"],
+            "property_axes": ["pitting potential"],
+        }
+    )
+
+    lens = service._build_objective_evidence_lens(
+        objective=objective,
+        variable_process_axes=["laser power"],
+        process_context_axes=["SLM"],
+        target_property_axes=["pitting potential"],
+        excluded_property_axes=["yield strength"],
+    )
+
+    assert lens["target_outcome_axes"] == ["pitting potential"]
+    assert lens["mediator_axes"] == ["porosity", "pore", "pore size"]
+    assert lens["variable_process_axes"] == ["laser power"]
+    assert lens["context_axes"] == ["316L stainless steel", "SLM"]
+    assert lens["excluded_axes"] == ["yield strength"]
+    assert any("target_outcome_axis" in rule for rule in lens["direct_support_rules"])
+    assert any("Mediator axes" in rule for rule in lens["direct_support_rules"])
+
+
+def test_research_objective_service_route_payload_includes_objective_evidence_lens(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "question": "How does porosity affect pitting corrosion?",
+            "target_property_axes": ["pitting potential"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["pitting potential"],
+                "mediator_axes": ["porosity"],
+                "variable_process_axes": [],
+                "context_axes": ["316L stainless steel"],
+                "excluded_axes": [],
+                "direct_support_rules": [
+                    "Direct support must explicitly report a target outcome."
+                ],
+            },
+        }
+    )
+
+    payload = service._route_prompt_objective_context_record(context)
+
+    assert payload["objective_evidence_lens"]["target_outcome_axes"] == [
+        "pitting potential"
+    ]
+    assert payload["objective_evidence_lens"]["mediator_axes"] == ["porosity"]
+
+
 def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
     tmp_path,
 ):

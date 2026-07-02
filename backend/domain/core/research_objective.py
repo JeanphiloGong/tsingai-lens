@@ -283,6 +283,7 @@ class ObjectiveContext:
     process_context_axes: tuple[str, ...]
     target_property_axes: tuple[str, ...]
     excluded_property_axes: tuple[str, ...]
+    objective_evidence_lens: dict[str, Any]
     routing_hints: tuple[dict[str, Any], ...]
     extraction_guidance: dict[str, Any]
     confidence: float
@@ -305,6 +306,7 @@ class ObjectiveContext:
             excluded_property_axes=normalize_objective_terms(
                 payload.get("excluded_property_axes")
             ),
+            objective_evidence_lens=_normalize_objective_evidence_lens(payload),
             routing_hints=_normalize_mapping_tuple(payload.get("routing_hints")),
             extraction_guidance=_normalize_mapping(payload.get("extraction_guidance")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
@@ -319,6 +321,7 @@ class ObjectiveContext:
             "process_context_axes": list(self.process_context_axes),
             "target_property_axes": list(self.target_property_axes),
             "excluded_property_axes": list(self.excluded_property_axes),
+            "objective_evidence_lens": dict(self.objective_evidence_lens),
             "routing_hints": [dict(item) for item in self.routing_hints],
             "extraction_guidance": dict(self.extraction_guidance),
             "confidence": self.confidence,
@@ -689,6 +692,28 @@ def is_question_shaped_objective(objective: ResearchObjective) -> bool:
     if question in {term.lower() for term in objective.material_scope}:
         return False
     return any(term in question for term in _QUESTION_SIGNAL_TERMS)
+
+
+def _normalize_objective_evidence_lens(payload: Mapping[str, Any]) -> dict[str, Any]:
+    lens = _normalize_mapping(payload.get("objective_evidence_lens"))
+    if lens:
+        return lens
+    target_axes = normalize_objective_terms(payload.get("target_property_axes"))
+    variable_axes = normalize_objective_terms(payload.get("variable_process_axes"))
+    material_scope = normalize_objective_terms(payload.get("material_scope"))
+    context_axes = normalize_objective_terms(payload.get("process_context_axes"))
+    excluded_axes = normalize_objective_terms(payload.get("excluded_property_axes"))
+    return {
+        "target_outcome_axes": list(target_axes),
+        "mediator_axes": [],
+        "variable_process_axes": list(variable_axes),
+        "context_axes": [*material_scope, *context_axes],
+        "excluded_axes": list(excluded_axes),
+        "direct_support_rules": [
+            "Direct support must explicitly report, compare, or explain at least one target_outcome_axis.",
+            "Variable, material, and test context alone can bind evidence but cannot by themselves support a claim.",
+        ],
+    }
 
 
 def _normalize_text(value: Any) -> str | None:

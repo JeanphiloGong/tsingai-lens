@@ -349,6 +349,16 @@ def test_paper_facts_payloads_include_sanitized_objective_context():
             "process_context_axes": ["LPBF"],
             "target_property_axes": ["yield strength"],
             "excluded_property_axes": ["relative density"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["yield strength"],
+                "mediator_axes": [],
+                "variable_process_axes": ["scanning speed"],
+                "context_axes": ["316L stainless steel", "LPBF"],
+                "excluded_axes": ["relative density"],
+                "direct_support_rules": [
+                    "Direct support must explicitly report a target outcome."
+                ],
+            },
             "routing_hints": [
                 {
                     "table_id": "tbl-internal-1",
@@ -387,6 +397,16 @@ def test_paper_facts_payloads_include_sanitized_objective_context():
         "process_context_axes": ["LPBF"],
         "target_property_axes": ["yield strength"],
         "excluded_property_axes": ["relative density"],
+        "objective_evidence_lens": {
+            "target_outcome_axes": ["yield strength"],
+            "mediator_axes": [],
+            "variable_process_axes": ["scanning speed"],
+            "context_axes": ["316L stainless steel", "LPBF"],
+            "excluded_axes": ["relative density"],
+            "direct_support_rules": [
+                "Direct support must explicitly report a target outcome."
+            ],
+        },
         "routing_hints": [],
         "extraction_guidance": {"focus": "Extract mechanical current-work evidence."},
         "confidence": 0.9,

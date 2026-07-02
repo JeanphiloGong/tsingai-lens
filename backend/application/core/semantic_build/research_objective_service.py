@@ -247,6 +247,21 @@ _OBJECTIVE_CHARACTERIZATION_METHOD_PROPERTIES = frozenset(
         "grain size primary dendrite spacing",
     }
 )
+_OBJECTIVE_MEDIATOR_AXIS_TERMS = (
+    "porosity",
+    "pore",
+    "pore size",
+    "pores",
+    "defect",
+    "defects",
+    "lack of fusion",
+    "lof",
+    "microstructure",
+    "grain",
+    "grains",
+    "melt pool",
+    "passive film",
+)
 
 
 class ResearchObjectivesNotReadyError(RuntimeError):
@@ -2128,6 +2143,7 @@ class ResearchObjectiveService:
             "process_context_axes": list(objective_context.process_context_axes),
             "target_property_axes": list(objective_context.target_property_axes),
             "excluded_property_axes": list(objective_context.excluded_property_axes),
+            "objective_evidence_lens": dict(objective_context.objective_evidence_lens),
         }
 
     def _route_prompt_paper_frame_record(
@@ -8823,6 +8839,13 @@ class ResearchObjectiveService:
                 relevant_skims=relevant_skims,
                 target_properties=target_properties,
             )
+            objective_evidence_lens = self._build_objective_evidence_lens(
+                objective=objective,
+                variable_process_axes=variable_axes,
+                process_context_axes=context_axes,
+                target_property_axes=target_properties,
+                excluded_property_axes=excluded_properties,
+            )
             routing_hints = self._build_objective_table_routing_hints(
                 objective,
                 tables=tables,
@@ -8839,6 +8862,7 @@ class ResearchObjectiveService:
                         "process_context_axes": context_axes,
                         "target_property_axes": target_properties,
                         "excluded_property_axes": excluded_properties,
+                        "objective_evidence_lens": objective_evidence_lens,
                         "routing_hints": routing_hints,
                         "extraction_guidance": {
                             "focus": (
@@ -8855,6 +8879,78 @@ class ResearchObjectiveService:
                 )
             )
         return tuple(contexts)
+
+    def _build_objective_evidence_lens(
+        self,
+        *,
+        objective: ResearchObjective,
+        variable_process_axes: list[str],
+        process_context_axes: list[str],
+        target_property_axes: list[str],
+        excluded_property_axes: list[str],
+    ) -> dict[str, Any]:
+        mediator_axes = self._objective_mediator_axes(
+            objective=objective,
+            target_property_axes=target_property_axes,
+        )
+        context_axes = self._unique_axis_values(
+            (*objective.material_scope, *process_context_axes)
+        )
+        return {
+            "target_outcome_axes": self._unique_axis_values(target_property_axes),
+            "mediator_axes": mediator_axes,
+            "variable_process_axes": self._unique_axis_values(variable_process_axes),
+            "context_axes": context_axes,
+            "excluded_axes": self._unique_axis_values(excluded_property_axes),
+            "direct_support_rules": self._objective_evidence_lens_direct_support_rules(
+                mediator_axes=mediator_axes,
+            ),
+        }
+
+    def _objective_mediator_axes(
+        self,
+        *,
+        objective: ResearchObjective,
+        target_property_axes: list[str],
+    ) -> list[str]:
+        haystack = " ".join(
+            (
+                objective.question,
+                " ".join(objective.process_axes),
+                " ".join(objective.property_axes),
+                objective.comparison_intent or "",
+            )
+        ).casefold()
+        target_keys = {
+            self._objective_column_key(axis)
+            for axis in target_property_axes
+            if self._objective_column_key(axis)
+        }
+        mediators: list[str] = []
+        seen: set[str] = set()
+        for term in _OBJECTIVE_MEDIATOR_AXIS_TERMS:
+            if term not in haystack:
+                continue
+            term_key = self._objective_column_key(term)
+            if not term_key or term_key in target_keys:
+                continue
+            self._append_unique_axis(mediators, seen, term)
+        return mediators
+
+    def _objective_evidence_lens_direct_support_rules(
+        self,
+        *,
+        mediator_axes: list[str],
+    ) -> list[str]:
+        rules = [
+            "Direct support must explicitly report, compare, or explain at least one target_outcome_axis.",
+            "Variable, material, and test context alone can bind evidence but cannot by themselves support a claim.",
+        ]
+        if mediator_axes:
+            rules.append(
+                "Mediator axes are explanatory context unless the source explicitly links them to a target_outcome_axis."
+            )
+        return rules
 
     def _select_relevant_skims(
         self,

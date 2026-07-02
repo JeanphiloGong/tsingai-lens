@@ -210,7 +210,7 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert understanding["state"] == "ready"
     assert understanding["scope"]["scope_type"] == "objective"
     assert understanding["scope"]["objective_id"] == "obj-corrosion"
-    assert "corrosion current density is reported as 0.4 uA/cm2." in [
+    assert "corrosion current density is reported as 0.4 uA/cm2." not in [
         claim["statement"] for claim in understanding["claims"]
     ]
     assert "Heat treatment improves the corrosion response." in [
@@ -474,7 +474,7 @@ def test_objective_understanding_filters_weak_claim_fragments():
     statements = [claim["statement"] for claim in understanding["claims"]]
     assert "Achieved through optimized process parameters" not in statements
     assert "density level and ultimate microstructure" not in statements
-    assert "relative density is reported as 99.1 %." in statements
+    assert "relative density is reported as 99.1 %." not in statements
     assert "laser power increases relative density" in statements
     assert "Optimized laser power improves relative density." in statements
     assert all(claim["claim_type"] != "context" for claim in understanding["claims"])
@@ -549,7 +549,7 @@ def test_objective_understanding_prioritizes_relation_claims_over_measurements()
     measurement_claims = [
         claim for claim in understanding["claims"] if claim["claim_type"] == "measurement"
     ]
-    assert len(measurement_claims) == 3
+    assert measurement_claims == []
     assert all(claim["evidence_ref_ids"] for claim in understanding["claims"])
     assert understanding["relations"]
     assert understanding["presentation"]["summary"]["relation_count"] == len(
@@ -646,6 +646,45 @@ def test_objective_understanding_filters_noisy_claim_entry_fragments():
     assert understanding["presentation"]["summary"]["evidence_count"] == 4
 
 
+def test_objective_understanding_filters_aggregate_logic_summary_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"].append(
+        {
+            "evidence_unit_id": "oeu-valid-mechanism",
+            "document_id": "paper-2",
+            "unit_kind": "interpretation",
+            "property_normalized": "microstructure",
+            "process_context": {"process": "selective laser melting"},
+            "value_payload": {
+                "summary": "increase in applied energy density results in coarser grains",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-grains",
+                    "display_label": "P002 Discussion",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.88,
+        }
+    )
+    payload["logic_chain"]["evidence_unit_ids"] = [
+        unit["evidence_unit_id"] for unit in payload["evidence_units"]
+    ]
+    payload["logic_chain"][
+        "summary"
+    ] = "How does processing affect 316L?: 43 measurement unit(s) across 6 document(s); density range 90.04-99.45 %; table 2 > laser energy density range 3.0-3.0 J/mm3."
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert "increase in applied energy density results in coarser grains" in statements
+    assert all("measurement unit(s)" not in statement for statement in statements)
+    assert all("density range" not in statement for statement in statements)
+
+
 def test_objective_understanding_keeps_measurement_only_claims():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     payload = _oversized_relation_payload(unit_count=14)
@@ -734,14 +773,7 @@ def test_objective_understanding_binds_claim_specific_context_boundaries():
     contexts_by_id = {
         context["context_id"]: context for context in understanding["contexts"]
     }
-    density_claim = next(
-        claim
-        for claim in understanding["claims"]
-        if claim["statement"] == "relative density is reported as 99.1 %."
-    )
-    density_context_ids = density_claim["context_ids"]
-    assert density_context_ids == ["ctx_oeu-density_boundary"]
-    density_context = contexts_by_id[density_context_ids[0]]
+    density_context = contexts_by_id["ctx_oeu-density_boundary"]
     assert density_context["label"] == "Claim applicability"
     assert density_context["material_scope"] == ["316L stainless steel"]
     assert density_context["process_context"] == {
@@ -762,11 +794,11 @@ def test_objective_understanding_binds_claim_specific_context_boundaries():
     density_effect = next(
         effect
         for effect in understanding["presentation"]["effects"]
-        if effect["claim_id"] == density_claim["claim_id"]
+        if effect["statement"] == "scan speed decreases relative density"
     )
     assert (
         density_effect["context_summary"]
-        == "316L stainless steel, LPBF, 200 W, S2, Archimedes"
+        == "316L stainless steel, LPBF, 800 mm/s"
     )
 
 

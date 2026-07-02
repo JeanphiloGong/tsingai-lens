@@ -408,6 +408,7 @@ class ResearchUnderstandingService:
             len(claims) < max_claims
             and summary
             and self._looks_complete_claim_statement(summary)
+            and not self._is_aggregate_logic_summary(summary)
         ):
             evidence_unit_ids = _strings(logic_chain.get("evidence_unit_ids"))
             _append_claim(
@@ -488,7 +489,7 @@ class ResearchUnderstandingService:
         primary_claim_count: int,
     ) -> int:
         if primary_claim_count > 0:
-            return 3
+            return 0
         return 12
 
     def _objective_relations(
@@ -1243,6 +1244,21 @@ class ResearchUnderstandingService:
         if " is reported as " in lower and lower.endswith(" analysis."):
             return True
         return False
+
+    def _is_aggregate_logic_summary(self, statement: str) -> bool:
+        text = _text(statement) or ""
+        lower = text.lower()
+        if not lower:
+            return True
+        aggregate_signals = (
+            " measurement unit(s)",
+            " across ",
+            " density range ",
+            " relative density range ",
+            " table ",
+        )
+        signal_count = sum(1 for signal in aggregate_signals if signal in lower)
+        return signal_count >= 2 or (len(text) > 220 and ":" in text)
 
     def _has_source_value(self, unit: Mapping[str, Any]) -> bool:
         value_payload = _mapping(unit.get("value_payload"))

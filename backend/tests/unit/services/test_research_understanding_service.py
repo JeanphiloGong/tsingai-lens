@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from application.core.research_understanding_service import (
     ResearchUnderstandingService,
 )
@@ -45,6 +49,74 @@ class _FakeSemanticRelation:
 
     def model_dump(self) -> dict:
         return dict(self.payload)
+
+
+def _oversized_relation_payload(unit_count: int = 28) -> dict:
+    long_details = " ".join(
+        f"metallography preparation route and measurement caveat {index}"
+        for index in range(30)
+    )
+    evidence_units = []
+    for index in range(unit_count):
+        evidence_units.append(
+            {
+                "evidence_unit_id": f"oeu-density-{index}",
+                "document_id": f"paper-{index % 6}",
+                "unit_kind": "measurement" if index % 3 else "comparison",
+                "property_normalized": "relative density",
+                "material_system": {"alloy": "316L stainless steel"},
+                "process_context": {
+                    "process": "LPBF",
+                    "laser_power": f"{180 + index} W",
+                    "scan_speed": f"{700 + index} mm/s",
+                },
+                "sample_context": {"sample": f"S{index}"},
+                "test_condition": {
+                    "method": "Archimedes",
+                    "details": long_details,
+                },
+                "value_payload": {
+                    "comparison_axis": "laser power",
+                    "direction": "increases",
+                    "source_value_text": f"{97 + (index % 20) / 10:.1f} %",
+                    "summary": "laser power changes relative density",
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": f"table-{index}",
+                        "display_label": f"P{index:03d} Table 1",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.85,
+            }
+        )
+    return {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How do LPBF parameters affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "scan speed"],
+            "property_axes": ["relative density"],
+        },
+        "objective_context": {
+            "objective_id": "obj-density",
+            "question": "How do LPBF parameters affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["laser power", "scan speed"],
+            "target_property_axes": ["relative density"],
+        },
+        "evidence_units": evidence_units,
+        "logic_chain": {
+            "evidence_unit_ids": [
+                evidence_units[0]["evidence_unit_id"],
+                evidence_units[3]["evidence_unit_id"],
+            ],
+            "summary": "LPBF process parameters affect relative density.",
+        },
+    }
 
 
 def test_objective_understanding_projects_claims_relations_and_evidence_refs():
@@ -168,6 +240,26 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["effects"][0]["evidence_count"] == 1
     assert presentation["effects"][0]["needs_review"] is False
     assert presentation["evidence_items"][0]["title"] == "table-1"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="relation payload compaction lands in compact-relation-input",
+)
+def test_objective_relation_payload_excludes_full_audit_context_details():
+    extractor = _FakeSemanticExtractor()
+    service = ResearchUnderstandingService(structured_extractor=extractor)
+
+    service.build_objective_understanding(_oversized_relation_payload())
+
+    relation_payload = extractor.payloads[0]
+    serialized = json.dumps(relation_payload, ensure_ascii=False)
+    assert "metallography preparation route and measurement caveat" not in serialized
+    assert len(relation_payload["contexts"]) <= 16
+    assert len(relation_payload["evidence_units"]) <= 24
+    assert relation_payload["evidence_units"][0]["evidence_unit_id"] == "oeu-density-0"
+    assert relation_payload["evidence_units"][0]["property_normalized"] == "relative density"
+    assert len(serialized) < 30000
 
 
 def test_objective_understanding_filters_weak_claim_fragments():

@@ -78,6 +78,11 @@ class ResearchUnderstandingService:
         question = _text(objective.get("question")) or _text(context.get("question"))
         evidence_units = _mapping_list(payload.get("evidence_units"))
         evidence_refs = self._evidence_refs_from_evidence_units(evidence_units)
+        blocks_by_id, _documents_by_id = self._source_artifact_lookups(collection_id)
+        evidence_refs = self._enrich_evidence_refs_from_source_blocks(
+            evidence_refs,
+            blocks_by_id=blocks_by_id,
+        )
         evidence_ref_ids_by_unit = self._evidence_ref_ids_by_fact(evidence_refs)
         contexts = self._objective_contexts(
             context,
@@ -1226,6 +1231,41 @@ class ResearchUnderstandingService:
             "quote": _text(source.get("quote")),
             "href": _text(source.get("href")),
         }
+
+    def _enrich_evidence_refs_from_source_blocks(
+        self,
+        refs: list[dict[str, Any]],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> list[dict[str, Any]]:
+        if not refs or not blocks_by_id:
+            return refs
+        return [
+            self._evidence_ref_with_source_block(ref, blocks_by_id=blocks_by_id)
+            for ref in refs
+        ]
+
+    def _evidence_ref_with_source_block(
+        self,
+        ref: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> dict[str, Any]:
+        locator = _locator_mapping(ref.get("locator"))
+        source_ref = _text(locator.get("source_ref"))
+        block = blocks_by_id.get(source_ref or "") if source_ref else None
+        if block is None:
+            return dict(ref)
+        enriched = dict(ref)
+        enriched_locator = dict(locator)
+        if block.page is not None and not _text(enriched_locator.get("page")):
+            enriched_locator["page"] = block.page
+        enriched["locator"] = enriched_locator
+        if not _text(enriched.get("document_id")) and block.document_id:
+            enriched["document_id"] = block.document_id
+        if not _text(enriched.get("quote")) and _text(block.text):
+            enriched["quote"] = _short_text(block.text, limit=420)
+        return enriched
 
     def _statement_from_evidence_unit(self, unit: Mapping[str, Any]) -> str | None:
         unit_kind = _text(unit.get("unit_kind"))

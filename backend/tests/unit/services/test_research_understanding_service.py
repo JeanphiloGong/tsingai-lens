@@ -1089,6 +1089,120 @@ def test_objective_understanding_prioritizes_high_value_evidence_refs():
     assert first_item["quote"] == "Relative density is measured as 99.1 %."
 
 
+def test_objective_understanding_enriches_evidence_refs_with_source_block_quote():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[
+                SourceBlock(
+                    block_id="blk-density-results",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text="Relative density reached 99.1% after laser power optimization.",
+                    block_order=12,
+                    page=5,
+                    heading_path="Results / Density",
+                )
+            ]
+        ),
+    )
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "property_axes": ["relative density"],
+        },
+        "objective_context": {
+            "objective_id": "obj-density",
+            "target_property_axes": ["relative density"],
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "value_payload": {"source_value_text": "99.1 %"},
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "blk-density-results",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        ],
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    evidence_ref = understanding["evidence_refs"][0]
+    assert (
+        evidence_ref["quote"]
+        == "Relative density reached 99.1% after laser power optimization."
+    )
+    assert evidence_ref["locator"]["source_ref"] == "blk-density-results"
+    assert evidence_ref["locator"]["page"] == 5
+    assert evidence_ref["document_id"] == "paper-1"
+
+
+def test_objective_understanding_preserves_existing_evidence_ref_quote():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[
+                SourceBlock(
+                    block_id="blk-density-results",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text="Block text should not replace an explicit source quote.",
+                    block_order=12,
+                    page=5,
+                    heading_path="Results / Density",
+                )
+            ]
+        ),
+    )
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "property_axes": ["relative density"],
+        },
+        "objective_context": {
+            "objective_id": "obj-density",
+            "target_property_axes": ["relative density"],
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "relative density",
+                "value_payload": {"source_value_text": "99.1 %"},
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "blk-density-results",
+                        "quote": "Explicit quote from extraction.",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        ],
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    evidence_ref = understanding["evidence_refs"][0]
+    assert evidence_ref["quote"] == "Explicit quote from extraction."
+    assert evidence_ref["locator"]["page"] == 5
+
+
 def test_material_understanding_projects_findings_measurements_and_relations():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     evidence_ref = {

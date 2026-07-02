@@ -348,7 +348,31 @@ class ResearchUnderstandingService:
     ) -> list[dict[str, Any]]:
         claims: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for unit in evidence_units[:12]:
+        max_claims = 12
+        prioritized_units = [
+            unit
+            for _, unit in sorted(
+                enumerate(evidence_units),
+                key=lambda item: self._objective_claim_unit_priority(
+                    item[1],
+                    item[0],
+                ),
+            )
+        ]
+        primary_units = [
+            unit
+            for unit in prioritized_units
+            if (_text(unit.get("unit_kind")) or "").lower() != "measurement"
+        ]
+        measurement_units = [
+            unit
+            for unit in prioritized_units
+            if (_text(unit.get("unit_kind")) or "").lower() == "measurement"
+        ]
+
+        for unit in primary_units:
+            if len(claims) >= max_claims:
+                break
             statement = self._statement_from_evidence_unit(unit)
             if not statement:
                 continue
@@ -368,15 +392,23 @@ class ResearchUnderstandingService:
                     claim_type=claim_type,
                     statement=statement,
                     source_object_ids=evidence_unit_ids,
-                    evidence_ref_ids=self._ref_ids_for(evidence_unit_ids, evidence_ref_ids_by_unit),
+                    evidence_ref_ids=self._ref_ids_for(
+                        evidence_unit_ids,
+                        evidence_ref_ids_by_unit,
+                    ),
                     context_ids=claim_context_ids,
                     confidence=unit.get("confidence"),
                     seen=seen,
                 ),
             )
+
         logic_chain = _mapping(payload.get("logic_chain"))
         summary = _text(logic_chain.get("summary"))
-        if summary and self._looks_complete_claim_statement(summary):
+        if (
+            len(claims) < max_claims
+            and summary
+            and self._looks_complete_claim_statement(summary)
+        ):
             evidence_unit_ids = _strings(logic_chain.get("evidence_unit_ids"))
             _append_claim(
                 claims,
@@ -392,7 +424,72 @@ class ResearchUnderstandingService:
                     seen=seen,
                 ),
             )
+        measurement_limit = min(
+            self._objective_measurement_claim_limit(primary_claim_count=len(claims)),
+            max_claims - len(claims),
+        )
+        measurement_count = 0
+        for unit in measurement_units:
+            if measurement_count >= measurement_limit or len(claims) >= max_claims:
+                break
+            statement = self._statement_from_evidence_unit(unit)
+            if not statement:
+                continue
+            claim_type = self._reviewable_objective_claim_type(unit, statement)
+            if not claim_type:
+                continue
+            unit_id = _text(unit.get("evidence_unit_id"))
+            evidence_unit_ids = [unit_id] if unit_id else []
+            claim_context_ids = self._context_ids_for_evidence_unit(
+                unit,
+                context_ids,
+                context_ids_by_unit,
+            )
+            before_count = len(claims)
+            _append_claim(
+                claims,
+                self._claim(
+                    claim_type=claim_type,
+                    statement=statement,
+                    source_object_ids=evidence_unit_ids,
+                    evidence_ref_ids=self._ref_ids_for(
+                        evidence_unit_ids,
+                        evidence_ref_ids_by_unit,
+                    ),
+                    context_ids=claim_context_ids,
+                    confidence=unit.get("confidence"),
+                    seen=seen,
+                ),
+            )
+            if len(claims) > before_count:
+                measurement_count += 1
         return claims
+
+    def _objective_claim_unit_priority(
+        self,
+        unit: Mapping[str, Any],
+        index: int,
+    ) -> tuple[int, int]:
+        unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+        if unit_kind in {
+            "comparison",
+            "interpretation",
+            "characterization",
+            "mechanism",
+        }:
+            return (0, index)
+        if unit_kind == "measurement":
+            return (1, index)
+        return (2, index)
+
+    def _objective_measurement_claim_limit(
+        self,
+        *,
+        primary_claim_count: int,
+    ) -> int:
+        if primary_claim_count > 0:
+            return 3
+        return 12
 
     def _objective_relations(
         self,
@@ -1095,12 +1192,35 @@ class ResearchUnderstandingService:
                 else None
             )
         if unit_kind == "comparison":
+            sample_context = _mapping(unit.get("sample_context"))
+            baseline_context = _mapping(unit.get("baseline_context"))
+            sample_values = _display_values(sample_context)
+            baseline_values = _display_values(baseline_context)
+            process_values = _display_values(_mapping(unit.get("process_context")))
+            row_level_keys = {
+                "sample_number",
+                "condition_number",
+                "sample_id",
+                "condition_id",
+            }
+            context_keys = {
+                _text(key).lower()
+                for key in (*sample_context.keys(), *baseline_context.keys())
+                if _text(key)
+            }
+            if (
+                sample_values
+                and baseline_values
+                and not process_values
+                and context_keys.intersection(row_level_keys)
+            ):
+                return None
             return (
                 "comparison"
                 if property_name and self._has_comparison_signal(unit)
                 else None
             )
-        if unit_kind in {"characterization", "interpretation"}:
+        if unit_kind in {"characterization", "interpretation", "mechanism"}:
             return "mechanism"
         return None
 

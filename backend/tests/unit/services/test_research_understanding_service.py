@@ -241,9 +241,9 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["summary"]["property_scope"] == ["corrosion resistance"]
     assert presentation["summary"]["review_queue_count"] == 1
     assert presentation["effects"][0]["claim_id"] == understanding["claims"][0]["claim_id"]
-    assert presentation["effects"][0]["target_property"] == "corrosion current density"
+    assert presentation["effects"][0]["target_property"] == "corrosion resistance"
     assert presentation["effects"][0]["evidence_count"] == 1
-    assert presentation["effects"][0]["needs_review"] is False
+    assert presentation["effects"][0]["needs_review"] is True
     assert presentation["evidence_items"][0]["title"] == "table-1"
 
 
@@ -478,6 +478,99 @@ def test_objective_understanding_filters_weak_claim_fragments():
     assert "laser power increases relative density" in statements
     assert "Optimized laser power improves relative density." in statements
     assert all(claim["claim_type"] != "context" for claim in understanding["claims"])
+
+
+def test_objective_understanding_prioritizes_relation_claims_over_measurements():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=14)
+    payload["evidence_units"].extend(
+        [
+            {
+                "evidence_unit_id": "oeu-laser-density",
+                "document_id": "paper-1",
+                "unit_kind": "comparison",
+                "property_normalized": "relative density",
+                "process_context": {"process": "LPBF", "laser_power": "220 W"},
+                "value_payload": {
+                    "comparison_axis": "laser power",
+                    "direction": "increases",
+                    "source_value_text": "laser power increases relative density",
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "paragraph",
+                        "source_ref": "blk-density",
+                        "display_label": "P001 Results",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.86,
+            },
+            {
+                "evidence_unit_id": "oeu-heat-microstructure",
+                "document_id": "paper-2",
+                "unit_kind": "interpretation",
+                "property_normalized": "microstructure",
+                "process_context": {"heat_treatment": "solution annealing"},
+                "value_payload": {
+                    "summary": "heat treatment reduces carbide and ferrite features",
+                },
+                "interpretation": "heat treatment reduces carbide and ferrite features",
+                "source_refs": [
+                    {
+                        "source_kind": "paragraph",
+                        "source_ref": "blk-microstructure",
+                        "display_label": "P002 Discussion",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.81,
+            },
+        ]
+    )
+    payload["logic_chain"]["evidence_unit_ids"] = [
+        "oeu-laser-density",
+        "oeu-heat-microstructure",
+    ]
+    payload["logic_chain"][
+        "summary"
+    ] = "Laser power and heat treatment affect density and microstructure."
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    claim_types = [claim["claim_type"] for claim in understanding["claims"]]
+    assert statements[:3] == [
+        "laser power increases relative density",
+        "heat treatment reduces carbide and ferrite features",
+        "Laser power and heat treatment affect density and microstructure.",
+    ]
+    assert claim_types[:3] == ["comparison", "mechanism", "finding"]
+    measurement_claims = [
+        claim for claim in understanding["claims"] if claim["claim_type"] == "measurement"
+    ]
+    assert len(measurement_claims) == 3
+    assert all(claim["evidence_ref_ids"] for claim in understanding["claims"])
+    assert understanding["relations"]
+    assert understanding["presentation"]["summary"]["relation_count"] == len(
+        understanding["relations"]
+    )
+
+
+def test_objective_understanding_keeps_measurement_only_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=14)
+    for index, unit in enumerate(payload["evidence_units"]):
+        unit["unit_kind"] = "measurement"
+        unit["value_payload"] = {"source_value_text": f"99.{index} %"}
+    payload["logic_chain"]["summary"] = ""
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert len(understanding["claims"]) == 12
+    assert {claim["claim_type"] for claim in understanding["claims"]} == {
+        "measurement"
+    }
 
 
 def test_objective_understanding_binds_claim_specific_context_boundaries():
@@ -764,7 +857,7 @@ def test_objective_understanding_does_not_project_low_level_comparisons_as_relat
 
     understanding = service.build_objective_understanding(payload)
 
-    assert understanding["claims"]
+    assert understanding["claims"] == []
     assert understanding["relations"] == []
     assert understanding["presentation"]["summary"]["relation_count"] == 0
 

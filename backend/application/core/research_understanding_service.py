@@ -98,6 +98,7 @@ class ResearchUnderstandingService:
             claims=claims,
             evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
             context_ids=context_ids,
+            context_ids_by_unit=context_ids_by_unit,
             contexts=contexts,
         )
         state = self._state_for(claims, relations, evidence_refs)
@@ -401,8 +402,15 @@ class ResearchUnderstandingService:
         claims: list[dict[str, Any]],
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
         contexts: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[str]]:
+        deterministic_relations = self._deterministic_objective_relations(
+            evidence_units,
+            evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+            context_ids=context_ids,
+            context_ids_by_unit=context_ids_by_unit,
+        )
         relation_payload = self._semantic_relation_payload(
             payload,
             evidence_units=evidence_units,
@@ -415,7 +423,7 @@ class ResearchUnderstandingService:
             )
         except Exception:  # noqa: BLE001
             logger.warning("research understanding semantic relation extraction failed", exc_info=True)
-            return [], ["relation_extraction_failed"]
+            return deterministic_relations, ["relation_extraction_failed"]
         relations: list[dict[str, Any]] = []
         for item in getattr(extracted, "relations", []):
             relation = self._semantic_relation_from_model(
@@ -425,7 +433,166 @@ class ResearchUnderstandingService:
             )
             if relation:
                 relations.append(relation)
-        return _dedupe_by_id(relations, "relation_id"), []
+        return _dedupe_by_id((*relations, *deterministic_relations), "relation_id"), []
+
+    def _deterministic_objective_relations(
+        self,
+        evidence_units: list[dict[str, Any]],
+        *,
+        evidence_ref_ids_by_unit: dict[str, list[str]],
+        context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
+    ) -> list[dict[str, Any]]:
+        relations = [
+            relation
+            for unit in evidence_units
+            if (
+                relation := self._deterministic_relation_from_evidence_unit(
+                    unit,
+                    evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+                    context_ids=context_ids,
+                    context_ids_by_unit=context_ids_by_unit,
+                )
+            )
+        ]
+        return _dedupe_by_id(relations, "relation_id")
+
+    def _deterministic_relation_from_evidence_unit(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        evidence_ref_ids_by_unit: dict[str, list[str]],
+        context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        unit_id = _text(unit.get("evidence_unit_id"))
+        if not unit_id:
+            return {}
+        unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+        if unit_kind not in {
+            "comparison",
+            "interpretation",
+            "characterization",
+            "mechanism",
+        }:
+            return {}
+        predicate = self._deterministic_relation_predicate(unit)
+        sample_values = _display_values(_mapping(unit.get("sample_context")))
+        baseline_values = _display_values(_mapping(unit.get("baseline_context")))
+        process_values = _display_values(_mapping(unit.get("process_context")))
+        if (
+            unit_kind == "comparison"
+            and sample_values
+            and baseline_values
+            and not process_values
+        ):
+            return {}
+        if unit_kind == "measurement" and predicate in {"reports", ""}:
+            return {}
+        subject = self._deterministic_relation_subject(unit)
+        target = _text(unit.get("property_normalized")) or "observed response"
+        statement = self._deterministic_relation_statement(
+            unit,
+            subject=subject,
+            predicate=predicate,
+            target=target,
+        )
+        if not subject or not target or not statement:
+            return {}
+        if subject.lower() in {"characterization", "interpretation", "mechanism", "comparison"}:
+            return {}
+        if not _looks_user_facing(subject) or subject.lower() in {"true", "false"}:
+            return {}
+        if subject.replace(".", "", 1).isdigit():
+            return {}
+        if not self._looks_complete_claim_statement(statement):
+            return {}
+        statement_lower = statement.lower()
+        if (
+            " has the highest " in statement_lower
+            or "measurement is relative to" in statement_lower
+            or "measurement is " in statement_lower
+            or statement_lower.endswith(" explains density.")
+            or statement_lower == f"{subject.lower()} explains {target.lower()}."
+        ):
+            return {}
+        evidence_unit_ids = [unit_id]
+        evidence_ref_ids = self._ref_ids_for(evidence_unit_ids, evidence_ref_ids_by_unit)
+        return {
+            "relation_id": _stable_relation_id(
+                "deterministic",
+                subject,
+                target,
+                statement,
+                evidence_unit_ids,
+            ),
+            "relation_type": self._presentation_relation_type("comparative", predicate),
+            "subject": subject,
+            "predicate": predicate or "relates to",
+            "object": target,
+            "statement": statement,
+            "conditions": [],
+            "status": "supported" if evidence_ref_ids else "limited",
+            "confidence": unit.get("confidence"),
+            "evidence_ref_ids": evidence_ref_ids,
+            "context_ids": self._context_ids_for_evidence_unit(
+                unit,
+                context_ids,
+                context_ids_by_unit,
+            ),
+            "source_object_ids": evidence_unit_ids,
+            "warnings": ["deterministic_relation"],
+        }
+
+    def _deterministic_relation_subject(self, unit: Mapping[str, Any]) -> str:
+        value_payload = _mapping(unit.get("value_payload"))
+        axis = _text(value_payload.get("comparison_axis"))
+        if axis and _looks_user_facing(axis):
+            return axis
+        process_context = _mapping(unit.get("process_context"))
+        for key in (
+            "process",
+            "process_family",
+            "process_type",
+            "method",
+            "treatment",
+            "heat_treatment",
+        ):
+            text = _text(process_context.get(key))
+            if text and _looks_user_facing(text):
+                return text
+        return ""
+
+    def _deterministic_relation_predicate(self, unit: Mapping[str, Any]) -> str:
+        value_payload = _mapping(unit.get("value_payload"))
+        for key in ("direction", "trend"):
+            text = _text(value_payload.get(key))
+            if text and _looks_user_facing(text):
+                return _short_text(text, limit=80)
+        unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+        if unit_kind in {"interpretation", "characterization", "mechanism"}:
+            return "explains"
+        if _text(value_payload.get("comparison_axis")):
+            return "compares"
+        return "reports"
+
+    def _deterministic_relation_statement(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        subject: str,
+        predicate: str,
+        target: str,
+    ) -> str:
+        value_payload = _mapping(unit.get("value_payload"))
+        for key in ("summary", "statement", "source_value_text"):
+            text = _text(value_payload.get(key))
+            if text and _looks_user_facing(text):
+                return _short_text(text, limit=220)
+        interpretation = _text(unit.get("interpretation"))
+        if interpretation and _looks_user_facing(interpretation):
+            return _short_text(interpretation, limit=220)
+        return f"{subject} {predicate or 'relates to'} {target}."
 
     def _material_claims(
         self,

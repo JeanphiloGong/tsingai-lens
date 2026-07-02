@@ -316,15 +316,75 @@ def test_objective_relation_payload_prioritizes_relation_worthy_units():
 
 
 def test_objective_relation_extraction_failure_is_visible_in_warnings():
+    payload = _oversized_relation_payload()
+    payload["evidence_units"][0]["value_payload"][
+        "summary"
+    ] = "Laser power increases relative density."
     service = ResearchUnderstandingService(
         structured_extractor=_FailingSemanticExtractor(),
     )
 
-    understanding = service.build_objective_understanding(_oversized_relation_payload())
+    understanding = service.build_objective_understanding(payload)
 
-    assert understanding["relations"] == []
+    assert understanding["relations"]
     assert "relation_extraction_failed" in understanding["warnings"]
-    assert understanding["presentation"]["summary"]["relation_count"] == 0
+    assert understanding["presentation"]["summary"]["relation_count"] == len(
+        understanding["relations"]
+    )
+    assert any(
+        "deterministic_relation" in relation["warnings"]
+        for relation in understanding["relations"]
+    )
+
+
+def test_objective_understanding_projects_deterministic_relations_from_evidence_units():
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-comparison",
+            "document_id": "paper-1",
+            "unit_kind": "comparison",
+            "property_normalized": "relative density",
+            "value_payload": {
+                "comparison_axis": "scan speed",
+                "direction": "decreases",
+                "source_value_text": "scan speed decreases relative density",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "blk-results",
+                    "display_label": "P001 Results",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.87,
+        },
+        {
+            "evidence_unit_id": "oeu-plain-measurement",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "relative density",
+            "value_payload": {"source_value_text": "99.1 %"},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    ]
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+
+    understanding = service.build_objective_understanding(payload)
+
+    relation = understanding["relations"][0]
+    assert relation["subject"] == "scan speed"
+    assert relation["predicate"] == "decreases"
+    assert relation["object"] == "relative density"
+    assert relation["source_object_ids"] == ["oeu-comparison"]
+    assert relation["evidence_ref_ids"]
+    assert "deterministic_relation" in relation["warnings"]
+    assert all(
+        "oeu-plain-measurement" not in relation["source_object_ids"]
+        for relation in understanding["relations"]
+    )
 
 
 def test_objective_understanding_filters_weak_claim_fragments():

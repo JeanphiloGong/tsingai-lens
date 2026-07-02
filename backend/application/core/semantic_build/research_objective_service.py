@@ -7168,6 +7168,7 @@ class ResearchObjectiveService:
             "source_kind": route.source_kind,
             "source_ref": route.source_ref,
             "role": route.role,
+            "evidence_role": route.join_plan.get("evidence_role"),
             "page": source.get("page"),
         }
         return (

@@ -702,6 +702,257 @@ def test_objective_understanding_keeps_mediator_observations_out_of_claims():
     assert "Laser power improves pitting potential." in statements
 
 
+def test_objective_understanding_blocks_real_corrosion_mediators_from_claims():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[
+                SourceBlock(
+                    block_id="blk-lof-defects",
+                    document_id="paper-3",
+                    block_type="paragraph",
+                    text=(
+                        "LoF defects located at melt pool boundaries and pore size "
+                        "changes were observed in the SLM samples."
+                    ),
+                    block_order=18,
+                    page=6,
+                    heading_path="Results / Defects",
+                ),
+                SourceBlock(
+                    block_id="blk-corrosion",
+                    document_id="paper-5",
+                    block_type="paragraph",
+                    text=(
+                        "Pitting corrosion resistance improved after the passive "
+                        "film became more stable."
+                    ),
+                    block_order=24,
+                    page=9,
+                    heading_path="Results / Corrosion",
+                ),
+            ]
+        ),
+    )
+    payload = {
+        "collection_id": "col-real",
+        "objective": {
+            "objective_id": "obj-pitting",
+            "question": "What affects pitting corrosion behavior?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["SLM"],
+            "property_axes": ["pitting corrosion behavior"],
+        },
+        "objective_context": {
+            "objective_id": "obj-pitting",
+            "target_property_axes": ["pitting corrosion behavior"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["pitting corrosion behavior"],
+                "mediator_axes": ["lack of fusion", "pore size", "porosity"],
+            },
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-lof",
+                "document_id": "paper-3",
+                "unit_kind": "characterization",
+                "property_normalized": "lack of fusion defects",
+                "value_payload": {
+                    "summary": (
+                        "LoF defects located at melt pool boundaries and pore size "
+                        "changes were observed in the SLM samples."
+                    ),
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "blk-lof-defects",
+                        "role": "characterization",
+                        "evidence_role": "mediator_context",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            },
+            {
+                "evidence_unit_id": "oeu-corrosion",
+                "document_id": "paper-5",
+                "unit_kind": "interpretation",
+                "property_normalized": "pitting corrosion behavior",
+                "value_payload": {
+                    "summary": (
+                        "Pitting corrosion resistance improved after the passive "
+                        "film became more stable."
+                    ),
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "blk-corrosion",
+                        "role": "current_experimental_evidence",
+                        "evidence_role": "direct_support",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            },
+        ],
+        "logic_chain": {
+            "evidence_unit_ids": ["oeu-lof", "oeu-corrosion"],
+            "summary": "Stable passive film improves pitting corrosion behavior.",
+        },
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert all("LoF defects" not in statement for statement in statements)
+    assert all("pore size" not in statement for statement in statements)
+    assert (
+        "Pitting corrosion resistance improved after the passive film became more stable."
+        in statements
+    )
+    assert "Stable passive film improves pitting corrosion behavior." in statements
+    evidence_by_ref = {
+        ref["locator"]["source_ref"]: ref for ref in understanding["evidence_refs"]
+    }
+    assert (
+        evidence_by_ref["blk-corrosion"]["quote"]
+        == "Pitting corrosion resistance improved after the passive film became more stable."
+    )
+    assert evidence_by_ref["blk-corrosion"]["locator"]["page"] == 9
+    assert evidence_by_ref["blk-corrosion"]["document_id"] == "paper-5"
+
+
+def test_objective_understanding_blocks_real_density_background_from_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["objective"]["question"] = "How do LPBF parameters affect density and microstructure?"
+    payload["objective"]["property_axes"] = ["relative density", "microstructure"]
+    payload["objective_context"]["question"] = (
+        "How do LPBF parameters affect density and microstructure?"
+    )
+    payload["objective_context"]["target_property_axes"] = [
+        "relative density",
+        "microstructure",
+    ]
+    payload["objective_context"]["objective_evidence_lens"] = {
+        "target_outcome_axes": ["relative density", "microstructure"],
+        "mediator_axes": ["porosity defects", "pore size"],
+        "context_axes": ["LPBF process window"],
+    }
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-porosity",
+            "document_id": "paper-4",
+            "unit_kind": "characterization",
+            "property_normalized": "porosity defects",
+            "value_payload": {
+                "summary": (
+                    "Porosity defects observed in the low-energy-density samples "
+                    "were mostly lack-of-fusion pores."
+                ),
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "blk-porosity",
+                    "role": "characterization",
+                    "evidence_role": "mediator_context",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.82,
+        },
+        {
+            "evidence_unit_id": "oeu-density",
+            "document_id": "paper-1",
+            "unit_kind": "comparison",
+            "property_normalized": "relative density",
+            "value_payload": {
+                "comparison_axis": "laser power",
+                "direction": "increases",
+                "source_value_text": "laser power increases relative density",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "blk-density",
+                    "role": "current_experimental_evidence",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.87,
+        },
+    ]
+    payload["logic_chain"]["summary"] = (
+        "Laser power affects relative density in the reviewed LPBF samples."
+    )
+    payload["logic_chain"]["evidence_unit_ids"] = ["oeu-porosity", "oeu-density"]
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert all("Porosity defects observed" not in statement for statement in statements)
+    assert "laser power increases relative density" in statements
+    assert (
+        "Laser power affects relative density in the reviewed LPBF samples."
+        in statements
+    )
+
+
+def test_objective_understanding_blocks_real_fatigue_future_work_from_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["objective"]["question"] = "How do LPBF parameters affect fatigue performance?"
+    payload["objective"]["property_axes"] = ["fatigue performance"]
+    payload["objective_context"]["question"] = (
+        "How do LPBF parameters affect fatigue performance?"
+    )
+    payload["objective_context"]["target_property_axes"] = ["fatigue performance"]
+    payload["objective_context"]["objective_evidence_lens"] = {
+        "target_outcome_axes": ["fatigue performance"],
+        "mediator_axes": ["porosity", "surface roughness"],
+    }
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-fatigue-assumption",
+            "document_id": "paper-2",
+            "unit_kind": "interpretation",
+            "property_normalized": "fatigue performance",
+            "value_payload": {
+                "summary": (
+                    "fatigue performance is assumed to improve after porosity "
+                    "reduction but remains to be studied."
+                ),
+            },
+            "interpretation": (
+                "fatigue performance is assumed to improve after porosity "
+                "reduction but remains to be studied."
+            ),
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "blk-fatigue-future",
+                    "role": "current_experimental_evidence",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.74,
+        }
+    ]
+    payload["logic_chain"]["summary"] = (
+        "Future work should verify whether porosity reduction improves fatigue performance."
+    )
+    payload["logic_chain"]["evidence_unit_ids"] = ["oeu-fatigue-assumption"]
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert understanding["claims"] == []
+
+
 def test_objective_understanding_does_not_match_dislocation_density_as_density_claim():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     payload = _oversized_relation_payload(unit_count=4)

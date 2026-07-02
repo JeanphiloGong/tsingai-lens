@@ -2537,6 +2537,50 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
     assert "value" not in records[0]["value_payload"]
 
 
+def test_research_objective_service_carries_route_evidence_role_to_source_refs(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "blk-lof-defects",
+            "role": "characterization",
+            "extractable": True,
+            "join_plan": {"evidence_role": "mediator_context"},
+            "confidence": 0.72,
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={
+            "page": 6,
+            "text": "LoF defects located at melt pool boundaries were observed.",
+        },
+        objective_context=ObjectiveContext.from_mapping(
+            {
+                "objective_id": "obj-corrosion",
+                "target_property_axes": ["pitting corrosion behavior"],
+            }
+        ),
+        extracted_record={
+            "unit_kind": "characterization",
+            "property_normalized": "lack of fusion defects",
+            "value_payload": {
+                "summary": "LoF defects located at melt pool boundaries were observed.",
+            },
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert records[0]["source_refs"][0]["evidence_role"] == "mediator_context"
+
+
 def test_research_objective_service_uses_main_number_after_leading_uncertainty(
     tmp_path,
 ):

@@ -375,11 +375,13 @@ class ResearchUnderstandingService:
             unit
             for unit in prioritized_units
             if (_text(unit.get("unit_kind")) or "").lower() != "measurement"
+            and self._objective_unit_can_drive_claim(unit)
         ]
         measurement_units = [
             unit
             for unit in prioritized_units
             if (_text(unit.get("unit_kind")) or "").lower() == "measurement"
+            and self._objective_unit_can_drive_claim(unit)
         ]
 
         for unit in primary_units:
@@ -426,22 +428,28 @@ class ResearchUnderstandingService:
             for unit in evidence_units
             if (unit_id := _text(unit.get("evidence_unit_id")))
         }
+        summary_claim_units = [
+            units_by_id[unit_id]
+            for unit_id in summary_evidence_unit_ids
+            if unit_id in units_by_id
+            and self._objective_unit_can_drive_claim(units_by_id[unit_id])
+        ]
         if (
             len(claims) < max_claims
             and summary
             and self._looks_complete_claim_statement(summary)
             and not self._is_aggregate_logic_summary(summary)
             and not self._is_noisy_objective_claim_statement(summary)
+            and (not summary_evidence_unit_ids or summary_claim_units)
             and (
                 self._objective_statement_mentions_target_axis(summary, target_axes)
                 or any(
                     self._objective_unit_matches_claim_target(
-                        units_by_id[unit_id],
+                        unit,
                         summary,
                         target_axes,
                     )
-                    for unit_id in summary_evidence_unit_ids
-                    if unit_id in units_by_id
+                    for unit in summary_claim_units
                 )
             )
         ):
@@ -529,6 +537,17 @@ class ResearchUnderstandingService:
         if primary_claim_count > 0:
             return 0
         return 12
+
+    def _objective_unit_can_drive_claim(self, unit: Mapping[str, Any]) -> bool:
+        evidence_role = self._objective_unit_evidence_role(unit)
+        return not evidence_role or evidence_role == "direct_support"
+
+    def _objective_unit_evidence_role(self, unit: Mapping[str, Any]) -> str:
+        for source_ref in _mapping_list(unit.get("source_refs")):
+            evidence_role = _text(source_ref.get("evidence_role"))
+            if evidence_role:
+                return evidence_role
+        return ""
 
     def _objective_relations(
         self,

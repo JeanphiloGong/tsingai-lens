@@ -387,6 +387,69 @@ def test_objective_understanding_projects_deterministic_relations_from_evidence_
     )
 
 
+def test_objective_understanding_projects_density_effect_relation_from_statement():
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-density-effect",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "density",
+            "sample_context": {
+                "test_method": "heat treatment",
+                "test_type": "hot isostatic pressing",
+            },
+            "process_context": {"process": "selective laser melting"},
+            "baseline_context": {"test_method": "as-SLM"},
+            "value_payload": {"source_value_text": "97.83%", "value": 97.83},
+            "interpretation": "The heat treatment process reduces density compared to the as-SLM condition.",
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-density-effect",
+                    "display_label": "P001 Results",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.83,
+        },
+        {
+            "evidence_unit_id": "oeu-sample-rank",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "relative density",
+            "value_payload": {
+                "summary": "Sample 24 has the highest table-derived relative density at 98.75%.",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-density",
+                    "display_label": "P001 Table 2",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.85,
+        },
+    ]
+    payload["logic_chain"]["summary"] = ""
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert [claim["statement"] for claim in understanding["claims"]] == [
+        "The heat treatment process reduces density compared to the as-SLM condition."
+    ]
+    assert len(understanding["relations"]) == 1
+    relation = understanding["relations"][0]
+    assert relation["subject"] == "heat treatment"
+    assert relation["predicate"] == "reduces"
+    assert relation["object"] == "density"
+    assert relation["source_object_ids"] == ["oeu-density-effect"]
+    effect = understanding["presentation"]["effects"][0]
+    assert effect["relation_ids"] == [relation["relation_id"]]
+
+
 def test_objective_understanding_filters_weak_claim_fragments():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     payload = {

@@ -591,6 +591,22 @@ class ResearchUnderstandingService:
         target = _text(unit.get("property_normalized")) or "observed response"
         statement = self._deterministic_relation_statement(
             unit,
+            subject=subject or "process",
+            predicate=predicate,
+            target=target,
+        )
+        statement_subject = ""
+        statement_predicate = ""
+        statement_subject = self._statement_relation_subject(statement)
+        statement_predicate = self._statement_relation_predicate(statement)
+        if statement_subject and statement_predicate:
+            subject = statement_subject
+        if target == "observed response" and "density" in statement.lower():
+            target = "density"
+        if statement_predicate and predicate in {"explains", "reports", ""}:
+            predicate = statement_predicate
+        statement = self._deterministic_relation_statement(
+            unit,
             subject=subject,
             predicate=predicate,
             target=target,
@@ -674,6 +690,25 @@ class ResearchUnderstandingService:
             return "compares"
         return "reports"
 
+    def _statement_relation_subject(self, statement: str) -> str:
+        lower = (_text(statement) or "").lower()
+        if "density" not in lower:
+            return ""
+        if "heat treatment" in lower:
+            return "heat treatment"
+        if "treatment" in lower:
+            return "treatment"
+        if "process" in lower:
+            return "process"
+        return ""
+
+    def _statement_relation_predicate(self, statement: str) -> str:
+        lower = (_text(statement) or "").lower()
+        for predicate in ("reduces", "increases", "decreases", "improves", "affects"):
+            if f" {predicate} " in f" {lower} ":
+                return predicate
+        return ""
+
     def _deterministic_relation_statement(
         self,
         unit: Mapping[str, Any],
@@ -682,12 +717,19 @@ class ResearchUnderstandingService:
         predicate: str,
         target: str,
     ) -> str:
+        unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+        interpretation = _text(unit.get("interpretation"))
+        if (
+            unit_kind in {"interpretation", "characterization", "mechanism"}
+            and interpretation
+            and _looks_user_facing(interpretation)
+        ):
+            return _short_text(interpretation, limit=220)
         value_payload = _mapping(unit.get("value_payload"))
         for key in ("summary", "statement", "source_value_text"):
             text = _text(value_payload.get(key))
             if text and _looks_user_facing(text):
                 return _short_text(text, limit=220)
-        interpretation = _text(unit.get("interpretation"))
         if interpretation and _looks_user_facing(interpretation):
             return _short_text(interpretation, limit=220)
         return f"{subject} {predicate or 'relates to'} {target}."

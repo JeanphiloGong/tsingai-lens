@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from application.core.research_understanding_service import (
     ResearchUnderstandingService,
 )
@@ -224,9 +222,7 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     )
     assert understanding["relations"][0]["conditions"] == ["316L stainless steel"]
     assert understanding["relations"][0]["source_object_ids"] == ["oeu-comparison"]
-    assert extractor.payloads[0]["evidence_units"][1]["sample_context"] == {
-        "sample": "heat-treated"
-    }
+    assert extractor.payloads[0]["evidence_units"][1]["sample_summary"] == "heat-treated"
     assert understanding["evidence_refs"][0]["fact_ids"] == ["oeu-corrosion"]
     assert understanding["evidence_refs"][0]["label"] == "P001 Table 1"
     assert understanding["contexts"][0]["material_scope"] == ["316L stainless steel"]
@@ -242,10 +238,6 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["evidence_items"][0]["title"] == "table-1"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="relation payload compaction lands in compact-relation-input",
-)
 def test_objective_relation_payload_excludes_full_audit_context_details():
     extractor = _FakeSemanticExtractor()
     service = ResearchUnderstandingService(structured_extractor=extractor)

@@ -12,6 +12,9 @@ from infra.persistence.factory import build_source_artifact_repository
 
 logger = logging.getLogger(__name__)
 
+_RELATION_CONTEXT_LIMIT = 16
+_RELATION_EVIDENCE_UNIT_LIMIT = 24
+
 
 class ResearchUnderstandingService:
     """Project existing Core research views into claim/relation/evidence form."""
@@ -539,20 +542,30 @@ class ResearchUnderstandingService:
                 if _text(claim.get("statement"))
             ][:12],
             "contexts": [
-                {
-                    "label": _text(context.get("label")),
-                    "material_scope": _strings(context.get("material_scope")),
-                    "process_context": _mapping(context.get("process_context")),
-                    "test_condition": _mapping(context.get("test_condition")),
-                    "property_scope": _strings(context.get("property_scope")),
-                }
-                for context in contexts
+                self._semantic_relation_context(context)
+                for context in contexts[:_RELATION_CONTEXT_LIMIT]
             ],
             "evidence_units": [
                 self._semantic_relation_evidence_unit(unit)
                 for unit in evidence_units
                 if _text(unit.get("evidence_unit_id"))
-            ][:80],
+            ][:_RELATION_EVIDENCE_UNIT_LIMIT],
+        }
+
+    def _semantic_relation_context(
+        self,
+        context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "label": _text(context.get("label")),
+            "material_scope": _strings(context.get("material_scope")),
+            "process_summary": self._semantic_relation_mapping_summary(
+                _mapping(context.get("process_context")),
+            ),
+            "test_summary": self._semantic_relation_test_condition(
+                _mapping(context.get("test_condition")),
+            ),
+            "property_scope": _strings(context.get("property_scope")),
         }
 
     def _semantic_relation_evidence_unit(self, unit: Mapping[str, Any]) -> dict[str, Any]:
@@ -561,11 +574,17 @@ class ResearchUnderstandingService:
             "evidence_unit_id": _text(unit.get("evidence_unit_id")),
             "unit_kind": _text(unit.get("unit_kind")),
             "property_normalized": _text(unit.get("property_normalized")),
-            "sample_context": _mapping(unit.get("sample_context")),
-            "process_context": _mapping(unit.get("process_context")),
-            "test_condition": _mapping(unit.get("test_condition")),
+            "sample_summary": self._semantic_relation_mapping_summary(
+                _mapping(unit.get("sample_context")),
+            ),
+            "process_summary": self._semantic_relation_mapping_summary(
+                _mapping(unit.get("process_context")),
+            ),
+            "test_summary": self._semantic_relation_test_condition(
+                _mapping(unit.get("test_condition")),
+            ),
             "value_payload": {
-                key: value
+                key: _short_text(str(value), limit=240)
                 for key, value in value_payload.items()
                 if key
                 in {
@@ -578,13 +597,36 @@ class ResearchUnderstandingService:
                     "value",
                     "trend",
                 }
+                and _text(value)
             },
             "unit": _text(unit.get("unit")),
-            "baseline_context": _mapping(unit.get("baseline_context")),
-            "interpretation": _text(unit.get("interpretation")),
+            "baseline_summary": self._semantic_relation_mapping_summary(
+                _mapping(unit.get("baseline_context")),
+            ),
+            "interpretation": _short_text(_text(unit.get("interpretation")) or "", limit=240),
             "resolution_status": _text(unit.get("resolution_status")),
             "confidence": unit.get("confidence"),
         }
+
+    def _semantic_relation_mapping_summary(
+        self,
+        payload: Mapping[str, Any],
+    ) -> str:
+        return _join_display_values(
+            [_short_text(value, limit=80) for value in _display_values(payload)],
+            limit=5,
+        )
+
+    def _semantic_relation_test_condition(
+        self,
+        payload: Mapping[str, Any],
+    ) -> str:
+        compact = {
+            key: value
+            for key, value in payload.items()
+            if str(key).lower() not in {"details", "detail", "notes", "note"}
+        }
+        return self._semantic_relation_mapping_summary(compact)
 
     def _semantic_relation_from_model(
         self,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import logging
+import re
 from typing import Any, Mapping
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
@@ -349,6 +350,12 @@ class ResearchUnderstandingService:
         claims: list[dict[str, Any]] = []
         seen: set[str] = set()
         max_claims = 12
+        objective_context = _mapping(payload.get("objective_context"))
+        objective = _mapping(payload.get("objective"))
+        target_axes = self._objective_target_axes_for_claims(
+            objective_context,
+            objective,
+        )
         prioritized_units = [
             unit
             for _, unit in sorted(
@@ -376,7 +383,11 @@ class ResearchUnderstandingService:
             statement = self._statement_from_evidence_unit(unit)
             if not statement:
                 continue
-            claim_type = self._reviewable_objective_claim_type(unit, statement)
+            claim_type = self._reviewable_objective_claim_type(
+                unit,
+                statement,
+                target_axes=target_axes,
+            )
             if not claim_type:
                 continue
             unit_id = _text(unit.get("evidence_unit_id"))
@@ -404,21 +415,39 @@ class ResearchUnderstandingService:
 
         logic_chain = _mapping(payload.get("logic_chain"))
         summary = _text(logic_chain.get("summary"))
+        summary_evidence_unit_ids = _strings(logic_chain.get("evidence_unit_ids"))
+        units_by_id = {
+            unit_id: unit
+            for unit in evidence_units
+            if (unit_id := _text(unit.get("evidence_unit_id")))
+        }
         if (
             len(claims) < max_claims
             and summary
             and self._looks_complete_claim_statement(summary)
             and not self._is_aggregate_logic_summary(summary)
+            and not self._is_noisy_objective_claim_statement(summary)
+            and (
+                self._objective_statement_mentions_target_axis(summary, target_axes)
+                or any(
+                    self._objective_unit_matches_claim_target(
+                        units_by_id[unit_id],
+                        summary,
+                        target_axes,
+                    )
+                    for unit_id in summary_evidence_unit_ids
+                    if unit_id in units_by_id
+                )
+            )
         ):
-            evidence_unit_ids = _strings(logic_chain.get("evidence_unit_ids"))
             _append_claim(
                 claims,
                 self._claim(
                     claim_type="finding",
                     statement=summary,
-                    source_object_ids=evidence_unit_ids,
+                    source_object_ids=summary_evidence_unit_ids,
                     evidence_ref_ids=self._ref_ids_for(
-                        evidence_unit_ids,
+                        summary_evidence_unit_ids,
                         evidence_ref_ids_by_unit,
                     ),
                     context_ids=context_ids,
@@ -436,7 +465,11 @@ class ResearchUnderstandingService:
             statement = self._statement_from_evidence_unit(unit)
             if not statement:
                 continue
-            claim_type = self._reviewable_objective_claim_type(unit, statement)
+            claim_type = self._reviewable_objective_claim_type(
+                unit,
+                statement,
+                target_axes=target_axes,
+            )
             if not claim_type:
                 continue
             unit_id = _text(unit.get("evidence_unit_id"))
@@ -1226,8 +1259,16 @@ class ResearchUnderstandingService:
         self,
         unit: Mapping[str, Any],
         statement: str,
+        *,
+        target_axes: list[str] | tuple[str, ...] = (),
     ) -> str | None:
         if not self._looks_complete_claim_statement(statement):
+            return None
+        if not self._objective_unit_matches_claim_target(
+            unit,
+            statement,
+            target_axes,
+        ):
             return None
         unit_kind = _text(unit.get("unit_kind"))
         property_name = _text(unit.get("property_normalized"))
@@ -1272,6 +1313,83 @@ class ResearchUnderstandingService:
             return "mechanism"
         return None
 
+    def _objective_target_axes_for_claims(
+        self,
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> list[str]:
+        lens = _mapping(objective_context.get("objective_evidence_lens"))
+        return _dedupe_strings(
+            [
+                *(_strings(lens.get("target_outcome_axes"))),
+                *(_strings(objective_context.get("target_property_axes"))),
+                *(_strings(objective.get("property_axes"))),
+            ]
+        )
+
+    def _objective_unit_matches_claim_target(
+        self,
+        unit: Mapping[str, Any],
+        statement: str,
+        target_axes: list[str] | tuple[str, ...],
+    ) -> bool:
+        if not target_axes:
+            return True
+        property_name = _text(unit.get("property_normalized"))
+        if property_name and self._objective_statement_mentions_target_axis(
+            property_name,
+            target_axes,
+        ):
+            return True
+        value_payload = _mapping(unit.get("value_payload"))
+        text = " ".join(
+            item
+            for item in (
+                statement,
+                _text(value_payload.get("summary")),
+                _text(value_payload.get("source_value_text")),
+                _text(value_payload.get("statement")),
+                _text(unit.get("interpretation")),
+            )
+            if item
+        )
+        return self._objective_statement_mentions_target_axis(text, target_axes)
+
+    def _objective_statement_mentions_target_axis(
+        self,
+        statement: str,
+        target_axes: list[str] | tuple[str, ...],
+    ) -> bool:
+        if not target_axes:
+            return True
+        return any(
+            self._objective_axis_tokens_match(statement, axis)
+            for axis in target_axes
+        )
+
+    def _objective_axis_tokens_match(self, text: str, axis: str) -> bool:
+        axis_tokens = tuple(re.findall(r"[a-z0-9]+", (axis or "").lower()))
+        text_tokens = tuple(re.findall(r"[a-z0-9]+", (text or "").lower()))
+        if not axis_tokens or not text_tokens:
+            return False
+        if len(axis_tokens) > 1 and len(axis_tokens) <= len(text_tokens):
+            for index in range(0, len(text_tokens) - len(axis_tokens) + 1):
+                if text_tokens[index : index + len(axis_tokens)] == axis_tokens:
+                    return True
+        if axis_tokens == ("relative", "density"):
+            axis_tokens = ("density",)
+        if len(axis_tokens) != 1:
+            return False
+        axis_token = axis_tokens[0]
+        for index, token in enumerate(text_tokens):
+            if token != axis_token:
+                continue
+            previous = text_tokens[index - 1] if index > 0 else ""
+            if axis_token == "density" and previous == "dislocation":
+                continue
+            return True
+        return False
+
     def _is_noisy_objective_claim_statement(self, statement: str) -> bool:
         text = _text(statement) or ""
         lower = text.lower()
@@ -1282,6 +1400,16 @@ class ResearchUnderstandingService:
         if " table-derived " in lower and " has the highest " in lower:
             return True
         if "measurement is relative to" in lower:
+            return True
+        if lower.startswith(("future work", "further work")):
+            return True
+        if lower.startswith("further ") and (
+            " required" in lower
+            or " needed" in lower
+            or " should " in lower
+        ):
+            return True
+        if " should be investigated" in lower or " remains to be studied" in lower:
             return True
         if " is reported as " in lower and lower.endswith(" analysis."):
             return True

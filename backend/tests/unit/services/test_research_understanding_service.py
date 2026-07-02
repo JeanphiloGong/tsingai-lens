@@ -603,12 +603,12 @@ def test_objective_understanding_prioritizes_relation_claims_over_measurements()
 
     statements = [claim["statement"] for claim in understanding["claims"]]
     claim_types = [claim["claim_type"] for claim in understanding["claims"]]
-    assert statements[:3] == [
+    assert statements[:2] == [
         "laser power increases relative density",
-        "heat treatment reduces carbide and ferrite features",
         "Laser power and heat treatment affect density and microstructure.",
     ]
-    assert claim_types[:3] == ["comparison", "mechanism", "finding"]
+    assert "heat treatment reduces carbide and ferrite features" not in statements
+    assert claim_types[:2] == ["comparison", "finding"]
     measurement_claims = [
         claim for claim in understanding["claims"] if claim["claim_type"] == "measurement"
     ]
@@ -618,6 +618,162 @@ def test_objective_understanding_prioritizes_relation_claims_over_measurements()
     assert understanding["presentation"]["summary"]["relation_count"] == len(
         understanding["relations"]
     )
+
+
+def test_objective_understanding_keeps_mediator_observations_out_of_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = {
+        "collection_id": "col-1",
+        "objective": {
+            "objective_id": "obj-corrosion",
+            "question": "How does LPBF affect pitting potential?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power"],
+            "property_axes": ["pitting potential"],
+        },
+        "objective_context": {
+            "objective_id": "obj-corrosion",
+            "question": "How does LPBF affect pitting potential?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["laser power"],
+            "target_property_axes": ["pitting potential"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["pitting potential"],
+                "mediator_axes": ["lack of fusion", "porosity", "fatigue cracks"],
+            },
+        },
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-defects",
+                "document_id": "paper-1",
+                "unit_kind": "characterization",
+                "property_normalized": "lack of fusion defects",
+                "value_payload": {
+                    "summary": (
+                        "Lack of fusion defects and fatigue cracks were observed "
+                        "near melt pool boundaries."
+                    ),
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "paragraph",
+                        "source_ref": "blk-defects",
+                        "display_label": "P001 Results",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.83,
+            },
+            {
+                "evidence_unit_id": "oeu-pitting",
+                "document_id": "paper-1",
+                "unit_kind": "comparison",
+                "property_normalized": "pitting potential",
+                "value_payload": {
+                    "comparison_axis": "laser power",
+                    "direction": "increases",
+                    "source_value_text": "laser power increases pitting potential",
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "paragraph",
+                        "source_ref": "blk-pitting",
+                        "display_label": "P001 Corrosion",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.87,
+            },
+        ],
+        "logic_chain": {
+            "evidence_unit_ids": ["oeu-defects", "oeu-pitting"],
+            "summary": "Laser power improves pitting potential.",
+        },
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert (
+        "Lack of fusion defects and fatigue cracks were observed near melt pool boundaries."
+        not in statements
+    )
+    assert "laser power increases pitting potential" in statements
+    assert "Laser power improves pitting potential." in statements
+
+
+def test_objective_understanding_does_not_match_dislocation_density_as_density_claim():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-dislocation-density",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "dislocation density",
+            "value_payload": {
+                "summary": "heat treatment reduces dislocation density after deformation",
+            },
+            "interpretation": "heat treatment reduces dislocation density after deformation",
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-dislocation-density",
+                    "display_label": "P001 Discussion",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.82,
+        }
+    ]
+    payload["objective"]["property_axes"] = ["density"]
+    payload["objective_context"]["target_property_axes"] = ["density"]
+    payload["logic_chain"]["summary"] = "Heat treatment reduces dislocation density."
+    payload["logic_chain"]["evidence_unit_ids"] = ["oeu-dislocation-density"]
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert understanding["claims"] == []
+
+
+def test_objective_understanding_filters_future_work_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-future",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "relative density",
+            "value_payload": {
+                "summary": (
+                    "Future work should investigate whether scan speed improves "
+                    "relative density."
+                ),
+            },
+            "interpretation": (
+                "Future work should investigate whether scan speed improves "
+                "relative density."
+            ),
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-future-work",
+                    "display_label": "P001 Conclusion",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.78,
+        }
+    ]
+    payload["logic_chain"]["summary"] = (
+        "Future work should investigate whether scan speed improves relative density."
+    )
+    payload["logic_chain"]["evidence_unit_ids"] = ["oeu-future"]
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert understanding["claims"] == []
 
 
 def test_objective_understanding_filters_noisy_claim_entry_fragments():

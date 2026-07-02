@@ -557,6 +557,95 @@ def test_objective_understanding_prioritizes_relation_claims_over_measurements()
     )
 
 
+def test_objective_understanding_filters_noisy_claim_entry_fragments():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-sample-rank",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "relative density",
+            "value_payload": {
+                "summary": "Sample 24 has the highest table-derived relative density at 98.75%.",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-density",
+                    "display_label": "P001 Table 2",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.85,
+        },
+        {
+            "evidence_unit_id": "oeu-measurement-reference",
+            "document_id": "paper-1",
+            "unit_kind": "interpretation",
+            "property_normalized": "density",
+            "value_payload": {
+                "summary": "The density measurement is relative to the conventional 316L stainless steel reference value.",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-density-reference",
+                    "display_label": "P001 Methods",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.84,
+        },
+        {
+            "evidence_unit_id": "oeu-report-fragment",
+            "document_id": "paper-2",
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "value_payload": {
+                "summary": "microstructure is reported as melt pool analysis.",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-microstructure",
+                    "display_label": "P002 Results",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.82,
+        },
+        {
+            "evidence_unit_id": "oeu-valid-mechanism",
+            "document_id": "paper-2",
+            "unit_kind": "interpretation",
+            "property_normalized": "microstructure",
+            "process_context": {"process": "selective laser melting"},
+            "value_payload": {
+                "summary": "increase in applied energy density results in coarser grains",
+            },
+            "source_refs": [
+                {
+                    "source_kind": "paragraph",
+                    "source_ref": "blk-grains",
+                    "display_label": "P002 Discussion",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.88,
+        },
+    ]
+    payload["logic_chain"]["summary"] = ""
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert statements == [
+        "increase in applied energy density results in coarser grains"
+    ]
+    assert understanding["presentation"]["summary"]["evidence_count"] == 4
+
+
 def test_objective_understanding_keeps_measurement_only_claims():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     payload = _oversized_relation_payload(unit_count=14)

@@ -1160,6 +1160,7 @@ class ResearchUnderstandingService:
             or _text(value_payload.get("value"))
             or _text(value_payload.get("statement"))
         )
+        summary = _text(value_payload.get("summary"))
         unit_text = _text(unit.get("unit"))
         interpretation = _text(unit.get("interpretation"))
         if unit_kind == "comparison":
@@ -1171,6 +1172,8 @@ class ResearchUnderstandingService:
             )
         if interpretation:
             return interpretation
+        if unit_kind in {"characterization", "interpretation", "mechanism"} and summary:
+            return summary
         if property_name and source_value:
             suffix = f" {unit_text}" if unit_text and unit_text not in source_value else ""
             return f"{property_name} is reported as {source_value}{suffix}."
@@ -1191,6 +1194,8 @@ class ResearchUnderstandingService:
                 if property_name and self._has_source_value(unit)
                 else None
             )
+        if self._is_noisy_objective_claim_statement(statement):
+            return None
         if unit_kind == "comparison":
             sample_context = _mapping(unit.get("sample_context"))
             baseline_context = _mapping(unit.get("baseline_context"))
@@ -1223,6 +1228,21 @@ class ResearchUnderstandingService:
         if unit_kind in {"characterization", "interpretation", "mechanism"}:
             return "mechanism"
         return None
+
+    def _is_noisy_objective_claim_statement(self, statement: str) -> bool:
+        text = _text(statement) or ""
+        lower = text.lower()
+        if not lower:
+            return True
+        if lower.startswith("sample ") and " has the highest " in lower:
+            return True
+        if " table-derived " in lower and " has the highest " in lower:
+            return True
+        if "measurement is relative to" in lower:
+            return True
+        if " is reported as " in lower and lower.endswith(" analysis."):
+            return True
+        return False
 
     def _has_source_value(self, unit: Mapping[str, Any]) -> bool:
         value_payload = _mapping(unit.get("value_payload"))

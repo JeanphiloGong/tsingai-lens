@@ -1966,6 +1966,14 @@ class ResearchObjectiveService:
                     if route_candidate.get("frame_status") == "excluded":
                         record["role"] = "low_value_or_irrelevant"
                         record["extractable"] = False
+                    evidence_role = self._route_candidate_evidence_role(
+                        objective_context=objective_context,
+                        candidate=route_candidate,
+                    )
+                    record = self._apply_route_evidence_role(
+                        record=record,
+                        evidence_role=evidence_role,
+                    )
                     role = str(record.get("role") or "low_value_or_irrelevant")
                     route_key = (
                         frame.objective_id,
@@ -2011,7 +2019,6 @@ class ResearchObjectiveService:
                                     else {}
                                 ),
                                 "join_keys": {},
-                                "join_plan": {},
                             }
                         )
                     else:
@@ -2019,7 +2026,6 @@ class ResearchObjectiveService:
                             {
                                 "column_roles": {},
                                 "join_keys": {},
-                                "join_plan": {},
                             }
                         )
                     routes.append(ObjectiveEvidenceRoute.from_mapping(record))
@@ -2034,6 +2040,7 @@ class ResearchObjectiveService:
                 routes=routes,
                 seen=seen,
                 frame=frame,
+                objective_context=objective_context,
                 source_candidates=source_candidates,
             )
             frame_routes = routes[frame_route_count_before:]
@@ -2259,6 +2266,7 @@ class ResearchObjectiveService:
         routes: list[ObjectiveEvidenceRoute],
         seen: set[tuple[str, str, str, str, str]],
         frame: ObjectivePaperFrame,
+        objective_context: ObjectiveContext | None,
         source_candidates: list[dict[str, Any]],
     ) -> None:
         existing_refs = {
@@ -2286,7 +2294,18 @@ class ResearchObjectiveService:
         added = 0
         for _, _, candidate in ranked_candidates:
             source_ref = str(candidate.get("source_ref") or "").strip()
-            role = self._text_hint_route_role(frame=frame, candidate=candidate)
+            evidence_role = self._route_candidate_evidence_role(
+                objective_context=objective_context,
+                candidate=candidate,
+            )
+            if evidence_role == "irrelevant":
+                continue
+            role = self._text_hint_route_role(
+                frame=frame,
+                candidate=candidate,
+                evidence_role=evidence_role,
+            )
+            extractable = evidence_role in {"direct_support", "background_context"}
             route_key = (
                 frame.objective_id,
                 frame.document_id,
@@ -2305,12 +2324,15 @@ class ResearchObjectiveService:
                         "source_kind": "text_window",
                         "source_ref": source_ref,
                         "role": role,
-                        "extractable": True,
-                        "reason": "High-scoring objective text candidate retained for evidence extraction.",
+                        "extractable": extractable,
+                        "reason": (
+                            "High-scoring objective text candidate retained as "
+                            f"{evidence_role}."
+                        ),
+                        "join_plan": {"evidence_role": evidence_role},
                         "table_schema": {},
                         "column_roles": {},
                         "join_keys": {},
-                        "join_plan": {},
                         "confidence": 0.62,
                     }
                 )
@@ -2352,7 +2374,12 @@ class ResearchObjectiveService:
         *,
         frame: ObjectivePaperFrame,
         candidate: dict[str, Any],
+        evidence_role: str = "direct_support",
     ) -> str:
+        if evidence_role == "background_context":
+            return "process_or_treatment"
+        if evidence_role == "mediator_context":
+            return "characterization"
         text = " ".join(
             str(value or "")
             for value in (
@@ -2376,6 +2403,76 @@ class ResearchObjectiveService:
         ):
             return "characterization"
         return "current_experimental_evidence"
+
+    def _route_candidate_evidence_role(
+        self,
+        *,
+        objective_context: ObjectiveContext | None,
+        candidate: Mapping[str, Any],
+    ) -> str:
+        if objective_context is None:
+            return "direct_support"
+        text = self._route_candidate_text(candidate)
+        if not text:
+            return "irrelevant"
+        lens = objective_context.objective_evidence_lens
+        target_axes = self._unique_axis_values(lens.get("target_outcome_axes"))
+        mediator_axes = self._unique_axis_values(lens.get("mediator_axes"))
+        context_axes = self._unique_axis_values(lens.get("context_axes"))
+        variable_axes = self._unique_axis_values(lens.get("variable_process_axes"))
+        if self._route_text_mentions_any_axis(text, target_axes):
+            return "direct_support"
+        if self._route_text_mentions_any_axis(text, mediator_axes):
+            return "mediator_context"
+        if self._route_text_mentions_any_axis(text, (*variable_axes, *context_axes)):
+            return "background_context"
+        return "irrelevant"
+
+    def _apply_route_evidence_role(
+        self,
+        *,
+        record: dict[str, Any],
+        evidence_role: str,
+    ) -> dict[str, Any]:
+        updated = dict(record)
+        join_plan = dict(updated.get("join_plan") or {})
+        join_plan["evidence_role"] = evidence_role
+        updated["join_plan"] = join_plan
+        if evidence_role == "irrelevant":
+            updated["role"] = "low_value_or_irrelevant"
+            updated["extractable"] = False
+        elif evidence_role == "mediator_context":
+            updated["role"] = "characterization"
+            updated["extractable"] = False
+        elif evidence_role == "background_context":
+            updated["role"] = "process_or_treatment"
+        return updated
+
+    def _route_candidate_text(self, candidate: Mapping[str, Any]) -> str:
+        table_schema = candidate.get("table_schema")
+        column_headers = (
+            table_schema.get("column_headers")
+            if isinstance(table_schema, Mapping)
+            else candidate.get("column_headers")
+        )
+        return " ".join(
+            str(value or "")
+            for value in (
+                candidate.get("section_label"),
+                candidate.get("caption_text"),
+                candidate.get("heading_path"),
+                candidate.get("text"),
+                " ".join(str(item) for item in column_headers or []),
+            )
+            if str(value or "").strip()
+        )
+
+    def _route_text_mentions_any_axis(
+        self,
+        text: str,
+        axes: Iterable[str],
+    ) -> bool:
+        return any(self._source_text_mentions_axis(text, axis) for axis in axes)
 
     def _objective_header_matches_any_axis(
         self,

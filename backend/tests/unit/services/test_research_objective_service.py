@@ -6435,6 +6435,14 @@ def test_research_objective_service_ranks_result_text_candidates(
             "relevant_sections": ["Paper title"],
         }
     )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-structure",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["scanning speed", "energy density"],
+            "target_property_axes": ["microstructure", "densification"],
+        }
+    )
     blocks = [
         SimpleNamespace(
             block_id="intro",
@@ -6480,6 +6488,7 @@ def test_research_objective_service_ranks_result_text_candidates(
         routes=routes,
         seen=set(),
         frame=frame,
+        objective_context=objective_context,
         source_candidates=candidates,
     )
 
@@ -6488,6 +6497,85 @@ def test_research_objective_service_ranks_result_text_candidates(
         "microstructure-results",
     ]
     assert {route.role for route in routes} == {"characterization"}
+    assert {route.join_plan["evidence_role"] for route in routes} == {
+        "direct_support"
+    }
+
+
+def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["laser power"],
+            "measured_property_scope": ["pitting corrosion"],
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["laser power"],
+            "process_context_axes": ["SLM"],
+            "target_property_axes": ["pitting potential"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["pitting potential"],
+                "mediator_axes": ["porosity", "pore size", "lack of fusion"],
+                "variable_process_axes": ["laser power"],
+                "context_axes": ["316L stainless steel", "SLM"],
+                "excluded_axes": [],
+                "direct_support_rules": [
+                    "Direct support must explicitly report a target outcome."
+                ],
+            },
+        }
+    )
+    candidates = [
+        {
+            "source_kind": "text_window",
+            "source_ref": "lof-defects",
+            "section_label": "3. Results",
+            "block_type": "paragraph",
+            "text": (
+                "Lack of fusion defects were observed at melt pool boundaries "
+                "with irregular pore morphology."
+            ),
+        },
+        {
+            "source_kind": "text_window",
+            "source_ref": "pitting-result",
+            "section_label": "4. Conclusion",
+            "block_type": "paragraph",
+            "text": (
+                "The pitting potential increased when porosity decreased, "
+                "indicating improved pitting corrosion resistance."
+            ),
+        },
+    ]
+    routes: list[ObjectiveEvidenceRoute] = []
+
+    service._append_ranked_text_hint_routes(
+        routes=routes,
+        seen=set(),
+        frame=frame,
+        objective_context=objective_context,
+        source_candidates=candidates,
+    )
+
+    route_by_ref = {route.source_ref: route for route in routes}
+    assert route_by_ref["lof-defects"].join_plan["evidence_role"] == "mediator_context"
+    assert route_by_ref["lof-defects"].role == "characterization"
+    assert route_by_ref["lof-defects"].extractable is False
+    assert route_by_ref["pitting-result"].join_plan["evidence_role"] == "direct_support"
+    assert route_by_ref["pitting-result"].extractable is True
 
 
 def test_research_objective_routing_uses_document_tree_order(tmp_path):
@@ -6663,6 +6751,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
     assert routes[0].source_kind == "table"
     assert routes[0].source_ref == "table-1"
     assert routes[0].role == "current_experimental_evidence"
+    assert routes[0].join_plan["evidence_role"] == "direct_support"
 
 
 def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):

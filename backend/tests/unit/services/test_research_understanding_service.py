@@ -222,7 +222,11 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     )
     assert understanding["relations"][0]["conditions"] == ["316L stainless steel"]
     assert understanding["relations"][0]["source_object_ids"] == ["oeu-comparison"]
-    assert extractor.payloads[0]["evidence_units"][1]["sample_summary"] == "heat-treated"
+    relation_units_by_id = {
+        unit["evidence_unit_id"]: unit
+        for unit in extractor.payloads[0]["evidence_units"]
+    }
+    assert relation_units_by_id["oeu-comparison"]["sample_summary"] == "heat-treated"
     assert understanding["evidence_refs"][0]["fact_ids"] == ["oeu-corrosion"]
     assert understanding["evidence_refs"][0]["label"] == "P001 Table 1"
     assert understanding["contexts"][0]["material_scope"] == ["316L stainless steel"]
@@ -252,6 +256,58 @@ def test_objective_relation_payload_excludes_full_audit_context_details():
     assert relation_payload["evidence_units"][0]["evidence_unit_id"] == "oeu-density-0"
     assert relation_payload["evidence_units"][0]["property_normalized"] == "relative density"
     assert len(serialized) < 30000
+
+
+def test_objective_relation_payload_prioritizes_relation_worthy_units():
+    payload = _oversized_relation_payload(unit_count=30)
+    payload["evidence_units"].extend(
+        [
+            {
+                "evidence_unit_id": "oeu-late-comparison",
+                "document_id": "paper-9",
+                "unit_kind": "comparison",
+                "property_normalized": "relative density",
+                "value_payload": {
+                    "comparison_axis": "scan speed",
+                    "direction": "decreases",
+                    "source_value_text": "scan speed decreases relative density",
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.87,
+            },
+            {
+                "evidence_unit_id": "oeu-late-interpretation",
+                "document_id": "paper-9",
+                "unit_kind": "interpretation",
+                "property_normalized": "relative density",
+                "value_payload": {
+                    "summary": "Energy density explains densification changes.",
+                },
+                "interpretation": "Energy density explains densification changes.",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            },
+        ]
+    )
+    payload["logic_chain"]["evidence_unit_ids"] = [
+        "oeu-density-0",
+        "oeu-late-comparison",
+        "oeu-late-interpretation",
+    ]
+    extractor = _FakeSemanticExtractor()
+    service = ResearchUnderstandingService(structured_extractor=extractor)
+
+    service.build_objective_understanding(payload)
+
+    selected_ids = [
+        unit["evidence_unit_id"]
+        for unit in extractor.payloads[0]["evidence_units"]
+    ]
+    assert len(selected_ids) == 24
+    assert "oeu-density-0" in selected_ids
+    assert "oeu-late-comparison" in selected_ids[:8]
+    assert "oeu-late-interpretation" in selected_ids[:8]
+    assert selected_ids.index("oeu-late-comparison") < selected_ids.index("oeu-density-1")
 
 
 def test_objective_understanding_filters_weak_claim_fragments():

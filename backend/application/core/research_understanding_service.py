@@ -547,9 +547,11 @@ class ResearchUnderstandingService:
             ],
             "evidence_units": [
                 self._semantic_relation_evidence_unit(unit)
-                for unit in evidence_units
-                if _text(unit.get("evidence_unit_id"))
-            ][:_RELATION_EVIDENCE_UNIT_LIMIT],
+                for unit in self._semantic_relation_evidence_units(
+                    evidence_units,
+                    claims=claims,
+                )
+            ],
         }
 
     def _semantic_relation_context(
@@ -607,6 +609,67 @@ class ResearchUnderstandingService:
             "resolution_status": _text(unit.get("resolution_status")),
             "confidence": unit.get("confidence"),
         }
+
+    def _semantic_relation_evidence_units(
+        self,
+        evidence_units: list[dict[str, Any]],
+        *,
+        claims: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        eligible = [
+            unit
+            for unit in evidence_units
+            if _text(unit.get("evidence_unit_id"))
+        ]
+        claim_unit_ids = {
+            unit_id
+            for claim in claims
+            for unit_id in _strings(claim.get("source_object_ids"))
+        }
+        return [
+            unit
+            for _, unit in sorted(
+                enumerate(eligible),
+                key=lambda item: self._semantic_relation_evidence_priority(
+                    item[1],
+                    claim_unit_ids=claim_unit_ids,
+                    index=item[0],
+                ),
+            )
+        ][:_RELATION_EVIDENCE_UNIT_LIMIT]
+
+    def _semantic_relation_evidence_priority(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        claim_unit_ids: set[str],
+        index: int,
+    ) -> tuple[int, int, int]:
+        unit_id = _text(unit.get("evidence_unit_id")) or ""
+        claim_rank = 0 if unit_id in claim_unit_ids else 1
+        unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+        if unit_kind in {"comparison", "interpretation", "characterization", "mechanism"}:
+            signal_rank = 0
+        elif self._semantic_relation_value_text(unit):
+            signal_rank = 1
+        else:
+            signal_rank = 2
+        return (claim_rank, signal_rank, index)
+
+    def _semantic_relation_value_text(self, unit: Mapping[str, Any]) -> str:
+        value_payload = _mapping(unit.get("value_payload"))
+        parts = [
+            _text(value_payload.get(key)) or ""
+            for key in (
+                "comparison_axis",
+                "direction",
+                "trend",
+                "summary",
+                "statement",
+            )
+        ]
+        parts.append(_text(unit.get("interpretation")) or "")
+        return " ".join(part for part in parts if part)
 
     def _semantic_relation_mapping_summary(
         self,

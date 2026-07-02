@@ -2581,6 +2581,55 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
     assert records[0]["source_refs"][0]["evidence_role"] == "mediator_context"
 
 
+def test_research_objective_service_enriches_legacy_unit_source_refs_from_routes(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "blk-lof-defects",
+            "role": "characterization",
+            "extractable": False,
+            "join_plan": {"evidence_role": "mediator_context"},
+            "confidence": 0.62,
+        }
+    )
+    unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-lof",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "property_normalized": "lack of fusion defects",
+            "value_payload": {
+                "summary": "LoF defects located at melt pool boundaries were observed.",
+            },
+            "source_refs": [
+                {
+                    "route_id": route.route_id,
+                    "source_kind": "text_window",
+                    "source_ref": "blk-lof-defects",
+                    "role": "characterization",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.84,
+        }
+    )
+
+    records = service._evidence_units_with_route_evidence_roles(
+        (unit,),
+        routes=(route,),
+    )
+
+    assert records[0]["source_refs"][0]["evidence_role"] == "mediator_context"
+
+
 def test_research_objective_service_uses_main_number_after_leading_uncertainty(
     tmp_path,
 ):

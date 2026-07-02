@@ -953,6 +953,48 @@ def test_objective_understanding_blocks_real_fatigue_future_work_from_claims():
     assert understanding["claims"] == []
 
 
+def test_objective_understanding_blocks_observed_defect_characterization_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["objective"]["question"] = "How do defects affect pitting corrosion behavior?"
+    payload["objective"]["property_axes"] = ["pitting corrosion behavior"]
+    payload["objective_context"]["question"] = (
+        "How do defects affect pitting corrosion behavior?"
+    )
+    payload["objective_context"]["target_property_axes"] = [
+        "pitting corrosion behavior"
+    ]
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-lof-observed",
+            "document_id": "paper-1",
+            "unit_kind": "characterization",
+            "property_normalized": "pitting corrosion behavior",
+            "value_payload": {
+                "summary": (
+                    "LoF defects located at melt pool boundaries with elongated "
+                    "truncated shape are observed."
+                ),
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "blk-lof",
+                    "role": "characterization",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.85,
+        }
+    ]
+    payload["logic_chain"]["summary"] = ""
+    payload["logic_chain"]["evidence_unit_ids"] = ["oeu-lof-observed"]
+
+    understanding = service.build_objective_understanding(payload)
+
+    assert understanding["claims"] == []
+
+
 def test_objective_understanding_does_not_match_dislocation_density_as_density_claim():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     payload = _oversized_relation_payload(unit_count=4)
@@ -1153,6 +1195,40 @@ def test_objective_understanding_filters_aggregate_logic_summary_claims():
     assert "increase in applied energy density results in coarser grains" in statements
     assert all("measurement unit(s)" not in statement for statement in statements)
     assert all("density range" not in statement for statement in statements)
+
+
+def test_objective_understanding_filters_real_assembled_logic_summary_claims():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    payload = _oversized_relation_payload(unit_count=4)
+    payload["evidence_units"] = [
+        {
+            "evidence_unit_id": "oeu-density",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "density",
+            "value_payload": {"source_value_text": "98.33 %"},
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "tbl-density",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    ]
+    payload["logic_chain"]["evidence_unit_ids"] = ["oeu-density"]
+    payload["logic_chain"]["summary"] = (
+        "How do laser power and scan speed affect density?: assembled 43 "
+        "measurement unit(s) across 6 document(s); density range 90.04-99.45 %."
+    )
+
+    understanding = service.build_objective_understanding(payload)
+
+    statements = [claim["statement"] for claim in understanding["claims"]]
+    assert all("assembled 43 measurement unit(s)" not in item for item in statements)
+    assert all("density range" not in item for item in statements)
 
 
 def test_objective_understanding_keeps_measurement_only_claims():

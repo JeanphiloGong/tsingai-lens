@@ -1369,7 +1369,32 @@ class ResearchUnderstandingService:
                 else None
             )
         if unit_kind in {"characterization", "interpretation", "mechanism"}:
-            return "mechanism"
+            lower_statement = f" {_text(statement).lower()} "
+            mechanism_signals = (
+                " improves",
+                " improve",
+                " reduces",
+                " reduce",
+                " increases",
+                " increase",
+                " decreases",
+                " decrease",
+                " affects",
+                " affect",
+                " explains",
+                " explain",
+                " leads to ",
+                " led to ",
+                " results in ",
+                " resulted in ",
+                " associated with ",
+                " directly linking ",
+            )
+            return (
+                "mechanism"
+                if any(signal in lower_statement for signal in mechanism_signals)
+                else None
+            )
         return None
 
     def _objective_target_axes_for_claims(
@@ -1470,6 +1495,8 @@ class ResearchUnderstandingService:
             return True
         if " should be investigated" in lower or " remains to be studied" in lower:
             return True
+        if " is assumed " in lower or " are assumed " in lower:
+            return True
         if " is reported as " in lower and lower.endswith(" analysis."):
             return True
         return False
@@ -1480,6 +1507,7 @@ class ResearchUnderstandingService:
         if not lower:
             return True
         aggregate_signals = (
+            " assembled ",
             " measurement unit(s)",
             " across ",
             " density range ",

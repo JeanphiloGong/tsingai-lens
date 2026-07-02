@@ -1639,7 +1639,7 @@ class ResearchObjectiveService:
     ) -> dict[str, dict[str, str | None]]:
         return {
             document_id: {
-                "title": _normalize_text(tree.root.title),
+                "title": str(tree.root.title or "").strip() or None,
                 "source_filename": None,
             }
             for document_id, tree in document_trees_by_document_id.items()
@@ -1685,7 +1685,7 @@ class ResearchObjectiveService:
             for document_position, document in enumerate(documents, start=1):
                 completed_frame_requests += 1
                 document_id = str(getattr(document, "document_id", "") or "")
-                document_title = _normalize_text(getattr(document, "title", None))
+                document_title = str(getattr(document, "title", None) or "").strip() or None
                 source_filename = self._resolve_source_filename(document)
                 self._notify_progress(
                     progress_callback,

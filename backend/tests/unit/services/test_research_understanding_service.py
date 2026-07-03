@@ -1925,7 +1925,7 @@ def test_with_presentation_projects_findings_contract():
     assert finding["outcomes"] == ["relative density"]
     assert finding["direction"] == "increases"
     assert finding["scope_summary"] == "316L stainless steel, laser power"
-    assert finding["support_grade"] == "partial"
+    assert finding["support_grade"] == "insufficient"
     assert finding["review_status"] == "pending_review"
     assert finding["paper_count"] == 1
     assert finding["evidence_count"] == 2
@@ -2058,6 +2058,209 @@ def test_with_presentation_buckets_finding_evidence_by_role():
         "conflict": [],
         "noise": [],
         "uncategorized": ["evref_unknown"],
+    }
+
+
+def test_with_presentation_assigns_support_grade_from_evidence_quality():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does processing affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_strong",
+                    "claim_type": "finding",
+                    "statement": "Preheating reduces porosity.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_strong_direct", "evref_strong_mechanism"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_strong"],
+                },
+                {
+                    "claim_id": "claim_partial",
+                    "claim_type": "finding",
+                    "statement": "Laser power increases relative density.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_partial_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_partial"],
+                },
+                {
+                    "claim_id": "claim_weak",
+                    "claim_type": "finding",
+                    "statement": "Scan speed affects relative density.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_weak_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_weak"],
+                },
+                {
+                    "claim_id": "claim_conflict",
+                    "claim_type": "finding",
+                    "statement": "Energy density has conflicting density effects.",
+                    "status": "conflicted",
+                    "confidence": 0.72,
+                    "evidence_ref_ids": ["evref_conflict"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_conflict"],
+                },
+                {
+                    "claim_id": "claim_insufficient",
+                    "claim_type": "finding",
+                    "statement": "Background context suggests possible density effects.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_background"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_insufficient"],
+                },
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_strong",
+                    "relation_type": "reduces",
+                    "subject": "preheating",
+                    "predicate": "reduces",
+                    "object": "porosity",
+                    "statement": "Preheating reduces porosity.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_strong_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_strong"],
+                },
+                {
+                    "relation_id": "rel_partial",
+                    "relation_type": "increases",
+                    "subject": "laser power",
+                    "predicate": "increases",
+                    "object": "relative density",
+                    "statement": "Laser power increases relative density.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_partial_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_partial"],
+                },
+                {
+                    "relation_id": "rel_conflict",
+                    "relation_type": "conflicts",
+                    "subject": "energy density",
+                    "predicate": "conflicts",
+                    "object": "relative density",
+                    "statement": "Energy density has conflicting density effects.",
+                    "status": "conflicted",
+                    "evidence_ref_ids": ["evref_conflict"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_conflict"],
+                },
+                {
+                    "relation_id": "rel_insufficient",
+                    "relation_type": "correlates",
+                    "subject": "process window",
+                    "predicate": "correlates",
+                    "object": "relative density",
+                    "statement": "Background context suggests possible density effects.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_background"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_insufficient"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_strong_direct",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_strong"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_strong_mechanism",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Discussion",
+                    "locator": {"source_ref": "blk-mechanism"},
+                    "fact_ids": ["unit_strong"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "mediator_context",
+                },
+                {
+                    "evidence_ref_id": "evref_partial_direct",
+                    "source_kind": "table",
+                    "document_id": "paper-2",
+                    "label": "P002 Table 1",
+                    "locator": {"source_ref": "table-2"},
+                    "fact_ids": ["unit_partial"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_weak_direct",
+                    "source_kind": "table",
+                    "document_id": "paper-3",
+                    "label": "P003 Table 1",
+                    "locator": {"source_ref": "table-3"},
+                    "fact_ids": ["unit_weak"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_conflict",
+                    "source_kind": "text_window",
+                    "document_id": "paper-4",
+                    "label": "P004 Results",
+                    "locator": {"source_ref": "blk-conflict"},
+                    "fact_ids": ["unit_conflict"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "conflict",
+                },
+                {
+                    "evidence_ref_id": "evref_background",
+                    "source_kind": "text_window",
+                    "document_id": "paper-5",
+                    "label": "P005 Introduction",
+                    "locator": {"source_ref": "blk-background"},
+                    "fact_ids": ["unit_insufficient"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "background_context",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    grades = {
+        finding["claim_id"]: finding["support_grade"]
+        for finding in understanding["presentation"]["findings"]
+    }
+    assert grades == {
+        "claim_strong": "strong",
+        "claim_partial": "partial",
+        "claim_weak": "weak",
+        "claim_conflict": "conflict",
+        "claim_insufficient": "insufficient",
     }
 
 

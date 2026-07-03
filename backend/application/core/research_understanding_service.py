@@ -1830,6 +1830,14 @@ class ResearchUnderstandingService:
     ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
         relations = self._finding_relations(effect, relations_by_id)
+        outcomes = self._finding_outcomes(effect, relations)
+        relation_ids = list(_strings(effect.get("relation_ids")))
+        evidence_bundle = self._finding_evidence_bundle(
+            effect,
+            evidence_by_id=evidence_by_id,
+        )
+        review_status = self._finding_review_status(effect)
+        scope_summary = _text(effect.get("context_summary")) or ""
         return {
             "finding_id": f"finding_{claim_id}",
             "claim_id": claim_id,
@@ -1837,21 +1845,25 @@ class ResearchUnderstandingService:
             "statement": _text(effect.get("statement")) or "",
             "variables": self._finding_variables(effect, relations),
             "mediators": self._finding_mediators(relations),
-            "outcomes": self._finding_outcomes(effect, relations),
+            "outcomes": outcomes,
             "direction": self._finding_direction(effect, relations),
-            "scope_summary": _text(effect.get("context_summary")) or "",
-            "support_grade": self._finding_support_grade(effect),
-            "review_status": self._finding_review_status(effect),
+            "scope_summary": scope_summary,
+            "support_grade": self._finding_support_grade(
+                effect,
+                evidence_bundle=evidence_bundle,
+                outcomes=outcomes,
+                relation_ids=relation_ids,
+                review_status=review_status,
+                scope_summary=scope_summary,
+            ),
+            "review_status": review_status,
             "confidence": effect.get("confidence"),
             "paper_count": effect.get("paper_count") or 0,
             "evidence_count": effect.get("evidence_count") or 0,
             "evidence_ref_ids": list(_strings(effect.get("evidence_ref_ids"))),
             "context_ids": list(_strings(effect.get("context_ids"))),
-            "relation_ids": list(_strings(effect.get("relation_ids"))),
-            "evidence_bundle": self._finding_evidence_bundle(
-                effect,
-                evidence_by_id=evidence_by_id,
-            ),
+            "relation_ids": relation_ids,
+            "evidence_bundle": evidence_bundle,
             "warnings": list(_strings(effect.get("warnings"))),
         }
 
@@ -1969,15 +1981,43 @@ class ResearchUnderstandingService:
             return "noise"
         return "uncategorized"
 
-    def _finding_support_grade(self, effect: Mapping[str, Any]) -> str:
+    def _finding_support_grade(
+        self,
+        effect: Mapping[str, Any],
+        *,
+        evidence_bundle: Mapping[str, list[str]],
+        outcomes: list[str],
+        relation_ids: list[str],
+        review_status: str,
+        scope_summary: str,
+    ) -> str:
         support_status = (_text(effect.get("support_status")) or "limited").lower()
-        if support_status == "conflicted":
+        direct_count = len(evidence_bundle.get("direct_result", []))
+        evidence_count = int(effect.get("evidence_count") or 0)
+        paper_count = int(effect.get("paper_count") or 0)
+        has_mechanism = self._finding_has_mechanism_support(evidence_bundle)
+        has_direct = self._finding_has_direct_support(evidence_bundle)
+        if support_status == "conflicted" or evidence_bundle.get("conflict"):
             return "conflict"
-        if support_status == "unsupported":
+        if support_status == "unsupported" or evidence_count == 0 or not outcomes:
             return "insufficient"
-        if support_status == "supported" and not effect.get("needs_review"):
+        if not has_direct:
+            return "weak" if has_mechanism else "insufficient"
+        if not relation_ids or not scope_summary:
+            return "weak"
+        if review_status == "needs_review":
+            return "partial"
+        if direct_count >= 2 or paper_count >= 2 or has_mechanism:
+            return "strong"
+        if support_status == "supported":
             return "partial"
         return "weak"
+
+    def _finding_has_direct_support(self, bundle: Mapping[str, list[str]]) -> bool:
+        return bool(bundle.get("direct_result"))
+
+    def _finding_has_mechanism_support(self, bundle: Mapping[str, list[str]]) -> bool:
+        return bool(bundle.get("mechanism"))
 
     def _finding_review_status(self, effect: Mapping[str, Any]) -> str:
         return "needs_review" if effect.get("needs_review") else "pending_review"

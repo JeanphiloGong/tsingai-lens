@@ -334,6 +334,8 @@ const translations: Record<Language, Translations> = {
 				relationNeedsNormalization: 'Relation details need normalization before expert review.',
 				hiddenRelationCount: '{count} low-level relation(s) are hidden until normalized.',
 				hiddenFindingContextCount: '{count} additional context record(s) available for curation.',
+				secondaryFindingEvidenceCount:
+					'{count} secondary evidence record(s) available for audit and curation.',
 				paperCount: '{count} papers',
 				evidenceCount: '{count} evidence',
 				keyEvidence: 'Key evidence',
@@ -2959,6 +2961,7 @@ const translations: Record<Language, Translations> = {
 				relationNeedsNormalization: '该关系细节还需要归一化后再给专家复核。',
 				hiddenRelationCount: '{count} 条低层关系已隐藏，待归一化后再展示。',
 				hiddenFindingContextCount: '还有 {count} 条上下文记录可在专家校正中使用。',
+				secondaryFindingEvidenceCount: '还有 {count} 条次级证据可用于审计和专家校正。',
 				paperCount: '{count} 篇文献',
 				evidenceCount: '{count} 条证据',
 				keyEvidence: '关键证据',

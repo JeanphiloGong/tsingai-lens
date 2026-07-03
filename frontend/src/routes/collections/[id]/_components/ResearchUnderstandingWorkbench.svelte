@@ -57,6 +57,17 @@
 	const CURATION_CLAIM_TYPE_OPTIONS = CLAIM_TYPE_ORDER.filter((type) => type !== 'all');
 	const CURATION_STATUS_OPTIONS = CLAIM_STATUS_ORDER.filter((status) => status !== 'all');
 	type FindingEvidenceRole = keyof ResearchUnderstandingPresentationFinding['evidence_bundle'];
+	const FINDING_MAIN_EVIDENCE_ROLES: FindingEvidenceRole[] = [
+		'direct_result',
+		'mechanism',
+		'condition_context',
+		'conflict'
+	];
+	const FINDING_SECONDARY_EVIDENCE_ROLES: FindingEvidenceRole[] = [
+		'background',
+		'noise',
+		'uncategorized'
+	];
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
@@ -379,20 +390,20 @@
 
 	function selectedFindingEvidenceGroups() {
 		if (!selectedFinding) return [];
-		const roles: FindingEvidenceRole[] = [
-			'direct_result',
-			'mechanism',
-			'condition_context',
-			'conflict',
-			'background',
-			'uncategorized'
-		];
-		return roles
+		return FINDING_MAIN_EVIDENCE_ROLES
 			.map((role) => ({
 				role,
 				items: presentationEvidenceForIds(selectedFinding.evidence_bundle[role] ?? [])
 			}))
 			.filter((group) => group.items.length);
+	}
+
+	function selectedSecondaryFindingEvidenceCount() {
+		if (!selectedFinding) return 0;
+		return FINDING_SECONDARY_EVIDENCE_ROLES.reduce(
+			(count, role) => count + (selectedFinding.evidence_bundle[role]?.length ?? 0),
+			0
+		);
 	}
 
 	function compactText(value: string, limit = 160) {
@@ -1639,6 +1650,13 @@
 											{$t('research.understanding.noFindingEvidence')}
 										</div>
 									{/each}
+									{#if selectedSecondaryFindingEvidenceCount() > 0}
+										<p class="research-understanding-workbench__audit-note">
+											{$t('research.understanding.secondaryFindingEvidenceCount', {
+												count: selectedSecondaryFindingEvidenceCount()
+											})}
+										</p>
+									{/if}
 								</div>
 							{:else}
 								<div class="research-understanding-workbench__detail-section">

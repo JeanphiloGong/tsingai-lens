@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 
 import ResearchUnderstandingWorkbench from './ResearchUnderstandingWorkbench.svelte';
-import type { ResearchUnderstanding } from '../../../_shared/researchView';
+import type {
+	ResearchUnderstanding,
+	ResearchUnderstandingPresentationFinding
+} from '../../../_shared/researchView';
 
 const fetchMock = vi.fn();
 vi.stubGlobal('fetch', fetchMock);
@@ -514,7 +517,7 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 	const fixture = understandingFixture();
 	const noisySemContext =
 		'SLM processed 316L stainless steel samples were characterized in FEI-INSPECT 50 SEM. Same samples used for microhardness testing were used for SEM characterizations as well. The samples were polished using different grades of polishing cloths from 400 to 1200 and then polished for 30 min on a micro cloth using colloidal silica. SEM characterization was done on horizontal as well as on vertical sections of each sample.';
-	const finding = {
+	const finding: ResearchUnderstandingPresentationFinding = {
 		finding_id: 'finding_relation_density',
 		claim_id: 'claim_relation_density',
 		title: 'VED -> density',
@@ -582,6 +585,25 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 					evidence_role: 'direct_support',
 					confidence: 0.88,
 					href: null
+				},
+				{
+					evidence_ref_id: 'ev_density_aim',
+					document_id: 'doc_1',
+					title: 'P003 Abstract / p. 1',
+					source_label: 'P003 Abstract',
+					source_kind: 'text_window',
+					source_ref: 'blk_density_abstract',
+					block_type: 'paragraph',
+					heading_path: 'Abstract',
+					page: '1',
+					quote: 'This study aims to understand how VED changes LPBF 316L density.',
+					source_text:
+						'This study aims to understand how VED changes LPBF 316L density and microstructure, but it does not report the measured result.',
+					value_summary: 'P003 Abstract',
+					traceability_status: 'traceable',
+					evidence_role: null,
+					confidence: 0.45,
+					href: null
 				}
 			],
 			context_summaries: [
@@ -635,6 +657,9 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 		}
 	};
 	const relationFinding = returnValue.presentation.findings[0];
+	relationFinding.evidence_count = 2;
+	relationFinding.evidence_ref_ids = ['ev_density_quote', 'ev_density_aim'];
+	relationFinding.evidence_bundle.uncategorized = ['ev_density_aim'];
 	relationFinding.context_ids = [...relationFinding.context_ids, 'ctx_microhardness_off_target'];
 	return returnValue;
 }
@@ -823,9 +848,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 			)
 			.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Direct result evidence')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Uncategorized evidence')).not.toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByText('L-VED, M-VED and H-VED samples reached 91.9'))
 			.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'1 secondary evidence record(s) available for audit and curation.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText(/This study aims to understand how VED changes/))
+			.not.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Objective scope')).toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByText('VED, selective laser melting'))

@@ -161,6 +161,37 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 										warnings: []
 									}
 								],
+								findings: [
+									{
+										finding_id: 'finding_claim_1',
+										claim_id: 'claim_1',
+										title: 'heat treatment -> tensile strength',
+										statement: 'Heat treatment changes tensile strength.',
+										variables: ['heat treatment'],
+										mediators: [],
+										outcomes: ['tensile strength'],
+										direction: '',
+										scope_summary: '316L stainless steel, heat treatment',
+										support_grade: 'weak',
+										review_status: 'pending_review',
+										confidence: 0.84,
+										paper_count: 0,
+										evidence_count: 0,
+										evidence_ref_ids: [],
+										context_ids: [],
+										relation_ids: [],
+										evidence_bundle: {
+											direct_result: [],
+											mechanism: [],
+											condition_context: [],
+											background: [],
+											conflict: [],
+											noise: [],
+											uncategorized: []
+										},
+										warnings: []
+									}
+								],
 								evidence_items: [],
 								context_summaries: []
 							}
@@ -184,6 +215,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();

@@ -48,6 +48,7 @@ export type ResearchUnderstandingEvidenceRef = {
 	anchor_ids: string[];
 	confidence: number | null;
 	traceability_status: string;
+	evidence_role: string | null;
 	quote: string | null;
 	href: string | null;
 };
@@ -118,6 +119,36 @@ export type ResearchUnderstandingPresentationEffect = {
 	needs_review: boolean;
 	warnings: string[];
 };
+export type ResearchUnderstandingPresentationEvidenceBundle = {
+	direct_result: string[];
+	mechanism: string[];
+	condition_context: string[];
+	background: string[];
+	conflict: string[];
+	noise: string[];
+	uncategorized: string[];
+};
+export type ResearchUnderstandingPresentationFinding = {
+	finding_id: string;
+	claim_id: string;
+	title: string;
+	statement: string;
+	variables: string[];
+	mediators: string[];
+	outcomes: string[];
+	direction: string;
+	scope_summary: string;
+	support_grade: string;
+	review_status: string;
+	confidence: number | null;
+	paper_count: number;
+	evidence_count: number;
+	evidence_ref_ids: string[];
+	context_ids: string[];
+	relation_ids: string[];
+	evidence_bundle: ResearchUnderstandingPresentationEvidenceBundle;
+	warnings: string[];
+};
 export type ResearchUnderstandingPresentationEvidence = {
 	evidence_ref_id: string;
 	document_id: string | null;
@@ -132,6 +163,7 @@ export type ResearchUnderstandingPresentationEvidence = {
 	source_text: string | null;
 	value_summary: string;
 	traceability_status: string;
+	evidence_role: string | null;
 	confidence: number | null;
 	href: string | null;
 };
@@ -147,6 +179,7 @@ export type ResearchUnderstandingPresentationContext = {
 export type ResearchUnderstandingPresentation = {
 	summary: ResearchUnderstandingPresentationSummary;
 	effects: ResearchUnderstandingPresentationEffect[];
+	findings: ResearchUnderstandingPresentationFinding[];
 	evidence_items: ResearchUnderstandingPresentationEvidence[];
 	context_summaries: ResearchUnderstandingPresentationContext[];
 };
@@ -982,6 +1015,7 @@ function normalizeResearchUnderstandingEvidenceRef(
 		anchor_ids: toStringList(record.anchor_ids),
 		confidence: toOptionalNumber(record.confidence),
 		traceability_status: toText(record.traceability_status, 'unknown'),
+		evidence_role: nonEmptyText(record.evidence_role),
 		quote: nonEmptyText(record.quote),
 		href: nonEmptyText(record.href)
 	};
@@ -1062,6 +1096,9 @@ function normalizeResearchUnderstandingPresentation(
 	const effects = asArray(record.effects)
 		.map((item) => normalizeResearchUnderstandingPresentationEffect(item))
 		.filter((item): item is ResearchUnderstandingPresentationEffect => item !== null);
+	const findings = asArray(record.findings)
+		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
+		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
 	const evidenceItems = asArray(record.evidence_items)
 		.map((item) => normalizeResearchUnderstandingPresentationEvidence(item))
 		.filter((item): item is ResearchUnderstandingPresentationEvidence => item !== null);
@@ -1081,6 +1118,7 @@ function normalizeResearchUnderstandingPresentation(
 			review_queue_count: toNumber(summaryRecord.review_queue_count, 0)
 		},
 		effects,
+		findings,
 		evidence_items: evidenceItems,
 		context_summaries: contextSummaries
 	};
@@ -1116,6 +1154,67 @@ function normalizeResearchUnderstandingPresentationEffect(
 	};
 }
 
+function emptyResearchUnderstandingPresentationEvidenceBundle(): ResearchUnderstandingPresentationEvidenceBundle {
+	return {
+		direct_result: [],
+		mechanism: [],
+		condition_context: [],
+		background: [],
+		conflict: [],
+		noise: [],
+		uncategorized: []
+	};
+}
+
+function normalizeResearchUnderstandingPresentationEvidenceBundle(
+	value: unknown
+): ResearchUnderstandingPresentationEvidenceBundle {
+	const record = asRecord(value);
+	if (!record) return emptyResearchUnderstandingPresentationEvidenceBundle();
+	return {
+		direct_result: toStringList(record.direct_result),
+		mechanism: toStringList(record.mechanism),
+		condition_context: toStringList(record.condition_context),
+		background: toStringList(record.background),
+		conflict: toStringList(record.conflict),
+		noise: toStringList(record.noise),
+		uncategorized: toStringList(record.uncategorized)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationFinding(
+	value: unknown
+): ResearchUnderstandingPresentationFinding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const claimId = toText(record.claim_id);
+	const statement = toText(record.statement);
+	if (!claimId && !statement) return null;
+	return {
+		finding_id: toText(record.finding_id, claimId || statement),
+		claim_id: claimId || statement,
+		title: toText(record.title, statement || 'Research finding'),
+		statement,
+		variables: toStringList(record.variables),
+		mediators: toStringList(record.mediators),
+		outcomes: toStringList(record.outcomes),
+		direction: toText(record.direction),
+		scope_summary: toText(record.scope_summary),
+		support_grade: toText(record.support_grade, 'weak'),
+		review_status: toText(record.review_status, 'pending_review'),
+		confidence: toOptionalNumber(record.confidence),
+		paper_count: toNumber(record.paper_count, 0),
+		evidence_count: toNumber(record.evidence_count, 0),
+		evidence_ref_ids: toStringList(record.evidence_ref_ids),
+		context_ids: toStringList(record.context_ids),
+		relation_ids: toStringList(record.relation_ids),
+		evidence_bundle: normalizeResearchUnderstandingPresentationEvidenceBundle(
+			record.evidence_bundle
+		),
+		warnings: toStringList(record.warnings)
+	};
+}
+
 function normalizeResearchUnderstandingPresentationEvidence(
 	value: unknown
 ): ResearchUnderstandingPresentationEvidence | null {
@@ -1137,6 +1236,7 @@ function normalizeResearchUnderstandingPresentationEvidence(
 		source_text: nonEmptyText(record.source_text ?? record.quote),
 		value_summary: toText(record.value_summary),
 		traceability_status: toText(record.traceability_status, 'unknown'),
+		evidence_role: nonEmptyText(record.evidence_role),
 		confidence: toOptionalNumber(record.confidence),
 		href: nonEmptyText(record.href)
 	};
@@ -1177,6 +1277,7 @@ function emptyResearchUnderstandingPresentation(fallback: {
 			review_queue_count: 0
 		},
 		effects: [],
+		findings: [],
 		evidence_items: [],
 		context_summaries: []
 	};

@@ -117,6 +117,7 @@ function understandingFixture(): ResearchUnderstanding {
 				anchor_ids: ['anc_1'],
 				confidence: 0.9,
 				traceability_status: 'traceable',
+				evidence_role: 'direct_support',
 				quote: null,
 				href: null
 			},
@@ -130,6 +131,7 @@ function understandingFixture(): ResearchUnderstanding {
 				anchor_ids: [],
 				confidence: 0.64,
 				traceability_status: 'traceable',
+				evidence_role: 'mediator_context',
 				quote: 'Annealing reduced cellular substructure.',
 				href: null
 			},
@@ -143,6 +145,7 @@ function understandingFixture(): ResearchUnderstanding {
 				anchor_ids: [],
 				confidence: 0.51,
 				traceability_status: 'traceable',
+				evidence_role: 'conflict',
 				quote: null,
 				href: null
 			}
@@ -239,6 +242,95 @@ function understandingFixture(): ResearchUnderstanding {
 					warnings: ['conflicting_direction']
 				}
 			],
+			findings: [
+				{
+					finding_id: 'finding_strength_supported',
+					claim_id: 'claim_strength_supported',
+					title: 'Heat treatment -> yield strength',
+					statement: 'Heat treatment changes LPBF 316L tensile response.',
+					variables: ['heat treatment'],
+					mediators: [],
+					outcomes: ['yield strength'],
+					direction: '',
+					scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					support_grade: 'partial',
+					review_status: 'pending_review',
+					confidence: 0.9,
+					paper_count: 1,
+					evidence_count: 1,
+					evidence_ref_ids: ['ev_table_2'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: [],
+					evidence_bundle: {
+						direct_result: ['ev_table_2'],
+						mechanism: [],
+						condition_context: [],
+						background: [],
+						conflict: [],
+						noise: [],
+						uncategorized: []
+					},
+					warnings: []
+				},
+				{
+					finding_id: 'finding_mechanism_limited',
+					claim_id: 'claim_mechanism_limited',
+					title: 'Annealing -> cellular substructure change',
+					statement: 'Annealing may reduce cellular substructure.',
+					variables: ['annealing'],
+					mediators: ['cellular substructure'],
+					outcomes: ['yield strength'],
+					direction: 'explains',
+					scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					support_grade: 'weak',
+					review_status: 'needs_review',
+					confidence: 0.64,
+					paper_count: 1,
+					evidence_count: 1,
+					evidence_ref_ids: ['ev_section_3'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: ['rel_annealing_microstructure', 'rel_internal_sample'],
+					evidence_bundle: {
+						direct_result: [],
+						mechanism: ['ev_section_3'],
+						condition_context: [],
+						background: [],
+						conflict: [],
+						noise: [],
+						uncategorized: []
+					},
+					warnings: ['needs_expert_review']
+				},
+				{
+					finding_id: 'finding_comparison_conflict',
+					claim_id: 'claim_comparison_conflict',
+					title: 'Heat treatment -> yield strength conflict',
+					statement: 'Strength trends conflict across reported heat treatments.',
+					variables: ['heat treatment'],
+					mediators: [],
+					outcomes: ['yield strength'],
+					direction: 'compares',
+					scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					support_grade: 'conflict',
+					review_status: 'needs_review',
+					confidence: 0.51,
+					paper_count: 1,
+					evidence_count: 1,
+					evidence_ref_ids: ['ev_conflict'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: [],
+					evidence_bundle: {
+						direct_result: [],
+						mechanism: [],
+						condition_context: [],
+						background: [],
+						conflict: ['ev_conflict'],
+						noise: [],
+						uncategorized: []
+					},
+					warnings: ['conflicting_direction']
+				}
+			],
 			evidence_items: [
 				{
 					evidence_ref_id: 'ev_table_2',
@@ -254,6 +346,7 @@ function understandingFixture(): ResearchUnderstanding {
 					source_text: null,
 					value_summary: 'P001 Table 2',
 					traceability_status: 'traceable',
+					evidence_role: 'direct_support',
 					confidence: 0.9,
 					href: null
 				},
@@ -272,6 +365,7 @@ function understandingFixture(): ResearchUnderstanding {
 						'Annealing reduced cellular substructure after LPBF processing. This paragraph is the original parsed source block used as evidence.',
 					value_summary: 'P001 Section 3.2',
 					traceability_status: 'traceable',
+					evidence_role: 'mediator_context',
 					confidence: 0.64,
 					href: null
 				},
@@ -289,6 +383,7 @@ function understandingFixture(): ResearchUnderstanding {
 					source_text: null,
 					value_summary: 'P002 Table 4',
 					traceability_status: 'traceable',
+					evidence_role: 'conflict',
 					confidence: 0.51,
 					href: null
 				}
@@ -323,7 +418,7 @@ function goalUnderstandingFixture(): ResearchUnderstanding {
 }
 
 async function openMechanismClaimDetail() {
-	await browserPage.getByRole('button', { name: 'Mechanism 1' }).click();
+	await browserPage.getByRole('button', { name: 'Weak 1' }).click();
 	await browserPage
 		.getByRole('button', { name: /Annealing may reduce cellular substructure\./ })
 		.click();
@@ -331,7 +426,7 @@ async function openMechanismClaimDetail() {
 }
 
 async function openConflictedClaimDetail() {
-	await browserPage.getByRole('button', { name: 'Conflicted 1' }).click();
+	await browserPage.getByRole('button', { name: 'Conflict 1' }).click();
 	await browserPage
 		.getByRole('button', { name: /Strength trends conflict across reported heat treatments\./ })
 		.click();
@@ -400,6 +495,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: 'Evidence grade' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: 'Variables' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: 'Mechanism' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('3 of 3')).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Claim detail')).not.toBeInTheDocument();

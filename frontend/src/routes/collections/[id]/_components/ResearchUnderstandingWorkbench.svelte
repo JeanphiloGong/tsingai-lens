@@ -12,6 +12,7 @@
 		type ResearchUnderstandingCuration,
 		type ResearchUnderstandingPresentationEffect,
 		type ResearchUnderstandingPresentationEvidence,
+		type ResearchUnderstandingPresentationFinding,
 		type ResearchUnderstandingPresentationContext,
 		type ResearchUnderstandingRelation,
 		type ResearchUnderstandingFeedbackIssueType,
@@ -35,6 +36,7 @@
 		'context'
 	];
 	const CLAIM_STATUS_ORDER = ['all', 'supported', 'limited', 'conflicted', 'unsupported'];
+	const SUPPORT_GRADE_ORDER = ['all', 'strong', 'partial', 'weak', 'conflict', 'insufficient'];
 	const FEEDBACK_STATUS_OPTIONS: ResearchUnderstandingFeedbackStatus[] = [
 		'correct',
 		'partial',
@@ -85,10 +87,17 @@
 	let feedbackMessage = '';
 	let feedbackError = '';
 	let lastFeedbackClaimId = '';
+	let lastUsesFindings = false;
 
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
 	$: effectRows = presentation?.effects ?? [];
+	$: findingRows = presentation?.findings ?? [];
+	$: usesFindings = findingRows.length > 0;
+	$: if (usesFindings !== lastUsesFindings) {
+		lastUsesFindings = usesFindings;
+		selectedClaimStatus = 'all';
+	}
 	$: presentationEvidenceById = new Map(
 		(presentation?.evidence_items ?? []).map((item) => [item.evidence_ref_id, item])
 	);
@@ -114,21 +123,37 @@
 			(selectedClaimStatus === 'all' || effect.support_status === selectedClaimStatus) &&
 			(!reviewQueueOnly || effect.needs_review || reviewQueueClaimIds.has(effect.claim_id))
 	);
+	$: filteredFindings = findingRows.filter(
+		(finding) =>
+			(selectedClaimStatus === 'all' || finding.support_grade === selectedClaimStatus) &&
+			(!reviewQueueOnly ||
+				finding.review_status === 'needs_review' ||
+				reviewQueueClaimIds.has(finding.claim_id))
+	);
+	$: visibleFindingRows = usesFindings ? filteredFindings : [];
+	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
+	$: selectableEffects = usesFindings
+		? filteredFindings
+				.map((finding) => findingEffectFor(finding))
+				.filter((effect): effect is ResearchUnderstandingPresentationEffect => Boolean(effect))
+		: filteredEffects;
 	$: claimTypeCounts = countEffectsBy(effectRows, 'claim_type');
-	$: claimStatusCounts = countEffectsBy(effectRows, 'support_status');
-	$: if (
-		understanding &&
-		detailMode &&
-		filteredEffects.length &&
-		!filteredEffects.some((effect) => effect.effect_id === selectedEffectId)
-	) {
-		selectedEffectId = filteredEffects[0].effect_id;
+	$: claimStatusCounts = (() => {
+		if (!usesFindings) return countEffectsBy(effectRows, 'support_status');
+		const counts = new Map<string, number>([['all', findingRows.length]]);
+		for (const finding of findingRows) {
+			counts.set(finding.support_grade, (counts.get(finding.support_grade) ?? 0) + 1);
+		}
+		return counts;
+	})();
+	$: if (understanding && detailMode && selectableEffects.length && !selectableEffects.some((effect) => effect.effect_id === selectedEffectId)) {
+		selectedEffectId = selectableEffects[0]?.effect_id ?? '';
 	}
-	$: if ((!filteredEffects.length || !detailMode) && selectedEffectId) {
+	$: if ((!selectableEffects.length || !detailMode) && selectedEffectId) {
 		selectedEffectId = '';
 	}
 	$: selectedEffect =
-		detailMode ? (filteredEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
+		detailMode ? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
 	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
 	$: selectedRelations = selectedEffect
 		? selectedEffect.relation_ids
@@ -214,6 +239,15 @@
 		return translatedCatalogLabel('research.understanding.statuses', status);
 	}
 
+	function supportGradeLabel(grade: string) {
+		if (grade === 'all') return $t('research.understanding.allSupportGrades');
+		return translatedCatalogLabel('research.understanding.supportGrades', grade);
+	}
+
+	function findingReviewStatusLabel(status: string) {
+		return translatedCatalogLabel('research.understanding.findingReviewStatuses', status);
+	}
+
 	function relationLabel(type: string) {
 		return translatedCatalogLabel('research.understanding.relations', type);
 	}
@@ -263,6 +297,10 @@
 	function listLabel(values: string[]) {
 		const cleaned = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 		return cleaned.length ? cleaned.join(', ') : $t('research.emptyValue');
+	}
+
+	function findingListLabel(values: string[]) {
+		return listLabel(values);
 	}
 
 	function compactText(value: string, limit = 160) {
@@ -315,6 +353,10 @@
 	function isReadableRelation(relation: ResearchUnderstandingRelation) {
 		const summary = relationSummary(relation);
 		return summary !== $t('research.understanding.relationNeedsNormalization');
+	}
+
+	function findingEffectFor(finding: ResearchUnderstandingPresentationFinding) {
+		return effectRows.find((effect) => effect.claim_id === finding.claim_id) ?? null;
 	}
 
 	function openClaimDetail(effectId: string) {
@@ -611,48 +653,71 @@
 			</div>
 		</div>
 
-		{#if effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
-			{#if effectRows.length}
+		{#if findingRows.length || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
+			{#if findingRows.length || effectRows.length}
 				<div
 					class="research-understanding-workbench__filters"
 					aria-label={$t('research.understanding.claimFilters')}
 				>
-					<div class="research-understanding-workbench__filter-group">
-						<span>{$t('research.understanding.filterByType')}</span>
-						<div class="research-understanding-workbench__segmented" role="list">
-							{#each CLAIM_TYPE_ORDER as type (type)}
-								{@const count = claimTypeCounts.get(type) ?? 0}
-								{#if count || type === 'all'}
-									<button
-										type="button"
-										class:research-understanding-workbench__segment--active={selectedClaimType ===
-											type}
-										aria-pressed={selectedClaimType === type}
-										on:click={() => (selectedClaimType = type)}
-									>
-										{optionLabel(claimTypeLabel(type), count)}
-									</button>
-								{/if}
-							{/each}
+					{#if !usesFindings}
+						<div class="research-understanding-workbench__filter-group">
+							<span>{$t('research.understanding.filterByType')}</span>
+							<div class="research-understanding-workbench__segmented" role="list">
+								{#each CLAIM_TYPE_ORDER as type (type)}
+									{@const count = claimTypeCounts.get(type) ?? 0}
+									{#if count || type === 'all'}
+										<button
+											type="button"
+											class:research-understanding-workbench__segment--active={selectedClaimType ===
+												type}
+											aria-pressed={selectedClaimType === type}
+											on:click={() => (selectedClaimType = type)}
+										>
+											{optionLabel(claimTypeLabel(type), count)}
+										</button>
+									{/if}
+								{/each}
+							</div>
 						</div>
-					</div>
+					{/if}
 					<div class="research-understanding-workbench__filter-group">
-						<span>{$t('research.understanding.filterByStatus')}</span>
+						<span>
+							{usesFindings
+								? $t('research.understanding.filterByEvidenceGrade')
+								: $t('research.understanding.filterByStatus')}
+						</span>
 						<div class="research-understanding-workbench__segmented" role="list">
-							{#each CLAIM_STATUS_ORDER as status (status)}
-								{@const count = claimStatusCounts.get(status) ?? 0}
-								{#if count || status === 'all'}
-									<button
-										type="button"
-										class:research-understanding-workbench__segment--active={selectedClaimStatus ===
-											status}
-										aria-pressed={selectedClaimStatus === status}
-										on:click={() => (selectedClaimStatus = status)}
-									>
-										{optionLabel(statusLabel(status), count)}
-									</button>
-								{/if}
-							{/each}
+							{#if usesFindings}
+								{#each SUPPORT_GRADE_ORDER as grade (grade)}
+									{@const count = claimStatusCounts.get(grade) ?? 0}
+									{#if count || grade === 'all'}
+										<button
+											type="button"
+											class:research-understanding-workbench__segment--active={selectedClaimStatus ===
+												grade}
+											aria-pressed={selectedClaimStatus === grade}
+											on:click={() => (selectedClaimStatus = grade)}
+										>
+											{optionLabel(supportGradeLabel(grade), count)}
+										</button>
+									{/if}
+								{/each}
+							{:else}
+								{#each CLAIM_STATUS_ORDER as status (status)}
+									{@const count = claimStatusCounts.get(status) ?? 0}
+									{#if count || status === 'all'}
+										<button
+											type="button"
+											class:research-understanding-workbench__segment--active={selectedClaimStatus ===
+												status}
+											aria-pressed={selectedClaimStatus === status}
+											on:click={() => (selectedClaimStatus = status)}
+										>
+											{optionLabel(statusLabel(status), count)}
+										</button>
+									{/if}
+								{/each}
+							{/if}
 						</div>
 					</div>
 					<div class="research-understanding-workbench__filter-group">
@@ -684,92 +749,167 @@
 			{#if !detailMode}
 				<section
 					class="research-understanding-workbench__column research-understanding-workbench__column--list"
-					aria-label={$t('research.understanding.claimWorkspace')}
+					aria-label={usesFindings
+						? $t('research.understanding.findingsWorkspace')
+						: $t('research.understanding.claimWorkspace')}
 				>
 					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.claimWorkspace')}</h4>
+						<h4>
+							{usesFindings
+								? $t('research.understanding.findingsWorkspace')
+								: $t('research.understanding.claimWorkspace')}
+						</h4>
 						<span>
 							{$t('research.understanding.filteredClaimCount', {
-								shown: filteredEffects.length,
-								total: effectRows.length
+								shown: usesFindings ? visibleFindingRows.length : visibleEffectRows.length,
+								total: usesFindings ? findingRows.length : effectRows.length
 							})}
 						</span>
 					</div>
-					{#each filteredEffects as effect (effect.effect_id)}
-						{@const claim = claimById.get(effect.claim_id)}
-						{@const curation = claim ? curationsByClaimId.get(claim.claim_id) : null}
-						{@const claimFeedback = claim ? (feedbackByClaimId.get(claim.claim_id) ?? []) : []}
-						{@const displayType = curation?.curated_claim_type ?? effect.claim_type}
-						{@const displayStatus = curation?.curated_status ?? effect.support_status}
-						{@const displayStatement = curation?.curated_statement ?? effect.statement}
-						{@const displayEvidenceIds = curation?.curated_evidence_ref_ids ?? effect.evidence_ref_ids}
-						{@const labels = evidenceLabelsForIds(displayEvidenceIds)}
-						<button
-							type="button"
-							class="research-understanding-workbench__card research-understanding-workbench__card--claim"
-							on:click={() => openClaimDetail(effect.effect_id)}
-						>
-							<div class="research-understanding-workbench__meta">
-								<span>{claimTypeLabel(displayType)}</span>
-								<span>{statusLabel(displayStatus)}</span>
-								{#if effect.confidence !== null}
-									<span>{confidenceLabel(effect.confidence)}</span>
+					{#if usesFindings}
+						{#if visibleFindingRows.length}
+							<div
+								class="research-understanding-workbench__table-wrap"
+								aria-label={$t('research.understanding.findingsTable')}
+							>
+								<table class="research-understanding-workbench__findings-table">
+									<thead>
+										<tr>
+											<th scope="col">{$t('research.understanding.findingColumn')}</th>
+											<th scope="col">{$t('research.understanding.variablesColumn')}</th>
+											<th scope="col">{$t('research.understanding.mechanismColumn')}</th>
+											<th scope="col">{$t('research.understanding.resultColumn')}</th>
+											<th scope="col">{$t('research.understanding.scopeColumn')}</th>
+											<th scope="col">{$t('research.understanding.evidenceGradeColumn')}</th>
+											<th scope="col">{$t('research.understanding.paperCountColumn')}</th>
+											<th scope="col">{$t('research.understanding.reviewStatusColumn')}</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each visibleFindingRows as finding (finding.finding_id)}
+											<tr>
+												<td class="research-understanding-workbench__finding-main">
+													<button
+														type="button"
+														on:click={() => {
+															const effect = findingEffectFor(finding);
+															if (effect) openClaimDetail(effect.effect_id);
+														}}
+														disabled={!findingEffectFor(finding)}
+													>
+														<strong>{finding.statement || finding.title}</strong>
+														{#if finding.title && finding.title !== finding.statement}
+															<span>{finding.title}</span>
+														{/if}
+													</button>
+												</td>
+												<td>{findingListLabel(finding.variables)}</td>
+												<td>{findingListLabel(finding.mediators)}</td>
+												<td>
+													{#if finding.direction}
+														<span>{relationLabel(finding.direction)}</span>
+													{/if}
+													{#if finding.outcomes.length}
+														<span>{findingListLabel(finding.outcomes)}</span>
+													{:else}
+														<span>{findingListLabel([])}</span>
+													{/if}
+												</td>
+												<td>{finding.scope_summary || $t('research.emptyValue')}</td>
+												<td>
+													<span class="research-understanding-workbench__grade">
+														{supportGradeLabel(finding.support_grade)}
+													</span>
+												</td>
+												<td>{finding.paper_count}</td>
+												<td>{findingReviewStatusLabel(finding.review_status)}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{:else}
+							<div class="research-understanding-workbench__empty">
+								{$t('research.understanding.noFindings')}
+							</div>
+						{/if}
+					{:else}
+						{#each visibleEffectRows as effect (effect.effect_id)}
+							{@const claim = claimById.get(effect.claim_id)}
+							{@const curation = claim ? curationsByClaimId.get(claim.claim_id) : null}
+							{@const claimFeedback = claim ? (feedbackByClaimId.get(claim.claim_id) ?? []) : []}
+							{@const displayType = curation?.curated_claim_type ?? effect.claim_type}
+							{@const displayStatus = curation?.curated_status ?? effect.support_status}
+							{@const displayStatement = curation?.curated_statement ?? effect.statement}
+							{@const displayEvidenceIds = curation?.curated_evidence_ref_ids ?? effect.evidence_ref_ids}
+							{@const labels = evidenceLabelsForIds(displayEvidenceIds)}
+							<button
+								type="button"
+								class="research-understanding-workbench__card research-understanding-workbench__card--claim"
+								on:click={() => openClaimDetail(effect.effect_id)}
+							>
+								<div class="research-understanding-workbench__meta">
+									<span>{claimTypeLabel(displayType)}</span>
+									<span>{statusLabel(displayStatus)}</span>
+									{#if effect.confidence !== null}
+										<span>{confidenceLabel(effect.confidence)}</span>
+									{/if}
+									{#if curation}
+										<span>{$t('research.understanding.curatedBadge')}</span>
+									{/if}
+									{#if claimFeedback.length}
+										<span>
+											{$t('research.understanding.feedbackCount', {
+												count: claimFeedback.length
+											})}
+										</span>
+									{/if}
+								</div>
+								<strong>{displayStatement}</strong>
+								{#if effect.title && effect.title !== displayStatement}
+									<p>{effect.title}</p>
 								{/if}
-								{#if curation}
-									<span>{$t('research.understanding.curatedBadge')}</span>
-								{/if}
-								{#if claimFeedback.length}
+								<div class="research-understanding-workbench__claim-stats">
 									<span>
-										{$t('research.understanding.feedbackCount', {
-											count: claimFeedback.length
+										{$t('research.understanding.paperCount', {
+											count: effect.paper_count
 										})}
 									</span>
-								{/if}
-							</div>
-							<strong>{displayStatement}</strong>
-							{#if effect.title && effect.title !== displayStatement}
-								<p>{effect.title}</p>
-							{/if}
-							<div class="research-understanding-workbench__claim-stats">
-								<span>
-									{$t('research.understanding.paperCount', {
-										count: effect.paper_count
-									})}
-								</span>
-								<span>
-									{$t('research.understanding.evidenceCount', {
-										count: effect.evidence_count
-									})}
-								</span>
-							</div>
-							{#if curation && claim && curation.curated_statement !== claim.statement}
-								<small>
-									{$t('research.understanding.originalClaimPrefix')}
-									{claim.statement}
-								</small>
-							{/if}
-							{#if labels.length}
-								<div class="research-understanding-workbench__source-list">
-									<span>{$t('research.understanding.keyEvidence')}</span>
-									<ul>
-										{#each labels as label, index (`${effect.effect_id}-${index}-${label}`)}
-											<li>{label}</li>
-										{/each}
-									</ul>
+									<span>
+										{$t('research.understanding.evidenceCount', {
+											count: effect.evidence_count
+										})}
+									</span>
 								</div>
-							{/if}
-							{#if effect.context_summary}
-								<small>
-									{$t('research.understanding.contextPrefix')}
-									{effect.context_summary}
-								</small>
-							{/if}
-						</button>
-					{:else}
-						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noEffects')}
-						</div>
-					{/each}
+								{#if curation && claim && curation.curated_statement !== claim.statement}
+									<small>
+										{$t('research.understanding.originalClaimPrefix')}
+										{claim.statement}
+									</small>
+								{/if}
+								{#if labels.length}
+									<div class="research-understanding-workbench__source-list">
+										<span>{$t('research.understanding.keyEvidence')}</span>
+										<ul>
+											{#each labels as label, index (`${effect.effect_id}-${index}-${label}`)}
+												<li>{label}</li>
+											{/each}
+										</ul>
+									</div>
+								{/if}
+								{#if effect.context_summary}
+									<small>
+										{$t('research.understanding.contextPrefix')}
+										{effect.context_summary}
+									</small>
+								{/if}
+							</button>
+						{:else}
+							<div class="research-understanding-workbench__empty">
+								{$t('research.understanding.noEffects')}
+							</div>
+						{/each}
+					{/if}
 				</section>
 			{:else}
 				<section
@@ -1565,6 +1705,111 @@
 	.research-understanding-workbench__source-list li {
 		overflow: hidden;
 		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__table-wrap {
+		overflow-x: auto;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__findings-table {
+		width: 100%;
+		min-width: 980px;
+		border-collapse: collapse;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__findings-table th,
+	.research-understanding-workbench__findings-table td {
+		border-bottom: 1px solid var(--border-default);
+		padding: 10px;
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.research-understanding-workbench__findings-table th {
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__findings-table tr:last-child td {
+		border-bottom: 0;
+	}
+
+	.research-understanding-workbench__findings-table td {
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__findings-table td:nth-child(2),
+	.research-understanding-workbench__findings-table td:nth-child(3),
+	.research-understanding-workbench__findings-table td:nth-child(4),
+	.research-understanding-workbench__findings-table td:nth-child(5),
+	.research-understanding-workbench__findings-table td:nth-child(8) {
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__finding-main {
+		width: 28%;
+		min-width: 260px;
+	}
+
+	.research-understanding-workbench__finding-main button {
+		display: grid;
+		gap: 4px;
+		width: 100%;
+		border: 0;
+		padding: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__finding-main button:hover strong,
+	.research-understanding-workbench__finding-main button:focus-visible strong {
+		color: var(--color-accent);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.research-understanding-workbench__finding-main button:disabled {
+		cursor: not-allowed;
+		opacity: 0.65;
+	}
+
+	.research-understanding-workbench__finding-main strong {
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__finding-main span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__grade {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 2px 8px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
 		white-space: nowrap;
 	}
 

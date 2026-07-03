@@ -273,6 +273,104 @@ describe('research view shared helpers', () => {
 		});
 	});
 
+	it('normalizes research understanding findings on confirmed goal analysis', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			goal: {
+				goal_id: 'goal_1',
+				collection_id: 'col_123',
+				question: 'How does heat treatment affect strength?',
+				source_type: 'objective_candidate',
+				status: 'ready'
+			},
+			understanding: {
+				schema_version: 'research_understanding.v1',
+				state: 'ready',
+				scope: {
+					scope_type: 'goal',
+					collection_id: 'col_123',
+					goal_id: 'goal_1',
+					title: 'How does heat treatment affect strength?'
+				},
+				claims: [
+					{
+						claim_id: 'claim_1',
+						claim_type: 'finding',
+						statement: 'Heat treatment changes tensile strength.',
+						status: 'supported'
+					}
+				],
+				relations: [],
+				evidence_refs: [
+					{
+						evidence_ref_id: 'ev_1',
+						source_kind: 'table',
+						document_id: 'doc_1',
+						label: 'P001 Table 2',
+						traceability_status: 'traceable',
+						evidence_role: 'direct_support'
+					}
+				],
+				contexts: [],
+				summary: {
+					claim_count: 1,
+					relation_count: 0,
+					evidence_ref_count: 1,
+					context_count: 0
+				},
+				presentation: {
+					findings: [
+						{
+							finding_id: 'finding_claim_1',
+							claim_id: 'claim_1',
+							title: 'heat treatment -> tensile strength',
+							statement: 'Heat treatment changes tensile strength.',
+							variables: ['heat treatment'],
+							outcomes: ['tensile strength'],
+							support_grade: 'partial',
+							review_status: 'pending_review',
+							evidence_ref_ids: ['ev_1'],
+							evidence_bundle: {
+								direct_result: ['ev_1']
+							}
+						}
+					],
+					evidence_items: [
+						{
+							evidence_ref_id: 'ev_1',
+							document_id: 'doc_1',
+							title: 'P001 Table 2 / p. 5',
+							source_label: 'P001 Table 2',
+							source_kind: 'table',
+							traceability_status: 'traceable',
+							evidence_role: 'direct_support'
+						}
+					]
+				}
+			},
+			pipeline_nodes: {},
+			errors: [],
+			warnings: []
+		});
+
+		const analysis = await fetchGoalAnalysis('col_123', 'goal_1');
+		const finding = analysis.understanding?.presentation.findings[0];
+
+		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/goals/goal_1/analysis');
+		expect(finding).toMatchObject({
+			finding_id: 'finding_claim_1',
+			variables: ['heat treatment'],
+			outcomes: ['tensile strength'],
+			support_grade: 'partial',
+			review_status: 'pending_review'
+		});
+		expect(finding?.evidence_bundle.direct_result).toEqual(['ev_1']);
+		expect(analysis.understanding?.evidence_refs[0].evidence_role).toBe('direct_support');
+		expect(analysis.understanding?.presentation.evidence_items[0].evidence_role).toBe(
+			'direct_support'
+		);
+	});
+
 	it('posts research understanding feedback through the same-origin collection contract', async () => {
 		requestJson.mockResolvedValueOnce({
 			feedback_id: 'ruf_1',

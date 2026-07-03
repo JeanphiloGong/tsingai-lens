@@ -79,6 +79,14 @@
 		'corrosion',
 		'pitting corrosion'
 	];
+	const FINDING_CONTEXT_GENERIC_FRAGMENTS = [
+		'variable',
+		'test specimen',
+		'source object ids',
+		'source_object_ids',
+		'evidence ref ids',
+		'evidence_ref_ids'
+	];
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
@@ -637,9 +645,31 @@
 	}
 
 	function readableFindingContextText(value: string, limit = 140) {
-		const normalized = value.replace(/\s+/g, ' ').trim();
+		const normalized = cleanFindingContextText(value);
 		if (!normalized || isNoisyFindingContextText(normalized)) return '';
 		return compactText(normalized, limit);
+	}
+
+	function cleanFindingContextText(value: string) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (!normalized) return '';
+		const fragments = normalized
+			.split(/[,;]/)
+			.map((fragment) => fragment.trim())
+			.filter(Boolean);
+		if (fragments.length <= 1) {
+			return isGenericFindingContextFragment(normalized) ? '' : normalized;
+		}
+		return fragments
+			.filter((fragment) => !isGenericFindingContextFragment(fragment))
+			.join(', ');
+	}
+
+	function isGenericFindingContextFragment(value: string) {
+		const normalized = normalizedFindingContextToken(value);
+		return FINDING_CONTEXT_GENERIC_FRAGMENTS.some(
+			(fragment) => normalized === normalizedFindingContextToken(fragment)
+		);
 	}
 
 	function readableFindingContextList(values: string[], limit = 4) {

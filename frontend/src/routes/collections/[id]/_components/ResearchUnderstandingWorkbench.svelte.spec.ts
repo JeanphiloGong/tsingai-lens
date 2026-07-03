@@ -613,8 +613,8 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 					label: 'Objective scope',
 					material_scope: ['stainless steel 316L'],
 					property_scope: ['density'],
-					process_summary: 'VED, selective laser melting',
-					test_summary: 'Archimedes method',
+					process_summary: 'VED, variable, selective laser melting, test specimen',
+					test_summary: 'Archimedes method, test specimen',
 					limitations: []
 				},
 				{
@@ -880,6 +880,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(findingDetail.getByText('Archimedes method'))
 			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText(/test specimen/)).not.toBeInTheDocument();
+		await expect.element(findingDetail.getByText(/variable/)).not.toBeInTheDocument();
 		await expect.element(findingDetail.getByText(/oeu_6b9838393120/)).not.toBeInTheDocument();
 		await expect.element(findingDetail.getByText(/FEI-INSPECT 50 SEM/)).not.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('microhardness')).not.toBeInTheDocument();

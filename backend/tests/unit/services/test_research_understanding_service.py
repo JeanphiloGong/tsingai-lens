@@ -4329,7 +4329,106 @@ def test_with_presentation_concrete_variable_replaces_broad_process_display():
     finding = understanding["presentation"]["findings"][0]
     assert finding["variables"] == ["VED"]
     assert finding["title"] == "VED -> microstructure"
-    assert finding["relation_chain"][0]["variable"] == "selective laser melting"
+    assert finding["relation_chain"][0]["variable"] == "VED"
+    assert finding["relation_chain"][0]["direction"] == "explains"
+
+
+def test_with_presentation_relation_chain_uses_each_display_variable():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How do defects affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_corrosion",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Porosity level and pore size affect pitting corrosion "
+                        "behavior."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "increases",
+                    "subject": "porosity level",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Porosity level increases susceptibility to pitting "
+                        "corrosion behavior."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                },
+                {
+                    "relation_id": "rel_pore_corrosion",
+                    "relation_type": "increases",
+                    "subject": "pore size",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Pore size increases susceptibility to pitting "
+                        "corrosion behavior."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_corrosion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_corrosion"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Porosity level and pore size were highly sensitive "
+                        "to pitting corrosion behavior."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["porosity level", "pore size"]
+                    },
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["porosity level", "pore size"]
+    assert [
+        segment["variable"] for segment in finding["relation_chain"]
+    ] == ["porosity level", "pore size"]
 
 
 def test_with_presentation_concrete_variable_keeps_specific_process_variable():
@@ -4519,7 +4618,8 @@ def test_with_presentation_quote_calibrated_variable_promotes_density_primary():
         "The achieved density measured using the Archimedes method was "
         "91.9, 98.9 and 99.6% for L-VED, M-VED and H-VED, respectively."
     )
-    assert finding["relation_chain"][0]["variable"] == "laser power and scan speed"
+    assert finding["relation_chain"][0]["variable"] == "VED"
+    assert finding["relation_chain"][0]["direction"] == "increases"
     assert understanding["presentation"]["primary_findings"] == [finding]
     assert understanding["presentation"]["review_queue_findings"] == []
 

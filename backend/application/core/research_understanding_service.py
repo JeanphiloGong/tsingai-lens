@@ -2172,7 +2172,11 @@ class ResearchUnderstandingService:
             "mediators": mediators,
             "outcomes": outcomes,
             "direction": direction,
-            "relation_chain": self._finding_relation_chain(relations),
+            "relation_chain": self._finding_relation_chain(
+                relations,
+                variables=display_variables,
+                direction=direction,
+            ),
             "scope_summary": scope_summary,
             "support_grade": self._finding_support_grade(
                 effect,
@@ -2367,26 +2371,35 @@ class ResearchUnderstandingService:
     def _finding_relation_chain(
         self,
         relations: list[dict[str, Any]],
+        *,
+        variables: list[str] | None = None,
+        direction: str = "",
     ) -> list[dict[str, Any]]:
         chain: list[dict[str, Any]] = []
-        for relation in relations:
+        display_variables = variables or []
+        for index, relation in enumerate(relations):
             variable = self._presentation_relation_side(relation.get("subject"))
             object_chain = self._relation_object_chain(relation)
             if not variable or not object_chain:
                 continue
-            direction = ""
+            display_variable = (
+                display_variables[index]
+                if index < len(display_variables)
+                else (display_variables[0] if display_variables else variable)
+            )
+            segment_direction = ""
             for value in (relation.get("predicate"), relation.get("relation_type")):
                 text = _text(value)
                 if text and _looks_user_facing(text):
-                    direction = text
+                    segment_direction = text
                     break
             chain.append(
                 {
                     "relation_id": _text(relation.get("relation_id")) or "",
-                    "variable": variable,
+                    "variable": display_variable,
                     "mediators": object_chain[:-1],
                     "outcome": object_chain[-1],
-                    "direction": direction,
+                    "direction": segment_direction or direction,
                     "statement": self._presentation_relation_summary(relation),
                 }
             )

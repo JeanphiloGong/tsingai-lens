@@ -2220,12 +2220,6 @@ class ResearchUnderstandingService:
         evidence_bundle: Mapping[str, list[str]],
         blocks_by_id: Mapping[str, SourceBlock],
     ) -> str:
-        if self._statement_matches_finding_display(
-            statement,
-            variables=variables,
-            outcomes=outcomes,
-        ):
-            return statement
         if not variables or not outcomes:
             return statement
         quote_statement = self._quote_derived_finding_statement(
@@ -2235,6 +2229,16 @@ class ResearchUnderstandingService:
             evidence_bundle=evidence_bundle,
             blocks_by_id=blocks_by_id,
         )
+        if self._statement_matches_finding_display(
+            statement,
+            variables=variables,
+            outcomes=outcomes,
+        ):
+            if quote_statement and self._statement_specificity_score(
+                quote_statement
+            ) >= self._statement_specificity_score(statement) + 5:
+                return quote_statement
+            return statement
         if quote_statement:
             return quote_statement
         variable = variables[0]
@@ -2283,6 +2287,36 @@ class ResearchUnderstandingService:
                     continue
                 return sentence
         return ""
+
+    def _statement_specificity_score(self, statement: str) -> int:
+        if not statement:
+            return 0
+        score = 0
+        if _quote_has_concrete_result_cue(statement):
+            score += 4
+        if re.search(r"\d", statement):
+            score += 4
+        normalized = f" {_normalize_match_text(statement)} "
+        for cue in (
+            "increased",
+            "increases",
+            "decreased",
+            "decreases",
+            "reduced",
+            "reduces",
+            "improved",
+            "improves",
+            "affecting",
+            "affects",
+            "measured",
+            "achieved",
+            "observed",
+            "revealed",
+            "sensitive",
+        ):
+            if f" {cue} " in normalized:
+                score += 1
+        return score
 
     def _finding_statement_outcome_terms(self, outcomes: list[str]) -> set[str]:
         terms: set[str] = set()

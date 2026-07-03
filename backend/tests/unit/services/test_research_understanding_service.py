@@ -4347,7 +4347,10 @@ def test_with_presentation_concrete_variable_keeps_specific_process_variable():
                 {
                     "claim_id": "claim_preheat",
                     "claim_type": "finding",
-                    "statement": "Preheating improves mechanical properties.",
+                    "statement": (
+                        "Higher build platform preheating temperature improves "
+                        "mechanical properties."
+                    ),
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat"],
@@ -4362,7 +4365,10 @@ def test_with_presentation_concrete_variable_keeps_specific_process_variable():
                     "subject": "build platform preheating temperature",
                     "predicate": "improves",
                     "object": "mechanical properties",
-                    "statement": "Preheating improves mechanical properties.",
+                    "statement": (
+                        "Higher build platform preheating temperature improves "
+                        "mechanical properties."
+                    ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_preheat"],
                     "context_ids": ["ctx_goal"],
@@ -4406,6 +4412,27 @@ def test_with_presentation_concrete_variable_keeps_specific_process_variable():
     assert finding["title"] == (
         "build platform preheating temperature -> mechanical properties"
     )
+    assert finding["statement"] == "Preheating temperature increased ductility by 14%."
+
+
+def test_specific_quote_statement_preserves_equivalent_aligned_statement():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+
+    statement = service._finding_statement(
+        statement="Laser power increases relative density.",
+        variables=["laser power"],
+        outcomes=["relative density"],
+        evidence_by_id={
+            "evref_density": {
+                "quote": "Relative density increased with laser power.",
+                "locator": {},
+            }
+        },
+        evidence_bundle={"direct_result": ["evref_density"]},
+        blocks_by_id={},
+    )
+
+    assert statement == "Laser power increases relative density."
 
 
 def test_with_presentation_quote_calibrated_variable_promotes_density_primary():

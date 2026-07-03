@@ -4488,10 +4488,94 @@ def test_with_presentation_quote_calibrated_variable_promotes_density_primary():
     finding = understanding["presentation"]["findings"][0]
     assert finding["variables"] == ["VED"]
     assert finding["title"] == "VED -> density"
-    assert finding["statement"] == "VED is associated with density."
+    assert finding["statement"] == (
+        "The achieved density measured using the Archimedes method was "
+        "91.9, 98.9 and 99.6% for L-VED, M-VED and H-VED, respectively."
+    )
     assert finding["relation_chain"][0]["variable"] == "laser power and scan speed"
     assert understanding["presentation"]["primary_findings"] == [finding]
     assert understanding["presentation"]["review_queue_findings"] == []
+
+
+def test_with_presentation_quote_derived_statement_uses_microstructure_result():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does VED affect microstructure?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_ved_microstructure",
+                    "claim_type": "finding",
+                    "statement": "Selective laser melting affects the as-built structure.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_ved"],
+                    "needs_review": True,
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_slm_microstructure",
+                    "relation_type": "affects",
+                    "subject": "selective laser melting",
+                    "predicate": "affects",
+                    "object": "microstructure",
+                    "statement": "Selective laser melting affects the as-built structure.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_ved"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_ved",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_ved"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "The increase in VED from the medium to high level did "
+                        "not notably affect the melt pool size or grain size, "
+                        "but columnar grains were observed in the H-VED structure "
+                        "after etching, as is shown in Fig. 2c."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "selective laser melting"},
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["VED"]
+    assert finding["title"] == "VED -> microstructure"
+    assert finding["statement"] == (
+        "The increase in VED from the medium to high level did not notably "
+        "affect the melt pool size or grain size, but columnar grains were "
+        "observed in the H-VED structure after etching, as is shown in Fig. 2c."
+    )
 
 
 def test_with_presentation_drops_placeholder_relation_chain_segments():

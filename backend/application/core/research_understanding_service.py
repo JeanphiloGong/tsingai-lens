@@ -2164,6 +2164,9 @@ class ResearchUnderstandingService:
                 statement=_text(effect.get("statement")) or "",
                 variables=display_variables,
                 outcomes=outcomes,
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=evidence_bundle,
+                blocks_by_id=blocks_by_id,
             ),
             "variables": display_variables,
             "mediators": mediators,
@@ -2213,6 +2216,9 @@ class ResearchUnderstandingService:
         statement: str,
         variables: list[str],
         outcomes: list[str],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
     ) -> str:
         if self._statement_matches_finding_display(
             statement,
@@ -2222,9 +2228,92 @@ class ResearchUnderstandingService:
             return statement
         if not variables or not outcomes:
             return statement
+        quote_statement = self._quote_derived_finding_statement(
+            variables=variables,
+            outcomes=outcomes,
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        )
+        if quote_statement:
+            return quote_statement
         variable = variables[0]
         outcome = outcomes[0]
         return f"{variable} is associated with {outcome}."
+
+    def _quote_derived_finding_statement(
+        self,
+        *,
+        variables: list[str],
+        outcomes: list[str],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> str:
+        quote_hints = {
+            "variable": {
+                term for value in variables for term in _quote_hint_terms(value)
+            },
+            "outcome": self._finding_statement_outcome_terms(outcomes),
+            "relation": set(),
+        }
+        if not quote_hints["variable"] or not quote_hints["outcome"]:
+            return ""
+        for ref_id in _strings(evidence_bundle.get("direct_result")):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+            source_text = self._presentation_source_text_for_quote(
+                block,
+                blocks_by_id=blocks_by_id,
+                quote_hints=quote_hints,
+            ) or _text(evidence_ref.get("quote"))
+            if not source_text:
+                continue
+            snippet = self._best_matching_quote_snippet(source_text, quote_hints)
+            if not snippet:
+                continue
+            for sentence in _quote_sentences(snippet):
+                if not _quote_has_concrete_result_cue(sentence):
+                    continue
+                normalized = f" {_normalize_match_text(sentence)} "
+                if not _quote_term_hits(normalized, quote_hints["variable"]):
+                    continue
+                if not _quote_term_hits(normalized, quote_hints["outcome"]):
+                    continue
+                return sentence
+        return ""
+
+    def _finding_statement_outcome_terms(self, outcomes: list[str]) -> set[str]:
+        terms: set[str] = set()
+        for value in outcomes:
+            terms.update(_quote_hint_terms(value))
+            normalized = _normalize_match_text(value)
+            if normalized == "microstructure":
+                terms.update(
+                    {
+                        "cellular",
+                        "columnar",
+                        "grain",
+                        "grains",
+                        "melt pool",
+                        "microstructural",
+                        "structure",
+                    }
+                )
+            elif normalized == "mechanical properties":
+                terms.update({"ductility", "elongation", "strength", "tensile", "yield"})
+            elif normalized in {"corrosion behavior", "pitting corrosion behavior"}:
+                terms.update(
+                    {
+                        "corrosion",
+                        "electrochemical",
+                        "passivation",
+                        "pitting",
+                        "polarization",
+                    }
+                )
+        return terms
 
     def _statement_matches_finding_display(
         self,
@@ -3800,8 +3889,11 @@ def _quote_sentences(value: str) -> list[str]:
     text = " ".join(value.split())
     if not text:
         return []
+    abbreviations = {"Fig.": "Fig<dot>"}
+    for source, replacement in abbreviations.items():
+        text = text.replace(source, replacement)
     sentences = [
-        candidate.strip()
+        candidate.replace("Fig<dot>", "Fig.").strip()
         for candidate in re.split(r"(?<=[.!?])\s+", text)
         if candidate.strip()
     ]
@@ -3887,8 +3979,10 @@ def _quote_has_concrete_result_cue(candidate: str) -> bool:
             "reduced",
             "improved",
             "attributed",
+            "affected",
             "measured",
             "achieved",
+            "observed",
             "revealed",
             "sensitive",
             "prone",

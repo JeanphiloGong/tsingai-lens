@@ -60,6 +60,7 @@
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
 	let selectedEffectId = '';
+	let selectedFindingId = '';
 	let detailMode = false;
 	let activeReviewPanel: 'feedback' | 'curation' | '' = '';
 	let curationClaimType = 'finding';
@@ -159,6 +160,9 @@
 				.map((finding) => findingEffectFor(finding))
 				.filter((effect): effect is ResearchUnderstandingPresentationEffect => Boolean(effect))
 		: filteredEffects;
+	$: selectedFinding = detailMode && selectedFindingId
+		? (allFindingRows.find((finding) => finding.finding_id === selectedFindingId) ?? null)
+		: null;
 	$: claimTypeCounts = countEffectsBy(effectRows, 'claim_type');
 	$: claimStatusCounts = (() => {
 		if (!usesFindings) return countEffectsBy(effectRows, 'support_status');
@@ -171,20 +175,25 @@
 	$: if (understanding && detailMode && selectableEffects.length && !selectableEffects.some((effect) => effect.effect_id === selectedEffectId)) {
 		selectedEffectId = selectableEffects[0]?.effect_id ?? '';
 	}
-	$: if ((!selectableEffects.length || !detailMode) && selectedEffectId) {
+	$: if ((!selectableEffects.length || !detailMode || selectedFindingId) && selectedEffectId) {
 		selectedEffectId = '';
 	}
 	$: selectedEffect =
 		detailMode ? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
-	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
-	$: selectedFinding = selectedEffect
-		? (allFindingRows.find((finding) => finding.claim_id === selectedEffect.claim_id) ?? null)
-		: null;
+	$: selectedClaim = selectedFinding
+		? (claimById.get(selectedFinding.claim_id) ?? null)
+		: selectedEffect
+			? (claimById.get(selectedEffect.claim_id) ?? null)
+			: null;
 	$: selectedRelations = selectedEffect
 		? (selectedFinding?.relation_ids.length ? selectedFinding.relation_ids : selectedEffect.relation_ids)
 				.map((relationId) => relationById.get(relationId))
 				.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
-		: [];
+		: selectedFinding
+			? selectedFinding.relation_ids
+					.map((relationId) => relationById.get(relationId))
+					.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
+			: [];
 	$: selectedReadableRelations = selectedRelations.filter((relation) => isReadableRelation(relation));
 	$: selectedHiddenRelationCount = Math.max(
 		0,
@@ -216,20 +225,28 @@
 				context_ids: selectedCuration?.curated_context_ids ?? selectedClaim.context_ids
 			}
 		: null;
-	$: selectedEvidenceRefs = displayClaim ? presentationEvidenceForIds(displayClaim.evidence_ref_ids) : [];
-	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
+	$: selectedEvidenceRefs = displayClaim
+		? presentationEvidenceForIds(displayClaim.evidence_ref_ids)
+		: selectedFinding
+			? presentationEvidenceForIds(selectedFinding.evidence_ref_ids)
+			: [];
+	$: selectedContextRefs = displayClaim
+		? presentationContextsForIds(displayClaim.context_ids)
+		: selectedFinding
+			? presentationContextsForIds(selectedFinding.context_ids)
+			: [];
 	$: selectedFindingContextRefs = selectedFinding
 		? presentationContextsForIds(selectedFinding.context_ids)
 		: [];
-	$: selectedCurationEvidenceOptions = selectedClaim
+	$: selectedCurationEvidenceOptions = selectedClaim || selectedFinding
 		? presentationEvidenceForIds([
-				...(selectedFinding?.evidence_ref_ids ?? selectedClaim.evidence_ref_ids),
+				...(selectedFinding?.evidence_ref_ids ?? selectedClaim?.evidence_ref_ids ?? []),
 				...(selectedCuration?.curated_evidence_ref_ids ?? [])
 			])
 		: [];
-	$: selectedCurationContextOptions = selectedClaim
+	$: selectedCurationContextOptions = selectedClaim || selectedFinding
 		? presentationContextsForIds([
-				...(selectedFinding?.context_ids ?? selectedClaim.context_ids),
+				...(selectedFinding?.context_ids ?? selectedClaim?.context_ids ?? []),
 				...(selectedCuration?.curated_context_ids ?? [])
 			])
 		: [];
@@ -429,12 +446,20 @@
 
 	function openClaimDetail(effectId: string) {
 		selectedEffectId = effectId;
+		selectedFindingId = '';
+		detailMode = true;
+	}
+
+	function openFindingDetail(findingId: string) {
+		selectedFindingId = findingId;
+		selectedEffectId = '';
 		detailMode = true;
 	}
 
 	function closeClaimDetail() {
 		detailMode = false;
 		selectedEffectId = '';
+		selectedFindingId = '';
 		activeReviewPanel = '';
 	}
 
@@ -570,7 +595,7 @@
 	function resetCurationForm() {
 		const curation = selectedCuration;
 		curationClaimType = curation?.curated_claim_type ?? selectedClaim?.claim_type ?? 'finding';
-		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'limited';
+		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'supported';
 		curationStatement =
 			curation?.curated_statement ?? selectedFinding?.statement ?? selectedClaim?.statement ?? '';
 		curationEvidenceRefIds = [
@@ -652,17 +677,16 @@
 	}
 
 	async function submitClaimFeedback() {
-		if (!understanding || !selectedClaim || !collectionId || !selectedScopeId) return;
+		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
 		feedbackSubmitting = true;
 		feedbackMessage = '';
 		feedbackError = '';
 		try {
-			const findingId = selectedFinding?.finding_id ?? selectedClaim.claim_id;
 			const feedback = await createResearchUnderstandingFeedback(collectionId, {
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId,
-				finding_id: findingId,
-				claim_id: selectedClaim.claim_id,
+				finding_id: selectedReviewTargetId,
+				claim_id: selectedClaim?.claim_id ?? selectedFinding?.claim_id ?? null,
 				review_status: feedbackStatus,
 				issue_type: feedbackIssue,
 				note: feedbackNote.trim() || null,
@@ -685,17 +709,16 @@
 	}
 
 	async function submitClaimCuration() {
-		if (!understanding || !selectedClaim || !collectionId || !selectedScopeId) return;
+		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
 		curationSubmitting = true;
 		curationMessage = '';
 		curationError = '';
 		try {
-			const findingId = selectedFinding?.finding_id ?? selectedClaim.claim_id;
 			const curation = await createResearchUnderstandingCuration(collectionId, {
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId,
-				finding_id: findingId,
-				claim_id: selectedClaim.claim_id,
+				finding_id: selectedReviewTargetId,
+				claim_id: selectedClaim?.claim_id ?? selectedFinding?.claim_id ?? null,
 				curated_claim_type: curationClaimType,
 				curated_status: curationStatus,
 				curated_statement: curationStatement.trim(),
@@ -904,11 +927,7 @@
 													<td class="research-understanding-workbench__finding-main">
 														<button
 														type="button"
-														on:click={() => {
-															const effect = findingEffectFor(finding);
-															if (effect) openClaimDetail(effect.effect_id);
-														}}
-														disabled={!findingEffectFor(finding)}
+														on:click={() => openFindingDetail(finding.finding_id)}
 													>
 														<strong>{finding.statement || finding.title}</strong>
 															{#if finding.title && finding.title !== finding.statement}
@@ -1061,7 +1080,7 @@
 								: $t('research.understanding.claimDetail')}
 						</h4>
 					</div>
-					{#if selectedEffect && selectedClaim}
+					{#if selectedFinding || (selectedEffect && selectedClaim)}
 							<article class="research-understanding-workbench__detail">
 								<header class="research-understanding-workbench__claim-header">
 									<div class="research-understanding-workbench__meta">
@@ -1081,7 +1100,7 @@
 													count: selectedFinding.evidence_count
 												})}
 											</span>
-										{:else}
+										{:else if selectedClaim}
 											<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
 											<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
 											{#if selectedClaim.confidence !== null}
@@ -1106,11 +1125,12 @@
 										{selectedFinding?.statement ||
 											selectedFinding?.title ||
 											displayClaim?.statement ||
-											selectedClaim.statement}
+											selectedClaim?.statement ||
+											''}
 									</strong>
 									{#if selectedFinding?.title && selectedFinding.title !== selectedFinding.statement}
 										<p>{selectedFinding.title}</p>
-									{:else if !selectedFinding && selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
+									{:else if !selectedFinding && selectedEffect && selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim?.statement)}
 										<p>{selectedEffect.title}</p>
 									{/if}
 								<div
@@ -1387,7 +1407,7 @@
 								</form>
 							{/if}
 
-							{#if !selectedFinding && (selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction)}
+							{#if !selectedFinding && selectedEffect && (selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction)}
 								<div class="research-understanding-workbench__context research-understanding-workbench__context--compact">
 									{#if selectedEffect.variable_axis}
 										<div>
@@ -1572,18 +1592,20 @@
 								<div class="research-understanding-workbench__detail-section">
 									<h5>{$t('research.understanding.curationApplied')}</h5>
 									<div class="research-understanding-workbench__context">
-										<div>
-											<span>{$t('research.understanding.originalClaim')}</span>
-											<p>{selectedClaim.statement}</p>
-										</div>
-										<div>
-											<span>{$t('research.understanding.originalClassification')}</span>
-											<p>
-												{claimTypeLabel(selectedClaim.claim_type)}
-												·
-												{statusLabel(selectedClaim.status)}
-											</p>
-										</div>
+										{#if selectedClaim}
+											<div>
+												<span>{$t('research.understanding.originalClaim')}</span>
+												<p>{selectedClaim.statement}</p>
+											</div>
+											<div>
+												<span>{$t('research.understanding.originalClassification')}</span>
+												<p>
+													{claimTypeLabel(selectedClaim.claim_type)}
+													·
+													{statusLabel(selectedClaim.status)}
+												</p>
+											</div>
+										{/if}
 										<div>
 											<span>{$t('research.understanding.curationStatement')}</span>
 											<p>{selectedCuration.curated_statement}</p>
@@ -1632,7 +1654,7 @@
 								{/each}
 							</div>
 
-							{#if selectedClaim.warnings.length || selectedClaim.source_object_ids.length}
+							{#if selectedClaim && (selectedClaim.warnings.length || selectedClaim.source_object_ids.length)}
 								<div class="research-understanding-workbench__detail-section">
 									<h5>{$t('research.warnings')}</h5>
 									{#if selectedClaim.warnings.length}

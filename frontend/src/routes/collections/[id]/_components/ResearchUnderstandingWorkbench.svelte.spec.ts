@@ -510,6 +510,77 @@ function goalUnderstandingFixture(): ResearchUnderstanding {
 	};
 }
 
+function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
+	const fixture = understandingFixture();
+	const finding = {
+		finding_id: 'finding_relation_density',
+		claim_id: 'claim_relation_density',
+		title: 'VED -> density',
+		statement:
+			"The achieved density measured using the Archimedes ' method was 91.9, 98.9 and 99.6 % for L-VED, M-VED and H-VED, respectively.",
+		variables: ['VED'],
+		mediators: ['porosity'],
+		outcomes: ['density'],
+		direction: 'increases',
+		scope_summary: 'stainless steel 316L, VED, density, selective laser melting',
+		support_grade: 'partial',
+		review_status: 'pending_review',
+		confidence: 0.88,
+		paper_count: 1,
+		evidence_count: 1,
+		evidence_ref_ids: ['ev_density_quote'],
+		context_ids: ['ctx_heat_treatment'],
+		relation_ids: ['rel_density_quote'],
+		evidence_bundle: {
+			direct_result: ['ev_density_quote'],
+			mechanism: [],
+			condition_context: [],
+			background: [],
+			conflict: [],
+			noise: [],
+			uncategorized: []
+		},
+		warnings: []
+	};
+	return {
+		...fixture,
+		presentation: {
+			...fixture.presentation,
+			summary: {
+				...fixture.presentation.summary,
+				primary_finding_count: 1,
+				review_queue_finding_count: 0
+			},
+			findings: [finding],
+			primary_findings: [finding],
+			review_queue_findings: [],
+			effects: [],
+			evidence_items: [
+				{
+					evidence_ref_id: 'ev_density_quote',
+					document_id: 'doc_1',
+					title: 'P003 Results / p. 3',
+					source_label: 'P003 Results',
+					source_kind: 'text_window',
+					source_ref: 'blk_density_results',
+					block_type: 'paragraph',
+					heading_path: 'Results / Density',
+					page: '3',
+					quote:
+						"The achieved density measured using the Archimedes ' method was 91.9, 98.9 and 99.6 % for L-VED, M-VED and H-VED, respectively.",
+					source_text:
+						"L-VED, M-VED and H-VED samples reached 91.9, 98.9 and 99.6 % density, respectively.",
+					value_summary: 'P003 Results',
+					traceability_status: 'traceable',
+					evidence_role: 'direct_support',
+					confidence: 0.88,
+					href: null
+				}
+			]
+		}
+	};
+}
+
 async function openMechanismClaimDetail() {
 	await browserPage.getByRole('button', { name: 'Needs review 2' }).click();
 	await browserPage.getByRole('button', { name: 'Weak 1' }).click();
@@ -668,6 +739,37 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await expect.element(browserPage.getByText('1 of 2')).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
+	});
+
+	it('opens finding-only detail with evidence and review actions', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: findingOnlyUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: /VED -> density/ }).click();
+
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect.element(findingDetail).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText(/The achieved density measured using the Archimedes/))
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Variables')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('VED', { exact: true })).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('porosity', { exact: true })).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Outcomes density')).toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText('stainless steel 316L, VED, density, selective laser melting')
+			)
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Direct result evidence')).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('L-VED, M-VED and H-VED samples reached 91.9'))
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByRole('button', { name: 'Expert feedback' })).toBeInTheDocument();
+		await expect.element(findingDetail.getByRole('button', { name: 'Expert curation' })).toBeInTheDocument();
 	});
 
 	it('filters claims by support status for conflict review', async () => {

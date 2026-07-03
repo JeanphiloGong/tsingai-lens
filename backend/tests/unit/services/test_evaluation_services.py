@@ -96,6 +96,7 @@ class FakeEvaluationRepository:
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ):
         return tuple(
@@ -104,6 +105,7 @@ class FakeEvaluationRepository:
             if curation.collection_id == collection_id
             and (scope_type is None or curation.scope_type == scope_type)
             and (scope_id is None or curation.scope_id == scope_id)
+            and (finding_id is None or curation.finding_id == finding_id)
             and (claim_id is None or curation.claim_id == claim_id)
         )
 
@@ -193,10 +195,18 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
                 "collection_id": "col-gold",
                 "scope_type": "objective",
                 "scope_id": "obj-1",
+                "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "mechanism",
                 "curated_status": "limited",
                 "curated_statement": "Annealing mechanism evidence remains limited.",
+                "curated_support_grade": "weak",
+                "curated_review_status": "needs_review",
+                "curated_variables": ["annealing"],
+                "curated_mediators": ["cellular substructure"],
+                "curated_outcomes": ["yield strength"],
+                "curated_direction": "explains",
+                "curated_scope_summary": "LPBF 316L",
                 "curated_evidence_ref_ids": ["ev-1", "ev-2"],
                 "curated_context_ids": ["ctx-1"],
                 "note": "Needs microstructure evidence.",
@@ -217,13 +227,21 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
     assert draft["metric_profile"] == "research_understanding_v1"
     assert draft["item_count"] == 1
     item = draft["items"][0]
-    assert item["family"] == "research_understanding_claims"
-    assert item["item_key"] == "objective:obj-1:claim-1"
+    assert item["family"] == "research_understanding_findings"
+    assert item["item_key"] == "objective:obj-1:finding-1"
     assert item["payload"] == {
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
         "claim_type": "mechanism",
         "status": "limited",
         "statement": "Annealing mechanism evidence remains limited.",
+        "support_grade": "weak",
+        "review_status": "needs_review",
+        "variables": ["annealing"],
+        "mediators": ["cellular substructure"],
+        "outcomes": ["yield strength"],
+        "direction": "explains",
+        "scope_summary": "LPBF 316L",
         "evidence_ref_ids": ["ev-1", "ev-2"],
         "context_ids": ["ctx-1"],
     }

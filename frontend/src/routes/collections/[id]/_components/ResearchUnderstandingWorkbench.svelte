@@ -73,10 +73,10 @@
 	let curationMessage = '';
 	let curationError = '';
 	let curationLoadError = '';
-	let curationsByClaimId = new Map<string, ResearchUnderstandingCuration>();
+	let curationsByTargetId = new Map<string, ResearchUnderstandingCuration>();
 	let loadedCurationScopeKey = '';
-	let lastCurationClaimId = '';
-	let feedbackByClaimId = new Map<string, ResearchUnderstandingFeedback[]>();
+	let lastCurationTargetId = '';
+	let feedbackByTargetId = new Map<string, ResearchUnderstandingFeedback[]>();
 	let loadedFeedbackScopeKey = '';
 	let feedbackLoadError = '';
 	let reviewQueueOnly = false;
@@ -87,7 +87,7 @@
 	let feedbackSubmitting = false;
 	let feedbackMessage = '';
 	let feedbackError = '';
-	let lastFeedbackClaimId = '';
+	let lastFeedbackTargetId = '';
 	let lastUsesFindings = false;
 
 	$: presentation = understanding?.presentation ?? null;
@@ -115,8 +115,22 @@
 	);
 	$: reviewQueueClaimIds = new Set(
 		claims
-			.filter((claim) => shouldReviewClaim(claim, feedbackByClaimId))
+			.filter((claim) => shouldReviewClaim(claim, feedbackByTargetId))
 			.map((claim) => claim.claim_id)
+	);
+	$: reviewQueueFindingIds = new Set(
+		findingRows
+			.filter((finding) => {
+				const feedback = [
+					...(feedbackByTargetId.get(finding.finding_id) ?? []),
+					...(feedbackByTargetId.get(finding.claim_id) ?? [])
+				];
+				return (
+					finding.review_status === 'needs_review' ||
+					feedback.some((item) => item.review_status !== 'correct' || item.issue_type !== 'none')
+				);
+			})
+			.map((finding) => finding.finding_id)
 	);
 	$: filteredEffects = effectRows.filter(
 		(effect) =>
@@ -129,6 +143,7 @@
 			(selectedClaimStatus === 'all' || finding.support_grade === selectedClaimStatus) &&
 			(!reviewQueueOnly ||
 				finding.review_status === 'needs_review' ||
+				reviewQueueFindingIds.has(finding.finding_id) ||
 				reviewQueueClaimIds.has(finding.claim_id))
 	);
 	$: visibleFindingRows = usesFindings ? filteredFindings : [];
@@ -170,8 +185,22 @@
 		selectedRelations.length - selectedReadableRelations.length
 	);
 	$: selectedScopeId = scopeId(understanding);
-	$: selectedCuration = selectedClaim ? curationsByClaimId.get(selectedClaim.claim_id) : null;
-	$: selectedFeedback = selectedClaim ? (feedbackByClaimId.get(selectedClaim.claim_id) ?? []) : [];
+	$: selectedReviewTargetId = selectedFinding?.finding_id ?? selectedClaim?.claim_id ?? '';
+	$: selectedReviewFallbackId =
+		selectedFinding && selectedFinding.claim_id !== selectedReviewTargetId
+			? selectedFinding.claim_id
+			: '';
+	$: selectedCuration = selectedReviewTargetId
+		? (curationsByTargetId.get(selectedReviewTargetId) ??
+			(selectedReviewFallbackId ? curationsByTargetId.get(selectedReviewFallbackId) : null) ??
+			null)
+		: null;
+	$: selectedFeedback = selectedReviewTargetId
+		? [
+				...(feedbackByTargetId.get(selectedReviewTargetId) ?? []),
+				...(selectedReviewFallbackId ? (feedbackByTargetId.get(selectedReviewFallbackId) ?? []) : [])
+			]
+		: [];
 	$: displayClaim = selectedClaim
 		? {
 				claim_type: selectedCuration?.curated_claim_type ?? selectedClaim.claim_type,
@@ -188,18 +217,18 @@
 		: [];
 	$: selectedCurationEvidenceOptions = selectedClaim
 		? presentationEvidenceForIds([
-				...selectedClaim.evidence_ref_ids,
+				...(selectedFinding?.evidence_ref_ids ?? selectedClaim.evidence_ref_ids),
 				...(selectedCuration?.curated_evidence_ref_ids ?? [])
 			])
 		: [];
 	$: selectedCurationContextOptions = selectedClaim
 		? presentationContextsForIds([
-				...selectedClaim.context_ids,
+				...(selectedFinding?.context_ids ?? selectedClaim.context_ids),
 				...(selectedCuration?.curated_context_ids ?? [])
 			])
 		: [];
-	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
-		lastCurationClaimId = selectedClaim?.claim_id ?? '';
+	$: if (selectedReviewTargetId !== lastCurationTargetId) {
+		lastCurationTargetId = selectedReviewTargetId;
 		activeReviewPanel = '';
 		resetCurationForm();
 		curationMessage = '';
@@ -215,8 +244,8 @@
 	$: if (curationScopeKey && curationScopeKey !== loadedFeedbackScopeKey) {
 		void loadFeedbackForScope(curationScopeKey);
 	}
-	$: if ((selectedClaim?.claim_id ?? '') !== lastFeedbackClaimId) {
-		lastFeedbackClaimId = selectedClaim?.claim_id ?? '';
+	$: if (selectedReviewTargetId !== lastFeedbackTargetId) {
+		lastFeedbackTargetId = selectedReviewTargetId;
 		feedbackMessage = '';
 		feedbackError = '';
 	}
@@ -536,11 +565,20 @@
 		const curation = selectedCuration;
 		curationClaimType = curation?.curated_claim_type ?? selectedClaim?.claim_type ?? 'finding';
 		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'limited';
-		curationStatement = curation?.curated_statement ?? selectedClaim?.statement ?? '';
+		curationStatement =
+			curation?.curated_statement ?? selectedFinding?.statement ?? selectedClaim?.statement ?? '';
 		curationEvidenceRefIds = [
-			...(curation?.curated_evidence_ref_ids ?? selectedClaim?.evidence_ref_ids ?? [])
+			...(curation?.curated_evidence_ref_ids ??
+				selectedFinding?.evidence_ref_ids ??
+				selectedClaim?.evidence_ref_ids ??
+				[])
 		];
-		curationContextIds = [...(curation?.curated_context_ids ?? selectedClaim?.context_ids ?? [])];
+		curationContextIds = [
+			...(curation?.curated_context_ids ??
+				selectedFinding?.context_ids ??
+				selectedClaim?.context_ids ??
+				[])
+		];
 		curationNote = curation?.note ?? '';
 		curationReviewer = curation?.reviewer ?? '';
 	}
@@ -557,6 +595,10 @@
 			: [...curationContextIds, contextId];
 	}
 
+	function reviewTargetKey(record: ResearchUnderstandingFeedback | ResearchUnderstandingCuration) {
+		return record.finding_id || record.claim_id || '';
+	}
+
 	async function loadCurationsForScope(scopeKey: string) {
 		if (!understanding || !collectionId || !selectedScopeId) return;
 		loadedCurationScopeKey = scopeKey;
@@ -566,7 +608,16 @@
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId
 			});
-			curationsByClaimId = new Map(curations.map((curation) => [curation.claim_id, curation]));
+			curationsByTargetId = new Map(
+				curations
+					.map(
+						(curation): [string, ResearchUnderstandingCuration] => [
+							reviewTargetKey(curation),
+							curation
+						]
+					)
+					.filter(([id]) => Boolean(id))
+			);
 			resetCurationForm();
 		} catch (error) {
 			curationLoadError = error instanceof Error ? error.message : $t('error.unexpected');
@@ -584,9 +635,11 @@
 			});
 			const next = new Map<string, ResearchUnderstandingFeedback[]>();
 			for (const item of feedback) {
-				next.set(item.claim_id, [...(next.get(item.claim_id) ?? []), item]);
+				const targetId = reviewTargetKey(item);
+				if (!targetId) continue;
+				next.set(targetId, [...(next.get(targetId) ?? []), item]);
 			}
-			feedbackByClaimId = next;
+			feedbackByTargetId = next;
 		} catch (error) {
 			feedbackLoadError = error instanceof Error ? error.message : $t('error.unexpected');
 		}
@@ -598,9 +651,11 @@
 		feedbackMessage = '';
 		feedbackError = '';
 		try {
+			const findingId = selectedFinding?.finding_id ?? selectedClaim.claim_id;
 			const feedback = await createResearchUnderstandingFeedback(collectionId, {
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId,
+				finding_id: findingId,
 				claim_id: selectedClaim.claim_id,
 				review_status: feedbackStatus,
 				issue_type: feedbackIssue,
@@ -610,9 +665,10 @@
 			feedbackMessage = $t('research.understanding.feedbackSaved', {
 				id: formatShortIdentifier(feedback.feedback_id)
 			});
-			feedbackByClaimId = new Map(feedbackByClaimId).set(feedback.claim_id, [
+			const targetId = reviewTargetKey(feedback);
+			feedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
 				feedback,
-				...(feedbackByClaimId.get(feedback.claim_id) ?? [])
+				...(feedbackByTargetId.get(targetId) ?? [])
 			]);
 			feedbackNote = '';
 		} catch (error) {
@@ -628,13 +684,22 @@
 		curationMessage = '';
 		curationError = '';
 		try {
+			const findingId = selectedFinding?.finding_id ?? selectedClaim.claim_id;
 			const curation = await createResearchUnderstandingCuration(collectionId, {
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId,
+				finding_id: findingId,
 				claim_id: selectedClaim.claim_id,
 				curated_claim_type: curationClaimType,
 				curated_status: curationStatus,
 				curated_statement: curationStatement.trim(),
+				curated_support_grade: selectedFinding?.support_grade ?? null,
+				curated_review_status: selectedFinding?.review_status ?? null,
+				curated_variables: selectedFinding?.variables ?? [],
+				curated_mediators: selectedFinding?.mediators ?? [],
+				curated_outcomes: selectedFinding?.outcomes ?? [],
+				curated_direction: selectedFinding?.direction || null,
+				curated_scope_summary: selectedFinding?.scope_summary || null,
 				curated_evidence_ref_ids: curationEvidenceRefIds,
 				curated_context_ids: curationContextIds,
 				note: curationNote.trim() || null,
@@ -643,7 +708,7 @@
 			curationMessage = $t('research.understanding.curationSaved', {
 				id: formatShortIdentifier(curation.curation_id)
 			});
-			curationsByClaimId = new Map(curationsByClaimId).set(curation.claim_id, curation);
+			curationsByTargetId = new Map(curationsByTargetId).set(reviewTargetKey(curation), curation);
 		} catch (error) {
 			curationError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
@@ -818,11 +883,13 @@
 											<th scope="col">{$t('research.understanding.reviewStatusColumn')}</th>
 										</tr>
 									</thead>
-									<tbody>
-										{#each visibleFindingRows as finding (finding.finding_id)}
-											<tr>
-												<td class="research-understanding-workbench__finding-main">
-													<button
+										<tbody>
+											{#each visibleFindingRows as finding (finding.finding_id)}
+												{@const curation = curationsByTargetId.get(finding.finding_id)}
+												{@const findingFeedback = feedbackByTargetId.get(finding.finding_id) ?? []}
+												<tr>
+													<td class="research-understanding-workbench__finding-main">
+														<button
 														type="button"
 														on:click={() => {
 															const effect = findingEffectFor(finding);
@@ -831,11 +898,25 @@
 														disabled={!findingEffectFor(finding)}
 													>
 														<strong>{finding.statement || finding.title}</strong>
-														{#if finding.title && finding.title !== finding.statement}
-															<span>{finding.title}</span>
-														{/if}
-													</button>
-												</td>
+															{#if finding.title && finding.title !== finding.statement}
+																<span>{finding.title}</span>
+															{/if}
+															{#if curation || findingFeedback.length}
+																<span>
+																	{[
+																		curation ? $t('research.understanding.curatedBadge') : '',
+																		findingFeedback.length
+																			? $t('research.understanding.feedbackCount', {
+																					count: findingFeedback.length
+																				})
+																			: ''
+																	]
+																		.filter(Boolean)
+																		.join(' · ')}
+																</span>
+															{/if}
+														</button>
+													</td>
 												<td>{findingListLabel(finding.variables)}</td>
 												<td>{findingListLabel(finding.mediators)}</td>
 												<td>
@@ -869,8 +950,8 @@
 					{:else}
 						{#each visibleEffectRows as effect (effect.effect_id)}
 							{@const claim = claimById.get(effect.claim_id)}
-							{@const curation = claim ? curationsByClaimId.get(claim.claim_id) : null}
-							{@const claimFeedback = claim ? (feedbackByClaimId.get(claim.claim_id) ?? []) : []}
+							{@const curation = claim ? curationsByTargetId.get(claim.claim_id) : null}
+							{@const claimFeedback = claim ? (feedbackByTargetId.get(claim.claim_id) ?? []) : []}
 							{@const displayType = curation?.curated_claim_type ?? effect.claim_type}
 							{@const displayStatus = curation?.curated_status ?? effect.support_status}
 							{@const displayStatement = curation?.curated_statement ?? effect.statement}

@@ -213,7 +213,8 @@ export type ResearchUnderstandingFeedbackIssueType =
 export type ResearchUnderstandingFeedbackCreate = {
 	scope_type: string;
 	scope_id: string;
-	claim_id: string;
+	finding_id: string;
+	claim_id?: string | null;
 	review_status: ResearchUnderstandingFeedbackStatus;
 	issue_type: ResearchUnderstandingFeedbackIssueType;
 	note?: string | null;
@@ -227,15 +228,24 @@ export type ResearchUnderstandingFeedback = ResearchUnderstandingFeedbackCreate 
 export type ResearchUnderstandingFeedbackFilters = {
 	scope_type?: string;
 	scope_id?: string;
+	finding_id?: string;
 	claim_id?: string;
 };
 export type ResearchUnderstandingCurationCreate = {
 	scope_type: string;
 	scope_id: string;
-	claim_id: string;
+	finding_id: string;
+	claim_id?: string | null;
 	curated_claim_type: string;
 	curated_status: string;
 	curated_statement: string;
+	curated_support_grade?: string | null;
+	curated_review_status?: string | null;
+	curated_variables?: string[];
+	curated_mediators?: string[];
+	curated_outcomes?: string[];
+	curated_direction?: string | null;
+	curated_scope_summary?: string | null;
 	curated_evidence_ref_ids: string[];
 	curated_context_ids: string[];
 	note?: string | null;
@@ -249,6 +259,7 @@ export type ResearchUnderstandingCuration = ResearchUnderstandingCurationCreate 
 export type ResearchUnderstandingCurationFilters = {
 	scope_type?: string;
 	scope_id?: string;
+	finding_id?: string;
 	claim_id?: string;
 };
 export type ResearchUnderstandingGoldDraftItem = {
@@ -2298,6 +2309,7 @@ export async function fetchResearchUnderstandingFeedback(
 	const params = new URLSearchParams();
 	if (filters.scope_type) params.set('scope_type', filters.scope_type);
 	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.finding_id) params.set('finding_id', filters.finding_id);
 	if (filters.claim_id) params.set('claim_id', filters.claim_id);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	const data = (await requestJson(
@@ -2325,6 +2337,7 @@ export async function fetchResearchUnderstandingCurations(
 	const params = new URLSearchParams();
 	if (filters.scope_type) params.set('scope_type', filters.scope_type);
 	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.finding_id) params.set('finding_id', filters.finding_id);
 	if (filters.claim_id) params.set('claim_id', filters.claim_id);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	const data = (await requestJson(

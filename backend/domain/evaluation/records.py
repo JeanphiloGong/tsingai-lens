@@ -361,7 +361,8 @@ class ResearchUnderstandingFeedback:
     collection_id: str
     scope_type: str
     scope_id: str
-    claim_id: str
+    finding_id: str
+    claim_id: str | None
     review_status: str
     issue_type: str
     note: str | None
@@ -375,7 +376,8 @@ class ResearchUnderstandingFeedback:
             collection_id=_normalize_text(payload.get("collection_id")) or "",
             scope_type=_normalize_text(payload.get("scope_type")) or "",
             scope_id=_normalize_text(payload.get("scope_id")) or "",
-            claim_id=_normalize_text(payload.get("claim_id")) or "",
+            finding_id=_normalize_text(payload.get("finding_id")) or "",
+            claim_id=_normalize_text(payload.get("claim_id")),
             review_status=_normalize_choice(
                 payload.get("review_status"),
                 allowed=RESEARCH_UNDERSTANDING_REVIEW_STATUSES,
@@ -397,6 +399,7 @@ class ResearchUnderstandingFeedback:
             "collection_id": self.collection_id,
             "scope_type": self.scope_type,
             "scope_id": self.scope_id,
+            "finding_id": self.finding_id,
             "claim_id": self.claim_id,
             "review_status": self.review_status,
             "issue_type": self.issue_type,
@@ -412,10 +415,18 @@ class ResearchUnderstandingCuration:
     collection_id: str
     scope_type: str
     scope_id: str
-    claim_id: str
+    finding_id: str
+    claim_id: str | None
     curated_claim_type: str
     curated_status: str
     curated_statement: str
+    curated_support_grade: str | None
+    curated_review_status: str | None
+    curated_variables: tuple[str, ...]
+    curated_mediators: tuple[str, ...]
+    curated_outcomes: tuple[str, ...]
+    curated_direction: str | None
+    curated_scope_summary: str | None
     curated_evidence_ref_ids: tuple[str, ...]
     curated_context_ids: tuple[str, ...]
     note: str | None
@@ -429,7 +440,8 @@ class ResearchUnderstandingCuration:
             collection_id=_normalize_text(payload.get("collection_id")) or "",
             scope_type=_normalize_text(payload.get("scope_type")) or "",
             scope_id=_normalize_text(payload.get("scope_id")) or "",
-            claim_id=_normalize_text(payload.get("claim_id")) or "",
+            finding_id=_normalize_text(payload.get("finding_id")) or "",
+            claim_id=_normalize_text(payload.get("claim_id")),
             curated_claim_type=_normalize_choice(
                 payload.get("curated_claim_type"),
                 allowed=RESEARCH_UNDERSTANDING_CLAIM_TYPES,
@@ -441,6 +453,13 @@ class ResearchUnderstandingCuration:
                 default="limited",
             ),
             curated_statement=_normalize_text(payload.get("curated_statement")) or "",
+            curated_support_grade=_normalize_text(payload.get("curated_support_grade")),
+            curated_review_status=_normalize_text(payload.get("curated_review_status")),
+            curated_variables=_normalize_text_tuple(payload.get("curated_variables")),
+            curated_mediators=_normalize_text_tuple(payload.get("curated_mediators")),
+            curated_outcomes=_normalize_text_tuple(payload.get("curated_outcomes")),
+            curated_direction=_normalize_text(payload.get("curated_direction")),
+            curated_scope_summary=_normalize_text(payload.get("curated_scope_summary")),
             curated_evidence_ref_ids=_normalize_text_tuple(
                 payload.get("curated_evidence_ref_ids")
             ),
@@ -456,10 +475,18 @@ class ResearchUnderstandingCuration:
             "collection_id": self.collection_id,
             "scope_type": self.scope_type,
             "scope_id": self.scope_id,
+            "finding_id": self.finding_id,
             "claim_id": self.claim_id,
             "curated_claim_type": self.curated_claim_type,
             "curated_status": self.curated_status,
             "curated_statement": self.curated_statement,
+            "curated_support_grade": self.curated_support_grade,
+            "curated_review_status": self.curated_review_status,
+            "curated_variables": list(self.curated_variables),
+            "curated_mediators": list(self.curated_mediators),
+            "curated_outcomes": list(self.curated_outcomes),
+            "curated_direction": self.curated_direction,
+            "curated_scope_summary": self.curated_scope_summary,
             "curated_evidence_ref_ids": list(self.curated_evidence_ref_ids),
             "curated_context_ids": list(self.curated_context_ids),
             "note": self.note,

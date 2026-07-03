@@ -20,6 +20,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "collection_id": "col-1",
                     "scope_type": "objective",
                     "scope_id": "obj-1",
+                    "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "review_status": "incorrect",
                     "issue_type": "evidence_not_grounded",
@@ -36,6 +37,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "collection_id": "col-1",
                     "scope_type": "objective",
                     "scope_id": "obj-1",
+                    "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "curated_claim_type": "mechanism",
                     "curated_status": "limited",
@@ -57,6 +59,7 @@ class FakeResearchUnderstandingFeedbackService:
                 "collection_id": kwargs["collection_id"],
                 "scope_type": kwargs["scope_type"],
                 "scope_id": kwargs["scope_id"],
+                "finding_id": kwargs["finding_id"],
                 "claim_id": kwargs["claim_id"],
                 "review_status": kwargs["review_status"],
                 "issue_type": kwargs["issue_type"],
@@ -78,6 +81,7 @@ class FakeResearchUnderstandingFeedbackService:
                 "collection_id": kwargs["collection_id"],
                 "scope_type": kwargs["scope_type"],
                 "scope_id": kwargs["scope_id"],
+                "finding_id": kwargs["finding_id"],
                 "claim_id": kwargs["claim_id"],
                 "curated_claim_type": kwargs["curated_claim_type"],
                 "curated_status": kwargs["curated_status"],
@@ -108,9 +112,10 @@ class FakeResearchUnderstandingFeedbackService:
                 {
                     "gold_item_id": "gold_claim-1",
                     "document_id": "",
-                    "family": "research_understanding_claims",
-                    "item_key": "objective:obj-1:claim-1",
+                    "family": "research_understanding_findings",
+                    "item_key": "objective:obj-1:finding-1",
                     "payload": {
+                        "finding_id": "finding-1",
                         "claim_id": "claim-1",
                         "claim_type": "mechanism",
                         "status": "limited",
@@ -139,6 +144,7 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
             ResearchUnderstandingFeedbackCreateRequest(
                 scope_type="objective",
                 scope_id="obj-1",
+                finding_id="finding-1",
                 claim_id="claim-1",
                 review_status="incorrect",
                 issue_type="evidence_not_grounded",
@@ -151,12 +157,14 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
     assert response.feedback_id == "ruf-created"
     assert response.collection_id == "col-1"
     assert response.scope_id == "obj-1"
+    assert response.finding_id == "finding-1"
     assert response.claim_id == "claim-1"
     assert response.review_status == "incorrect"
     assert service.created == {
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
         "review_status": "incorrect",
         "issue_type": "evidence_not_grounded",
@@ -178,6 +186,7 @@ def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch)
             "col-1",
             scope_type="objective",
             scope_id="obj-1",
+            finding_id="finding-1",
             claim_id="claim-1",
         )
     )
@@ -189,6 +198,7 @@ def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch)
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
     }
 
@@ -207,6 +217,7 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
             ResearchUnderstandingCurationCreateRequest(
                 scope_type="objective",
                 scope_id="obj-1",
+                finding_id="finding-1",
                 claim_id="claim-1",
                 curated_claim_type="mechanism",
                 curated_status="limited",
@@ -223,6 +234,7 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
 
     assert response.curation_id == "ruc-created"
     assert response.collection_id == "col-1"
+    assert response.finding_id == "finding-1"
     assert response.claim_id == "claim-1"
     assert response.curated_claim_type == "mechanism"
     assert response.curated_status == "limited"
@@ -231,10 +243,18 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
         "curated_claim_type": "mechanism",
         "curated_status": "limited",
         "curated_statement": "Nitrogen improves strength with limited mechanism evidence.",
+        "curated_support_grade": None,
+        "curated_review_status": None,
+        "curated_variables": [],
+        "curated_mediators": [],
+        "curated_outcomes": [],
+        "curated_direction": None,
+        "curated_scope_summary": None,
         "curated_evidence_ref_ids": ["ev-1"],
         "curated_context_ids": ["ctx-1"],
         "note": "Needs microstructure evidence before marking supported.",
@@ -255,6 +275,7 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
             "col-1",
             scope_type="objective",
             scope_id="obj-1",
+            finding_id="finding-1",
             claim_id="claim-1",
         )
     )
@@ -266,6 +287,7 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
     }
 
@@ -290,7 +312,7 @@ def test_research_understanding_gold_draft_route_exports_curations(monkeypatch):
     assert response.scope_type == "objective"
     assert response.scope_id == "obj-1"
     assert response.item_count == 1
-    assert response.items[0].family == "research_understanding_claims"
+    assert response.items[0].family == "research_understanding_findings"
     assert response.items[0].payload["claim_type"] == "mechanism"
     assert service.exported == {
         "collection_id": "col-1",

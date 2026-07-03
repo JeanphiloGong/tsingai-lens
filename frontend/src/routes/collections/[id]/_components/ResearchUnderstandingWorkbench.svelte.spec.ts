@@ -457,11 +457,19 @@ describe('ResearchUnderstandingWorkbench', () => {
 						collection_id: 'col_123',
 						scope_type: 'objective',
 						scope_id: 'obj_1',
+						finding_id: 'finding_mechanism_limited',
 						claim_id: 'claim_mechanism_limited',
 						curated_claim_type: 'mechanism',
 						curated_status: 'limited',
 						curated_statement:
 							'Annealing may reduce cellular substructure, but the mechanism evidence is limited.',
+						curated_support_grade: 'weak',
+						curated_review_status: 'needs_review',
+						curated_variables: ['annealing'],
+						curated_mediators: ['cellular substructure'],
+						curated_outcomes: ['yield strength'],
+						curated_direction: 'explains',
+						curated_scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
 						curated_evidence_ref_ids: ['ev_section_3'],
 						curated_context_ids: ['ctx_heat_treatment'],
 						note: 'Keep limited until EBSD evidence is added.',
@@ -476,6 +484,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 					collection_id: 'col_123',
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_mechanism_limited',
 					claim_id: 'claim_mechanism_limited',
 					review_status: 'incorrect',
 					issue_type: 'evidence_not_grounded',
@@ -602,6 +611,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(JSON.parse(String(init.body))).toEqual({
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_mechanism_limited',
 			claim_id: 'claim_mechanism_limited',
 			review_status: 'incorrect',
 			issue_type: 'evidence_not_grounded',
@@ -633,6 +643,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(JSON.parse(String(init.body))).toMatchObject({
 			scope_type: 'goal',
 			scope_id: 'goal_1',
+			finding_id: 'finding_mechanism_limited',
 			claim_id: 'claim_mechanism_limited',
 			review_status: 'incorrect'
 		});
@@ -672,11 +683,19 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(JSON.parse(String(init.body))).toEqual({
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_mechanism_limited',
 			claim_id: 'claim_mechanism_limited',
 			curated_claim_type: 'mechanism',
 			curated_status: 'limited',
 			curated_statement:
 				'Annealing may reduce cellular substructure, but the mechanism evidence is limited.',
+			curated_support_grade: 'weak',
+			curated_review_status: 'needs_review',
+			curated_variables: ['annealing'],
+			curated_mediators: ['cellular substructure'],
+			curated_outcomes: ['yield strength'],
+			curated_direction: 'explains',
+			curated_scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
 			curated_evidence_ref_ids: ['ev_section_3'],
 			curated_context_ids: ['ctx_heat_treatment'],
 			note: 'Keep limited until EBSD evidence is added.',

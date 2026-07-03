@@ -299,6 +299,7 @@ class EvaluationRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
 
@@ -312,5 +313,6 @@ class EvaluationRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingCuration, ...]: ...

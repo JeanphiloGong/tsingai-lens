@@ -12,7 +12,7 @@ from infra.persistence.factory import build_evaluation_repository
 
 
 class ResearchUnderstandingFeedbackService:
-    """Persist expert review feedback for research-understanding claims."""
+    """Persist expert review feedback for research-understanding findings."""
 
     def __init__(
         self,
@@ -28,9 +28,10 @@ class ResearchUnderstandingFeedbackService:
         collection_id: str,
         scope_type: str,
         scope_id: str,
-        claim_id: str,
+        finding_id: str,
         review_status: str,
         issue_type: str,
+        claim_id: str | None = None,
         note: str | None = None,
         reviewer: str | None = None,
     ) -> ResearchUnderstandingFeedback:
@@ -41,7 +42,7 @@ class ResearchUnderstandingFeedbackService:
                     collection_id,
                     scope_type,
                     scope_id,
-                    claim_id,
+                    finding_id,
                     review_status,
                     issue_type,
                     note,
@@ -51,6 +52,7 @@ class ResearchUnderstandingFeedbackService:
                 "collection_id": collection_id,
                 "scope_type": scope_type,
                 "scope_id": scope_id,
+                "finding_id": finding_id,
                 "claim_id": claim_id,
                 "review_status": review_status,
                 "issue_type": issue_type,
@@ -69,12 +71,14 @@ class ResearchUnderstandingFeedbackService:
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingFeedback, ...]:
         return self.evaluation_repository.list_research_understanding_feedback(
             collection_id=collection_id,
             scope_type=scope_type,
             scope_id=scope_id,
+            finding_id=finding_id,
             claim_id=claim_id,
         )
 
@@ -84,12 +88,20 @@ class ResearchUnderstandingFeedbackService:
         collection_id: str,
         scope_type: str,
         scope_id: str,
-        claim_id: str,
+        finding_id: str,
         curated_claim_type: str,
         curated_status: str,
         curated_statement: str,
         curated_evidence_ref_ids: list[str],
         curated_context_ids: list[str],
+        claim_id: str | None = None,
+        curated_support_grade: str | None = None,
+        curated_review_status: str | None = None,
+        curated_variables: list[str] | None = None,
+        curated_mediators: list[str] | None = None,
+        curated_outcomes: list[str] | None = None,
+        curated_direction: str | None = None,
+        curated_scope_summary: str | None = None,
         note: str | None = None,
         reviewer: str | None = None,
     ) -> ResearchUnderstandingCuration:
@@ -100,15 +112,23 @@ class ResearchUnderstandingFeedbackService:
                     collection_id,
                     scope_type,
                     scope_id,
-                    claim_id,
+                    finding_id,
                 ),
                 "collection_id": collection_id,
                 "scope_type": scope_type,
                 "scope_id": scope_id,
+                "finding_id": finding_id,
                 "claim_id": claim_id,
                 "curated_claim_type": curated_claim_type,
                 "curated_status": curated_status,
                 "curated_statement": curated_statement,
+                "curated_support_grade": curated_support_grade,
+                "curated_review_status": curated_review_status,
+                "curated_variables": curated_variables or [],
+                "curated_mediators": curated_mediators or [],
+                "curated_outcomes": curated_outcomes or [],
+                "curated_direction": curated_direction,
+                "curated_scope_summary": curated_scope_summary,
                 "curated_evidence_ref_ids": curated_evidence_ref_ids,
                 "curated_context_ids": curated_context_ids,
                 "note": note,
@@ -126,12 +146,14 @@ class ResearchUnderstandingFeedbackService:
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingCuration, ...]:
         return self.evaluation_repository.list_research_understanding_curations(
             collection_id=collection_id,
             scope_type=scope_type,
             scope_id=scope_id,
+            finding_id=finding_id,
             claim_id=claim_id,
         )
 
@@ -151,15 +173,23 @@ class ResearchUnderstandingFeedbackService:
             {
                 "gold_item_id": "gold_" + curation.curation_id.removeprefix("ruc_"),
                 "document_id": "",
-                "family": "research_understanding_claims",
+                "family": "research_understanding_findings",
                 "item_key": ":".join(
-                    [curation.scope_type, curation.scope_id, curation.claim_id]
+                    [curation.scope_type, curation.scope_id, curation.finding_id]
                 ),
                 "payload": {
+                    "finding_id": curation.finding_id,
                     "claim_id": curation.claim_id,
                     "claim_type": curation.curated_claim_type,
                     "status": curation.curated_status,
                     "statement": curation.curated_statement,
+                    "support_grade": curation.curated_support_grade,
+                    "review_status": curation.curated_review_status,
+                    "variables": list(curation.curated_variables),
+                    "mediators": list(curation.curated_mediators),
+                    "outcomes": list(curation.curated_outcomes),
+                    "direction": curation.curated_direction,
+                    "scope_summary": curation.curated_scope_summary,
                     "evidence_ref_ids": list(curation.curated_evidence_ref_ids),
                     "context_ids": list(curation.curated_context_ids),
                 },

@@ -273,13 +273,14 @@ class ResearchUnderstandingResponse(BaseModel):
 
 
 class ResearchUnderstandingFeedbackCreateRequest(BaseModel):
-    """Expert feedback captured on one research-understanding claim."""
+    """Expert feedback captured on one research-understanding finding."""
 
     model_config = ConfigDict(extra="ignore")
 
     scope_type: UnderstandingScopeType
     scope_id: str = Field(..., min_length=1, max_length=160)
-    claim_id: str = Field(..., min_length=1, max_length=200)
+    finding_id: str = Field(..., min_length=1, max_length=200)
+    claim_id: str | None = Field(default=None, max_length=200)
     review_status: ResearchUnderstandingFeedbackStatus
     issue_type: ResearchUnderstandingFeedbackIssueType = Field(default="none")
     note: str | None = Field(default=None, max_length=2000)
@@ -287,13 +288,14 @@ class ResearchUnderstandingFeedbackCreateRequest(BaseModel):
 
 
 class ResearchUnderstandingFeedbackResponse(BaseModel):
-    """Persisted expert feedback on one claim."""
+    """Persisted expert feedback on one finding."""
 
     feedback_id: str
     collection_id: str
     scope_type: str
     scope_id: str
-    claim_id: str
+    finding_id: str
+    claim_id: str | None = None
     review_status: ResearchUnderstandingFeedbackStatus
     issue_type: ResearchUnderstandingFeedbackIssueType
     note: str | None = None
@@ -309,16 +311,24 @@ class ResearchUnderstandingFeedbackListResponse(BaseModel):
 
 
 class ResearchUnderstandingCurationCreateRequest(BaseModel):
-    """Expert-curated correction for one research-understanding claim."""
+    """Expert-curated correction for one research-understanding finding."""
 
     model_config = ConfigDict(extra="ignore")
 
     scope_type: UnderstandingScopeType
     scope_id: str = Field(..., min_length=1, max_length=160)
-    claim_id: str = Field(..., min_length=1, max_length=200)
-    curated_claim_type: ClaimType
-    curated_status: ClaimStatus
+    finding_id: str = Field(..., min_length=1, max_length=200)
+    claim_id: str | None = Field(default=None, max_length=200)
+    curated_claim_type: ClaimType = Field(default="finding")
+    curated_status: ClaimStatus = Field(default="limited")
     curated_statement: str = Field(..., min_length=1, max_length=4000)
+    curated_support_grade: str | None = Field(default=None, max_length=40)
+    curated_review_status: str | None = Field(default=None, max_length=40)
+    curated_variables: list[str] = Field(default_factory=list, max_length=40)
+    curated_mediators: list[str] = Field(default_factory=list, max_length=40)
+    curated_outcomes: list[str] = Field(default_factory=list, max_length=40)
+    curated_direction: str | None = Field(default=None, max_length=80)
+    curated_scope_summary: str | None = Field(default=None, max_length=1000)
     curated_evidence_ref_ids: list[str] = Field(default_factory=list, max_length=80)
     curated_context_ids: list[str] = Field(default_factory=list, max_length=80)
     note: str | None = Field(default=None, max_length=2000)
@@ -326,16 +336,24 @@ class ResearchUnderstandingCurationCreateRequest(BaseModel):
 
 
 class ResearchUnderstandingCurationResponse(BaseModel):
-    """Persisted expert-curated claim correction."""
+    """Persisted expert-curated finding correction."""
 
     curation_id: str
     collection_id: str
     scope_type: str
     scope_id: str
-    claim_id: str
+    finding_id: str
+    claim_id: str | None = None
     curated_claim_type: ClaimType
     curated_status: ClaimStatus
     curated_statement: str
+    curated_support_grade: str | None = None
+    curated_review_status: str | None = None
+    curated_variables: list[str] = Field(default_factory=list)
+    curated_mediators: list[str] = Field(default_factory=list)
+    curated_outcomes: list[str] = Field(default_factory=list)
+    curated_direction: str | None = None
+    curated_scope_summary: str | None = None
     curated_evidence_ref_ids: list[str] = Field(default_factory=list)
     curated_context_ids: list[str] = Field(default_factory=list)
     note: str | None = None

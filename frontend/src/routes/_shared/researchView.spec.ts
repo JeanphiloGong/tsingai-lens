@@ -377,6 +377,7 @@ describe('research view shared helpers', () => {
 			collection_id: 'col_123',
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			review_status: 'incorrect',
 			issue_type: 'evidence_not_grounded',
@@ -388,6 +389,7 @@ describe('research view shared helpers', () => {
 		const feedback = await createResearchUnderstandingFeedback('col_123', {
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			review_status: 'incorrect',
 			issue_type: 'evidence_not_grounded',
@@ -402,6 +404,7 @@ describe('research view shared helpers', () => {
 				body: JSON.stringify({
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					review_status: 'incorrect',
 					issue_type: 'evidence_not_grounded',
@@ -422,6 +425,7 @@ describe('research view shared helpers', () => {
 					collection_id: 'col_123',
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					review_status: 'incorrect',
 					issue_type: 'evidence_not_grounded',
@@ -450,6 +454,7 @@ describe('research view shared helpers', () => {
 			collection_id: 'col_123',
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			curated_claim_type: 'mechanism',
 			curated_status: 'limited',
@@ -464,6 +469,7 @@ describe('research view shared helpers', () => {
 		const curation = await createResearchUnderstandingCuration('col_123', {
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			curated_claim_type: 'mechanism',
 			curated_status: 'limited',
@@ -481,6 +487,7 @@ describe('research view shared helpers', () => {
 				body: JSON.stringify({
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					curated_claim_type: 'mechanism',
 					curated_status: 'limited',
@@ -504,6 +511,7 @@ describe('research view shared helpers', () => {
 					collection_id: 'col_123',
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					curated_claim_type: 'mechanism',
 					curated_status: 'limited',
@@ -540,11 +548,11 @@ describe('research view shared helpers', () => {
 			item_count: 1,
 			items: [
 				{
-					gold_item_id: 'gold_claim_1',
+					gold_item_id: 'gold_finding_1',
 					document_id: '',
-					family: 'research_understanding_claims',
-					item_key: 'objective:obj_1:claim_1',
-					payload: { claim_id: 'claim_1', claim_type: 'mechanism' },
+					family: 'research_understanding_findings',
+					item_key: 'objective:obj_1:finding_1',
+					payload: { finding_id: 'finding_1', claim_id: 'claim_1', claim_type: 'mechanism' },
 					evidence_refs: [{ evidence_ref_id: 'ev_1' }],
 					metadata: { curation_id: 'ruc_1' }
 				}
@@ -560,7 +568,7 @@ describe('research view shared helpers', () => {
 			'/collections/col_123/research-understanding/gold-draft?scope_type=objective&scope_id=obj_1'
 		);
 		expect(draft.item_count).toBe(1);
-		expect(draft.items[0].family).toBe('research_understanding_claims');
+		expect(draft.items[0].family).toBe('research_understanding_findings');
 	});
 
 	it('shortens long internal identifiers for display fallback', () => {

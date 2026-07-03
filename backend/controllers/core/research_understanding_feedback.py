@@ -22,7 +22,7 @@ feedback_service = ResearchUnderstandingFeedbackService()
 @router.post(
     "/{collection_id}/research-understanding/feedback",
     response_model=ResearchUnderstandingFeedbackResponse,
-    summary="记录 research understanding claim 专家反馈",
+    summary="记录 research understanding finding 专家反馈",
 )
 async def create_research_understanding_feedback(
     collection_id: str,
@@ -33,6 +33,7 @@ async def create_research_understanding_feedback(
         collection_id=collection_id,
         scope_type=payload.scope_type,
         scope_id=payload.scope_id,
+        finding_id=payload.finding_id,
         claim_id=payload.claim_id,
         review_status=payload.review_status,
         issue_type=payload.issue_type,
@@ -45,12 +46,13 @@ async def create_research_understanding_feedback(
 @router.get(
     "/{collection_id}/research-understanding/feedback",
     response_model=ResearchUnderstandingFeedbackListResponse,
-    summary="读取 research understanding claim 专家反馈",
+    summary="读取 research understanding finding 专家反馈",
 )
 async def list_research_understanding_feedback(
     collection_id: str,
     scope_type: str | None = Query(default=None, max_length=32),
     scope_id: str | None = Query(default=None, max_length=160),
+    finding_id: str | None = Query(default=None, max_length=200),
     claim_id: str | None = Query(default=None, max_length=200),
 ) -> ResearchUnderstandingFeedbackListResponse:
     items = await run_in_threadpool(
@@ -58,6 +60,7 @@ async def list_research_understanding_feedback(
         collection_id=collection_id,
         scope_type=scope_type,
         scope_id=scope_id,
+        finding_id=finding_id,
         claim_id=claim_id,
     )
     return ResearchUnderstandingFeedbackListResponse(
@@ -75,7 +78,7 @@ def _feedback_response(
 @router.post(
     "/{collection_id}/research-understanding/curations",
     response_model=ResearchUnderstandingCurationResponse,
-    summary="记录 research understanding claim 专家校正",
+    summary="记录 research understanding finding 专家校正",
 )
 async def create_research_understanding_curation(
     collection_id: str,
@@ -86,10 +89,18 @@ async def create_research_understanding_curation(
         collection_id=collection_id,
         scope_type=payload.scope_type,
         scope_id=payload.scope_id,
+        finding_id=payload.finding_id,
         claim_id=payload.claim_id,
         curated_claim_type=payload.curated_claim_type,
         curated_status=payload.curated_status,
         curated_statement=payload.curated_statement,
+        curated_support_grade=payload.curated_support_grade,
+        curated_review_status=payload.curated_review_status,
+        curated_variables=payload.curated_variables,
+        curated_mediators=payload.curated_mediators,
+        curated_outcomes=payload.curated_outcomes,
+        curated_direction=payload.curated_direction,
+        curated_scope_summary=payload.curated_scope_summary,
         curated_evidence_ref_ids=payload.curated_evidence_ref_ids,
         curated_context_ids=payload.curated_context_ids,
         note=payload.note,
@@ -101,12 +112,13 @@ async def create_research_understanding_curation(
 @router.get(
     "/{collection_id}/research-understanding/curations",
     response_model=ResearchUnderstandingCurationListResponse,
-    summary="读取 research understanding claim 专家校正",
+    summary="读取 research understanding finding 专家校正",
 )
 async def list_research_understanding_curations(
     collection_id: str,
     scope_type: str | None = Query(default=None, max_length=32),
     scope_id: str | None = Query(default=None, max_length=160),
+    finding_id: str | None = Query(default=None, max_length=200),
     claim_id: str | None = Query(default=None, max_length=200),
 ) -> ResearchUnderstandingCurationListResponse:
     items = await run_in_threadpool(
@@ -114,6 +126,7 @@ async def list_research_understanding_curations(
         collection_id=collection_id,
         scope_type=scope_type,
         scope_id=scope_id,
+        finding_id=finding_id,
         claim_id=claim_id,
     )
     return ResearchUnderstandingCurationListResponse(

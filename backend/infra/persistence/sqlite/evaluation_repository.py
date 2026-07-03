@@ -452,6 +452,7 @@ class SqliteEvaluationRepository:
                     collection_id,
                     scope_type,
                     scope_id,
+                    finding_id,
                     claim_id,
                     review_status,
                     issue_type,
@@ -459,11 +460,12 @@ class SqliteEvaluationRepository:
                     reviewer,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(feedback_id) DO UPDATE SET
                     collection_id = excluded.collection_id,
                     scope_type = excluded.scope_type,
                     scope_id = excluded.scope_id,
+                    finding_id = excluded.finding_id,
                     claim_id = excluded.claim_id,
                     review_status = excluded.review_status,
                     issue_type = excluded.issue_type,
@@ -476,6 +478,7 @@ class SqliteEvaluationRepository:
                     feedback.collection_id,
                     feedback.scope_type,
                     feedback.scope_id,
+                    feedback.finding_id,
                     feedback.claim_id,
                     feedback.review_status,
                     feedback.issue_type,
@@ -491,6 +494,7 @@ class SqliteEvaluationRepository:
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingFeedback, ...]:
         self._ensure_schema()
@@ -502,6 +506,9 @@ class SqliteEvaluationRepository:
         if scope_id:
             filters.append("scope_id = ?")
             params.append(scope_id)
+        if finding_id:
+            filters.append("finding_id = ?")
+            params.append(finding_id)
         if claim_id:
             filters.append("claim_id = ?")
             params.append(claim_id)
@@ -514,6 +521,7 @@ class SqliteEvaluationRepository:
                     collection_id,
                     scope_type,
                     scope_id,
+                    finding_id,
                     claim_id,
                     review_status,
                     issue_type,
@@ -541,25 +549,41 @@ class SqliteEvaluationRepository:
                     collection_id,
                     scope_type,
                     scope_id,
+                    finding_id,
                     claim_id,
                     curated_claim_type,
                     curated_status,
                     curated_statement,
+                    curated_support_grade,
+                    curated_review_status,
+                    curated_variables_json,
+                    curated_mediators_json,
+                    curated_outcomes_json,
+                    curated_direction,
+                    curated_scope_summary,
                     curated_evidence_ref_ids_json,
                     curated_context_ids_json,
                     note,
                     reviewer,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(curation_id) DO UPDATE SET
                     collection_id = excluded.collection_id,
                     scope_type = excluded.scope_type,
                     scope_id = excluded.scope_id,
+                    finding_id = excluded.finding_id,
                     claim_id = excluded.claim_id,
                     curated_claim_type = excluded.curated_claim_type,
                     curated_status = excluded.curated_status,
                     curated_statement = excluded.curated_statement,
+                    curated_support_grade = excluded.curated_support_grade,
+                    curated_review_status = excluded.curated_review_status,
+                    curated_variables_json = excluded.curated_variables_json,
+                    curated_mediators_json = excluded.curated_mediators_json,
+                    curated_outcomes_json = excluded.curated_outcomes_json,
+                    curated_direction = excluded.curated_direction,
+                    curated_scope_summary = excluded.curated_scope_summary,
                     curated_evidence_ref_ids_json = excluded.curated_evidence_ref_ids_json,
                     curated_context_ids_json = excluded.curated_context_ids_json,
                     note = excluded.note,
@@ -571,10 +595,18 @@ class SqliteEvaluationRepository:
                     curation.collection_id,
                     curation.scope_type,
                     curation.scope_id,
+                    curation.finding_id,
                     curation.claim_id,
                     curation.curated_claim_type,
                     curation.curated_status,
                     curation.curated_statement,
+                    curation.curated_support_grade,
+                    curation.curated_review_status,
+                    _dump_json(curation.curated_variables),
+                    _dump_json(curation.curated_mediators),
+                    _dump_json(curation.curated_outcomes),
+                    curation.curated_direction,
+                    curation.curated_scope_summary,
                     _dump_json(curation.curated_evidence_ref_ids),
                     _dump_json(curation.curated_context_ids),
                     curation.note,
@@ -589,6 +621,7 @@ class SqliteEvaluationRepository:
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingCuration, ...]:
         self._ensure_schema()
@@ -600,6 +633,9 @@ class SqliteEvaluationRepository:
         if scope_id:
             filters.append("scope_id = ?")
             params.append(scope_id)
+        if finding_id:
+            filters.append("finding_id = ?")
+            params.append(finding_id)
         if claim_id:
             filters.append("claim_id = ?")
             params.append(claim_id)
@@ -612,10 +648,18 @@ class SqliteEvaluationRepository:
                     collection_id,
                     scope_type,
                     scope_id,
+                    finding_id,
                     claim_id,
                     curated_claim_type,
                     curated_status,
                     curated_statement,
+                    curated_support_grade,
+                    curated_review_status,
+                    curated_variables_json,
+                    curated_mediators_json,
+                    curated_outcomes_json,
+                    curated_direction,
+                    curated_scope_summary,
                     curated_evidence_ref_ids_json,
                     curated_context_ids_json,
                     note,
@@ -762,7 +806,8 @@ class SqliteEvaluationRepository:
                     collection_id TEXT NOT NULL,
                     scope_type TEXT NOT NULL,
                     scope_id TEXT NOT NULL,
-                    claim_id TEXT NOT NULL,
+                    finding_id TEXT,
+                    claim_id TEXT,
                     review_status TEXT NOT NULL,
                     issue_type TEXT NOT NULL,
                     note TEXT,
@@ -775,6 +820,7 @@ class SqliteEvaluationRepository:
                     collection_id,
                     scope_type,
                     scope_id,
+                    finding_id,
                     claim_id,
                     created_at
                 );
@@ -784,10 +830,18 @@ class SqliteEvaluationRepository:
                     collection_id TEXT NOT NULL,
                     scope_type TEXT NOT NULL,
                     scope_id TEXT NOT NULL,
-                    claim_id TEXT NOT NULL,
+                    finding_id TEXT,
+                    claim_id TEXT,
                     curated_claim_type TEXT NOT NULL,
                     curated_status TEXT NOT NULL,
                     curated_statement TEXT NOT NULL,
+                    curated_support_grade TEXT,
+                    curated_review_status TEXT,
+                    curated_variables_json TEXT NOT NULL DEFAULT '[]',
+                    curated_mediators_json TEXT NOT NULL DEFAULT '[]',
+                    curated_outcomes_json TEXT NOT NULL DEFAULT '[]',
+                    curated_direction TEXT,
+                    curated_scope_summary TEXT,
                     curated_evidence_ref_ids_json TEXT NOT NULL,
                     curated_context_ids_json TEXT NOT NULL,
                     note TEXT,
@@ -800,11 +854,88 @@ class SqliteEvaluationRepository:
                     collection_id,
                     scope_type,
                     scope_id,
+                    finding_id,
                     claim_id,
                     updated_at
                 );
                 """
             )
+            self._ensure_column(
+                connection,
+                "research_understanding_feedback",
+                "finding_id",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "finding_id",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_support_grade",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_review_status",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_variables_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_mediators_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_outcomes_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_direction",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "curated_scope_summary",
+                "TEXT",
+            )
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing = {str(row["name"]) for row in rows}
+        if column_name in existing:
+            return
+        try:
+            connection.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+            rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+            if column_name not in {str(row["name"]) for row in rows}:
+                raise
 
     def _gold_item_from_row(self, row: sqlite3.Row) -> EvaluationGoldItem:
         return EvaluationGoldItem.from_mapping(
@@ -930,6 +1061,7 @@ class SqliteEvaluationRepository:
                 "collection_id": row["collection_id"],
                 "scope_type": row["scope_type"],
                 "scope_id": row["scope_id"],
+                "finding_id": row["finding_id"],
                 "claim_id": row["claim_id"],
                 "review_status": row["review_status"],
                 "issue_type": row["issue_type"],
@@ -946,10 +1078,18 @@ class SqliteEvaluationRepository:
                 "collection_id": row["collection_id"],
                 "scope_type": row["scope_type"],
                 "scope_id": row["scope_id"],
+                "finding_id": row["finding_id"],
                 "claim_id": row["claim_id"],
                 "curated_claim_type": row["curated_claim_type"],
                 "curated_status": row["curated_status"],
                 "curated_statement": row["curated_statement"],
+                "curated_support_grade": row["curated_support_grade"],
+                "curated_review_status": row["curated_review_status"],
+                "curated_variables": _load_json(row["curated_variables_json"]) or [],
+                "curated_mediators": _load_json(row["curated_mediators_json"]) or [],
+                "curated_outcomes": _load_json(row["curated_outcomes_json"]) or [],
+                "curated_direction": row["curated_direction"],
+                "curated_scope_summary": row["curated_scope_summary"],
                 "curated_evidence_ref_ids": (
                     _load_json(row["curated_evidence_ref_ids_json"]) or []
                 ),

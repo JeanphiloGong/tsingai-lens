@@ -2093,7 +2093,6 @@ class ResearchUnderstandingService:
         support_status = (_text(effect.get("support_status")) or "limited").lower()
         direct_count = len(evidence_bundle.get("direct_result", []))
         evidence_count = int(effect.get("evidence_count") or 0)
-        paper_count = int(effect.get("paper_count") or 0)
         has_mechanism = self._finding_has_mechanism_support(evidence_bundle)
         has_direct = self._finding_has_direct_support(evidence_bundle)
         if support_status == "conflicted" or evidence_bundle.get("conflict"):
@@ -2106,7 +2105,7 @@ class ResearchUnderstandingService:
             return "weak"
         if review_status == "needs_review":
             return "partial"
-        if direct_count >= 2 or paper_count >= 2 or has_mechanism:
+        if direct_count >= 2 or has_mechanism:
             return "strong"
         if support_status == "supported":
             return "partial"
@@ -2145,6 +2144,16 @@ class ResearchUnderstandingService:
             if self._reviewable_presentation_relation(relation)
         ]
         primary_relation = related_relations[0] if related_relations else {}
+        relation_evidence_ref_ids = _dedupe_strings(
+            [
+                ref_id
+                for relation in related_relations
+                for ref_id in _strings(relation.get("evidence_ref_ids"))
+            ]
+        )
+        effect_evidence_ref_ids = _dedupe_strings(
+            [*evidence_ref_ids, *relation_evidence_ref_ids]
+        )
         contexts = [
             contexts_by_id[context_id]
             for context_id in context_ids
@@ -2154,7 +2163,7 @@ class ResearchUnderstandingService:
         target_property = self._target_property_for(claim, primary_relation, contexts)
         evidence_refs = [
             evidence_by_id[ref_id]
-            for ref_id in evidence_ref_ids
+            for ref_id in effect_evidence_ref_ids
             if ref_id in evidence_by_id
         ]
         paper_count = len(
@@ -2191,7 +2200,7 @@ class ResearchUnderstandingService:
             "paper_count": paper_count,
             "evidence_count": len(evidence_refs),
             "context_summary": self._context_summary_text(contexts),
-            "evidence_ref_ids": evidence_ref_ids,
+            "evidence_ref_ids": effect_evidence_ref_ids,
             "context_ids": context_ids,
             "relation_ids": relation_ids,
             "needs_review": self._effect_needs_review(

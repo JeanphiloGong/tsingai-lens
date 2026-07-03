@@ -2225,6 +2225,108 @@ def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized
     assert finding["support_grade"] == "insufficient"
 
 
+def test_with_presentation_recalls_target_matching_corrosion_relation_evidence():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_corrosion",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Porosity level and pore size affect pitting corrosion "
+                        "behavior."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.82,
+                    "evidence_ref_ids": ["evref_density_table"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density_table"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "increases",
+                    "subject": "porosity level",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Higher porosity level increases pitting corrosion "
+                        "susceptibility."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": [
+                        "evref_density_table",
+                        "evref_corrosion_text",
+                    ],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": [
+                        "unit_density_table",
+                        "unit_corrosion_text",
+                    ],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density_table",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 3 density and pore size",
+                    "locator": {"source_ref": "table-density"},
+                    "fact_ids": ["unit_density_table"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "Table 3 measured average melt pool and grain sizes, "
+                        "and the densities obtained by the Archimedes method."
+                    ),
+                },
+                {
+                    "evidence_ref_id": "evref_corrosion_text",
+                    "source_kind": "text_window",
+                    "document_id": "paper-5",
+                    "label": "P005 Conclusion",
+                    "locator": {"source_ref": "blk-corrosion"},
+                    "fact_ids": ["unit_corrosion_text"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "Porosities were highly sensitive to pitting corrosion "
+                        "behavior, with pores reducing passive film stability."
+                    ),
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "SLM"},
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_ref_ids"] == [
+        "evref_density_table",
+        "evref_corrosion_text",
+    ]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_corrosion_text"]
+    assert finding["evidence_bundle"]["uncategorized"] == ["evref_density_table"]
+    assert finding["support_grade"] == "partial"
+
+
 def test_with_presentation_semantic_match_handles_porosity_pore_variants():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

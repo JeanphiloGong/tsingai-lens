@@ -1856,6 +1856,7 @@ class ResearchUnderstandingService:
             )
             for effect in effects
         ]
+        findings = self._sort_presentation_findings(findings)
         quote_hints_by_ref = self._finding_quote_hints_by_evidence_ref(
             findings,
             relations_by_id=relations_by_id,
@@ -1889,6 +1890,36 @@ class ResearchUnderstandingService:
             "evidence_items": evidence_items,
             "context_summaries": context_summaries,
         }
+
+    def _sort_presentation_findings(
+        self,
+        findings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        grade_rank = {
+            "strong": 0,
+            "partial": 1,
+            "weak": 2,
+            "conflict": 3,
+            "insufficient": 4,
+        }
+
+        def sort_key(item: tuple[int, dict[str, Any]]) -> tuple[int, int, int, int]:
+            index, finding = item
+            bundle = _mapping(finding.get("evidence_bundle"))
+            has_direct = bool(_strings(bundle.get("direct_result")))
+            has_chain = bool(finding.get("relation_chain"))
+            grade = _text(finding.get("support_grade")) or ""
+            usable_rank = (
+                0 if grade in {"strong", "partial"} and has_direct and has_chain else 1
+            )
+            return (
+                usable_rank,
+                grade_rank.get(grade, 5),
+                0 if has_direct else 1,
+                index,
+            )
+
+        return [finding for _, finding in sorted(enumerate(findings), key=sort_key)]
 
     def _presentation_finding(
         self,

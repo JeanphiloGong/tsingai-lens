@@ -3453,14 +3453,14 @@ def test_with_presentation_recalls_goal_variable_relation_when_claim_is_off_axis
     assert understanding is not None
     findings = understanding["presentation"]["findings"]
     assert [finding["relation_ids"] for finding in findings] == [
-        [],
         ["rel_preheat_microstructure"],
+        [],
     ]
-    assert findings[0]["support_grade"] == "insufficient"
-    assert findings[1]["title"] == "build platform preheating -> microstructure"
-    assert findings[1]["variables"] == ["build platform preheating"]
-    assert findings[1]["evidence_bundle"]["direct_result"] == ["evref_preheat"]
-    assert findings[1]["support_grade"] == "partial"
+    assert findings[0]["title"] == "build platform preheating -> microstructure"
+    assert findings[0]["variables"] == ["build platform preheating"]
+    assert findings[0]["evidence_bundle"]["direct_result"] == ["evref_preheat"]
+    assert findings[0]["support_grade"] == "partial"
+    assert findings[1]["support_grade"] == "insufficient"
 
 
 def test_with_presentation_semantic_match_handles_porosity_pore_variants():
@@ -3931,6 +3931,110 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
             ),
         }
     ]
+
+
+def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect mechanical properties?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_context_only",
+                    "claim_type": "finding",
+                    "statement": "Preheating was investigated for LPBF 316L.",
+                    "status": "supported",
+                    "confidence": 0.84,
+                    "evidence_ref_ids": ["evref_context"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_context"],
+                },
+                {
+                    "claim_id": "claim_preheat_mechanical",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Preheating improves mechanical properties through "
+                        "microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.88,
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                },
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_mechanical",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating",
+                    "predicate": "improves",
+                    "object": "microstructure -> mechanical properties",
+                    "statement": (
+                        "Build platform preheating improves mechanical "
+                        "properties through microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_context",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Abstract",
+                    "locator": {"source_ref": "blk-abstract"},
+                    "fact_ids": ["unit_context"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "background_context",
+                },
+                {
+                    "evidence_ref_id": "evref_direct",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_direct"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": "Preheating increased ductility by 14%.",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["build platform preheating"]
+                    },
+                    "property_scope": ["mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    findings = understanding["presentation"]["findings"]
+    assert [finding["claim_id"] for finding in findings] == [
+        "claim_preheat_mechanical",
+        "claim_context_only",
+    ]
+    assert findings[0]["support_grade"] == "partial"
+    assert findings[0]["evidence_bundle"]["direct_result"] == ["evref_direct"]
+    assert findings[1]["support_grade"] == "insufficient"
+    assert findings[1]["evidence_bundle"]["background"] == ["evref_context"]
 
 
 def test_with_presentation_drops_placeholder_relation_chain_segments():

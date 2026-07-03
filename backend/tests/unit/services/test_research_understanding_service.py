@@ -1805,10 +1805,11 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
                     "evidence_ref_id": "evref_density",
                     "source_kind": "table",
                     "document_id": "paper-1",
-                    "label": "P001 Table 1",
+                    "label": "P001 Table 1 relative density",
                     "locator": {"source_ref": "table-1"},
                     "fact_ids": ["unit_density"],
                     "traceability_status": "resolved",
+                    "quote": "Relative density increased with laser power.",
                 },
                 {
                     "evidence_ref_id": "evref_texture",
@@ -1882,10 +1883,11 @@ def test_with_presentation_projects_findings_contract():
                     "evidence_ref_id": "evref_density",
                     "source_kind": "table",
                     "document_id": "paper-1",
-                    "label": "P001 Table 1",
+                    "label": "P001 Table 1 relative density",
                     "locator": {"source_ref": "table-1"},
                     "fact_ids": ["unit_density"],
                     "traceability_status": "resolved",
+                    "quote": "Relative density increased with laser power.",
                 },
                 {
                     "evidence_ref_id": "evref_density_text",
@@ -2061,7 +2063,7 @@ def test_with_presentation_buckets_finding_evidence_by_role():
     }
 
 
-def test_with_presentation_infers_direct_result_for_relation_linked_missing_role():
+def test_with_presentation_semantic_match_infers_relation_linked_direct_result():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(
         {
@@ -2107,6 +2109,10 @@ def test_with_presentation_infers_direct_result_for_relation_linked_missing_role
                     "locator": {"source_ref": "blk-results"},
                     "fact_ids": ["unit_relation"],
                     "traceability_status": "resolved",
+                    "quote": (
+                        "Comparing polished sections, the porosity level "
+                        "decreased for specimens fabricated with preheating."
+                    ),
                 },
                 {
                     "evidence_ref_id": "evref_context_only",
@@ -2136,6 +2142,158 @@ def test_with_presentation_infers_direct_result_for_relation_linked_missing_role
     finding = understanding["presentation"]["findings"][0]
     assert finding["evidence_bundle"]["direct_result"] == ["evref_relation_text"]
     assert finding["evidence_bundle"]["uncategorized"] == ["evref_context_only"]
+    assert finding["support_grade"] == "partial"
+
+
+def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_corrosion",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Porosity level and pore size affect pitting corrosion "
+                        "behavior."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.82,
+                    "evidence_ref_ids": ["evref_density_table"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density_table"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "increases",
+                    "subject": "porosity level and pore size",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Porosity level and pore size affect pitting corrosion "
+                        "behavior."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density_table"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density_table"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density_table",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 3 density and pore size",
+                    "locator": {"source_ref": "table-density"},
+                    "fact_ids": ["unit_density_table"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "Table 3 measured average melt pool and grain sizes, "
+                        "and the densities obtained by the Archimedes method."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "SLM"},
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["outcomes"] == ["pitting corrosion behavior"]
+    assert finding["evidence_bundle"]["direct_result"] == []
+    assert finding["evidence_bundle"]["uncategorized"] == ["evref_density_table"]
+    assert finding["support_grade"] == "insufficient"
+
+
+def test_with_presentation_semantic_match_handles_porosity_pore_variants():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does scan speed affect porosity?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_pores",
+                    "claim_type": "finding",
+                    "statement": "Scan speed changes porosity.",
+                    "status": "supported",
+                    "confidence": 0.84,
+                    "evidence_ref_ids": ["evref_pores"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_pores"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_speed_porosity",
+                    "relation_type": "changes",
+                    "subject": "scan speed",
+                    "predicate": "changes",
+                    "object": "porosity",
+                    "statement": "Scan speed changes porosity.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_pores"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_pores"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_pores",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-pores"},
+                    "fact_ids": ["unit_pores"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "Pores with irregular shapes were observed, and the "
+                        "pore size ranged from tens to hundreds of micrometers."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "SLM"},
+                    "property_scope": ["porosity"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_pores"]
     assert finding["support_grade"] == "partial"
 
 

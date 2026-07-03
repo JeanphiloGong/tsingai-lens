@@ -15,6 +15,35 @@ logger = logging.getLogger(__name__)
 
 _RELATION_CONTEXT_LIMIT = 16
 _RELATION_EVIDENCE_UNIT_LIMIT = 24
+_FINDING_MATCH_STOPWORDS = {
+    "affect",
+    "affects",
+    "behavior",
+    "behaviour",
+    "condition",
+    "conditions",
+    "context",
+    "effect",
+    "effects",
+    "level",
+    "levels",
+    "material",
+    "materials",
+    "method",
+    "methods",
+    "process",
+    "processes",
+    "properties",
+    "property",
+    "result",
+    "results",
+    "sample",
+    "samples",
+    "specimen",
+    "specimens",
+    "table",
+    "tables",
+}
 
 
 class ResearchUnderstandingService:
@@ -1836,6 +1865,7 @@ class ResearchUnderstandingService:
             effect,
             evidence_by_id=evidence_by_id,
             relations=relations,
+            outcomes=outcomes,
         )
         review_status = self._finding_review_status(effect)
         scope_summary = _text(effect.get("context_summary")) or ""
@@ -1951,6 +1981,7 @@ class ResearchUnderstandingService:
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
         relations: list[dict[str, Any]],
+        outcomes: list[str],
     ) -> dict[str, list[str]]:
         bundle: dict[str, list[str]] = {
             "direct_result": [],
@@ -1966,14 +1997,65 @@ class ResearchUnderstandingService:
             for relation in relations
             for ref_id in _strings(relation.get("evidence_ref_ids"))
         }
+        target_terms = self._finding_target_terms(effect, outcomes)
         for ref_id in _strings(effect.get("evidence_ref_ids")):
-            role = _text(evidence_by_id.get(ref_id, {}).get("evidence_role"))
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            role = _text(evidence_ref.get("evidence_role"))
             bundle_key = self._finding_bundle_key_for_role(
                 role,
-                fallback_direct=not role and ref_id in relation_evidence_ref_ids,
+                fallback_direct=(
+                    not role
+                    and ref_id in relation_evidence_ref_ids
+                    and self._evidence_matches_finding_target(
+                        evidence_ref,
+                        target_terms,
+                    )
+                ),
             )
             bundle[bundle_key].append(ref_id)
         return bundle
+
+    def _finding_target_terms(
+        self,
+        effect: Mapping[str, Any],
+        outcomes: list[str],
+    ) -> set[str]:
+        target_texts = outcomes or [_text(effect.get("target_property")) or ""]
+        terms: set[str] = set()
+        for text in target_texts:
+            tokens = _meaningful_match_tokens(text)
+            if not tokens:
+                continue
+            phrase = _normalize_match_text(" ".join(tokens))
+            if len(tokens) >= 2:
+                terms.add(phrase)
+                for index in range(len(tokens) - 1):
+                    terms.add(f"{tokens[index]} {tokens[index + 1]}")
+            for token in tokens:
+                terms.update(_target_token_variants(token))
+        return {term for term in terms if term}
+
+    def _evidence_matches_finding_target(
+        self,
+        evidence_ref: Mapping[str, Any],
+        target_terms: set[str],
+    ) -> bool:
+        if not target_terms:
+            return False
+        searchable = self._evidence_search_text(evidence_ref)
+        if not searchable:
+            return False
+        bounded = f" {searchable} "
+        return any(f" {term} " in bounded for term in target_terms)
+
+    def _evidence_search_text(self, evidence_ref: Mapping[str, Any]) -> str:
+        locator = _mapping(evidence_ref.get("locator"))
+        parts = [
+            _text(evidence_ref.get("quote")),
+            _text(evidence_ref.get("label")),
+            *_display_values(locator),
+        ]
+        return _normalize_match_text(" ".join(part for part in parts if part))
 
     def _finding_bundle_key_for_role(
         self,
@@ -2590,6 +2672,45 @@ def _text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalize_match_text(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def _meaningful_match_tokens(value: str) -> list[str]:
+    return [
+        token
+        for token in _normalize_match_text(value).split()
+        if len(token) >= 3 and token not in _FINDING_MATCH_STOPWORDS
+    ]
+
+
+def _target_token_variants(token: str) -> set[str]:
+    variants = {token}
+    domain_variants = {
+        "porosity": {"pore", "pores", "porosities"},
+        "pore": {"pores", "porosity"},
+        "pores": {"pore", "porosity"},
+        "density": {"densities"},
+        "densities": {"density"},
+        "microstructure": {"microstructural"},
+        "microstructural": {"microstructure"},
+    }
+    variants.update(domain_variants.get(token, set()))
+    if token.endswith("y") and len(token) > 4:
+        variants.add(f"{token[:-1]}ies")
+    elif token.endswith("ies") and len(token) > 5:
+        variants.add(f"{token[:-3]}y")
+    elif token.endswith("s") and len(token) > 4:
+        variants.add(token[:-1])
+    elif not token.endswith("s"):
+        variants.add(f"{token}s")
+    if token.endswith("al") and len(token) > 5:
+        variants.add(token[:-2])
+    else:
+        variants.add(f"{token}al")
+    return variants
 
 
 def _confidence_or_none(value: Any) -> float | None:

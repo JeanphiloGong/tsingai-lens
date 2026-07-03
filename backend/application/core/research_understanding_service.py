@@ -2160,7 +2160,11 @@ class ResearchUnderstandingService:
                 outcomes=outcomes,
                 fallback=_text(effect.get("title")) or _text(effect.get("statement")),
             ),
-            "statement": _text(effect.get("statement")) or "",
+            "statement": self._finding_statement(
+                statement=_text(effect.get("statement")) or "",
+                variables=display_variables,
+                outcomes=outcomes,
+            ),
             "variables": display_variables,
             "mediators": mediators,
             "outcomes": outcomes,
@@ -2202,6 +2206,40 @@ class ResearchUnderstandingService:
         if variables:
             return variables[0]
         return "Research finding"
+
+    def _finding_statement(
+        self,
+        *,
+        statement: str,
+        variables: list[str],
+        outcomes: list[str],
+    ) -> str:
+        if self._statement_matches_finding_display(
+            statement,
+            variables=variables,
+            outcomes=outcomes,
+        ):
+            return statement
+        if not variables or not outcomes:
+            return statement
+        variable = variables[0]
+        outcome = outcomes[0]
+        return f"{variable} is associated with {outcome}."
+
+    def _statement_matches_finding_display(
+        self,
+        statement: str,
+        *,
+        variables: list[str],
+        outcomes: list[str],
+    ) -> bool:
+        if not statement or not variables or not outcomes:
+            return False
+        normalized = f" {_normalize_match_text(statement)} "
+        return bool(
+            self._variable_matches_direct_evidence(variables, statement)
+            and _quote_term_hits(normalized, _quote_hint_terms(outcomes[0]))
+        )
 
     def _finding_relation_chain(
         self,

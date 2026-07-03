@@ -4488,6 +4488,7 @@ def test_with_presentation_quote_calibrated_variable_promotes_density_primary():
     finding = understanding["presentation"]["findings"][0]
     assert finding["variables"] == ["VED"]
     assert finding["title"] == "VED -> density"
+    assert finding["statement"] == "VED is associated with density."
     assert finding["relation_chain"][0]["variable"] == "laser power and scan speed"
     assert understanding["presentation"]["primary_findings"] == [finding]
     assert understanding["presentation"]["review_queue_findings"] == []

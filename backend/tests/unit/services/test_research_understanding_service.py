@@ -2799,6 +2799,91 @@ def test_with_presentation_projects_findings_contract():
     }
 
 
+def test_with_presentation_compacts_long_finding_scope_summary():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does VED affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "finding",
+                    "statement": "VED increases density.",
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_ved_density",
+                    "relation_type": "increases",
+                    "subject": "VED",
+                    "predicate": "increases",
+                    "object": "density",
+                    "statement": "VED increases density.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "quote": "VED increased density.",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["stainless steel 316L"],
+                    "process_context": {
+                        "process": "selective laser melting",
+                        "variable_process_axes": ["VED"],
+                        "all_conditions": [
+                            "laser power",
+                            "scan speed",
+                            "heat treatment",
+                            "as-built condition",
+                            "low",
+                            "medium",
+                            "high",
+                            "sample A",
+                            "sample B",
+                        ],
+                    },
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["scope_summary"] == (
+        "stainless steel 316L, VED, density, selective laser melting"
+    )
+    assert "+5 more" not in finding["scope_summary"]
+
+
 def test_with_presentation_buckets_finding_evidence_by_role():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

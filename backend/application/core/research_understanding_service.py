@@ -2151,7 +2151,11 @@ class ResearchUnderstandingService:
             evidence_bundle=evidence_bundle,
         )
         review_status = self._finding_review_status(effect)
-        scope_summary = _text(effect.get("context_summary")) or ""
+        scope_summary = _compact_finding_scope_summary(
+            _text(effect.get("context_summary")) or "",
+            variables=display_variables,
+            outcomes=outcomes,
+        )
         return {
             "finding_id": f"finding_{claim_id}",
             "claim_id": claim_id,
@@ -3771,6 +3775,93 @@ def _join_display_values(values: list[str] | tuple[str, ...], *, limit: int = 6)
     if len(cleaned) > limit:
         return ", ".join((*cleaned[:limit], f"+{len(cleaned) - limit} more"))
     return ", ".join(cleaned)
+
+
+def _compact_finding_scope_summary(
+    raw_scope_summary: str,
+    *,
+    variables: list[str],
+    outcomes: list[str],
+) -> str:
+    raw = _text(raw_scope_summary) or ""
+    if not raw:
+        return ""
+
+    raw_tokens = [token.strip() for token in raw.split(",") if token.strip()]
+    has_more_marker = any(
+        re.fullmatch(r"\+\d+\s+more", token, flags=re.IGNORECASE)
+        for token in raw_tokens
+    )
+    if not has_more_marker:
+        return raw
+
+    visible_tokens = [
+        token
+        for token in raw_tokens
+        if not re.fullmatch(r"\+\d+\s+more", token, flags=re.IGNORECASE)
+    ]
+    compact: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        text = _text(value)
+        if not text or not _looks_user_facing(text):
+            return
+        key = text.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        compact.append(text)
+
+    material_markers = (
+        "316l",
+        "304l",
+        "steel",
+        "stainless",
+        "alloy",
+        "aluminium",
+        "aluminum",
+        "titanium",
+        "nickel",
+        "inconel",
+        "copper",
+        "ti-",
+        "ti6",
+    )
+    context_markers = (
+        "lpbf",
+        "l-pbf",
+        "slm",
+        "selective laser melting",
+        "laser beam powder bed fusion",
+        "powder bed fusion",
+        "additive manufacturing",
+        "electron beam melting",
+        "directed energy deposition",
+        "preheat",
+        "preheating",
+        "hot isostatic",
+        "hip",
+        "nacl",
+        "corrosion",
+    )
+
+    for token in visible_tokens:
+        lower = token.lower()
+        if any(marker in lower for marker in material_markers):
+            add(token)
+    for variable in variables:
+        add(variable)
+    for outcome in outcomes:
+        add(outcome)
+    for token in visible_tokens:
+        lower = token.lower()
+        if any(marker in lower for marker in context_markers):
+            add(token)
+
+    if compact:
+        return ", ".join(compact[:5])
+    return ", ".join(visible_tokens[:4])
 
 
 def _short_text(value: str, *, limit: int) -> str:

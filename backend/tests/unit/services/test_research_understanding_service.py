@@ -2085,6 +2085,271 @@ def test_with_presentation_prefers_specific_single_sentence_quote():
     )
 
 
+def test_with_presentation_prefers_result_bearing_direct_evidence_source():
+    abstract_text = (
+        "This study aims to understand the effect of build platform "
+        "preheating temperature on microstructural features and mechanical "
+        "properties in laser beam powder bed fusion."
+    )
+    conclusion_text = (
+        "Conclusions show that preheating to 150 C increased ductility by "
+        "14% and this improvement was attributed to homogenized cellular "
+        "microstructure after laser beam powder bed fusion. "
+        "The size and distribution of porosity also decreased with "
+        "preheating."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-2",
+                    human_readable_id=2,
+                    title="Preheating effects in LPBF 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-abstract",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=abstract_text,
+                    block_order=9,
+                    page=1,
+                    heading_path="Abstract",
+                ),
+                SourceBlock(
+                    block_id="blk-conclusion",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=conclusion_text,
+                    block_order=240,
+                    page=13,
+                    heading_path="Conclusions",
+                ),
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How do build platform preheating temperature and build "
+                    "platform preheating affect microstructure?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Build platform preheating improves microstructure "
+                        "and mechanical properties."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_abstract"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_abstract"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_microstructure",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating",
+                    "predicate": "improves",
+                    "object": "microstructure",
+                    "statement": (
+                        "Build platform preheating improves microstructure "
+                        "and mechanical properties."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_abstract"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_abstract"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_abstract",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Abstract",
+                    "locator": {"source_ref": "blk-abstract"},
+                    "fact_ids": ["unit_abstract"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_conclusion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Conclusions",
+                    "locator": {"source_ref": "blk-conclusion"},
+                    "fact_ids": ["unit_conclusion"],
+                    "traceability_status": "resolved",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process": "laser beam powder bed fusion",
+                        "variable_process_axes": ["build platform preheating"],
+                    },
+                    "property_scope": ["microstructure", "mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_conclusion"]
+    assert finding["evidence_bundle"]["uncategorized"] == ["evref_abstract"]
+    evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    assert evidence_by_id["evref_conclusion"]["source_text"] == conclusion_text
+    assert evidence_by_id["evref_conclusion"]["quote"] == (
+        "Conclusions show that preheating to 150 C increased ductility by "
+        "14% and this improvement was attributed to homogenized cellular "
+        "microstructure after laser beam powder bed fusion."
+    )
+
+
+def test_with_presentation_keeps_results_direct_evidence_over_introduction_review():
+    results_text = (
+        "The achieved density measured using the Archimedes method was 91.9, "
+        "98.9 and 99.6 % for L-VED, M-VED and H-VED, respectively."
+    )
+    intro_text = (
+        "Several previous studies reported that laser power can manipulate "
+        "density in an optimal VED range, but these reports are reviewed as "
+        "background for the present work."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-1",
+                    human_readable_id=1,
+                    title="VED effects in PBF-LB 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-results",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text=results_text,
+                    block_order=65,
+                    page=3,
+                    heading_path="3.1. As-built microstructures",
+                ),
+                SourceBlock(
+                    block_id="blk-introduction",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text=intro_text,
+                    block_order=31,
+                    page=2,
+                    heading_path="1. Introduction",
+                ),
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How do laser power and scan speed affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "finding",
+                    "statement": "Laser power and scan speed affect density.",
+                    "status": "supported",
+                    "confidence": 0.82,
+                    "evidence_ref_ids": ["evref_results"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_density",
+                    "relation_type": "affects",
+                    "subject": "laser power and scan speed",
+                    "predicate": "affects",
+                    "object": "density",
+                    "statement": "Laser power and scan speed affect density.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_results"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_results",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_intro_review",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Introduction",
+                    "locator": {"source_ref": "blk-introduction"},
+                    "fact_ids": ["unit_intro"],
+                    "traceability_status": "resolved",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["laser power", "scan speed"],
+                    },
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_results"]
+    assert finding["evidence_bundle"]["uncategorized"] == []
+
+
 def test_with_presentation_keeps_only_reviewable_direct_relations():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

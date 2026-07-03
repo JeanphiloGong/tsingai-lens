@@ -1852,6 +1852,7 @@ class ResearchUnderstandingService:
                 effect,
                 evidence_by_id=evidence_by_id,
                 relations_by_id=relations_by_id,
+                blocks_by_id=blocks_by_id,
             )
             for effect in effects
         ]
@@ -1895,6 +1896,7 @@ class ResearchUnderstandingService:
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
         relations_by_id: Mapping[str, dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
     ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
         relations = self._finding_relations(effect, relations_by_id)
@@ -1905,6 +1907,14 @@ class ResearchUnderstandingService:
             evidence_by_id=evidence_by_id,
             relations=relations,
             outcomes=outcomes,
+        )
+        evidence_bundle = self._finding_result_source_bundle(
+            effect,
+            evidence_bundle=evidence_bundle,
+            evidence_by_id=evidence_by_id,
+            relations=relations,
+            outcomes=outcomes,
+            blocks_by_id=blocks_by_id,
         )
         review_status = self._finding_review_status(effect)
         scope_summary = _text(effect.get("context_summary")) or ""
@@ -2054,6 +2064,118 @@ class ResearchUnderstandingService:
             bundle[bundle_key].append(ref_id)
         return bundle
 
+    def _finding_result_source_bundle(
+        self,
+        effect: Mapping[str, Any],
+        *,
+        evidence_bundle: Mapping[str, list[str]],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        relations: list[dict[str, Any]],
+        outcomes: list[str],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> dict[str, list[str]]:
+        direct_ref_ids = _strings(evidence_bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return {key: list(value) for key, value in evidence_bundle.items()}
+        target_terms = self._finding_target_terms(effect, outcomes)
+        variable_terms: set[str] = set()
+        relation_terms: set[str] = set()
+        for relation in relations:
+            variable_terms.update(
+                _quote_hint_terms(
+                    self._presentation_relation_side(relation.get("subject"))
+                )
+            )
+            for value in (
+                _text(relation.get("predicate")),
+                _text(relation.get("relation_type")),
+                self._presentation_relation_summary(relation),
+                " ".join(self._relation_object_chain(relation)),
+            ):
+                relation_terms.update(_quote_hint_terms(value))
+        for value in (
+            _text(effect.get("variable_axis")),
+            _text(effect.get("statement")),
+            _text(effect.get("title")),
+            _text(effect.get("effect_direction")),
+        ):
+            relation_terms.update(_quote_hint_terms(value))
+        if not target_terms or not (variable_terms or relation_terms):
+            return {key: list(value) for key, value in evidence_bundle.items()}
+        current_best_score = max(
+            self._evidence_result_source_score(
+                evidence_by_id.get(ref_id, {}),
+                blocks_by_id=blocks_by_id,
+            )
+            for ref_id in direct_ref_ids
+        )
+        if current_best_score >= 4:
+            return {key: list(value) for key, value in evidence_bundle.items()}
+        def document_id_for(evidence_ref: Mapping[str, Any]) -> str:
+            document_id = _text(evidence_ref.get("document_id"))
+            if document_id:
+                return document_id
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+            return _text(block.document_id if block else None) or ""
+
+        direct_document_ids = {
+            document_id
+            for ref_id in direct_ref_ids
+            if (document_id := document_id_for(evidence_by_id.get(ref_id, {})))
+        }
+        candidate_ref_ids = _dedupe_strings(
+            [
+                ref_id
+                for ref_id, ref in evidence_by_id.items()
+                if not direct_document_ids or document_id_for(ref) in direct_document_ids
+            ]
+        )
+        candidates: list[tuple[int, int, str]] = []
+        for index, ref_id in enumerate(candidate_ref_ids):
+            if ref_id in direct_ref_ids:
+                continue
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            score = self._evidence_result_source_score(
+                evidence_ref,
+                blocks_by_id=blocks_by_id,
+            )
+            if score < 4 or score <= current_best_score:
+                continue
+            searchable = self._evidence_ref_source_text(
+                evidence_ref,
+                blocks_by_id=blocks_by_id,
+            )
+            if not searchable:
+                continue
+            bounded = f" {searchable} "
+            target_hits = _quote_term_hits(bounded, target_terms)
+            variable_hits = _quote_term_hits(bounded, variable_terms)
+            relation_hits = _quote_term_hits(bounded, relation_terms)
+            if not (target_hits and (variable_hits or relation_hits)):
+                continue
+            candidates.append((score, -index, ref_id))
+        if not candidates:
+            return {key: list(value) for key, value in evidence_bundle.items()}
+        preferred_ref_id = max(candidates)[2]
+        updated = {
+            key: [ref_id for ref_id in value if ref_id != preferred_ref_id]
+            for key, value in evidence_bundle.items()
+        }
+        updated["direct_result"] = [preferred_ref_id]
+        updated["uncategorized"] = _dedupe_strings(
+            [
+                *updated.get("uncategorized", []),
+                *[
+                    ref_id
+                    for ref_id in direct_ref_ids
+                    if ref_id != preferred_ref_id
+                    and ref_id not in updated.get("uncategorized", [])
+                ],
+            ]
+        )
+        return updated
+
     def _finding_target_terms(
         self,
         effect: Mapping[str, Any],
@@ -2093,6 +2215,87 @@ class ResearchUnderstandingService:
             _text(evidence_ref.get("quote")),
             _text(evidence_ref.get("label")),
             *_display_values(locator),
+        ]
+        return _normalize_match_text(" ".join(part for part in parts if part))
+
+    def _evidence_result_source_score(
+        self,
+        evidence_ref: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> int:
+        searchable = self._evidence_ref_source_text(
+            evidence_ref,
+            blocks_by_id=blocks_by_id,
+        )
+        if not searchable:
+            return 0
+        score = 0
+        locator = _locator_mapping(evidence_ref.get("locator"))
+        block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+        heading = _normalize_match_text(_text(block.heading_path if block else None) or "")
+        is_background_heading = any(
+            term in heading
+            for term in ("abstract", "introduction", "background", "references")
+        )
+        for cue in (
+            "result",
+            "results",
+            "discussion",
+            "conclusion",
+            "conclusions",
+            "show",
+            "showed",
+            "demonstrate",
+            "demonstrated",
+            "attributed",
+            "increased",
+            "decreased",
+            "reduced",
+            "improved",
+        ):
+            if f" {cue} " in f" {searchable} ":
+                score += 2
+        if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|c|k|w|mpa|gpa|hv|mm/s|um)\b", searchable):
+            score += 2
+        if any(term in heading for term in ("result", "discussion", "conclusion")):
+            score += 3
+        if is_background_heading:
+            score -= 8
+        if any(
+            f" {cue} " in f" {searchable} "
+            for cue in (
+                "abstract",
+                "introduction",
+                "background",
+                "aim",
+                "aims",
+                "objective",
+                "objectives",
+                "method",
+                "methods",
+                "study aims",
+            )
+        ):
+            score -= 4
+        return score
+
+    def _evidence_ref_source_text(
+        self,
+        evidence_ref: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> str:
+        locator = _locator_mapping(evidence_ref.get("locator"))
+        block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+        parts = [
+            _text(evidence_ref.get("quote")),
+            _text(evidence_ref.get("label")),
+            _text(locator.get("source_ref")),
+            _text(locator.get("source_kind")),
+            _text(evidence_ref.get("source_kind")),
+            _text(block.heading_path if block else None),
+            _text(block.text if block else None),
         ]
         return _normalize_match_text(" ".join(part for part in parts if part))
 

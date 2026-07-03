@@ -566,6 +566,13 @@ empty | processing | partial | ready | failed
     `claim_id`、`title`、`statement`、`variable_axis`、`target_property`、
     `support_status`、`confidence`、`paper_count`、`evidence_count`、
     `evidence_ref_ids` 和 `context_ids`
+  - `presentation.findings` 是面向材料专家的研究发现行，每行包含
+    `finding_id`、`claim_id`、`statement`、`variables`、`mediators`、
+    `outcomes`、`direction`、`scope_summary`、`support_grade`、
+    `review_status`、`paper_count`、`evidence_count`、`evidence_ref_ids`、
+    `context_ids`、`relation_ids` 和 `evidence_bundle`；证据角色尚未拆分时，
+    `evidence_bundle.uncategorized` 保留现有证据引用，避免把上下文证据误标为
+    直接支持
   - `presentation.evidence_items` 是用户可读证据卡片，内部 block/table id
     不应作为默认标题；精确 source locator 只能用于跳转参数或审计
   - `presentation.context_summaries` 是用户可读条件摘要，不直接暴露原始

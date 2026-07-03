@@ -161,6 +161,44 @@ class ResearchUnderstandingPresentationEffectResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ResearchUnderstandingPresentationEvidenceBundleResponse(BaseModel):
+    """Evidence references grouped by their role in a research finding."""
+
+    direct_result: list[str] = Field(default_factory=list)
+    mechanism: list[str] = Field(default_factory=list)
+    condition_context: list[str] = Field(default_factory=list)
+    background: list[str] = Field(default_factory=list)
+    conflict: list[str] = Field(default_factory=list)
+    noise: list[str] = Field(default_factory=list)
+    uncategorized: list[str] = Field(default_factory=list)
+
+
+class ResearchUnderstandingPresentationFindingResponse(BaseModel):
+    """Expert-facing research finding row for materials review."""
+
+    finding_id: str
+    claim_id: str
+    title: str
+    statement: str
+    variables: list[str] = Field(default_factory=list)
+    mediators: list[str] = Field(default_factory=list)
+    outcomes: list[str] = Field(default_factory=list)
+    direction: str = Field(default="")
+    scope_summary: str = Field(default="")
+    support_grade: str = Field(default="weak")
+    review_status: str = Field(default="pending_review")
+    confidence: float | None = Field(default=None)
+    paper_count: int = Field(default=0)
+    evidence_count: int = Field(default=0)
+    evidence_ref_ids: list[str] = Field(default_factory=list)
+    context_ids: list[str] = Field(default_factory=list)
+    relation_ids: list[str] = Field(default_factory=list)
+    evidence_bundle: ResearchUnderstandingPresentationEvidenceBundleResponse = Field(
+        default_factory=ResearchUnderstandingPresentationEvidenceBundleResponse
+    )
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ResearchUnderstandingPresentationEvidenceResponse(BaseModel):
     """Expert-readable evidence card used by the presentation workspace."""
 
@@ -196,6 +234,9 @@ class ResearchUnderstandingPresentationResponse(BaseModel):
         default_factory=ResearchUnderstandingPresentationSummaryResponse
     )
     effects: list[ResearchUnderstandingPresentationEffectResponse] = Field(
+        default_factory=list
+    )
+    findings: list[ResearchUnderstandingPresentationFindingResponse] = Field(
         default_factory=list
     )
     evidence_items: list[ResearchUnderstandingPresentationEvidenceResponse] = Field(

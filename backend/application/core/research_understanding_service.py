@@ -1795,9 +1795,63 @@ class ResearchUnderstandingService:
                 "review_queue_count": review_queue_count,
             },
             "effects": effects,
+            "findings": [
+                self._presentation_finding(effect)
+                for effect in effects
+            ],
             "evidence_items": evidence_items,
             "context_summaries": context_summaries,
         }
+
+    def _presentation_finding(self, effect: Mapping[str, Any]) -> dict[str, Any]:
+        claim_id = _text(effect.get("claim_id")) or "claim"
+        variable_axis = _text(effect.get("variable_axis"))
+        target_property = _text(effect.get("target_property"))
+        return {
+            "finding_id": f"finding_{claim_id}",
+            "claim_id": claim_id,
+            "title": _text(effect.get("title")) or "Research finding",
+            "statement": _text(effect.get("statement")) or "",
+            "variables": [variable_axis] if variable_axis else [],
+            "mediators": [],
+            "outcomes": [target_property] if target_property else [],
+            "direction": _text(effect.get("effect_direction")) or "",
+            "scope_summary": _text(effect.get("context_summary")) or "",
+            "support_grade": self._finding_support_grade(effect),
+            "review_status": self._finding_review_status(effect),
+            "confidence": effect.get("confidence"),
+            "paper_count": effect.get("paper_count") or 0,
+            "evidence_count": effect.get("evidence_count") or 0,
+            "evidence_ref_ids": list(_strings(effect.get("evidence_ref_ids"))),
+            "context_ids": list(_strings(effect.get("context_ids"))),
+            "relation_ids": list(_strings(effect.get("relation_ids"))),
+            "evidence_bundle": self._finding_evidence_bundle(effect),
+            "warnings": list(_strings(effect.get("warnings"))),
+        }
+
+    def _finding_evidence_bundle(self, effect: Mapping[str, Any]) -> dict[str, list[str]]:
+        return {
+            "direct_result": [],
+            "mechanism": [],
+            "condition_context": [],
+            "background": [],
+            "conflict": [],
+            "noise": [],
+            "uncategorized": list(_strings(effect.get("evidence_ref_ids"))),
+        }
+
+    def _finding_support_grade(self, effect: Mapping[str, Any]) -> str:
+        support_status = (_text(effect.get("support_status")) or "limited").lower()
+        if support_status == "conflicted":
+            return "conflict"
+        if support_status == "unsupported":
+            return "insufficient"
+        if support_status == "supported" and not effect.get("needs_review"):
+            return "partial"
+        return "weak"
+
+    def _finding_review_status(self, effect: Mapping[str, Any]) -> str:
+        return "needs_review" if effect.get("needs_review") else "pending_review"
 
     def _presentation_effect(
         self,

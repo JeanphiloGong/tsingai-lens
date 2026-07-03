@@ -4084,6 +4084,174 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     )
 
 
+def test_with_presentation_quote_mismatched_finding_is_review_candidate():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect microstructure?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Preheating changes microstructure through residual stress."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.88,
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_microstructure",
+                    "relation_type": "reduces",
+                    "subject": "build platform preheating temperature",
+                    "predicate": "reduces",
+                    "object": "residual stress -> microstructure",
+                    "statement": (
+                        "Higher build platform preheating temperature reduces "
+                        "residual stress and changes microstructure."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_direct",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_direct"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Preheating the build platform to 150 C increased "
+                        "ductility by 14% and yield strength by 4%."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "build platform preheating temperature"
+                        ]
+                    },
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["support_grade"] == "partial"
+    assert finding["title"] == (
+        "build platform preheating temperature -> microstructure"
+    )
+    assert understanding["presentation"]["primary_findings"] == []
+    assert understanding["presentation"]["review_queue_findings"] == [finding]
+
+
+def test_with_presentation_quote_aligned_primary_finding_stays_primary():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_porosity_corrosion",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Porosity level and pore size affect pitting corrosion "
+                        "behavior."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "increases",
+                    "subject": "porosity level",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Porosity level increases susceptibility to pitting "
+                        "corrosion behavior."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_corrosion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_corrosion"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "The electrochemical polarization curves revealed "
+                        "that porosity was highly sensitive to pitting corrosion."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["porosity level"]
+                    },
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["support_grade"] == "partial"
+    assert understanding["presentation"]["primary_findings"] == [finding]
+    assert understanding["presentation"]["review_queue_findings"] == []
+
+
 def test_with_presentation_concrete_variable_replaces_broad_process_display():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

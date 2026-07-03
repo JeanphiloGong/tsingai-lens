@@ -1858,7 +1858,9 @@ class ResearchUnderstandingService:
         ]
         findings = self._sort_presentation_findings(findings)
         primary_findings, review_queue_findings = self._partition_presentation_findings(
-            findings
+            findings,
+            evidence_by_id=evidence_by_id,
+            blocks_by_id=blocks_by_id,
         )
         quote_hints_by_ref = self._finding_quote_hints_by_evidence_ref(
             findings,
@@ -1901,22 +1903,187 @@ class ResearchUnderstandingService:
     def _partition_presentation_findings(
         self,
         findings: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         primary: list[dict[str, Any]] = []
         review_queue: list[dict[str, Any]] = []
         for finding in findings:
-            if self._is_primary_presentation_finding(finding):
+            if self._is_primary_presentation_finding(
+                finding,
+                evidence_by_id=evidence_by_id,
+                blocks_by_id=blocks_by_id,
+            ):
                 primary.append(finding)
             else:
                 review_queue.append(finding)
         return primary, review_queue
 
-    def _is_primary_presentation_finding(self, finding: Mapping[str, Any]) -> bool:
+    def _is_primary_presentation_finding(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> bool:
         grade = _text(finding.get("support_grade")) or ""
         if grade not in {"strong", "partial"}:
             return False
         bundle = _mapping(finding.get("evidence_bundle"))
-        return bool(_strings(bundle.get("direct_result")) and finding.get("relation_chain"))
+        return bool(
+            _strings(bundle.get("direct_result"))
+            and finding.get("relation_chain")
+            and self._finding_has_quote_aligned_direct_result(
+                finding,
+                evidence_by_id=evidence_by_id,
+                blocks_by_id=blocks_by_id,
+            )
+        )
+
+    def _finding_has_quote_aligned_direct_result(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> bool:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return False
+        terms = self._finding_quote_alignment_terms(finding)
+        if not terms["variable"] or not terms["outcome"]:
+            return False
+        quote_hints = {
+            "variable": terms["variable"],
+            "outcome": terms["outcome"],
+            "relation": {
+                term
+                for value in (
+                    _text(finding.get("statement")),
+                    _text(finding.get("title")),
+                    _text(finding.get("direction")),
+                    *_strings(finding.get("mediators")),
+                )
+                for term in _quote_hint_terms(value)
+            },
+        }
+        for ref_id in direct_ref_ids:
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+            source_text = self._presentation_source_text_for_quote(
+                block,
+                blocks_by_id=blocks_by_id,
+                quote_hints=quote_hints,
+            ) or _text(evidence_ref.get("quote"))
+            visible_quote = self._presentation_quote_for_ref(
+                quote=_text(evidence_ref.get("quote")),
+                source_text=source_text,
+                quote_hints=quote_hints,
+            )
+            searchable = _normalize_match_text(_short_text(visible_quote, limit=240))
+            if not searchable:
+                continue
+            bounded = f" {searchable} "
+            if not _quote_term_hits(bounded, terms["variable"]):
+                continue
+            if not _quote_term_hits(bounded, terms["outcome"]):
+                continue
+            outcome_keys = {
+                _normalize_match_text(value)
+                for value in _strings(finding.get("outcomes"))
+            }
+            if "microstructure" in outcome_keys and not _quote_term_hits(
+                bounded,
+                terms["microstructure_concrete"],
+            ):
+                continue
+            if "mechanical properties" in outcome_keys and not _quote_term_hits(
+                bounded,
+                terms["mechanical_concrete"],
+            ):
+                continue
+            if (
+                "pitting corrosion behavior" in outcome_keys
+                and not _quote_term_hits(bounded, terms["corrosion_concrete"])
+            ):
+                continue
+            if (
+                "corrosion behavior" in outcome_keys
+                and not _quote_term_hits(bounded, terms["corrosion_concrete"])
+            ):
+                continue
+            return True
+        return False
+
+    def _finding_quote_alignment_terms(
+        self,
+        finding: Mapping[str, Any],
+    ) -> dict[str, set[str]]:
+        variable_terms: set[str] = set()
+        for value in _strings(finding.get("variables")):
+            tokens = _meaningful_match_tokens(value)
+            if not tokens:
+                continue
+            if len(tokens) == 1:
+                variable_terms.update(_target_token_variants(tokens[0]))
+            else:
+                variable_terms.add(" ".join(tokens))
+                for index in range(len(tokens) - 1):
+                    left = tokens[index]
+                    right = tokens[index + 1]
+                    if left in {"and", "with"} or right in {"and", "with"}:
+                        continue
+                    variable_terms.add(f"{left} {right}")
+            token_set = set(tokens)
+            if "preheating" in token_set and (
+                "platform" in token_set or "plate" in token_set
+            ):
+                variable_terms.update({"preheating", "build plate", "build platform"})
+            if token_set & {"level", "size", "amount", "content"}:
+                for token in token_set - {"level", "size", "amount", "content"}:
+                    variable_terms.update(_target_token_variants(token))
+
+        outcome_terms: set[str] = set()
+        microstructure_concrete = {
+            "cellular",
+            "grain",
+            "grains",
+            "melt pool",
+            "microstructural",
+        }
+        mechanical_concrete = {
+            "ductility",
+            "elongation",
+            "strength",
+            "tensile",
+            "yield",
+        }
+        corrosion_concrete = {
+            "corrosion",
+            "electrochemical",
+            "passivation",
+            "pitting",
+            "polarization",
+        }
+        for value in _strings(finding.get("outcomes")):
+            outcome_terms.update(_quote_hint_terms(value))
+            normalized = _normalize_match_text(value)
+            if normalized == "microstructure":
+                outcome_terms.update(microstructure_concrete)
+            elif normalized == "mechanical properties":
+                outcome_terms.update(mechanical_concrete)
+            elif normalized in {"corrosion behavior", "pitting corrosion behavior"}:
+                outcome_terms.update(corrosion_concrete)
+        return {
+            "variable": variable_terms,
+            "outcome": outcome_terms,
+            "microstructure_concrete": microstructure_concrete,
+            "mechanical_concrete": mechanical_concrete,
+            "corrosion_concrete": corrosion_concrete,
+        }
 
     def _sort_presentation_findings(
         self,

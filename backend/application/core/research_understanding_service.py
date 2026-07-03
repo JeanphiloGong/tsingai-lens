@@ -2276,32 +2276,38 @@ class ResearchUnderstandingService:
             "selective laser melting",
             "slm",
         }
-        if not any(
+        has_broad_variable = any(
             _normalize_match_text(variable) in broad_process_variables
             for variable in variables
-        ):
-            return variables
-        text_parts: list[str] = []
+        )
+        relation_text_parts: list[str] = []
         for relation in relations:
-            text_parts.extend(
+            relation_text_parts.extend(
                 [
                     self._presentation_relation_summary(relation),
                     _text(relation.get("statement")) or "",
                 ]
             )
-        direct_ref_ids = _strings(evidence_bundle.get("direct_result"))
-        for ref_id in direct_ref_ids:
-            evidence_ref = evidence_by_id.get(ref_id, {})
-            locator = _locator_mapping(evidence_ref.get("locator"))
-            text_parts.extend(
-                [
-                    _text(evidence_ref.get("quote")) or "",
-                    _text(evidence_ref.get("label")) or "",
-                    *_display_values(locator),
-                ]
-            )
-        concrete_variables = self._concrete_variable_terms(" ".join(text_parts))
+        direct_evidence_text = self._direct_evidence_text_for_display_variables(
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+        )
+        direct_concrete_variables = self._concrete_variable_terms(direct_evidence_text)
+        concrete_variables = direct_concrete_variables or self._concrete_variable_terms(
+            " ".join([*relation_text_parts, direct_evidence_text])
+        )
         if not concrete_variables:
+            return variables
+        if (
+            not has_broad_variable
+            and direct_concrete_variables
+            and not self._variable_matches_direct_evidence(
+                variables,
+                direct_evidence_text,
+            )
+        ):
+            return direct_concrete_variables
+        if not has_broad_variable:
             return variables
         broad_variable_keys = {
             _normalize_match_text(variable)
@@ -2331,6 +2337,52 @@ class ResearchUnderstandingService:
                 )
             ]
         )
+
+    def _direct_evidence_text_for_display_variables(
+        self,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> str:
+        text_parts: list[str] = []
+        for ref_id in _strings(evidence_bundle.get("direct_result")):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            text_parts.extend(
+                [
+                    _text(evidence_ref.get("quote")) or "",
+                    _text(evidence_ref.get("label")) or "",
+                    *_display_values(locator),
+                ]
+            )
+        return " ".join(text_parts)
+
+    def _variable_matches_direct_evidence(
+        self,
+        variables: list[str],
+        direct_evidence_text: str,
+    ) -> bool:
+        normalized = f" {_normalize_match_text(direct_evidence_text)} "
+        if not normalized.strip():
+            return False
+        for variable in variables:
+            tokens = _meaningful_match_tokens(variable)
+            if not tokens:
+                continue
+            if len(tokens) == 1 and _quote_term_hits(
+                normalized,
+                _quote_hint_terms(variable),
+            ):
+                return True
+            phrase = " ".join(tokens)
+            if f" {phrase} " in normalized:
+                return True
+            token_hits = sum(
+                1 for token in set(tokens) if f" {token} " in normalized
+            )
+            if token_hits >= 2:
+                return True
+        return False
 
     def _concrete_variable_terms(self, text: str) -> list[str]:
         normalized = f" {_normalize_match_text(text)} "

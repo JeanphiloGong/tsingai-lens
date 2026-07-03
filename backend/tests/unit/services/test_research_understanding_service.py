@@ -4408,6 +4408,91 @@ def test_with_presentation_concrete_variable_keeps_specific_process_variable():
     )
 
 
+def test_with_presentation_quote_calibrated_variable_promotes_density_primary():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does energy density affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_ved_density",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Changes in laser power and scan speed affect porosity, "
+                        "which in turn influences relative density."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.95,
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                    "needs_review": True,
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_density",
+                    "relation_type": "increases",
+                    "subject": "laser power and scan speed",
+                    "predicate": "increases",
+                    "object": "porosity -> density",
+                    "statement": (
+                        "Changes in laser power and scan speed affect porosity, "
+                        "which in turn influences relative density."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "The achieved density measured using the Archimedes "
+                        "method was 91.9, 98.9 and 99.6% for L-VED, M-VED "
+                        "and H-VED, respectively."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["laser power", "scan speed"]
+                    },
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["VED"]
+    assert finding["title"] == "VED -> density"
+    assert finding["relation_chain"][0]["variable"] == "laser power and scan speed"
+    assert understanding["presentation"]["primary_findings"] == [finding]
+    assert understanding["presentation"]["review_queue_findings"] == []
+
+
 def test_with_presentation_drops_placeholder_relation_chain_segments():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

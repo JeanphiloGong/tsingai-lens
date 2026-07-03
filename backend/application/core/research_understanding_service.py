@@ -2815,7 +2815,11 @@ class ResearchUnderstandingService:
         quote = _text(ref.get("quote"))
         if not quote and block:
             quote = _short_text(block.text, limit=420)
-        source_text = _text(block.text if block else None) or quote
+        source_text = self._presentation_source_text_for_quote(
+            block,
+            blocks_by_id=blocks_by_id,
+            quote_hints=quote_hints or {},
+        ) or quote
         quote = self._presentation_quote_for_ref(
             quote=quote,
             source_text=source_text,
@@ -2846,6 +2850,49 @@ class ResearchUnderstandingService:
             "href": _text(ref.get("href")),
         }
 
+    def _presentation_source_text_for_quote(
+        self,
+        block: SourceBlock | None,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        quote_hints: Mapping[str, set[str]],
+    ) -> str:
+        source_text = _text(block.text if block else None) or ""
+        if (
+            not block
+            or not source_text
+            or not quote_hints
+            or _quote_has_concrete_result_cue(source_text)
+            or not _quote_has_background_cue(source_text)
+        ):
+            return source_text
+        source_heading = _normalize_match_text(_text(block.heading_path) or "")
+        candidates = [
+            candidate
+            for candidate in blocks_by_id.values()
+            if candidate.document_id == block.document_id
+            and candidate.block_id != block.block_id
+            and candidate.block_order is not None
+            and block.block_order is not None
+            and 0 < candidate.block_order - block.block_order <= 5
+            and _normalize_match_text(_text(candidate.heading_path) or "")
+            == source_heading
+            and _quote_has_concrete_result_cue(_text(candidate.text) or "")
+        ]
+        best: tuple[int, int, str] | None = None
+        for candidate in candidates:
+            text = _text(candidate.text) or ""
+            snippet = self._best_matching_quote_snippet(text, quote_hints)
+            if not snippet:
+                continue
+            score = _quote_candidate_score(snippet, quote_hints)
+            if score <= 0:
+                continue
+            ranked = (score, -(candidate.block_order or 0), text)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else source_text
+
     def _presentation_quote_for_ref(
         self,
         *,
@@ -2875,6 +2922,7 @@ class ResearchUnderstandingService:
             candidate
             for candidate in candidates
             if not _quote_has_background_cue(candidate)
+            or _quote_has_concrete_result_cue(candidate)
         ]
         if non_background_candidates:
             candidates = non_background_candidates
@@ -2885,7 +2933,19 @@ class ResearchUnderstandingService:
             and _quote_has_variable_and_outcome(sentence, quote_hints)
         ]
         if specific_sentences:
-            candidates = specific_sentences
+            best_specific_score = max(
+                _quote_candidate_score(sentence, quote_hints)
+                for sentence in specific_sentences
+            )
+            concrete_windows = [
+                candidate
+                for candidate in candidates
+                if candidate not in sentences
+                and _quote_has_concrete_result_cue(candidate)
+                and _quote_candidate_score(candidate, quote_hints)
+                >= best_specific_score + 8
+            ]
+            candidates = [*specific_sentences, *concrete_windows]
         best: tuple[int, int, str] | None = None
         for index, candidate in enumerate(candidates):
             score = _quote_candidate_score(candidate, quote_hints)
@@ -3268,11 +3328,28 @@ def _quote_sentences(value: str) -> list[str]:
     text = " ".join(value.split())
     if not text:
         return []
-    return [
+    sentences = [
         candidate.strip()
         for candidate in re.split(r"(?<=[.!?])\s+", text)
         if candidate.strip()
     ]
+    result: list[str] = []
+    for sentence in sentences:
+        prefix, separator, suffix = sentence.partition(":")
+        normalized_prefix = _normalize_match_text(prefix)
+        if (
+            separator
+            and suffix.strip()
+            and (
+                "following conclusions" in normalized_prefix
+                or "based on the results" in normalized_prefix
+            )
+        ):
+            result.append(prefix.strip() + separator)
+            result.append(suffix.strip())
+            continue
+        result.append(sentence)
+    return result
 
 
 def _quote_candidates_from_sentences(sentences: list[str]) -> list[str]:
@@ -3299,6 +3376,8 @@ def _quote_candidate_score(candidate: str, quote_hints: Mapping[str, set[str]]) 
         score += 8
     if outcome_hits and relation_hits:
         score += 4
+    if _quote_has_concrete_result_cue(candidate):
+        score += 12
     has_result_cue = any(
         f" {cue} " in normalized
         for cue in (
@@ -3322,6 +3401,28 @@ def _quote_candidate_score(candidate: str, quote_hints: Mapping[str, set[str]]) 
     if has_background_cue:
         score -= 12 if not has_result_cue else 4
     return score
+
+
+def _quote_has_concrete_result_cue(candidate: str) -> bool:
+    normalized = f" {_normalize_match_text(candidate)} "
+    if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|c|k|w|mpa|gpa|hv|mm/s|um)\b", candidate.lower()):
+        return True
+    return any(
+        f" {cue} " in normalized
+        for cue in (
+            "increased",
+            "decreased",
+            "reduced",
+            "improved",
+            "attributed",
+            "measured",
+            "achieved",
+            "revealed",
+            "sensitive",
+            "prone",
+            "formed",
+        )
+    )
 
 
 def _quote_has_variable_and_outcome(
@@ -3357,6 +3458,9 @@ def _normalized_quote_has_background_cue(normalized_candidate: str) -> bool:
             "prior work",
             "study evaluates",
             "study aims",
+            "was investigated",
+            "were investigated",
+            "can be drawn",
         )
     )
 

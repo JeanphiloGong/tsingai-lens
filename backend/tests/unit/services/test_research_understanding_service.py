@@ -2229,6 +2229,248 @@ def test_with_presentation_prefers_result_bearing_direct_evidence_source():
     )
 
 
+def test_with_presentation_prefers_concrete_result_sentence_over_lead_in_quote():
+    conclusion_text = (
+        "The effect of preheating the build platform on the microstructure "
+        "and mechanical properties of LBPBF 316L SS was investigated. "
+        "The following conclusions can be drawn based on the results: "
+        "Preheating the build platform to 150 C increased the ductility of "
+        "material by 14%. "
+        "This is attributed to the more homogenized microstructure as well "
+        "as cellular structure with geometrically necessary dislocations."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-2",
+                    human_readable_id=2,
+                    title="Preheating effects in LPBF 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-conclusion",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=conclusion_text,
+                    block_order=238,
+                    page=9,
+                    heading_path="Conclusions and future study",
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How does build platform preheating affect mechanical "
+                    "properties?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_mechanical",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Build platform preheating improves mechanical "
+                        "properties through microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_conclusion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_conclusion"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_mechanical",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating",
+                    "predicate": "improves",
+                    "object": "microstructure -> mechanical properties",
+                    "statement": (
+                        "Build platform preheating improves mechanical "
+                        "properties through microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_conclusion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_conclusion"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_conclusion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Conclusions",
+                    "locator": {"source_ref": "blk-conclusion"},
+                    "fact_ids": ["unit_conclusion"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process": "laser beam powder bed fusion",
+                        "variable_process_axes": ["build platform preheating"],
+                    },
+                    "property_scope": ["mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["quote"] == (
+        "Preheating the build platform to 150 C increased the ductility of "
+        "material by 14%. This is attributed to the more homogenized "
+        "microstructure as well as cellular structure with geometrically "
+        "necessary dislocations."
+    )
+
+
+def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
+    lead_in_text = (
+        "The effect of preheating the build platform on the microstructure "
+        "and mechanical properties of LBPBF 316L SS was investigated. "
+        "The following conclusions can be drawn based on the results:"
+    )
+    result_text = (
+        "Preheating the build platform to 150 C increased the ductility of "
+        "material by 14%. This is attributed to the more homogenized "
+        "microstructure as well as cellular structure with geometrically "
+        "necessary dislocations."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-2",
+                    human_readable_id=2,
+                    title="Preheating effects in LPBF 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-conclusion-lead-in",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=lead_in_text,
+                    block_order=238,
+                    page=9,
+                    heading_path="Conclusions and future study",
+                ),
+                SourceBlock(
+                    block_id="blk-conclusion-result",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=result_text,
+                    block_order=240,
+                    page=9,
+                    heading_path="Conclusions and future study",
+                ),
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How does build platform preheating affect mechanical "
+                    "properties?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_mechanical",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Build platform preheating improves mechanical "
+                        "properties through microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_conclusion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_conclusion"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_mechanical",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating",
+                    "predicate": "improves",
+                    "object": "microstructure -> mechanical properties",
+                    "statement": (
+                        "Build platform preheating improves mechanical "
+                        "properties through microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_conclusion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_conclusion"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_conclusion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Conclusions",
+                    "locator": {"source_ref": "blk-conclusion-lead-in"},
+                    "fact_ids": ["unit_conclusion"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process": "laser beam powder bed fusion",
+                        "variable_process_axes": ["build platform preheating"],
+                    },
+                    "property_scope": ["mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["source_ref"] == "blk-conclusion-lead-in"
+    assert evidence_item["source_text"] == result_text
+    assert evidence_item["quote"] == result_text
+
+
 def test_with_presentation_keeps_results_direct_evidence_over_introduction_review():
     results_text = (
         "The achieved density measured using the Archimedes method was 91.9, "

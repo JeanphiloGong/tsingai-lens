@@ -55,6 +55,7 @@
 	];
 	const CURATION_CLAIM_TYPE_OPTIONS = CLAIM_TYPE_ORDER.filter((type) => type !== 'all');
 	const CURATION_STATUS_OPTIONS = CLAIM_STATUS_ORDER.filter((status) => status !== 'all');
+	type FindingEvidenceRole = keyof ResearchUnderstandingPresentationFinding['evidence_bundle'];
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
@@ -155,8 +156,11 @@
 	$: selectedEffect =
 		detailMode ? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
 	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
+	$: selectedFinding = selectedEffect
+		? (findingRows.find((finding) => finding.claim_id === selectedEffect.claim_id) ?? null)
+		: null;
 	$: selectedRelations = selectedEffect
-		? selectedEffect.relation_ids
+		? (selectedFinding?.relation_ids.length ? selectedFinding.relation_ids : selectedEffect.relation_ids)
 				.map((relationId) => relationById.get(relationId))
 				.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
 		: [];
@@ -179,6 +183,9 @@
 		: null;
 	$: selectedEvidenceRefs = displayClaim ? presentationEvidenceForIds(displayClaim.evidence_ref_ids) : [];
 	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
+	$: selectedFindingContextRefs = selectedFinding
+		? presentationContextsForIds(selectedFinding.context_ids)
+		: [];
 	$: selectedCurationEvidenceOptions = selectedClaim
 		? presentationEvidenceForIds([
 				...selectedClaim.evidence_ref_ids,
@@ -301,6 +308,32 @@
 
 	function findingListLabel(values: string[]) {
 		return listLabel(values);
+	}
+
+	function findingChainText(values: string[]) {
+		return listLabel(values);
+	}
+
+	function findingEvidenceGroupLabel(role: FindingEvidenceRole) {
+		return translatedCatalogLabel('research.understanding.findingEvidenceGroups', role);
+	}
+
+	function selectedFindingEvidenceGroups() {
+		if (!selectedFinding) return [];
+		const roles: FindingEvidenceRole[] = [
+			'direct_result',
+			'mechanism',
+			'condition_context',
+			'conflict',
+			'background',
+			'uncategorized'
+		];
+		return roles
+			.map((role) => ({
+				role,
+				items: presentationEvidenceForIds(selectedFinding.evidence_bundle[role] ?? [])
+			}))
+			.filter((group) => group.items.length);
 	}
 
 	function compactText(value: string, limit = 160) {
@@ -914,7 +947,9 @@
 			{:else}
 				<section
 					class="research-understanding-workbench__detail-view"
-					aria-label={$t('research.understanding.claimDetail')}
+					aria-label={selectedFinding
+						? $t('research.understanding.findingDetail')
+						: $t('research.understanding.claimDetail')}
 				>
 					<div class="research-understanding-workbench__column-heading">
 						<button
@@ -922,37 +957,68 @@
 							class="research-understanding-workbench__back"
 							on:click={closeClaimDetail}
 						>
-							{$t('research.understanding.backToClaims')}
+							{selectedFinding
+								? $t('research.understanding.backToFindings')
+								: $t('research.understanding.backToClaims')}
 						</button>
-						<h4>{$t('research.understanding.claimDetail')}</h4>
+						<h4>
+							{selectedFinding
+								? $t('research.understanding.findingDetail')
+								: $t('research.understanding.claimDetail')}
+						</h4>
 					</div>
 					{#if selectedEffect && selectedClaim}
-						<article class="research-understanding-workbench__detail">
-							<header class="research-understanding-workbench__claim-header">
-								<div class="research-understanding-workbench__meta">
-									<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
-									<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
-									{#if selectedClaim.confidence !== null}
-										<span>{confidenceLabel(selectedClaim.confidence)}</span>
-									{/if}
-									{#if selectedClaim.strength}
-										<span>{selectedClaim.strength}</span>
-									{/if}
-									{#if selectedCuration}
-										<span>{$t('research.understanding.curatedBadge')}</span>
-									{/if}
+							<article class="research-understanding-workbench__detail">
+								<header class="research-understanding-workbench__claim-header">
+									<div class="research-understanding-workbench__meta">
+										{#if selectedFinding}
+											<span>{supportGradeLabel(selectedFinding.support_grade)}</span>
+											<span>{findingReviewStatusLabel(selectedFinding.review_status)}</span>
+											{#if selectedFinding.confidence !== null}
+												<span>{confidenceLabel(selectedFinding.confidence)}</span>
+											{/if}
+											<span>
+												{$t('research.understanding.paperCount', {
+													count: selectedFinding.paper_count
+												})}
+											</span>
+											<span>
+												{$t('research.understanding.evidenceCount', {
+													count: selectedFinding.evidence_count
+												})}
+											</span>
+										{:else}
+											<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
+											<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
+											{#if selectedClaim.confidence !== null}
+												<span>{confidenceLabel(selectedClaim.confidence)}</span>
+											{/if}
+											{#if selectedClaim.strength}
+												<span>{selectedClaim.strength}</span>
+											{/if}
+										{/if}
+										{#if selectedCuration}
+											<span>{$t('research.understanding.curatedBadge')}</span>
+										{/if}
 									{#if selectedFeedback.length}
 										<span>
 											{$t('research.understanding.feedbackCount', {
 												count: selectedFeedback.length
 											})}
-										</span>
+											</span>
+										{/if}
+									</div>
+									<strong>
+										{selectedFinding?.statement ||
+											selectedFinding?.title ||
+											displayClaim?.statement ||
+											selectedClaim.statement}
+									</strong>
+									{#if selectedFinding?.title && selectedFinding.title !== selectedFinding.statement}
+										<p>{selectedFinding.title}</p>
+									{:else if !selectedFinding && selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
+										<p>{selectedEffect.title}</p>
 									{/if}
-								</div>
-								<strong>{displayClaim?.statement ?? selectedClaim.statement}</strong>
-								{#if selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
-									<p>{selectedEffect.title}</p>
-								{/if}
 								<div
 									class="research-understanding-workbench__review-actions"
 									aria-label={$t('research.understanding.reviewActions')}
@@ -977,6 +1043,35 @@
 									</button>
 								</div>
 							</header>
+
+							{#if selectedFinding}
+								<div class="research-understanding-workbench__context research-understanding-workbench__context--finding-chain">
+									<div>
+										<span>{$t('research.understanding.findingVariables')}</span>
+										<p>{findingChainText(selectedFinding.variables)}</p>
+									</div>
+									<div>
+										<span>{$t('research.understanding.findingMechanism')}</span>
+										<p>{findingChainText(selectedFinding.mediators)}</p>
+									</div>
+									<div>
+										<span>{$t('research.understanding.findingOutcomes')}</span>
+										<p>{findingChainText(selectedFinding.outcomes)}</p>
+									</div>
+									{#if selectedFinding.direction}
+										<div>
+											<span>{$t('research.understanding.relationDirection')}</span>
+											<p>{relationLabel(selectedFinding.direction)}</p>
+										</div>
+									{/if}
+									{#if selectedFinding.scope_summary}
+										<div>
+											<span>{$t('research.understanding.findingScope')}</span>
+											<p>{selectedFinding.scope_summary}</p>
+										</div>
+									{/if}
+								</div>
+							{/if}
 
 							{#if activeReviewPanel === 'feedback'}
 								<form
@@ -1198,7 +1293,7 @@
 								</form>
 							{/if}
 
-							{#if selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction}
+							{#if !selectedFinding && (selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction)}
 								<div class="research-understanding-workbench__context research-understanding-workbench__context--compact">
 									{#if selectedEffect.variable_axis}
 										<div>
@@ -1221,42 +1316,82 @@
 								</div>
 							{/if}
 
-							<div class="research-understanding-workbench__detail-section">
-								<h5>{$t('research.understanding.evidenceRefs')}</h5>
-								{#each selectedEvidenceRefs as ref (ref.evidence_ref_id)}
-									{@const href = evidenceHref(ref)}
-									{@const sourceText = evidenceSourceText(ref)}
-									{#if href}
-										<a class="research-understanding-workbench__evidence" {href}>
-											<strong>{readableEvidenceTitle(ref.title)}</strong>
-											<span>{evidenceMeta(ref)}</span>
-											{#if sourceText}
-												<p>{sourceText}</p>
-											{:else}
-												<small>{$t('research.understanding.noEvidenceSourceText')}</small>
-											{/if}
-										</a>
+							{#if selectedFinding}
+								<div class="research-understanding-workbench__detail-section">
+									<h5>{$t('research.understanding.findingEvidence')}</h5>
+									{#each selectedFindingEvidenceGroups() as group (group.role)}
+										<section class="research-understanding-workbench__evidence-group">
+											<h6>{findingEvidenceGroupLabel(group.role)}</h6>
+											{#each group.items as ref (ref.evidence_ref_id)}
+												{@const href = evidenceHref(ref)}
+												{@const sourceText = evidenceSourceText(ref)}
+												{#if href}
+													<a class="research-understanding-workbench__evidence" {href}>
+														<strong>{readableEvidenceTitle(ref.title)}</strong>
+														<span>{evidenceMeta(ref)}</span>
+														{#if sourceText}
+															<p>{sourceText}</p>
+														{:else}
+															<small>{$t('research.understanding.noEvidenceSourceText')}</small>
+														{/if}
+													</a>
+												{:else}
+													<div class="research-understanding-workbench__evidence">
+														<strong>{readableEvidenceTitle(ref.title)}</strong>
+														<span>{evidenceMeta(ref)}</span>
+														{#if sourceText}
+															<p>{sourceText}</p>
+														{:else}
+															<small>{$t('research.understanding.noEvidenceSourceText')}</small>
+														{/if}
+													</div>
+												{/if}
+											{/each}
+										</section>
 									{:else}
-										<div class="research-understanding-workbench__evidence">
-											<strong>{readableEvidenceTitle(ref.title)}</strong>
-											<span>{evidenceMeta(ref)}</span>
-											{#if sourceText}
-												<p>{sourceText}</p>
-											{:else}
-												<small>{$t('research.understanding.noEvidenceSourceText')}</small>
-											{/if}
+										<div class="research-understanding-workbench__empty">
+											{$t('research.understanding.noFindingEvidence')}
 										</div>
-									{/if}
-								{:else}
-									<div class="research-understanding-workbench__empty">
-										{$t('research.understanding.noEvidence')}
-									</div>
-								{/each}
-							</div>
+									{/each}
+								</div>
+							{:else}
+								<div class="research-understanding-workbench__detail-section">
+									<h5>{$t('research.understanding.evidenceRefs')}</h5>
+									{#each selectedEvidenceRefs as ref (ref.evidence_ref_id)}
+										{@const href = evidenceHref(ref)}
+										{@const sourceText = evidenceSourceText(ref)}
+										{#if href}
+											<a class="research-understanding-workbench__evidence" {href}>
+												<strong>{readableEvidenceTitle(ref.title)}</strong>
+												<span>{evidenceMeta(ref)}</span>
+												{#if sourceText}
+													<p>{sourceText}</p>
+												{:else}
+													<small>{$t('research.understanding.noEvidenceSourceText')}</small>
+												{/if}
+											</a>
+										{:else}
+											<div class="research-understanding-workbench__evidence">
+												<strong>{readableEvidenceTitle(ref.title)}</strong>
+												<span>{evidenceMeta(ref)}</span>
+												{#if sourceText}
+													<p>{sourceText}</p>
+												{:else}
+													<small>{$t('research.understanding.noEvidenceSourceText')}</small>
+												{/if}
+											</div>
+										{/if}
+									{:else}
+										<div class="research-understanding-workbench__empty">
+											{$t('research.understanding.noEvidence')}
+										</div>
+									{/each}
+								</div>
+							{/if}
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.contexts')}</h5>
-								{#each selectedContextRefs as context (context.context_id)}
+								{#each (selectedFinding ? selectedFindingContextRefs : selectedContextRefs) as context (context.context_id)}
 									<div class="research-understanding-workbench__context">
 										<strong>{context.label}</strong>
 										{#if context.material_scope.length}
@@ -1354,6 +1489,10 @@
 												·
 												{statusLabel(selectedClaim.status)}
 											</p>
+										</div>
+										<div>
+											<span>{$t('research.understanding.curationStatement')}</span>
+											<p>{selectedCuration.curated_statement}</p>
 										</div>
 										{#if selectedCuration.note}
 											<div>
@@ -1602,7 +1741,8 @@
 	}
 
 	.research-understanding-workbench__column-heading h4,
-	.research-understanding-workbench__detail-section h5 {
+	.research-understanding-workbench__detail-section h5,
+	.research-understanding-workbench__evidence-group h6 {
 		margin: 0;
 		color: var(--text-primary);
 	}
@@ -1867,6 +2007,19 @@
 		line-height: 19px;
 	}
 
+	.research-understanding-workbench__evidence-group {
+		display: grid;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__evidence-group h6 {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+	}
+
 	.research-understanding-workbench__feedback {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
@@ -2052,6 +2205,10 @@
 
 	.research-understanding-workbench__context--compact {
 		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	}
+
+	.research-understanding-workbench__context--finding-chain {
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 	}
 
 	.research-understanding-workbench__evidence {

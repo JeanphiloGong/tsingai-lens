@@ -422,7 +422,7 @@ async function openMechanismClaimDetail() {
 	await browserPage
 		.getByRole('button', { name: /Annealing may reduce cellular substructure\./ })
 		.click();
-	return browserPage.getByLabelText('Claim detail');
+	return browserPage.getByLabelText('Finding detail');
 }
 
 async function openConflictedClaimDetail() {
@@ -430,7 +430,7 @@ async function openConflictedClaimDetail() {
 	await browserPage
 		.getByRole('button', { name: /Strength trends conflict across reported heat treatments\./ })
 		.click();
-	return browserPage.getByLabelText('Claim detail');
+	return browserPage.getByLabelText('Finding detail');
 }
 
 describe('ResearchUnderstandingWorkbench', () => {
@@ -507,11 +507,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(browserPage.getByRole('columnheader', { name: 'Mechanism' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('3 of 3')).toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Claim detail')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
 
 		const claimDetail = await openMechanismClaimDetail();
 		await expect.element(claimDetail).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Back to claims' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Back to findings' })).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Mechanism evidence')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Variables')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('annealing', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('cellular substructure', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('Outcomes yield strength'))
+			.toBeInTheDocument();
 		await expect.element(claimDetail.getByText('P001 Section 3.2').first()).toBeInTheDocument();
 		await expect
 			.element(claimDetail.getByText('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'))
@@ -527,10 +536,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const evidenceLink = claimDetail.getByRole('link', { name: /P001 Section 3.2/ }).element();
 		expect(evidenceLink.getAttribute('href')).toContain('view=parsed-paper');
 		await expect
-			.element(claimDetail.getByText('LPBF, annealing'))
+			.element(claimDetail.getByText('LPBF, annealing', { exact: true }))
 			.toBeInTheDocument();
 		await expect.element(claimDetail.getByText('needs expert review')).toBeInTheDocument();
-		await expect.element(claimDetail.getByText('Annealing -> yield strength')).toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByText('Annealing -> cellular substructure change'))
+			.toBeInTheDocument();
 		await expect
 			.element(claimDetail.getByText('Annealing explains cellular substructure changes in LPBF 316L.'))
 			.toBeInTheDocument();
@@ -541,9 +552,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByRole('button', { name: 'Expert curation' })).toBeInTheDocument();
 		await expect.element(claimDetail.getByLabelText('Review result')).not.toBeInTheDocument();
 
-		await browserPage.getByRole('button', { name: 'Back to claims' }).click();
+		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Claim detail')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
 	});
 
 	it('filters claims by support status for conflict review', async () => {
@@ -556,6 +567,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(claimDetail.getByText('Strength trends conflict across reported heat treatments.'))
 			.toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Conflict evidence')).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('P002 Table 4').first()).toBeInTheDocument();
 		await expect.element(claimDetail.getByText('conflicting direction')).toBeInTheDocument();
 	});

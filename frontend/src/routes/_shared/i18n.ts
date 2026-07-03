@@ -308,6 +308,13 @@ const translations: Record<Language, Translations> = {
 				evidenceGradeColumn: 'Evidence grade',
 				paperCountColumn: 'Papers',
 				reviewStatusColumn: 'Review',
+				findingDetail: 'Finding detail',
+				backToFindings: 'Back to findings',
+				findingVariables: 'Variables',
+				findingMechanism: 'Mechanism',
+				findingOutcomes: 'Outcomes',
+				findingScope: 'Scope',
+				findingEvidence: 'Finding evidence',
 				claimDetail: 'Claim detail',
 				backToClaims: 'Back to claims',
 				evidenceStripHint: 'Selected claim evidence is highlighted.',
@@ -382,6 +389,7 @@ const translations: Record<Language, Translations> = {
 				noFindings: 'No findings match the current filters.',
 				noRelations: 'No related relations are available for this claim.',
 				noEvidence: 'No evidence references are available yet.',
+				noFindingEvidence: 'No source evidence is linked to this finding yet.',
 				noEvidenceSourceText: 'No source text is available for this evidence block yet.',
 				noContexts: 'No context records are linked to this claim.',
 				noSelectedClaim: 'Select a claim to review its evidence, context, and relations.',
@@ -410,6 +418,14 @@ const translations: Record<Language, Translations> = {
 				findingReviewStatuses: {
 					pending_review: 'Pending review',
 					needs_review: 'Needs review'
+				},
+				findingEvidenceGroups: {
+					direct_result: 'Direct result evidence',
+					mechanism: 'Mechanism evidence',
+					condition_context: 'Condition context evidence',
+					conflict: 'Conflict evidence',
+					background: 'Background evidence',
+					uncategorized: 'Uncategorized evidence'
 				},
 				types: {
 					finding: 'Finding',
@@ -2916,6 +2932,13 @@ const translations: Record<Language, Translations> = {
 				evidenceGradeColumn: '证据等级',
 				paperCountColumn: '文献数',
 				reviewStatusColumn: '复核',
+				findingDetail: '研究发现详情',
+				backToFindings: '返回研究发现',
+				findingVariables: '变量',
+				findingMechanism: '中间机制',
+				findingOutcomes: '结果',
+				findingScope: '适用条件',
+				findingEvidence: '研究发现证据',
 				claimDetail: 'Claim 详情',
 				backToClaims: '返回 Claim 列表',
 				evidenceStripHint: '当前 Claim 的证据会被高亮。',
@@ -2990,6 +3013,7 @@ const translations: Record<Language, Translations> = {
 				noFindings: '当前筛选下暂无研究发现。',
 				noRelations: '当前 Claim 暂未关联关系。',
 				noEvidence: '暂未得到证据引用。',
+				noFindingEvidence: '当前研究发现暂未关联原文证据。',
 				noEvidenceSourceText: '当前证据块暂未返回原文。',
 				noContexts: '当前 Claim 暂未关联上下文记录。',
 				noSelectedClaim: '请选择一个 Claim 查看证据、上下文和关系。',
@@ -3018,6 +3042,14 @@ const translations: Record<Language, Translations> = {
 				findingReviewStatuses: {
 					pending_review: '待复核',
 					needs_review: '需要复核'
+				},
+				findingEvidenceGroups: {
+					direct_result: '直接结果证据',
+					mechanism: '机制证据',
+					condition_context: '条件上下文证据',
+					conflict: '冲突证据',
+					background: '背景证据',
+					uncategorized: '未分类证据'
 				},
 				types: {
 					finding: '发现',

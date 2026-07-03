@@ -2348,6 +2348,78 @@ def test_with_presentation_builds_finding_fields_from_mediated_relation():
     assert finding["evidence_bundle"]["mechanism"] == ["evref_mechanism"]
 
 
+def test_with_presentation_drops_placeholder_relation_chain_segments():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does LPBF affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "finding",
+                    "statement": "LPBF affects relative density.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_noisy",
+                    "relation_type": "correlates",
+                    "subject": "None",
+                    "predicate": "correlates",
+                    "object": "None -> relative density",
+                    "statement": "LPBF affects relative density.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    effect = understanding["presentation"]["effects"][0]
+    assert effect["relation_ids"] == []
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["LPBF"]
+    assert finding["mediators"] == []
+    assert finding["outcomes"] == ["relative density"]
+
+
 def test_with_presentation_finding_fields_fall_back_without_relation():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

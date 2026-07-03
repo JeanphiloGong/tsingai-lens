@@ -2127,7 +2127,9 @@ class ResearchUnderstandingService:
         return claim_type in {"comparison", "mechanism", "finding"}
 
     def _reviewable_presentation_relation(self, relation: Mapping[str, Any]) -> bool:
-        return bool(self._presentation_relation_summary(relation))
+        subject = self._presentation_relation_side(relation.get("subject"))
+        object_chain = self._relation_object_chain(relation)
+        return bool(subject and object_chain and self._presentation_relation_summary(relation))
 
     def _presentation_relation_summary(self, relation: Mapping[str, Any]) -> str:
         statement = _text(relation.get("statement"))
@@ -2143,6 +2145,8 @@ class ResearchUnderstandingService:
     def _presentation_relation_side(self, value: Any) -> str:
         text = _text(value)
         if not text or not _looks_user_facing(text):
+            return ""
+        if self._is_placeholder_relation_side(text):
             return ""
         lower = text.lower()
         if (
@@ -2164,6 +2168,25 @@ class ResearchUnderstandingService:
         ):
             return ""
         return text
+
+    def _is_placeholder_relation_side(self, value: Any) -> bool:
+        text = (_text(value) or "").strip()
+        if not text:
+            return True
+        lower = text.lower()
+        return lower in {
+            "none",
+            "null",
+            "unknown",
+            "n/a",
+            "na",
+            "not available",
+            "not specified",
+            "true",
+            "false",
+            "{}",
+            "[]",
+        }
 
     def _presentation_evidence_item(
         self,

@@ -4035,6 +4035,16 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     assert findings[0]["evidence_bundle"]["direct_result"] == ["evref_direct"]
     assert findings[1]["support_grade"] == "insufficient"
     assert findings[1]["evidence_bundle"]["background"] == ["evref_context"]
+    assert understanding["presentation"]["primary_findings"] == [findings[0]]
+    assert understanding["presentation"]["review_queue_findings"] == [findings[1]]
+    assert (
+        understanding["presentation"]["summary"]["primary_finding_count"]
+        == 1
+    )
+    assert (
+        understanding["presentation"]["summary"]["review_queue_finding_count"]
+        == 1
+    )
 
 
 def test_with_presentation_concrete_variable_replaces_broad_process_display():

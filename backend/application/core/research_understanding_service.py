@@ -1857,6 +1857,9 @@ class ResearchUnderstandingService:
             for effect in effects
         ]
         findings = self._sort_presentation_findings(findings)
+        primary_findings, review_queue_findings = self._partition_presentation_findings(
+            findings
+        )
         quote_hints_by_ref = self._finding_quote_hints_by_evidence_ref(
             findings,
             relations_by_id=relations_by_id,
@@ -1884,12 +1887,36 @@ class ResearchUnderstandingService:
                 "evidence_count": len(evidence_refs),
                 "context_count": len(contexts),
                 "review_queue_count": review_queue_count,
+                "primary_finding_count": len(primary_findings),
+                "review_queue_finding_count": len(review_queue_findings),
             },
             "effects": effects,
             "findings": findings,
+            "primary_findings": primary_findings,
+            "review_queue_findings": review_queue_findings,
             "evidence_items": evidence_items,
             "context_summaries": context_summaries,
         }
+
+    def _partition_presentation_findings(
+        self,
+        findings: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        primary: list[dict[str, Any]] = []
+        review_queue: list[dict[str, Any]] = []
+        for finding in findings:
+            if self._is_primary_presentation_finding(finding):
+                primary.append(finding)
+            else:
+                review_queue.append(finding)
+        return primary, review_queue
+
+    def _is_primary_presentation_finding(self, finding: Mapping[str, Any]) -> bool:
+        grade = _text(finding.get("support_grade")) or ""
+        if grade not in {"strong", "partial"}:
+            return False
+        bundle = _mapping(finding.get("evidence_bundle"))
+        return bool(_strings(bundle.get("direct_result")) and finding.get("relation_chain"))
 
     def _sort_presentation_findings(
         self,

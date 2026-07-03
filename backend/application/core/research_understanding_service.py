@@ -1775,14 +1775,6 @@ class ResearchUnderstandingService:
         blocks_by_id, documents_by_id = self._source_artifact_lookups(
             _text(scope.get("collection_id"))
         )
-        evidence_items = [
-            self._presentation_evidence_item(
-                ref,
-                blocks_by_id=blocks_by_id,
-                documents_by_id=documents_by_id,
-            )
-            for ref in evidence_refs
-        ]
         effects = [
             self._presentation_effect(
                 claim,
@@ -1855,6 +1847,30 @@ class ResearchUnderstandingService:
             ]
         )
         review_queue_count = sum(1 for effect in effects if effect.get("needs_review"))
+        findings = [
+            self._presentation_finding(
+                effect,
+                evidence_by_id=evidence_by_id,
+                relations_by_id=relations_by_id,
+            )
+            for effect in effects
+        ]
+        quote_hints_by_ref = self._finding_quote_hints_by_evidence_ref(
+            findings,
+            relations_by_id=relations_by_id,
+        )
+        evidence_items = [
+            self._presentation_evidence_item(
+                ref,
+                blocks_by_id=blocks_by_id,
+                documents_by_id=documents_by_id,
+                quote_hints=quote_hints_by_ref.get(
+                    _text(ref.get("evidence_ref_id")) or "",
+                    {},
+                ),
+            )
+            for ref in evidence_refs
+        ]
         return {
             "summary": {
                 "title": _text(scope.get("title")) or "Research understanding",
@@ -1868,14 +1884,7 @@ class ResearchUnderstandingService:
                 "review_queue_count": review_queue_count,
             },
             "effects": effects,
-            "findings": [
-                self._presentation_finding(
-                    effect,
-                    evidence_by_id=evidence_by_id,
-                    relations_by_id=relations_by_id,
-                )
-                for effect in effects
-            ],
+            "findings": findings,
             "evidence_items": evidence_items,
             "context_summaries": context_summaries,
         }
@@ -2149,6 +2158,64 @@ class ResearchUnderstandingService:
 
     def _finding_review_status(self, effect: Mapping[str, Any]) -> str:
         return "needs_review" if effect.get("needs_review") else "pending_review"
+
+    def _finding_quote_hints_by_evidence_ref(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        relations_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, dict[str, set[str]]]:
+        hints_by_ref: dict[str, dict[str, set[str]]] = {}
+        for finding in findings:
+            direct_ref_ids = _strings(
+                _mapping(finding.get("evidence_bundle")).get("direct_result")
+            )
+            if not direct_ref_ids:
+                continue
+            hint_terms = {
+                "variable": set(),
+                "outcome": set(),
+                "relation": set(),
+            }
+            for value in _strings(finding.get("variables")):
+                hint_terms["variable"].update(_quote_hint_terms(value))
+            for value in _strings(finding.get("outcomes")):
+                hint_terms["outcome"].update(_quote_hint_terms(value))
+            for value in (
+                _text(finding.get("statement")),
+                _text(finding.get("title")),
+                _text(finding.get("direction")),
+                *_strings(finding.get("mediators")),
+            ):
+                hint_terms["relation"].update(_quote_hint_terms(value))
+            for relation_id in _strings(finding.get("relation_ids")):
+                relation = relations_by_id.get(relation_id, {})
+                hint_terms["variable"].update(
+                    _quote_hint_terms(
+                        self._presentation_relation_side(relation.get("subject"))
+                    )
+                )
+                object_chain = self._relation_object_chain(relation)
+                if object_chain:
+                    hint_terms["outcome"].update(_quote_hint_terms(object_chain[-1]))
+                    for mediator in object_chain[:-1]:
+                        hint_terms["relation"].update(_quote_hint_terms(mediator))
+                for value in (
+                    _text(relation.get("predicate")),
+                    _text(relation.get("relation_type")),
+                    self._presentation_relation_summary(relation),
+                ):
+                    hint_terms["relation"].update(_quote_hint_terms(value))
+            if not any(hint_terms.values()):
+                continue
+            for ref_id in direct_ref_ids:
+                ref_hints = hints_by_ref.setdefault(
+                    ref_id,
+                    {"variable": set(), "outcome": set(), "relation": set()},
+                )
+                for key, terms in hint_terms.items():
+                    ref_hints[key].update(terms)
+        return hints_by_ref
 
     def _presentation_effect(
         self,
@@ -2506,6 +2573,7 @@ class ResearchUnderstandingService:
         *,
         blocks_by_id: Mapping[str, SourceBlock],
         documents_by_id: Mapping[str, SourceDocument],
+        quote_hints: Mapping[str, set[str]] | None = None,
     ) -> dict[str, Any]:
         locator = _locator_mapping(ref.get("locator"))
         source_ref = _text(locator.get("source_ref"))
@@ -2545,6 +2613,11 @@ class ResearchUnderstandingService:
         if not quote and block:
             quote = _short_text(block.text, limit=420)
         source_text = _text(block.text if block else None) or quote
+        quote = self._presentation_quote_for_ref(
+            quote=quote,
+            source_text=source_text,
+            quote_hints=quote_hints or {},
+        )
         heading_path = _text(block.heading_path if block else None)
         block_type = _text(block.block_type if block else None)
         value_summary = (
@@ -2569,6 +2642,58 @@ class ResearchUnderstandingService:
             "confidence": ref.get("confidence"),
             "href": _text(ref.get("href")),
         }
+
+    def _presentation_quote_for_ref(
+        self,
+        *,
+        quote: str | None,
+        source_text: str | None,
+        quote_hints: Mapping[str, set[str]],
+    ) -> str:
+        fallback = _text(quote) or ""
+        source = _text(source_text) or fallback
+        if not source:
+            return ""
+        snippet = self._best_matching_quote_snippet(source, quote_hints)
+        if snippet:
+            return snippet
+        return fallback or _short_text(source, limit=420)
+
+    def _best_matching_quote_snippet(
+        self,
+        source_text: str,
+        quote_hints: Mapping[str, set[str]],
+    ) -> str:
+        if not quote_hints:
+            return ""
+        sentences = _quote_sentences(source_text)
+        candidates = _quote_candidates_from_sentences(sentences)
+        non_background_candidates = [
+            candidate
+            for candidate in candidates
+            if not _quote_has_background_cue(candidate)
+        ]
+        if non_background_candidates:
+            candidates = non_background_candidates
+        specific_sentences = [
+            sentence
+            for sentence in sentences
+            if sentence in candidates
+            and _quote_has_variable_and_outcome(sentence, quote_hints)
+        ]
+        if specific_sentences:
+            candidates = specific_sentences
+        best: tuple[int, int, str] | None = None
+        for index, candidate in enumerate(candidates):
+            score = _quote_candidate_score(candidate, quote_hints)
+            if score <= 0:
+                continue
+            ranked = (score, -index, candidate)
+            if best is None or ranked > best:
+                best = ranked
+        if best is None:
+            return ""
+        return _short_text(best[2], limit=420)
 
     def _source_artifact_lookups(
         self,
@@ -2924,6 +3049,113 @@ def _target_token_variants(token: str) -> set[str]:
     else:
         variants.add(f"{token}al")
     return variants
+
+
+def _quote_hint_terms(value: str | None) -> set[str]:
+    terms: set[str] = set()
+    tokens = _meaningful_match_tokens(value or "")
+    for token in tokens:
+        terms.update(_target_token_variants(token))
+    for index in range(len(tokens) - 1):
+        terms.add(f"{tokens[index]} {tokens[index + 1]}")
+    return {term for term in terms if term}
+
+
+def _quote_sentences(value: str) -> list[str]:
+    text = " ".join(value.split())
+    if not text:
+        return []
+    return [
+        candidate.strip()
+        for candidate in re.split(r"(?<=[.!?])\s+", text)
+        if candidate.strip()
+    ]
+
+
+def _quote_candidates_from_sentences(sentences: list[str]) -> list[str]:
+    if not sentences:
+        return []
+    windows = [
+        f"{left} {right}"
+        for left, right in zip(sentences, sentences[1:], strict=False)
+    ]
+    return [*sentences, *windows]
+
+
+def _quote_candidate_score(candidate: str, quote_hints: Mapping[str, set[str]]) -> int:
+    normalized = f" {_normalize_match_text(candidate)} "
+    if not normalized.strip():
+        return 0
+    variable_hits = _quote_term_hits(normalized, quote_hints.get("variable", set()))
+    outcome_hits = _quote_term_hits(normalized, quote_hints.get("outcome", set()))
+    relation_hits = _quote_term_hits(normalized, quote_hints.get("relation", set()))
+    if not (variable_hits or outcome_hits or relation_hits):
+        return 0
+    score = variable_hits + outcome_hits * 4 + relation_hits * 2
+    if variable_hits and outcome_hits:
+        score += 8
+    if outcome_hits and relation_hits:
+        score += 4
+    has_result_cue = any(
+        f" {cue} " in normalized
+        for cue in (
+            "result",
+            "results",
+            "show",
+            "showed",
+            "shown",
+            "indicate",
+            "indicated",
+            "reported",
+            "demonstrate",
+            "demonstrated",
+            "conclusion",
+            "conclusions",
+        )
+    )
+    if has_result_cue:
+        score += 3
+    has_background_cue = _normalized_quote_has_background_cue(normalized)
+    if has_background_cue:
+        score -= 12 if not has_result_cue else 4
+    return score
+
+
+def _quote_has_variable_and_outcome(
+    candidate: str,
+    quote_hints: Mapping[str, set[str]],
+) -> bool:
+    normalized = f" {_normalize_match_text(candidate)} "
+    return bool(
+        _quote_term_hits(normalized, quote_hints.get("variable", set()))
+        and _quote_term_hits(normalized, quote_hints.get("outcome", set()))
+    )
+
+
+def _quote_term_hits(normalized_candidate: str, terms: set[str]) -> int:
+    return sum(1 for term in terms if f" {term} " in normalized_candidate)
+
+
+def _quote_has_background_cue(candidate: str) -> bool:
+    return _normalized_quote_has_background_cue(
+        f" {_normalize_match_text(candidate)} "
+    )
+
+
+def _normalized_quote_has_background_cue(normalized_candidate: str) -> bool:
+    return any(
+        f" {cue} " in normalized_candidate
+        for cue in (
+            "aim",
+            "aims",
+            "objective",
+            "objectives",
+            "introduction",
+            "prior work",
+            "study evaluates",
+            "study aims",
+        )
+    )
 
 
 def _confidence_or_none(value: Any) -> float | None:

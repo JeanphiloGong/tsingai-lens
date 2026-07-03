@@ -1740,6 +1740,351 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
     )
 
 
+def test_with_presentation_uses_result_specific_direct_evidence_quote():
+    long_block_text = (
+        "This study evaluates LPBF 316L samples with and without build "
+        "platform preheating to understand broad processing responses. "
+        "The introduction summarizes prior work on additive manufacturing "
+        "microstructure and mechanical properties. "
+        "Results show that build platform preheating reduced thermal "
+        "gradients, refined the microstructure, and improved tensile "
+        "strength."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-2",
+                    human_readable_id=2,
+                    title="Preheating effects in LPBF 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-preheat",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=long_block_text,
+                    block_order=12,
+                    page=8,
+                    heading_path="Results / Microstructure",
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How does build platform preheating affect "
+                    "microstructure?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Build platform preheating improves microstructure "
+                        "and mechanical properties."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_microstructure",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating",
+                    "predicate": "improves",
+                    "object": "thermal gradients -> microstructure",
+                    "statement": (
+                        "Build platform preheating improves microstructure by "
+                        "reducing thermal gradients."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_preheat",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Results",
+                    "locator": {"source_ref": "blk-preheat"},
+                    "fact_ids": ["unit_preheat"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process": "LPBF",
+                        "variable_process_axes": ["build platform preheating"],
+                    },
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_preheat"]
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["source_text"] == long_block_text
+    assert evidence_item["quote"] == (
+        "Results show that build platform preheating reduced thermal gradients, "
+        "refined the microstructure, and improved tensile strength."
+    )
+
+
+def test_with_presentation_quote_can_use_adjacent_sentences_for_direct_evidence():
+    long_block_text = (
+        "This study aims to understand the effect of build platform preheating "
+        "on microstructural features and mechanical properties. "
+        "Two sets of specimens were fabricated on a non-preheated build "
+        "platform and the build platform preheated to 150 C. "
+        "Microstructural features are analyzed via simulation, and the results "
+        "are validated experimentally."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-2",
+                    human_readable_id=2,
+                    title="Preheating effects in LPBF 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-preheat",
+                    document_id="paper-2",
+                    block_type="paragraph",
+                    text=long_block_text,
+                    block_order=12,
+                    page=8,
+                    heading_path="Abstract",
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How does build platform preheating affect "
+                    "microstructure?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Build platform preheating changes microstructural "
+                        "features."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.8,
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_microstructure",
+                    "relation_type": "changes",
+                    "subject": "build platform preheating",
+                    "predicate": "changes",
+                    "object": "microstructure",
+                    "statement": (
+                        "Build platform preheating changes microstructural "
+                        "features."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_preheat",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 Abstract",
+                    "locator": {"source_ref": "blk-preheat"},
+                    "fact_ids": ["unit_preheat"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process": "LPBF",
+                        "variable_process_axes": ["build platform preheating"],
+                    },
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["quote"] == (
+        "Two sets of specimens were fabricated on a non-preheated build "
+        "platform and the build platform preheated to 150 C. Microstructural "
+        "features are analyzed via simulation, and the results are validated "
+        "experimentally."
+    )
+
+
+def test_with_presentation_prefers_specific_single_sentence_quote():
+    long_block_text = (
+        "In the current experimental results, the strength does not seem to "
+        "noticeable change with the decrease in porosity level and pores size, "
+        "but it significantly influences ductility. "
+        "Besides, the pores of SLM 316L SS samples have higher sensitivity to "
+        "pitting behavior. "
+        "Under higher porosity level conditions, the as-fabricated sample was "
+        "more prone to pitting, formed unstable passive film, and easy to be "
+        "broken down."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-5",
+                    human_readable_id=5,
+                    title="Porosity and corrosion in SLM 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-corrosion",
+                    document_id="paper-5",
+                    block_type="paragraph",
+                    text=long_block_text,
+                    block_order=7,
+                    page=1,
+                    heading_path="Abstract",
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_corrosion",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Higher porosity level increases pitting corrosion "
+                        "susceptibility."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.82,
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "increases",
+                    "subject": "porosity level",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Higher porosity level increases pitting corrosion "
+                        "susceptibility."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_corrosion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-5",
+                    "label": "P005 Abstract",
+                    "locator": {"source_ref": "blk-corrosion"},
+                    "fact_ids": ["unit_corrosion"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "SLM"},
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["quote"] == (
+        "Under higher porosity level conditions, the as-fabricated sample was "
+        "more prone to pitting, formed unstable passive film, and easy to be "
+        "broken down."
+    )
+
+
 def test_with_presentation_keeps_only_reviewable_direct_relations():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

@@ -3818,8 +3818,119 @@ def test_with_presentation_builds_finding_fields_from_mediated_relation():
     assert finding["outcomes"] == ["porosity"]
     assert finding["direction"] == "reduces"
     assert finding["scope_summary"] == "316L stainless steel, LPBF"
+    assert finding["title"] == "preheating -> porosity"
+    assert finding["relation_chain"] == [
+        {
+            "relation_id": "rel_preheat_chain",
+            "variable": "preheating",
+            "mediators": ["melt pool instability"],
+            "outcome": "porosity",
+            "direction": "reduces",
+            "statement": "Preheating reduces porosity through melt pool stabilization.",
+        }
+    ]
     assert finding["evidence_bundle"]["direct_result"] == ["evref_direct"]
     assert finding["evidence_bundle"]["mechanism"] == ["evref_mechanism"]
+
+
+def test_with_presentation_finding_title_uses_relation_outcome_over_context_mediator():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect mechanical properties?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_mechanical",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Preheating improves mechanical properties through "
+                        "microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.88,
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_mechanical",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating temperature",
+                    "predicate": "improves",
+                    "object": "microstructure -> mechanical properties",
+                    "statement": (
+                        "Higher build platform preheating temperature improves "
+                        "mechanical properties by modifying microstructure."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_direct",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Conclusions",
+                    "locator": {"source_ref": "blk-conclusion"},
+                    "fact_ids": ["unit_direct"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Preheating increased ductility by 14% and this was "
+                        "attributed to homogenized microstructure."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "build platform preheating temperature"
+                        ]
+                    },
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["title"] == (
+        "build platform preheating temperature -> mechanical properties"
+    )
+    assert finding["variables"] == ["build platform preheating temperature"]
+    assert finding["mediators"] == ["microstructure"]
+    assert finding["outcomes"] == ["mechanical properties"]
+    assert finding["relation_chain"] == [
+        {
+            "relation_id": "rel_preheat_mechanical",
+            "variable": "build platform preheating temperature",
+            "mediators": ["microstructure"],
+            "outcome": "mechanical properties",
+            "direction": "improves",
+            "statement": (
+                "Higher build platform preheating temperature improves "
+                "mechanical properties by modifying microstructure."
+            ),
+        }
+    ]
 
 
 def test_with_presentation_drops_placeholder_relation_chain_segments():

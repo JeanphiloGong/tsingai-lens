@@ -2061,6 +2061,147 @@ def test_with_presentation_buckets_finding_evidence_by_role():
     }
 
 
+def test_with_presentation_builds_finding_fields_from_mediated_relation():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect porosity?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_porosity",
+                    "claim_type": "finding",
+                    "statement": "Preheating reduces porosity through melt pool stabilization.",
+                    "status": "supported",
+                    "confidence": 0.88,
+                    "evidence_ref_ids": ["evref_direct", "evref_mechanism"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct", "unit_mechanism"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_chain",
+                    "relation_type": "reduces",
+                    "subject": "preheating",
+                    "predicate": "reduces",
+                    "object": "melt pool instability -> porosity",
+                    "statement": "Preheating reduces porosity through melt pool stabilization.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct", "unit_mechanism"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_direct",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_direct"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_mechanism",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Discussion",
+                    "locator": {"source_ref": "blk-discussion"},
+                    "fact_ids": ["unit_mechanism"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "mediator_context",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["porosity"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["preheating"]
+    assert finding["mediators"] == ["melt pool instability"]
+    assert finding["outcomes"] == ["porosity"]
+    assert finding["direction"] == "reduces"
+    assert finding["scope_summary"] == "316L stainless steel, LPBF"
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_direct"]
+    assert finding["evidence_bundle"]["mechanism"] == ["evref_mechanism"]
+
+
+def test_with_presentation_finding_fields_fall_back_without_relation():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does LPBF affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "measurement",
+                    "statement": "Relative density is reported as 99.1%.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_density"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_density",
+                    "label": "Claim applicability",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["LPBF"]
+    assert finding["mediators"] == []
+    assert finding["outcomes"] == ["relative density"]
+    assert finding["direction"] == ""
+
+
 def test_with_presentation_projects_empty_findings_without_claims():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
 

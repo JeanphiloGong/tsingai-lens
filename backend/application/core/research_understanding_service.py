@@ -1738,6 +1738,11 @@ class ResearchUnderstandingService:
             for context in contexts
             if _text(context.get("context_id"))
         }
+        relations_by_id = {
+            _text(relation.get("relation_id")): relation
+            for relation in relations
+            if _text(relation.get("relation_id"))
+        }
         blocks_by_id, documents_by_id = self._source_artifact_lookups(
             _text(scope.get("collection_id"))
         )
@@ -1805,7 +1810,11 @@ class ResearchUnderstandingService:
             },
             "effects": effects,
             "findings": [
-                self._presentation_finding(effect, evidence_by_id=evidence_by_id)
+                self._presentation_finding(
+                    effect,
+                    evidence_by_id=evidence_by_id,
+                    relations_by_id=relations_by_id,
+                )
                 for effect in effects
             ],
             "evidence_items": evidence_items,
@@ -1817,19 +1826,19 @@ class ResearchUnderstandingService:
         effect: Mapping[str, Any],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
+        relations_by_id: Mapping[str, dict[str, Any]],
     ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
-        variable_axis = _text(effect.get("variable_axis"))
-        target_property = _text(effect.get("target_property"))
+        relations = self._finding_relations(effect, relations_by_id)
         return {
             "finding_id": f"finding_{claim_id}",
             "claim_id": claim_id,
             "title": _text(effect.get("title")) or "Research finding",
             "statement": _text(effect.get("statement")) or "",
-            "variables": [variable_axis] if variable_axis else [],
-            "mediators": [],
-            "outcomes": [target_property] if target_property else [],
-            "direction": _text(effect.get("effect_direction")) or "",
+            "variables": self._finding_variables(effect, relations),
+            "mediators": self._finding_mediators(relations),
+            "outcomes": self._finding_outcomes(effect, relations),
+            "direction": self._finding_direction(effect, relations),
             "scope_summary": _text(effect.get("context_summary")) or "",
             "support_grade": self._finding_support_grade(effect),
             "review_status": self._finding_review_status(effect),
@@ -1845,6 +1854,83 @@ class ResearchUnderstandingService:
             ),
             "warnings": list(_strings(effect.get("warnings"))),
         }
+
+    def _finding_relations(
+        self,
+        effect: Mapping[str, Any],
+        relations_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            relations_by_id[relation_id]
+            for relation_id in _strings(effect.get("relation_ids"))
+            if relation_id in relations_by_id
+        ]
+
+    def _finding_variables(
+        self,
+        effect: Mapping[str, Any],
+        relations: list[dict[str, Any]],
+    ) -> list[str]:
+        variables = _dedupe_strings(
+            [
+                subject
+                for relation in relations
+                if (subject := self._presentation_relation_side(relation.get("subject")))
+            ]
+        )
+        if variables:
+            return variables
+        fallback = _text(effect.get("variable_axis"))
+        return [fallback] if fallback else []
+
+    def _finding_mediators(self, relations: list[dict[str, Any]]) -> list[str]:
+        return _dedupe_strings(
+            [
+                segment
+                for relation in relations
+                for segment in self._relation_object_chain(relation)[:-1]
+            ]
+        )
+
+    def _finding_outcomes(
+        self,
+        effect: Mapping[str, Any],
+        relations: list[dict[str, Any]],
+    ) -> list[str]:
+        outcomes = _dedupe_strings(
+            [
+                chain[-1]
+                for relation in relations
+                if (chain := self._relation_object_chain(relation))
+            ]
+        )
+        if outcomes:
+            return outcomes
+        fallback = _text(effect.get("target_property"))
+        return [fallback] if fallback else []
+
+    def _relation_object_chain(self, relation: Mapping[str, Any]) -> list[str]:
+        object_text = _text(relation.get("object")) or ""
+        return [
+            segment
+            for segment in (
+                self._presentation_relation_side(part)
+                for part in object_text.split("->")
+            )
+            if segment
+        ]
+
+    def _finding_direction(
+        self,
+        effect: Mapping[str, Any],
+        relations: list[dict[str, Any]],
+    ) -> str:
+        for relation in relations:
+            for value in (relation.get("predicate"), relation.get("relation_type")):
+                text = _text(value)
+                if text and _looks_user_facing(text):
+                    return text
+        return _text(effect.get("effect_direction")) or ""
 
     def _finding_evidence_bundle(
         self,

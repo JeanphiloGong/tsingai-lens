@@ -4037,6 +4037,162 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     assert findings[1]["evidence_bundle"]["background"] == ["evref_context"]
 
 
+def test_with_presentation_concrete_variable_replaces_broad_process_display():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does VED affect microstructure?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_ved_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "The increase in VED from medium to high level did "
+                        "not notably affect melt pool size or grain size."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_ved"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_slm_microstructure",
+                    "relation_type": "explains",
+                    "subject": "selective laser melting",
+                    "predicate": "explains",
+                    "object": "microstructure",
+                    "statement": (
+                        "The increase in VED from medium to high level did "
+                        "not notably affect melt pool size or grain size."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_ved"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_ved",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_ved"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "The increase in VED from the medium to high level did "
+                        "not notably affect the melt pool size or grain size."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "selective laser melting"},
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["VED"]
+    assert finding["title"] == "VED -> microstructure"
+    assert finding["relation_chain"][0]["variable"] == "selective laser melting"
+
+
+def test_with_presentation_concrete_variable_keeps_specific_process_variable():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect properties?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat",
+                    "claim_type": "finding",
+                    "statement": "Preheating improves mechanical properties.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating temperature",
+                    "predicate": "improves",
+                    "object": "mechanical properties",
+                    "statement": "Preheating improves mechanical properties.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_preheat",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_preheat"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": "Preheating temperature increased ductility by 14%.",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "build platform preheating temperature"
+                        ]
+                    },
+                    "property_scope": ["mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["build platform preheating temperature"]
+    assert finding["title"] == (
+        "build platform preheating temperature -> mechanical properties"
+    )
+
+
 def test_with_presentation_drops_placeholder_relation_chain_segments():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

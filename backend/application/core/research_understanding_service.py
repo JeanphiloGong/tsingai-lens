@@ -1950,18 +1950,24 @@ class ResearchUnderstandingService:
             outcomes=outcomes,
             blocks_by_id=blocks_by_id,
         )
+        display_variables = self._finding_display_variables(
+            variables,
+            relations=relations,
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+        )
         review_status = self._finding_review_status(effect)
         scope_summary = _text(effect.get("context_summary")) or ""
         return {
             "finding_id": f"finding_{claim_id}",
             "claim_id": claim_id,
             "title": self._finding_title(
-                variables=variables,
+                variables=display_variables,
                 outcomes=outcomes,
                 fallback=_text(effect.get("title")) or _text(effect.get("statement")),
             ),
             "statement": _text(effect.get("statement")) or "",
-            "variables": variables,
+            "variables": display_variables,
             "mediators": mediators,
             "outcomes": outcomes,
             "direction": direction,
@@ -2058,6 +2064,104 @@ class ResearchUnderstandingService:
             return variables
         fallback = _text(effect.get("variable_axis"))
         return [fallback] if fallback else []
+
+    def _finding_display_variables(
+        self,
+        variables: list[str],
+        *,
+        relations: list[dict[str, Any]],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> list[str]:
+        broad_process_variables = {
+            "additive manufacturing",
+            "laser beam powder bed fusion",
+            "laser powder bed fusion",
+            "lpbf",
+            "powder bed fusion",
+            "selective laser melting",
+            "slm",
+        }
+        if not any(
+            _normalize_match_text(variable) in broad_process_variables
+            for variable in variables
+        ):
+            return variables
+        text_parts: list[str] = []
+        for relation in relations:
+            text_parts.extend(
+                [
+                    self._presentation_relation_summary(relation),
+                    _text(relation.get("statement")) or "",
+                ]
+            )
+        direct_ref_ids = _strings(evidence_bundle.get("direct_result"))
+        for ref_id in direct_ref_ids:
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            text_parts.extend(
+                [
+                    _text(evidence_ref.get("quote")) or "",
+                    _text(evidence_ref.get("label")) or "",
+                    *_display_values(locator),
+                ]
+            )
+        concrete_variables = self._concrete_variable_terms(" ".join(text_parts))
+        if not concrete_variables:
+            return variables
+        broad_variable_keys = {
+            _normalize_match_text(variable)
+            for variable in variables
+            if _normalize_match_text(variable) in broad_process_variables
+        }
+        non_broad_variable_keys = {
+            _normalize_match_text(variable)
+            for variable in variables
+            if _normalize_match_text(variable) not in broad_process_variables
+        }
+        replacement_variables = [
+            variable
+            for variable in concrete_variables
+            if _normalize_match_text(variable) not in non_broad_variable_keys
+        ]
+        if not replacement_variables:
+            return variables
+        return _dedupe_strings(
+            [
+                replacement
+                for variable in variables
+                for replacement in (
+                    replacement_variables
+                    if _normalize_match_text(variable) in broad_variable_keys
+                    else [variable]
+                )
+            ]
+        )
+
+    def _concrete_variable_terms(self, text: str) -> list[str]:
+        normalized = f" {_normalize_match_text(text)} "
+        variables: list[str] = []
+        if " ved " in normalized or " volumetric energy density " in normalized:
+            variables.append("VED")
+        elif " energy density " in normalized:
+            variables.append("energy density")
+        phrase_variables = (
+            ("laser power", ("laser power",)),
+            ("scan speed", ("scan speed", "scanning speed")),
+            ("heat treatment time", ("heat treatment time",)),
+            ("heat treatment pressure", ("heat treatment pressure",)),
+            ("heat treatment temperature", ("heat treatment temperature",)),
+            ("preheating temperature", ("preheating temperature",)),
+            (
+                "build platform preheating temperature",
+                ("build platform preheating temperature",),
+            ),
+            ("build platform preheating", ("build platform preheating",)),
+        )
+        for display, phrases in phrase_variables:
+            if any(f" {phrase} " in normalized for phrase in phrases):
+                variables.append(display)
+        return _dedupe_strings(variables)
 
     def _finding_mediators(self, relations: list[dict[str, Any]]) -> list[str]:
         return _dedupe_strings(

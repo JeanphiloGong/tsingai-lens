@@ -1793,6 +1793,36 @@ class ResearchUnderstandingService:
             for claim in claims
             if _text(claim.get("statement"))
         ]
+        covered_relation_ids = {
+            relation_id
+            for effect in effects
+            for relation_id in _strings(effect.get("relation_ids"))
+        }
+        goal_axes = _dedupe_strings(
+            [
+                axis
+                for context in contexts_by_id.values()
+                if (
+                    _text(context.get("context_id")) == "ctx_objective_scope"
+                    or _normalize_match_text(_text(context.get("label")) or "")
+                    in {"objective scope", "goal scope"}
+                )
+                for process_context in [_mapping(context.get("process_context"))]
+                for axis in _strings(process_context.get("variable_process_axes"))
+            ]
+        )
+        relation_effects = [
+            self._presentation_relation_effect(
+                relation,
+                evidence_by_id=evidence_by_id,
+                contexts_by_id=contexts_by_id,
+            )
+            for relation in relations
+            if _text(relation.get("relation_id")) not in covered_relation_ids
+            and self._reviewable_presentation_relation(relation)
+            and self._relation_matches_goal_axis(relation, goal_axes)
+        ]
+        effects.extend(relation_effects)
         context_summaries = [
             self._presentation_context_summary(context)
             for context in contexts
@@ -2171,6 +2201,41 @@ class ResearchUnderstandingService:
                     [],
                 )
             )
+        goal_axes = _dedupe_strings(
+            [
+                axis
+                for context in contexts_by_id.values()
+                if (
+                    _text(context.get("context_id")) == "ctx_objective_scope"
+                    or _normalize_match_text(_text(context.get("label")) or "")
+                    in {"objective scope", "goal scope"}
+                )
+                for process_context in [_mapping(context.get("process_context"))]
+                for axis in [
+                    *_strings(process_context.get("variable_process_axes")),
+                    *_strings(process_context.get("process_context_axes")),
+                ]
+            ]
+        )
+        goal_axis_relations = [
+            relation
+            for relation in related_relations
+            if self._relation_matches_goal_axis(relation, goal_axes)
+        ]
+        if goal_axis_relations:
+            related_relations = goal_axis_relations
+            primary_relation = related_relations[0]
+            variable_axis = self._variable_axis_for(primary_relation, contexts)
+            target_property = self._target_property_for(claim, primary_relation, contexts)
+        elif goal_axes and any(
+            self._reviewable_presentation_relation(relation)
+            and self._relation_matches_goal_axis(relation, goal_axes)
+            for relation in relations
+        ):
+            related_relations = []
+            primary_relation = {}
+            variable_axis = self._variable_axis_for(primary_relation, contexts)
+            target_property = self._target_property_for(claim, primary_relation, contexts)
         target_relations = [
             relation
             for relation in related_relations
@@ -2242,6 +2307,69 @@ class ResearchUnderstandingService:
             "warnings": _strings(claim.get("warnings")),
         }
 
+    def _presentation_relation_effect(
+        self,
+        relation: Mapping[str, Any],
+        *,
+        evidence_by_id: dict[str, dict[str, Any]],
+        contexts_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        relation_id = _text(relation.get("relation_id")) or "relation"
+        context_ids = _strings(relation.get("context_ids"))
+        contexts = [
+            contexts_by_id[context_id]
+            for context_id in context_ids
+            if context_id in contexts_by_id
+        ]
+        variable_axis = self._variable_axis_for(relation, contexts)
+        target_property = self._target_property_for({}, relation, contexts)
+        evidence_ref_ids = _strings(relation.get("evidence_ref_ids"))
+        evidence_refs = [
+            evidence_by_id[ref_id]
+            for ref_id in evidence_ref_ids
+            if ref_id in evidence_by_id
+        ]
+        paper_count = len(
+            {
+                _text(ref.get("document_id"))
+                for ref in evidence_refs
+                if _text(ref.get("document_id"))
+            }
+        )
+        statement = self._presentation_relation_summary(relation)
+        return {
+            "effect_id": f"effect_{relation_id}",
+            "claim_id": f"relation_{relation_id}",
+            "title": self._effect_title(
+                variable_axis=variable_axis,
+                target_property=target_property,
+                fallback=statement,
+                relation_count=1,
+            ),
+            "statement": statement,
+            "claim_type": "finding",
+            "support_status": _text(relation.get("status")) or "limited",
+            "confidence": relation.get("confidence"),
+            "effect_direction": _text(relation.get("relation_type"))
+            or _text(relation.get("predicate"))
+            or "",
+            "variable_axis": variable_axis,
+            "target_property": target_property,
+            "paper_count": paper_count,
+            "evidence_count": len(evidence_refs),
+            "context_summary": self._context_summary_text(contexts),
+            "evidence_ref_ids": evidence_ref_ids,
+            "context_ids": context_ids,
+            "relation_ids": [relation_id],
+            "needs_review": self._effect_needs_review(
+                {"claim_type": "finding", "status": relation.get("status")},
+                evidence_count=len(evidence_refs),
+                relation_ids=[relation_id],
+                context_summary=self._context_summary_text(contexts),
+            ),
+            "warnings": _strings(relation.get("warnings")),
+        }
+
     def _effect_needs_review(
         self,
         claim: Mapping[str, Any],
@@ -2268,6 +2396,27 @@ class ResearchUnderstandingService:
         subject = self._presentation_relation_side(relation.get("subject"))
         object_chain = self._relation_object_chain(relation)
         return bool(subject and object_chain and self._presentation_relation_summary(relation))
+
+    def _relation_matches_goal_axis(
+        self,
+        relation: Mapping[str, Any],
+        goal_axes: list[str],
+    ) -> bool:
+        if not goal_axes:
+            return False
+        searchable = " ".join(
+            item
+            for item in (
+                self._presentation_relation_side(relation.get("subject")),
+                " ".join(self._relation_object_chain(relation)),
+                self._presentation_relation_summary(relation),
+            )
+            if item
+        )
+        return any(
+            self._objective_axis_tokens_match(searchable, axis)
+            for axis in goal_axes
+        )
 
     def _relation_matches_finding_target(
         self,

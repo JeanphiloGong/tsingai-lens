@@ -2392,14 +2392,29 @@ def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_target
                     "source_object_ids": ["unit_pores"],
                 },
                 {
-                    "relation_id": "rel_speed_density",
+                    "relation_id": "rel_lbpf_density",
                     "relation_type": "increases",
-                    "subject": "scan speed",
+                    "subject": "laser beam powder bed fusion",
                     "predicate": "increases",
                     "object": "melt pool stability -> density",
                     "statement": (
-                        "Scan speed changes density through melt pool "
-                        "stability."
+                        "Laser beam powder bed fusion changes density "
+                        "through melt pool stability."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_pores"],
+                    "context_ids": ["ctx_microstructure"],
+                    "source_object_ids": ["unit_pores"],
+                },
+                {
+                    "relation_id": "rel_hip_microstructure",
+                    "relation_type": "explains",
+                    "subject": "hot isostatic pressing",
+                    "predicate": "explains",
+                    "object": "microstructure",
+                    "statement": (
+                        "Hot isostatic pressing changes microstructure in "
+                        "HIP-SLM samples."
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_pores"],
@@ -2437,7 +2452,11 @@ def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_target
                     "context_id": "ctx_objective_scope",
                     "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
-                    "process_context": {"process": "LPBF"},
+                    "process_context": {
+                        "process": "LPBF",
+                        "variable_process_axes": ["laser power"],
+                        "process_context_axes": ["laser beam powder bed fusion"],
+                    },
                     "property_scope": ["microstructure", "mechanical properties"],
                 },
                 {
@@ -2457,12 +2476,139 @@ def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_target
     finding = understanding["presentation"]["findings"][0]
     assert finding["relation_ids"] == [
         "rel_power_porosity",
-        "rel_speed_density",
+        "rel_lbpf_density",
     ]
-    assert finding["variables"] == ["laser power", "scan speed"]
+    assert finding["variables"] == ["laser power", "laser beam powder bed fusion"]
     assert finding["outcomes"] == ["porosity", "density"]
     assert finding["evidence_bundle"]["direct_result"] == ["evref_pores"]
     assert finding["support_grade"] == "partial"
+
+
+def test_with_presentation_recalls_goal_variable_relation_when_claim_is_off_axis():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How does build platform preheating affect "
+                    "microstructure?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_off_axis",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Laser power and scan speed affect pore size and "
+                        "density."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.8,
+                    "evidence_ref_ids": ["evref_scan_speed"],
+                    "context_ids": ["ctx_scan_speed"],
+                    "source_object_ids": ["unit_scan_speed"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_scan_speed_porosity",
+                    "relation_type": "increases",
+                    "subject": "scan speed",
+                    "predicate": "increases",
+                    "object": "porosity",
+                    "statement": "Higher scan speed increases porosity.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_scan_speed"],
+                    "context_ids": ["ctx_scan_speed"],
+                    "source_object_ids": ["unit_scan_speed"],
+                },
+                {
+                    "relation_id": "rel_preheat_microstructure",
+                    "relation_type": "improves",
+                    "subject": "build platform preheating",
+                    "predicate": "improves",
+                    "object": "thermal gradients -> microstructure",
+                    "statement": (
+                        "Build platform preheating improves microstructure by "
+                        "reducing thermal gradients."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_preheat"],
+                    "source_object_ids": ["unit_preheat"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_scan_speed",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 scan speed",
+                    "locator": {"source_ref": "blk-scan"},
+                    "fact_ids": ["unit_scan_speed"],
+                    "traceability_status": "resolved",
+                    "quote": "Scan speed changed pore size and density.",
+                },
+                {
+                    "evidence_ref_id": "evref_preheat",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 preheat",
+                    "locator": {"source_ref": "blk-preheat"},
+                    "fact_ids": ["unit_preheat"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "Build platform preheating reduced thermal gradients "
+                        "and changed the microstructure."
+                    ),
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process_context_axes": ["laser beam powder bed fusion"],
+                        "variable_process_axes": ["build platform preheating"],
+                    },
+                    "property_scope": ["microstructure"],
+                },
+                {
+                    "context_id": "ctx_scan_speed",
+                    "label": "Claim applicability",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["microstructure"],
+                },
+                {
+                    "context_id": "ctx_preheat",
+                    "label": "Claim applicability",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["microstructure"],
+                },
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    findings = understanding["presentation"]["findings"]
+    assert [finding["relation_ids"] for finding in findings] == [
+        [],
+        ["rel_preheat_microstructure"],
+    ]
+    assert findings[0]["support_grade"] == "insufficient"
+    assert findings[1]["title"] == "build platform preheating -> microstructure"
+    assert findings[1]["variables"] == ["build platform preheating"]
+    assert findings[1]["evidence_bundle"]["direct_result"] == ["evref_preheat"]
+    assert findings[1]["support_grade"] == "partial"
 
 
 def test_with_presentation_semantic_match_handles_porosity_pore_variants():

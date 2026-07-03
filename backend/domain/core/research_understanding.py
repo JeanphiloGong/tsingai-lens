@@ -66,6 +66,7 @@ class ResearchEvidenceRef:
     anchor_ids: tuple[str, ...]
     confidence: float | None
     traceability_status: str
+    evidence_role: str | None = None
     quote: str | None = None
     href: str | None = None
 
@@ -89,6 +90,7 @@ class ResearchEvidenceRef:
             anchor_ids=_strings(payload.get("anchor_ids")),
             confidence=_confidence_or_none(payload.get("confidence")),
             traceability_status=_text(payload.get("traceability_status")) or "unknown",
+            evidence_role=_text(payload.get("evidence_role")),
             quote=_text(payload.get("quote")),
             href=_text(payload.get("href")),
         )
@@ -104,6 +106,7 @@ class ResearchEvidenceRef:
             "anchor_ids": list(self.anchor_ids),
             "confidence": self.confidence,
             "traceability_status": self.traceability_status,
+            "evidence_role": self.evidence_role,
             "quote": self.quote,
             "href": self.href,
         }

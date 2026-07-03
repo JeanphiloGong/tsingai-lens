@@ -66,6 +66,10 @@ class ResearchEvidenceRefResponse(BaseModel):
     anchor_ids: list[str] = Field(default_factory=list, description="Source anchor IDs")
     confidence: float | None = Field(default=None, description="Evidence confidence")
     traceability_status: str = Field(..., description="Traceability status")
+    evidence_role: str | None = Field(
+        default=None,
+        description="Role in supporting a finding, such as direct_support or mediator_context",
+    )
     quote: str | None = Field(default=None, description="Optional quoted source text")
     href: str | None = Field(default=None, description="Optional source navigation URL")
 
@@ -211,6 +215,7 @@ class ResearchUnderstandingPresentationEvidenceResponse(BaseModel):
     quote: str | None = Field(default=None)
     value_summary: str = Field(default="")
     traceability_status: str = Field(default="unknown")
+    evidence_role: str | None = Field(default=None)
     confidence: float | None = Field(default=None)
     href: str | None = Field(default=None)
 

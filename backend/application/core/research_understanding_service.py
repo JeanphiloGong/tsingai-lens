@@ -1137,6 +1137,7 @@ class ResearchUnderstandingService:
             "anchor_ids": _strings(ref.get("anchor_ids")),
             "confidence": ref.get("confidence"),
             "traceability_status": _text(ref.get("traceability_status")) or "unknown",
+            "evidence_role": _text(ref.get("evidence_role")),
             "quote": _text(ref.get("quote")),
             "href": _text(ref.get("href")),
         }
@@ -1247,9 +1248,17 @@ class ResearchUnderstandingService:
                 _text(unit.get("resolution_status"))
                 or ("traceable" if source or unit.get("evidence_anchor_ids") else "missing")
             ),
+            "evidence_role": self._evidence_role_for_unit_source(unit, source),
             "quote": _text(source.get("quote")),
             "href": _text(source.get("href")),
         }
+
+    def _evidence_role_for_unit_source(
+        self,
+        unit: Mapping[str, Any],
+        source: Mapping[str, Any],
+    ) -> str | None:
+        return _text(source.get("evidence_role")) or _text(unit.get("evidence_role"))
 
     def _enrich_evidence_refs_from_source_blocks(
         self,
@@ -1796,14 +1805,19 @@ class ResearchUnderstandingService:
             },
             "effects": effects,
             "findings": [
-                self._presentation_finding(effect)
+                self._presentation_finding(effect, evidence_by_id=evidence_by_id)
                 for effect in effects
             ],
             "evidence_items": evidence_items,
             "context_summaries": context_summaries,
         }
 
-    def _presentation_finding(self, effect: Mapping[str, Any]) -> dict[str, Any]:
+    def _presentation_finding(
+        self,
+        effect: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
         variable_axis = _text(effect.get("variable_axis"))
         target_property = _text(effect.get("target_property"))
@@ -1825,20 +1839,49 @@ class ResearchUnderstandingService:
             "evidence_ref_ids": list(_strings(effect.get("evidence_ref_ids"))),
             "context_ids": list(_strings(effect.get("context_ids"))),
             "relation_ids": list(_strings(effect.get("relation_ids"))),
-            "evidence_bundle": self._finding_evidence_bundle(effect),
+            "evidence_bundle": self._finding_evidence_bundle(
+                effect,
+                evidence_by_id=evidence_by_id,
+            ),
             "warnings": list(_strings(effect.get("warnings"))),
         }
 
-    def _finding_evidence_bundle(self, effect: Mapping[str, Any]) -> dict[str, list[str]]:
-        return {
+    def _finding_evidence_bundle(
+        self,
+        effect: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        bundle: dict[str, list[str]] = {
             "direct_result": [],
             "mechanism": [],
             "condition_context": [],
             "background": [],
             "conflict": [],
             "noise": [],
-            "uncategorized": list(_strings(effect.get("evidence_ref_ids"))),
+            "uncategorized": [],
         }
+        for ref_id in _strings(effect.get("evidence_ref_ids")):
+            role = _text(evidence_by_id.get(ref_id, {}).get("evidence_role"))
+            bundle_key = self._finding_bundle_key_for_role(role)
+            bundle[bundle_key].append(ref_id)
+        return bundle
+
+    def _finding_bundle_key_for_role(self, evidence_role: str | None) -> str:
+        normalized = (_text(evidence_role) or "").lower()
+        if normalized == "direct_support":
+            return "direct_result"
+        if normalized in {"mediator_context", "mechanism"}:
+            return "mechanism"
+        if normalized in {"condition_context", "context"}:
+            return "condition_context"
+        if normalized in {"background_context", "background"}:
+            return "background"
+        if normalized in {"conflict", "conflicting"}:
+            return "conflict"
+        if normalized in {"noise", "irrelevant"}:
+            return "noise"
+        return "uncategorized"
 
     def _finding_support_grade(self, effect: Mapping[str, Any]) -> str:
         support_status = (_text(effect.get("support_status")) or "limited").lower()
@@ -2061,6 +2104,7 @@ class ResearchUnderstandingService:
             "source_text": source_text,
             "value_summary": value_summary,
             "traceability_status": _text(ref.get("traceability_status")) or "unknown",
+            "evidence_role": _text(ref.get("evidence_role")),
             "confidence": ref.get("confidence"),
             "href": _text(ref.get("href")),
         }

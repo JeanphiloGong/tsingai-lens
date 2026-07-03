@@ -702,7 +702,7 @@ def test_objective_understanding_keeps_mediator_observations_out_of_claims():
     assert "Laser power improves pitting potential." in statements
 
 
-def test_objective_understanding_blocks_real_corrosion_mediators_from_claims():
+def test_objective_understanding_blocks_real_corrosion_mediators_and_propagates_evidence_role():
     service = ResearchUnderstandingService(
         structured_extractor=_FakeSemanticExtractor(),
         source_artifact_repository=_FakeSourceArtifactRepository(
@@ -822,6 +822,16 @@ def test_objective_understanding_blocks_real_corrosion_mediators_from_claims():
     )
     assert evidence_by_ref["blk-corrosion"]["locator"]["page"] == 9
     assert evidence_by_ref["blk-corrosion"]["document_id"] == "paper-5"
+    assert evidence_by_ref["blk-corrosion"]["evidence_role"] == "direct_support"
+    assert evidence_by_ref["blk-lof-defects"]["evidence_role"] == "mediator_context"
+    presentation_by_ref = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    corrosion_ref_id = evidence_by_ref["blk-corrosion"]["evidence_ref_id"]
+    defects_ref_id = evidence_by_ref["blk-lof-defects"]["evidence_ref_id"]
+    assert presentation_by_ref[corrosion_ref_id]["evidence_role"] == "direct_support"
+    assert presentation_by_ref[defects_ref_id]["evidence_role"] == "mediator_context"
 
 
 def test_objective_understanding_blocks_real_density_background_from_claims():
@@ -1929,6 +1939,125 @@ def test_with_presentation_projects_findings_contract():
         "conflict": [],
         "noise": [],
         "uncategorized": ["evref_density", "evref_density_text"],
+    }
+
+
+def test_with_presentation_buckets_finding_evidence_by_role():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does LPBF affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "comparison",
+                    "statement": "Laser power increases relative density.",
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": [
+                        "evref_direct",
+                        "evref_mechanism",
+                        "evref_background",
+                        "evref_unknown",
+                    ],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_laser_density",
+                    "relation_type": "increases",
+                    "subject": "laser power",
+                    "predicate": "increases",
+                    "object": "relative density",
+                    "statement": None,
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_direct",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 Table 1",
+                    "locator": {"source_ref": "table-1"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_mechanism",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Mechanism",
+                    "locator": {"source_ref": "blk-mechanism"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "mediator_context",
+                },
+                {
+                    "evidence_ref_id": "evref_background",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Background",
+                    "locator": {"source_ref": "blk-background"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "background_context",
+                },
+                {
+                    "evidence_ref_id": "evref_unknown",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Context",
+                    "locator": {"source_ref": "blk-context"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"variable_process_axes": ["laser power"]},
+                    "property_scope": ["relative density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    evidence_by_id = {
+        ref["evidence_ref_id"]: ref for ref in understanding["evidence_refs"]
+    }
+    assert evidence_by_id["evref_direct"]["evidence_role"] == "direct_support"
+    evidence_item_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    assert evidence_item_by_id["evref_direct"]["evidence_role"] == "direct_support"
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"] == {
+        "direct_result": ["evref_direct"],
+        "mechanism": ["evref_mechanism"],
+        "condition_context": [],
+        "background": ["evref_background"],
+        "conflict": [],
+        "noise": [],
+        "uncategorized": ["evref_unknown"],
     }
 
 

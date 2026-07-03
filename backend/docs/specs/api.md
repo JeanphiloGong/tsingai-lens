@@ -554,7 +554,8 @@ empty | processing | partial | ready | failed
   `status`、`evidence_ref_ids` 和 `context_ids`
 - `evidence_refs`：可跳回来源文献、表格、文本窗口或 fact 的证据引用；每条至少包含
   `evidence_ref_id`、`source_kind`、`document_id`、`label`、`locator`、
-  `fact_ids`、`anchor_ids` 和 `traceability_status`
+  `fact_ids`、`anchor_ids`、`traceability_status` 和可选的
+  `evidence_role`
 - `contexts`：结论成立的材料、工艺、测试条件、性能范围和局限
 - `warnings`
 - `summary`：`claim_count`、`relation_count`、`evidence_ref_count`、
@@ -570,11 +571,13 @@ empty | processing | partial | ready | failed
     `finding_id`、`claim_id`、`statement`、`variables`、`mediators`、
     `outcomes`、`direction`、`scope_summary`、`support_grade`、
     `review_status`、`paper_count`、`evidence_count`、`evidence_ref_ids`、
-    `context_ids`、`relation_ids` 和 `evidence_bundle`；证据角色尚未拆分时，
-    `evidence_bundle.uncategorized` 保留现有证据引用，避免把上下文证据误标为
-    直接支持
+    `context_ids`、`relation_ids` 和 `evidence_bundle`；`evidence_bundle`
+    按 `evidence_role` 分到 `direct_result`、`mechanism`、
+    `condition_context`、`background`、`conflict`、`noise`，没有显式角色的证据保留在
+    `uncategorized`
   - `presentation.evidence_items` 是用户可读证据卡片，内部 block/table id
-    不应作为默认标题；精确 source locator 只能用于跳转参数或审计
+    不应作为默认标题；精确 source locator 只能用于跳转参数或审计；每项可带
+    `evidence_role` 用于解释它在研究发现中的作用
   - `presentation.context_summaries` 是用户可读条件摘要，不直接暴露原始
     `process_context` / `test_condition` 字典 dump
 

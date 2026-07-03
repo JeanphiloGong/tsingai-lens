@@ -3792,14 +3792,19 @@ def _compact_finding_scope_summary(
         re.fullmatch(r"\+\d+\s+more", token, flags=re.IGNORECASE)
         for token in raw_tokens
     )
-    if not has_more_marker:
-        return raw
-
     visible_tokens = [
         token
         for token in raw_tokens
         if not re.fullmatch(r"\+\d+\s+more", token, flags=re.IGNORECASE)
     ]
+    visible_tokens = [
+        token
+        for token in visible_tokens
+        if not _is_generic_finding_scope_token(token)
+    ]
+    if not has_more_marker and len(visible_tokens) == len(raw_tokens):
+        return raw
+
     compact: list[str] = []
     seen: set[str] = set()
 
@@ -3869,6 +3874,24 @@ def _short_text(value: str, *, limit: int) -> str:
     if len(text) <= limit:
         return text
     return f"{text[: max(0, limit - 1)].rstrip()}..."
+
+
+def _is_generic_finding_scope_token(value: str) -> bool:
+    text = _text(value)
+    if not text:
+        return True
+    return text.lower() in {
+        "axis",
+        "condition",
+        "control",
+        "factor",
+        "parameter",
+        "sample",
+        "specimen",
+        "test sample",
+        "test specimen",
+        "variable",
+    }
 
 
 def _intersects(left: list[str] | tuple[str, ...], right: list[str] | tuple[str, ...]) -> bool:

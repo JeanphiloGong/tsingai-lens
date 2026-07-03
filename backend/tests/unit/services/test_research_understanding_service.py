@@ -2884,6 +2884,85 @@ def test_with_presentation_compacts_long_finding_scope_summary():
     assert "+5 more" not in finding["scope_summary"]
 
 
+def test_with_presentation_filters_generic_finding_scope_tokens():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_corrosion",
+                    "claim_type": "finding",
+                    "statement": "Porosities were highly sensitive to pitting corrosion.",
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "increases",
+                    "subject": "porosity level",
+                    "predicate": "increases",
+                    "object": "pitting corrosion behavior",
+                    "statement": "Porosity increases pitting corrosion sensitivity.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_corrosion"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_corrosion"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_corrosion",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P005 Corrosion results",
+                    "locator": {"source_ref": "blk-corrosion"},
+                    "fact_ids": ["unit_corrosion"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "Porosities were highly sensitive to pitting corrosion."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "process": "selective laser melting",
+                        "axis_label": "variable",
+                    },
+                    "test_condition": {"sample_type": "test specimen"},
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["scope_summary"] == (
+        "316L stainless steel, porosity level, pitting corrosion behavior, "
+        "selective laser melting"
+    )
+    assert "variable" not in finding["scope_summary"]
+    assert "test specimen" not in finding["scope_summary"]
+
+
 def test_with_presentation_buckets_finding_evidence_by_role():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

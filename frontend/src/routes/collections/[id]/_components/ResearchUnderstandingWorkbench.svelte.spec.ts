@@ -512,6 +512,8 @@ function goalUnderstandingFixture(): ResearchUnderstanding {
 
 function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 	const fixture = understandingFixture();
+	const noisySemContext =
+		'SLM processed 316L stainless steel samples were characterized in FEI-INSPECT 50 SEM. Same samples used for microhardness testing were used for SEM characterizations as well. The samples were polished using different grades of polishing cloths from 400 to 1200 and then polished for 30 min on a micro cloth using colloidal silica. SEM characterization was done on horizontal as well as on vertical sections of each sample.';
 	const finding = {
 		finding_id: 'finding_relation_density',
 		claim_id: 'claim_relation_density',
@@ -529,7 +531,12 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 		paper_count: 1,
 		evidence_count: 1,
 		evidence_ref_ids: ['ev_density_quote'],
-		context_ids: ['ctx_heat_treatment'],
+		context_ids: [
+			'ctx_density_objective',
+			'ctx_density_noisy_sem',
+			'ctx_density_internal',
+			'ctx_density_numeric'
+		],
 		relation_ids: ['rel_density_quote'],
 		evidence_bundle: {
 			direct_result: ['ev_density_quote'],
@@ -542,7 +549,7 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 		},
 		warnings: []
 	};
-	return {
+	const returnValue = {
 		...fixture,
 		presentation: {
 			...fixture.presentation,
@@ -576,9 +583,60 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 					confidence: 0.88,
 					href: null
 				}
+			],
+			context_summaries: [
+				{
+					context_id: 'ctx_density_objective',
+					label: 'Objective scope',
+					material_scope: ['stainless steel 316L'],
+					property_scope: ['density'],
+					process_summary: 'VED, selective laser melting',
+					test_summary: 'Archimedes method',
+					limitations: []
+				},
+				{
+					context_id: 'ctx_density_noisy_sem',
+					label: 'Claim applicability',
+					material_scope: ['stainless steel 316L'],
+					property_scope: ['density'],
+					process_summary: '0.114, A, 0.25, density_porosity_microstructure, oeu_6b9838393120',
+					test_summary: noisySemContext,
+					limitations: []
+				},
+				{
+					context_id: 'ctx_density_internal',
+					label: 'Claim applicability',
+					material_scope: ['stainless steel 316L'],
+					property_scope: ['density'],
+					process_summary: 'oeu_48def1c60d60, 100, 280, HIP, 8, 91.54',
+					test_summary: 'density_porosity_microstructure, SEM / ImageJ',
+					limitations: []
+				},
+				{
+					context_id: 'ctx_density_numeric',
+					label: 'Claim applicability',
+					material_scope: ['stainless steel 316L'],
+					property_scope: ['density'],
+					process_summary: '0.12, B, 0.111, 6, 14',
+					test_summary: 'SEM / ImageJ',
+					limitations: []
+				},
+				{
+					context_id: 'ctx_microhardness_off_target',
+					label: 'Claim applicability',
+					material_scope: ['stainless steel 316L'],
+					property_scope: ['microhardness'],
+					process_summary:
+						'samples processed via scanning strategy B and C, selective laser melting, 150 J/mm³, 0.111 mm/s, A, 316L',
+					test_summary: 'ASTM B842',
+					limitations: []
+				}
 			]
 		}
 	};
+	const relationFinding = returnValue.presentation.findings[0];
+	relationFinding.context_ids = [...relationFinding.context_ids, 'ctx_microhardness_off_target'];
+	return returnValue;
 }
 
 async function openMechanismClaimDetail() {
@@ -767,6 +825,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingDetail.getByText('Direct result evidence')).toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByText('L-VED, M-VED and H-VED samples reached 91.9'))
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Objective scope')).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('VED, selective laser melting'))
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Archimedes method'))
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText(/oeu_6b9838393120/)).not.toBeInTheDocument();
+		await expect.element(findingDetail.getByText(/FEI-INSPECT 50 SEM/)).not.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('microhardness')).not.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('ASTM B842')).not.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('4 additional context record(s) available for curation.'))
 			.toBeInTheDocument();
 		await expect.element(findingDetail.getByRole('button', { name: 'Expert feedback' })).toBeInTheDocument();
 		await expect.element(findingDetail.getByRole('button', { name: 'Expert curation' })).toBeInTheDocument();

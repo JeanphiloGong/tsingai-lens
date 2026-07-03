@@ -37,6 +37,7 @@
 	];
 	const CLAIM_STATUS_ORDER = ['all', 'supported', 'limited', 'conflicted', 'unsupported'];
 	const SUPPORT_GRADE_ORDER = ['all', 'strong', 'partial', 'weak', 'conflict', 'insufficient'];
+	const FINDING_CONTEXT_DISPLAY_LIMIT = 3;
 	const FEEDBACK_STATUS_OPTIONS: ResearchUnderstandingFeedbackStatus[] = [
 		'correct',
 		'partial',
@@ -238,6 +239,12 @@
 	$: selectedFindingContextRefs = selectedFinding
 		? presentationContextsForIds(selectedFinding.context_ids)
 		: [];
+	$: selectedFindingDisplayContextRefs = selectedFinding
+		? compactFindingContextDisplay(selectedFindingContextRefs, selectedFinding)
+		: [];
+	$: selectedHiddenFindingContextCount = selectedFinding
+		? Math.max(0, selectedFindingContextRefs.length - selectedFindingDisplayContextRefs.length)
+		: 0;
 	$: selectedCurationEvidenceOptions = selectedClaim || selectedFinding
 		? presentationEvidenceForIds([
 				...(selectedFinding?.evidence_ref_ids ?? selectedClaim?.evidence_ref_ids ?? []),
@@ -567,6 +574,171 @@
 		return [...new Set(ids)]
 			.map((id) => presentationContextById.get(id))
 			.filter((context): context is ResearchUnderstandingPresentationContext => Boolean(context));
+	}
+
+	function isGenericFindingContextLabel(label: string) {
+		return /^(claim applicability|context)$/i.test(label.trim());
+	}
+
+	function isMostlyNumericContextText(value: string) {
+		const parts = value
+			.split(/[,;]/)
+			.map((part) => part.trim())
+			.filter(Boolean);
+		if (parts.length < 3) return false;
+		const noisyParts = parts.filter(
+			(part) =>
+				part === '-' ||
+				/^oeu_[a-z0-9]+$/i.test(part) ||
+				/^[A-Z]$/.test(part) ||
+				/^[-+]?\d+(\.\d+)?\s*(%|degc|c|mpa|w|mm\/s|j\/mm3|j\/mm³)?$/i.test(part)
+		);
+		return noisyParts.length / parts.length >= 0.65;
+	}
+
+	function isNoisyFindingContextText(value: string) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (!normalized) return true;
+		if (/\boeu_[a-z0-9]+\b/i.test(normalized)) return true;
+		if (/\bdensity_porosity_microstructure\b/i.test(normalized)) return true;
+		if (/^SEM\s*\/\s*ImageJ$/i.test(normalized)) return true;
+		if (isMostlyNumericContextText(normalized)) return true;
+		if (
+			normalized.length > 220 &&
+			/(samples were|characterized|polished|magnification|figure legend|interpretation of the references)/i.test(
+				normalized
+			)
+		) {
+			return true;
+		}
+		return false;
+	}
+
+	function readableFindingContextText(value: string, limit = 140) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (!normalized || isNoisyFindingContextText(normalized)) return '';
+		return compactText(normalized, limit);
+	}
+
+	function readableFindingContextList(values: string[], limit = 4) {
+		const cleaned: string[] = [];
+		for (const value of values) {
+			const text = readableFindingContextText(value, 90);
+			if (text && !cleaned.includes(text)) cleaned.push(text);
+			if (cleaned.length >= limit) break;
+		}
+		return cleaned;
+	}
+
+	function normalizedFindingContextToken(value: string) {
+		return value
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	function contextValueMatchesFinding(value: string, finding: ResearchUnderstandingPresentationFinding) {
+		const normalized = normalizedFindingContextToken(value);
+		if (!normalized) return false;
+		const findingTerms = [
+			...finding.variables,
+			...finding.mediators,
+			...finding.outcomes,
+			finding.scope_summary
+		]
+			.map(normalizedFindingContextToken)
+			.filter(Boolean);
+		return findingTerms.some(
+			(term) =>
+				term &&
+				(normalized.includes(term) || term.includes(normalized))
+		);
+	}
+
+	function contextMatchesFinding(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		if (!isGenericFindingContextLabel(context.label)) return true;
+		if (!context.property_scope.length) return true;
+		return context.property_scope.some((value) => contextValueMatchesFinding(value, finding));
+	}
+
+	function compactFindingContext(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	): ResearchUnderstandingPresentationContext | null {
+		if (!contextMatchesFinding(context, finding)) return null;
+		const material_scope = readableFindingContextList(context.material_scope);
+		const property_scope = readableFindingContextList(context.property_scope);
+		const process_summary = readableFindingContextText(context.process_summary);
+		const test_summary = readableFindingContextText(context.test_summary);
+		const limitations = readableFindingContextList(context.limitations, 3);
+		const hasSpecificContext = Boolean(process_summary || test_summary || limitations.length);
+		if (isGenericFindingContextLabel(context.label) && !hasSpecificContext) return null;
+		if (
+			!material_scope.length &&
+			!property_scope.length &&
+			!process_summary &&
+			!test_summary &&
+			!limitations.length
+		) {
+			return null;
+		}
+		return {
+			...context,
+			label: compactText(context.label || 'Context', 80),
+			material_scope,
+			property_scope,
+			process_summary,
+			test_summary,
+			limitations
+		};
+	}
+
+	function findingContextScore(
+		original: ResearchUnderstandingPresentationContext,
+		context: ResearchUnderstandingPresentationContext
+	) {
+		let score = isGenericFindingContextLabel(original.label) ? -2 : 5;
+		if (context.process_summary) score += 3;
+		if (context.test_summary) score += 2;
+		if (context.material_scope.length) score += 1;
+		if (context.property_scope.length) score += 1;
+		if (context.limitations.length) score += 1;
+		if (isNoisyFindingContextText(original.process_summary)) score -= 1;
+		if (isNoisyFindingContextText(original.test_summary)) score -= 1;
+		return score;
+	}
+
+	function compactFindingContextDisplay(
+		contexts: ResearchUnderstandingPresentationContext[],
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		return contexts
+			.map((context, index) => {
+				const compacted = compactFindingContext(context, finding);
+				if (!compacted) return null;
+				return {
+					context: compacted,
+					index,
+					score: findingContextScore(context, compacted)
+				};
+			})
+			.filter(
+				(
+					item
+				): item is {
+					context: ResearchUnderstandingPresentationContext;
+					index: number;
+					score: number;
+				} => Boolean(item)
+			)
+			.sort((left, right) => right.score - left.score || left.index - right.index)
+			.slice(0, FINDING_CONTEXT_DISPLAY_LIMIT)
+			.sort((left, right) => left.index - right.index)
+			.map((item) => item.context);
 	}
 
 	function contextCurationMeta(context: ResearchUnderstandingPresentationContext) {
@@ -1505,7 +1677,7 @@
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.contexts')}</h5>
-								{#each (selectedFinding ? selectedFindingContextRefs : selectedContextRefs) as context (context.context_id)}
+								{#each (selectedFinding ? selectedFindingDisplayContextRefs : selectedContextRefs) as context (context.context_id)}
 									<div class="research-understanding-workbench__context">
 										<strong>{context.label}</strong>
 										{#if context.material_scope.length}
@@ -1544,6 +1716,13 @@
 										{$t('research.understanding.noContexts')}
 									</div>
 								{/each}
+								{#if selectedFinding && selectedHiddenFindingContextCount > 0}
+									<p class="research-understanding-workbench__context-note">
+										{$t('research.understanding.hiddenFindingContextCount', {
+											count: selectedHiddenFindingContextCount
+										})}
+									</p>
+								{/if}
 							</div>
 
 							<div class="research-understanding-workbench__detail-section">
@@ -2302,6 +2481,13 @@
 	}
 
 	.research-understanding-workbench__feedback-state {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__context-note {
 		margin: 0;
 		color: var(--text-secondary);
 		font-size: 12px;

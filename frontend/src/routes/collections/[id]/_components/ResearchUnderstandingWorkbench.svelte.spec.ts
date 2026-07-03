@@ -538,7 +538,8 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 			'ctx_density_objective',
 			'ctx_density_noisy_sem',
 			'ctx_density_internal',
-			'ctx_density_numeric'
+			'ctx_density_numeric',
+			'ctx_density_off_axis_fatigue'
 		],
 		relation_ids: ['rel_density_quote'],
 		evidence_bundle: {
@@ -651,6 +652,16 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 					process_summary:
 						'samples processed via scanning strategy B and C, selective laser melting, 150 J/mm³, 0.111 mm/s, A, 316L',
 					test_summary: 'ASTM B842',
+					limitations: []
+				},
+				{
+					context_id: 'ctx_density_off_axis_fatigue',
+					label: 'Claim applicability',
+					material_scope: ['stainless steel 316L'],
+					property_scope: ['density'],
+					process_summary:
+						'condition without preheating the build platform, porosity level, fatigue tests, HIP-SLM',
+					test_summary: 'fatigue testing, machined specimens',
 					limitations: []
 				}
 			]
@@ -873,8 +884,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingDetail.getByText(/FEI-INSPECT 50 SEM/)).not.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('microhardness')).not.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('ASTM B842')).not.toBeInTheDocument();
+		await expect.element(findingDetail.getByText(/fatigue testing/)).not.toBeInTheDocument();
+		await expect.element(findingDetail.getByText(/HIP-SLM/)).not.toBeInTheDocument();
 		await expect
-			.element(findingDetail.getByText('4 additional context record(s) available for curation.'))
+			.element(findingDetail.getByText('5 additional context record(s) available for curation.'))
 			.toBeInTheDocument();
 		await expect.element(findingDetail.getByRole('button', { name: 'Expert feedback' })).toBeInTheDocument();
 		await expect.element(findingDetail.getByRole('button', { name: 'Expert curation' })).toBeInTheDocument();

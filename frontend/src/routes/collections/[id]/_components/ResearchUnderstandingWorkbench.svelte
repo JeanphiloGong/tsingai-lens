@@ -68,6 +68,17 @@
 		'noise',
 		'uncategorized'
 	];
+	const FINDING_CONTEXT_AXIS_TERMS = [
+		'fatigue',
+		'hip',
+		'hot isostatic pressing',
+		'as built',
+		'preheating',
+		'build platform preheating',
+		'microhardness',
+		'corrosion',
+		'pitting corrosion'
+	];
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
@@ -649,10 +660,8 @@
 			.trim();
 	}
 
-	function contextValueMatchesFinding(value: string, finding: ResearchUnderstandingPresentationFinding) {
-		const normalized = normalizedFindingContextToken(value);
-		if (!normalized) return false;
-		const findingTerms = [
+	function findingContextAxisTerms(finding: ResearchUnderstandingPresentationFinding) {
+		return [
 			...finding.variables,
 			...finding.mediators,
 			...finding.outcomes,
@@ -660,11 +669,52 @@
 		]
 			.map(normalizedFindingContextToken)
 			.filter(Boolean);
-		return findingTerms.some(
+	}
+
+	function contextValueMatchesFinding(value: string, finding: ResearchUnderstandingPresentationFinding) {
+		const normalized = normalizedFindingContextToken(value);
+		if (!normalized) return false;
+		return findingContextAxisTerms(finding).some(
 			(term) =>
 				term &&
 				(normalized.includes(term) || term.includes(normalized))
 		);
+	}
+
+	function contextDescriptionMatchesFinding(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		return [
+			context.process_summary,
+			context.test_summary,
+			...context.limitations
+		].some((value) => contextValueMatchesFinding(value, finding));
+	}
+
+	function contextHasOffAxisTerms(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		const text = normalizedFindingContextToken(
+			[
+				context.process_summary,
+				context.test_summary,
+				...context.property_scope,
+				...context.limitations
+			].join(' ')
+		);
+		if (!text) return false;
+		const axisTerms = findingContextAxisTerms(finding);
+		return FINDING_CONTEXT_AXIS_TERMS.some((term) => {
+			const normalizedTerm = normalizedFindingContextToken(term);
+			if (!normalizedTerm || !text.includes(normalizedTerm)) return false;
+			return !axisTerms.some(
+				(axisTerm) =>
+					axisTerm &&
+					(axisTerm.includes(normalizedTerm) || normalizedTerm.includes(axisTerm))
+			);
+		});
 	}
 
 	function contextMatchesFinding(
@@ -673,6 +723,9 @@
 	) {
 		if (!isGenericFindingContextLabel(context.label)) return true;
 		if (!context.property_scope.length) return true;
+		if (contextHasOffAxisTerms(context, finding)) return false;
+		if (contextDescriptionMatchesFinding(context, finding)) return true;
+		if (context.process_summary || context.test_summary || context.limitations.length) return false;
 		return context.property_scope.some((value) => contextValueMatchesFinding(value, finding));
 	}
 

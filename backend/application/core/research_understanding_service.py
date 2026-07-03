@@ -2144,6 +2144,43 @@ class ResearchUnderstandingService:
             if self._reviewable_presentation_relation(relation)
         ]
         primary_relation = related_relations[0] if related_relations else {}
+        contexts = [
+            contexts_by_id[context_id]
+            for context_id in context_ids
+            if context_id in contexts_by_id
+        ]
+        variable_axis = self._variable_axis_for(primary_relation, contexts)
+        target_property = self._target_property_for(claim, primary_relation, contexts)
+        target_properties = _dedupe_strings(
+            [
+                property_name
+                for context in contexts_by_id.values()
+                if (
+                    _text(context.get("context_id")) == "ctx_objective_scope"
+                    or _normalize_match_text(_text(context.get("label")) or "")
+                    in {"objective scope", "goal scope"}
+                )
+                for property_name in _strings(context.get("property_scope"))
+            ]
+        )
+        target_terms: set[str] = set()
+        for target_property_name in target_properties:
+            target_terms.update(
+                self._finding_target_terms(
+                    {"target_property": target_property_name},
+                    [],
+                )
+            )
+        target_relations = [
+            relation
+            for relation in related_relations
+            if self._relation_matches_finding_target(relation, target_terms)
+        ]
+        if target_relations:
+            related_relations = target_relations
+            primary_relation = related_relations[0]
+            variable_axis = self._variable_axis_for(primary_relation, contexts)
+            target_property = self._target_property_for(claim, primary_relation, [])
         relation_evidence_ref_ids = _dedupe_strings(
             [
                 ref_id
@@ -2154,13 +2191,6 @@ class ResearchUnderstandingService:
         effect_evidence_ref_ids = _dedupe_strings(
             [*evidence_ref_ids, *relation_evidence_ref_ids]
         )
-        contexts = [
-            contexts_by_id[context_id]
-            for context_id in context_ids
-            if context_id in contexts_by_id
-        ]
-        variable_axis = self._variable_axis_for(primary_relation, contexts)
-        target_property = self._target_property_for(claim, primary_relation, contexts)
         evidence_refs = [
             evidence_by_id[ref_id]
             for ref_id in effect_evidence_ref_ids
@@ -2238,6 +2268,31 @@ class ResearchUnderstandingService:
         subject = self._presentation_relation_side(relation.get("subject"))
         object_chain = self._relation_object_chain(relation)
         return bool(subject and object_chain and self._presentation_relation_summary(relation))
+
+    def _relation_matches_finding_target(
+        self,
+        relation: Mapping[str, Any],
+        target_terms: set[str],
+    ) -> bool:
+        if not target_terms:
+            return False
+        broad_target_terms = {
+            "mechanic",
+            "mechanical",
+            "mechanicals",
+            "microstructural",
+            "microstructure",
+            "microstructureal",
+            "microstructures",
+            "properties",
+        }
+        if target_terms <= broad_target_terms:
+            return False
+        object_terms = self._finding_target_terms(
+            {"target_property": " ".join(self._relation_object_chain(relation))},
+            [],
+        )
+        return bool(object_terms & target_terms)
 
     def _presentation_relation_summary(self, relation: Mapping[str, Any]) -> str:
         statement = _text(relation.get("statement"))

@@ -2272,7 +2272,22 @@ def test_with_presentation_recalls_target_matching_corrosion_relation_evidence()
                         "unit_density_table",
                         "unit_corrosion_text",
                     ],
-                }
+                },
+                {
+                    "relation_id": "rel_slm_porosity",
+                    "relation_type": "explains",
+                    "subject": "selective laser melting",
+                    "predicate": "explains",
+                    "object": "porosity",
+                    "statement": (
+                        "Selective laser melting process parameters affect "
+                        "porosity formation."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density_table"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density_table"],
+                },
             ],
             "evidence_refs": [
                 {
@@ -2318,12 +2333,135 @@ def test_with_presentation_recalls_target_matching_corrosion_relation_evidence()
 
     assert understanding is not None
     finding = understanding["presentation"]["findings"][0]
+    assert finding["title"] == "porosity level -> pitting corrosion behavior"
+    assert finding["variables"] == ["porosity level"]
+    assert finding["outcomes"] == ["pitting corrosion behavior"]
+    assert finding["relation_ids"] == ["rel_porosity_corrosion"]
     assert finding["evidence_ref_ids"] == [
         "evref_density_table",
         "evref_corrosion_text",
     ]
     assert finding["evidence_bundle"]["direct_result"] == ["evref_corrosion_text"]
     assert finding["evidence_bundle"]["uncategorized"] == ["evref_density_table"]
+    assert finding["support_grade"] == "partial"
+
+
+def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_targets():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": (
+                    "How do laser power and scan speed affect microstructure "
+                    "and mechanical properties?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Laser power and scan speed directly link process "
+                        "parameters to defect formation and density improvement."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.8,
+                    "evidence_ref_ids": ["evref_pores"],
+                    "context_ids": ["ctx_microstructure"],
+                    "source_object_ids": ["unit_pores"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_power_porosity",
+                    "relation_type": "reduces",
+                    "subject": "laser power",
+                    "predicate": "reduces",
+                    "object": "melt pool dynamics -> porosity",
+                    "statement": (
+                        "Higher laser power reduces porosity by stabilizing "
+                        "melt pool dynamics."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_pores"],
+                    "context_ids": ["ctx_microstructure"],
+                    "source_object_ids": ["unit_pores"],
+                },
+                {
+                    "relation_id": "rel_speed_density",
+                    "relation_type": "increases",
+                    "subject": "scan speed",
+                    "predicate": "increases",
+                    "object": "melt pool stability -> density",
+                    "statement": (
+                        "Scan speed changes density through melt pool "
+                        "stability."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_pores"],
+                    "context_ids": ["ctx_microstructure"],
+                    "source_object_ids": ["unit_pores"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_pores",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 pore result",
+                    "locator": {"source_ref": "blk-pores"},
+                    "fact_ids": ["unit_pores"],
+                    "traceability_status": "resolved",
+                    "quote": (
+                        "At higher laser power, pore size decreased and the "
+                        "average density increased."
+                    ),
+                },
+                {
+                    "evidence_ref_id": "evref_background",
+                    "source_kind": "text_window",
+                    "document_id": "paper-2",
+                    "label": "P002 background",
+                    "locator": {"source_ref": "blk-background"},
+                    "fact_ids": ["unit_background"],
+                    "traceability_status": "resolved",
+                    "quote": "The paper describes microstructure after HIP.",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["microstructure", "mechanical properties"],
+                },
+                {
+                    "context_id": "ctx_microstructure",
+                    "label": "Claim applicability",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["microstructure"],
+                },
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["relation_ids"] == [
+        "rel_power_porosity",
+        "rel_speed_density",
+    ]
+    assert finding["variables"] == ["laser power", "scan speed"]
+    assert finding["outcomes"] == ["porosity", "density"]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_pores"]
     assert finding["support_grade"] == "partial"
 
 

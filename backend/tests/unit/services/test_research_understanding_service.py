@@ -1925,20 +1925,20 @@ def test_with_presentation_projects_findings_contract():
     assert finding["outcomes"] == ["relative density"]
     assert finding["direction"] == "increases"
     assert finding["scope_summary"] == "316L stainless steel, laser power"
-    assert finding["support_grade"] == "insufficient"
+    assert finding["support_grade"] == "partial"
     assert finding["review_status"] == "pending_review"
     assert finding["paper_count"] == 1
     assert finding["evidence_count"] == 2
     assert finding["evidence_ref_ids"] == ["evref_density", "evref_density_text"]
     assert finding["relation_ids"] == ["rel_laser_density"]
     assert finding["evidence_bundle"] == {
-        "direct_result": [],
+        "direct_result": ["evref_density"],
         "mechanism": [],
         "condition_context": [],
         "background": [],
         "conflict": [],
         "noise": [],
-        "uncategorized": ["evref_density", "evref_density_text"],
+        "uncategorized": ["evref_density_text"],
     }
 
 
@@ -2059,6 +2059,84 @@ def test_with_presentation_buckets_finding_evidence_by_role():
         "noise": [],
         "uncategorized": ["evref_unknown"],
     }
+
+
+def test_with_presentation_infers_direct_result_for_relation_linked_missing_role():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect porosity?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_porosity",
+                    "claim_type": "finding",
+                    "statement": "Build platform preheating decreases porosity.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_relation_text", "evref_context_only"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_relation"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_porosity",
+                    "relation_type": "reduces",
+                    "subject": "build platform preheating",
+                    "predicate": "reduces",
+                    "object": "porosity",
+                    "statement": "Build platform preheating decreases porosity.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_relation_text"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_relation"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_relation_text",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_relation"],
+                    "traceability_status": "resolved",
+                },
+                {
+                    "evidence_ref_id": "evref_context_only",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Methods",
+                    "locator": {"source_ref": "blk-methods"},
+                    "fact_ids": ["unit_context"],
+                    "traceability_status": "resolved",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["porosity"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_relation_text"]
+    assert finding["evidence_bundle"]["uncategorized"] == ["evref_context_only"]
+    assert finding["support_grade"] == "partial"
 
 
 def test_with_presentation_assigns_support_grade_from_evidence_quality():

@@ -1835,6 +1835,7 @@ class ResearchUnderstandingService:
         evidence_bundle = self._finding_evidence_bundle(
             effect,
             evidence_by_id=evidence_by_id,
+            relations=relations,
         )
         review_status = self._finding_review_status(effect)
         scope_summary = _text(effect.get("context_summary")) or ""
@@ -1949,6 +1950,7 @@ class ResearchUnderstandingService:
         effect: Mapping[str, Any],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
+        relations: list[dict[str, Any]],
     ) -> dict[str, list[str]]:
         bundle: dict[str, list[str]] = {
             "direct_result": [],
@@ -1959,13 +1961,26 @@ class ResearchUnderstandingService:
             "noise": [],
             "uncategorized": [],
         }
+        relation_evidence_ref_ids = {
+            ref_id
+            for relation in relations
+            for ref_id in _strings(relation.get("evidence_ref_ids"))
+        }
         for ref_id in _strings(effect.get("evidence_ref_ids")):
             role = _text(evidence_by_id.get(ref_id, {}).get("evidence_role"))
-            bundle_key = self._finding_bundle_key_for_role(role)
+            bundle_key = self._finding_bundle_key_for_role(
+                role,
+                fallback_direct=not role and ref_id in relation_evidence_ref_ids,
+            )
             bundle[bundle_key].append(ref_id)
         return bundle
 
-    def _finding_bundle_key_for_role(self, evidence_role: str | None) -> str:
+    def _finding_bundle_key_for_role(
+        self,
+        evidence_role: str | None,
+        *,
+        fallback_direct: bool = False,
+    ) -> str:
         normalized = (_text(evidence_role) or "").lower()
         if normalized == "direct_support":
             return "direct_result"
@@ -1979,6 +1994,8 @@ class ResearchUnderstandingService:
             return "conflict"
         if normalized in {"noise", "irrelevant"}:
             return "noise"
+        if fallback_direct:
+            return "direct_result"
         return "uncategorized"
 
     def _finding_support_grade(

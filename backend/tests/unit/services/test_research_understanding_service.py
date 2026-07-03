@@ -5,6 +5,9 @@ import json
 from application.core.research_understanding_service import (
     ResearchUnderstandingService,
 )
+from controllers.schemas.core.research_understanding import (
+    ResearchUnderstandingResponse,
+)
 from domain.core import ResearchUnderstanding
 from domain.source import SourceBlock, SourceDocument
 
@@ -4043,6 +4046,40 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     )
     assert (
         understanding["presentation"]["summary"]["review_queue_finding_count"]
+        == 1
+    )
+
+    response_payload = ResearchUnderstandingResponse.model_validate(
+        understanding
+    ).model_dump()
+    serialized_primary = response_payload["presentation"]["primary_findings"]
+    serialized_review = response_payload["presentation"][
+        "review_queue_findings"
+    ]
+    assert [finding["finding_id"] for finding in serialized_primary] == [
+        findings[0]["finding_id"]
+    ]
+    assert [finding["finding_id"] for finding in serialized_review] == [
+        findings[1]["finding_id"]
+    ]
+    assert serialized_primary[0]["support_grade"] == "partial"
+    assert serialized_primary[0]["evidence_bundle"]["direct_result"] == [
+        "evref_direct"
+    ]
+    assert serialized_review[0]["support_grade"] == "insufficient"
+    assert serialized_review[0]["evidence_bundle"]["background"] == [
+        "evref_context"
+    ]
+    assert (
+        response_payload["presentation"]["summary"][
+            "primary_finding_count"
+        ]
+        == 1
+    )
+    assert (
+        response_payload["presentation"]["summary"][
+            "review_queue_finding_count"
+        ]
         == 1
     )
 

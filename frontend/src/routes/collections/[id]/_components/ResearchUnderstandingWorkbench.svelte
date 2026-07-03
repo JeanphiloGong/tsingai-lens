@@ -93,8 +93,14 @@
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
 	$: effectRows = presentation?.effects ?? [];
-	$: findingRows = presentation?.findings ?? [];
-	$: usesFindings = findingRows.length > 0;
+	$: allFindingRows = presentation?.findings ?? [];
+	$: primaryFindingRows = presentation?.primary_findings ?? [];
+	$: reviewQueueFindingRows = presentation?.review_queue_findings ?? [];
+	$: findingRows = reviewQueueOnly ? reviewQueueFindingRows : primaryFindingRows;
+	$: usesFindings =
+		allFindingRows.length > 0 ||
+		primaryFindingRows.length > 0 ||
+		reviewQueueFindingRows.length > 0;
 	$: if (usesFindings !== lastUsesFindings) {
 		lastUsesFindings = usesFindings;
 		selectedClaimStatus = 'all';
@@ -119,7 +125,7 @@
 			.map((claim) => claim.claim_id)
 	);
 	$: reviewQueueFindingIds = new Set(
-		findingRows
+		(reviewQueueFindingRows.length ? reviewQueueFindingRows : allFindingRows)
 			.filter((finding) => {
 				const feedback = [
 					...(feedbackByTargetId.get(finding.finding_id) ?? []),
@@ -172,7 +178,7 @@
 		detailMode ? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
 	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
 	$: selectedFinding = selectedEffect
-		? (findingRows.find((finding) => finding.claim_id === selectedEffect.claim_id) ?? null)
+		? (allFindingRows.find((finding) => finding.claim_id === selectedEffect.claim_id) ?? null)
 		: null;
 	$: selectedRelations = selectedEffect
 		? (selectedFinding?.relation_ids.length ? selectedFinding.relation_ids : selectedEffect.relation_ids)
@@ -746,13 +752,17 @@
 				<span>{$t('research.understanding.evidenceRefs')}</span>
 			</div>
 			<div>
-				<strong>{presentationSummary?.review_queue_count ?? reviewQueueClaimIds.size}</strong>
+				<strong>
+					{presentationSummary?.review_queue_finding_count ??
+						presentationSummary?.review_queue_count ??
+						reviewQueueFindingIds.size}
+				</strong>
 				<span>{$t('research.understanding.reviewQueue')}</span>
 			</div>
 		</div>
 
-		{#if findingRows.length || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
-			{#if findingRows.length || effectRows.length}
+		{#if usesFindings || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
+			{#if usesFindings || effectRows.length}
 				<div
 					class="research-understanding-workbench__filters"
 					aria-label={$t('research.understanding.claimFilters')}
@@ -828,7 +838,10 @@
 								on:click={() => (reviewQueueOnly = !reviewQueueOnly)}
 							>
 								{$t('research.understanding.reviewQueueCount', {
-									count: presentationSummary?.review_queue_count ?? reviewQueueClaimIds.size
+									count:
+										presentationSummary?.review_queue_finding_count ??
+										presentationSummary?.review_queue_count ??
+										reviewQueueFindingIds.size
 								})}
 							</button>
 						</div>

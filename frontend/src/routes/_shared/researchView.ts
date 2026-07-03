@@ -98,6 +98,8 @@ export type ResearchUnderstandingPresentationSummary = {
 	evidence_count: number;
 	context_count: number;
 	review_queue_count: number;
+	primary_finding_count: number;
+	review_queue_finding_count: number;
 };
 export type ResearchUnderstandingPresentationEffect = {
 	effect_id: string;
@@ -180,6 +182,8 @@ export type ResearchUnderstandingPresentation = {
 	summary: ResearchUnderstandingPresentationSummary;
 	effects: ResearchUnderstandingPresentationEffect[];
 	findings: ResearchUnderstandingPresentationFinding[];
+	primary_findings: ResearchUnderstandingPresentationFinding[];
+	review_queue_findings: ResearchUnderstandingPresentationFinding[];
 	evidence_items: ResearchUnderstandingPresentationEvidence[];
 	context_summaries: ResearchUnderstandingPresentationContext[];
 };
@@ -1110,6 +1114,18 @@ function normalizeResearchUnderstandingPresentation(
 	const findings = asArray(record.findings)
 		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
 		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
+	const primaryFindingsSource = Array.isArray(record.primary_findings)
+		? record.primary_findings
+		: findings;
+	const reviewQueueFindingsSource = Array.isArray(record.review_queue_findings)
+		? record.review_queue_findings
+		: findings;
+	const primaryFindings = primaryFindingsSource
+		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
+		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
+	const reviewQueueFindings = reviewQueueFindingsSource
+		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
+		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
 	const evidenceItems = asArray(record.evidence_items)
 		.map((item) => normalizeResearchUnderstandingPresentationEvidence(item))
 		.filter((item): item is ResearchUnderstandingPresentationEvidence => item !== null);
@@ -1126,10 +1142,17 @@ function normalizeResearchUnderstandingPresentation(
 			relation_count: toNumber(summaryRecord.relation_count, fallback.summary.relation_count),
 			evidence_count: toNumber(summaryRecord.evidence_count, fallback.summary.evidence_ref_count),
 			context_count: toNumber(summaryRecord.context_count, fallback.summary.context_count),
-			review_queue_count: toNumber(summaryRecord.review_queue_count, 0)
+			review_queue_count: toNumber(summaryRecord.review_queue_count, 0),
+			primary_finding_count: toNumber(summaryRecord.primary_finding_count, primaryFindings.length),
+			review_queue_finding_count: toNumber(
+				summaryRecord.review_queue_finding_count,
+				reviewQueueFindings.length
+			)
 		},
 		effects,
 		findings,
+		primary_findings: primaryFindings,
+		review_queue_findings: reviewQueueFindings,
 		evidence_items: evidenceItems,
 		context_summaries: contextSummaries
 	};
@@ -1285,10 +1308,14 @@ function emptyResearchUnderstandingPresentation(fallback: {
 			relation_count: fallback.summary.relation_count,
 			evidence_count: fallback.summary.evidence_ref_count,
 			context_count: fallback.summary.context_count,
-			review_queue_count: 0
+			review_queue_count: 0,
+			primary_finding_count: 0,
+			review_queue_finding_count: 0
 		},
 		effects: [],
 		findings: [],
+		primary_findings: [],
+		review_queue_findings: [],
 		evidence_items: [],
 		context_summaries: []
 	};

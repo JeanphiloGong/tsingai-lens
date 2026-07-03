@@ -319,6 +319,10 @@ describe('research view shared helpers', () => {
 					context_count: 0
 				},
 				presentation: {
+					summary: {
+						primary_finding_count: 1,
+						review_queue_finding_count: 1
+					},
 					findings: [
 						{
 							finding_id: 'finding_claim_1',
@@ -332,6 +336,52 @@ describe('research view shared helpers', () => {
 							evidence_ref_ids: ['ev_1'],
 							evidence_bundle: {
 								direct_result: ['ev_1']
+							}
+						},
+						{
+							finding_id: 'finding_claim_review',
+							claim_id: 'claim_review',
+							title: 'background -> tensile strength',
+							statement: 'Background-only candidate.',
+							variables: ['background'],
+							outcomes: ['tensile strength'],
+							support_grade: 'insufficient',
+							review_status: 'needs_review',
+							evidence_ref_ids: [],
+							evidence_bundle: {
+								background: ['ev_background']
+							}
+						}
+					],
+					primary_findings: [
+						{
+							finding_id: 'finding_claim_1',
+							claim_id: 'claim_1',
+							title: 'heat treatment -> tensile strength',
+							statement: 'Heat treatment changes tensile strength.',
+							variables: ['heat treatment'],
+							outcomes: ['tensile strength'],
+							support_grade: 'partial',
+							review_status: 'pending_review',
+							evidence_ref_ids: ['ev_1'],
+							evidence_bundle: {
+								direct_result: ['ev_1']
+							}
+						}
+					],
+					review_queue_findings: [
+						{
+							finding_id: 'finding_claim_review',
+							claim_id: 'claim_review',
+							title: 'background -> tensile strength',
+							statement: 'Background-only candidate.',
+							variables: ['background'],
+							outcomes: ['tensile strength'],
+							support_grade: 'insufficient',
+							review_status: 'needs_review',
+							evidence_ref_ids: [],
+							evidence_bundle: {
+								background: ['ev_background']
 							}
 						}
 					],
@@ -365,6 +415,14 @@ describe('research view shared helpers', () => {
 			review_status: 'pending_review'
 		});
 		expect(finding?.evidence_bundle.direct_result).toEqual(['ev_1']);
+		expect(analysis.understanding?.presentation.summary.primary_finding_count).toBe(1);
+		expect(analysis.understanding?.presentation.summary.review_queue_finding_count).toBe(1);
+		expect(analysis.understanding?.presentation.primary_findings.map((item) => item.finding_id)).toEqual([
+			'finding_claim_1'
+		]);
+		expect(
+			analysis.understanding?.presentation.review_queue_findings.map((item) => item.finding_id)
+		).toEqual(['finding_claim_review']);
 		expect(analysis.understanding?.evidence_refs[0].evidence_role).toBe('direct_support');
 		expect(analysis.understanding?.presentation.evidence_items[0].evidence_role).toBe(
 			'direct_support'

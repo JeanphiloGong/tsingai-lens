@@ -178,7 +178,9 @@ function understandingFixture(): ResearchUnderstanding {
 				relation_count: 1,
 				evidence_count: 3,
 				context_count: 1,
-				review_queue_count: 2
+				review_queue_count: 2,
+				primary_finding_count: 1,
+				review_queue_finding_count: 2
 			},
 			effects: [
 				{
@@ -331,6 +333,97 @@ function understandingFixture(): ResearchUnderstanding {
 					warnings: ['conflicting_direction']
 				}
 			],
+			primary_findings: [
+				{
+					finding_id: 'finding_strength_supported',
+					claim_id: 'claim_strength_supported',
+					title: 'Heat treatment -> yield strength',
+					statement: 'Heat treatment changes LPBF 316L tensile response.',
+					variables: ['heat treatment'],
+					mediators: [],
+					outcomes: ['yield strength'],
+					direction: '',
+					scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					support_grade: 'partial',
+					review_status: 'pending_review',
+					confidence: 0.9,
+					paper_count: 1,
+					evidence_count: 1,
+					evidence_ref_ids: ['ev_table_2'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: [],
+					evidence_bundle: {
+						direct_result: ['ev_table_2'],
+						mechanism: [],
+						condition_context: [],
+						background: [],
+						conflict: [],
+						noise: [],
+						uncategorized: []
+					},
+					warnings: []
+				}
+			],
+			review_queue_findings: [
+				{
+					finding_id: 'finding_mechanism_limited',
+					claim_id: 'claim_mechanism_limited',
+					title: 'Annealing -> cellular substructure change',
+					statement: 'Annealing may reduce cellular substructure.',
+					variables: ['annealing'],
+					mediators: ['cellular substructure'],
+					outcomes: ['yield strength'],
+					direction: 'explains',
+					scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					support_grade: 'weak',
+					review_status: 'needs_review',
+					confidence: 0.64,
+					paper_count: 1,
+					evidence_count: 1,
+					evidence_ref_ids: ['ev_section_3'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: ['rel_annealing_microstructure', 'rel_internal_sample'],
+					evidence_bundle: {
+						direct_result: [],
+						mechanism: ['ev_section_3'],
+						condition_context: [],
+						background: [],
+						conflict: [],
+						noise: [],
+						uncategorized: []
+					},
+					warnings: ['needs_expert_review']
+				},
+				{
+					finding_id: 'finding_comparison_conflict',
+					claim_id: 'claim_comparison_conflict',
+					title: 'Heat treatment -> yield strength conflict',
+					statement: 'Strength trends conflict across reported heat treatments.',
+					variables: ['heat treatment'],
+					mediators: [],
+					outcomes: ['yield strength'],
+					direction: 'compares',
+					scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+					support_grade: 'conflict',
+					review_status: 'needs_review',
+					confidence: 0.51,
+					paper_count: 1,
+					evidence_count: 1,
+					evidence_ref_ids: ['ev_conflict'],
+					context_ids: ['ctx_heat_treatment'],
+					relation_ids: [],
+					evidence_bundle: {
+						direct_result: [],
+						mechanism: [],
+						condition_context: [],
+						background: [],
+						conflict: ['ev_conflict'],
+						noise: [],
+						uncategorized: []
+					},
+					warnings: ['conflicting_direction']
+				}
+			],
 			evidence_items: [
 				{
 					evidence_ref_id: 'ev_table_2',
@@ -418,6 +511,7 @@ function goalUnderstandingFixture(): ResearchUnderstanding {
 }
 
 async function openMechanismClaimDetail() {
+	await browserPage.getByRole('button', { name: 'Needs review 2' }).click();
 	await browserPage.getByRole('button', { name: 'Weak 1' }).click();
 	await browserPage
 		.getByRole('button', { name: /Annealing may reduce cellular substructure\./ })
@@ -426,6 +520,7 @@ async function openMechanismClaimDetail() {
 }
 
 async function openConflictedClaimDetail() {
+	await browserPage.getByRole('button', { name: 'Needs review 2' }).click();
 	await browserPage.getByRole('button', { name: 'Conflict 1' }).click();
 	await browserPage
 		.getByRole('button', { name: /Strength trends conflict across reported heat treatments\./ })
@@ -515,7 +610,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(browserPage.getByRole('columnheader', { name: 'Mechanism' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('3 of 3')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 of 1')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Heat treatment changes LPBF 316L tensile response.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Annealing may reduce cellular substructure.').first())
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Strength trends conflict across reported heat treatments.').first())
+			.not.toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
 
 		const claimDetail = await openMechanismClaimDetail();
@@ -562,7 +666,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(claimDetail.getByLabelText('Review result')).not.toBeInTheDocument();
 
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
-		await expect.element(browserPage.getByText('1 of 3')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 of 2')).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
 	});
 
@@ -850,7 +954,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		await browserPage.getByRole('button', { name: 'Needs review 2' }).click();
 
-		await expect.element(browserPage.getByText('2 of 3')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('2 of 2')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Annealing may reduce cellular substructure.').first())
 			.toBeInTheDocument();

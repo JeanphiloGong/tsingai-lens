@@ -140,6 +140,8 @@ class ResearchUnderstandingPresentationSummaryResponse(BaseModel):
     evidence_count: int = Field(default=0)
     context_count: int = Field(default=0)
     review_queue_count: int = Field(default=0)
+    primary_finding_count: int = Field(default=0)
+    review_queue_finding_count: int = Field(default=0)
 
 
 class ResearchUnderstandingPresentationEffectResponse(BaseModel):
@@ -242,6 +244,12 @@ class ResearchUnderstandingPresentationResponse(BaseModel):
         default_factory=list
     )
     findings: list[ResearchUnderstandingPresentationFindingResponse] = Field(
+        default_factory=list
+    )
+    primary_findings: list[ResearchUnderstandingPresentationFindingResponse] = Field(
+        default_factory=list
+    )
+    review_queue_findings: list[ResearchUnderstandingPresentationFindingResponse] = Field(
         default_factory=list
     )
     evidence_items: list[ResearchUnderstandingPresentationEvidenceResponse] = Field(

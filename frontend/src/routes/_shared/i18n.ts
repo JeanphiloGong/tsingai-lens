@@ -292,6 +292,20 @@ const translations: Record<Language, Translations> = {
 				filterByEvidenceGrade: 'Evidence grade',
 				reviewQueue: 'Review queue',
 				reviewQueueCount: 'Needs review {count}',
+				datasetExportTitle: 'Dataset export',
+				datasetLoading: 'Checking reviewed sample readiness...',
+				datasetReady:
+					'{count} finding sample(s) can be exported. Gold is expert-confirmed; candidate still needs review.',
+				datasetUnavailable: 'Dataset export is unavailable for this scope.',
+				datasetError: 'Dataset export is unavailable: {message}',
+				datasetDownloadJson: 'Download JSON',
+				datasetDownloadJsonl: 'Download JSONL',
+				datasetLabelStatuses: {
+					candidate: 'Candidate',
+					silver: 'Silver',
+					gold: 'Gold',
+					rejected: 'Rejected'
+				},
 				allClaimTypes: 'All types',
 				allStatuses: 'All statuses',
 				allSupportGrades: 'All grades',
@@ -2919,6 +2933,20 @@ const translations: Record<Language, Translations> = {
 				filterByEvidenceGrade: '证据等级',
 				reviewQueue: '复核队列',
 				reviewQueueCount: '待复核 {count}',
+				datasetExportTitle: '数据集导出',
+				datasetLoading: '正在检查可导出的复核样本...',
+				datasetReady:
+					'当前可导出 {count} 条 finding 样本。Gold 为专家确认；Candidate 仍需复核。',
+				datasetUnavailable: '当前范围暂不能导出数据集。',
+				datasetError: '数据集导出不可用：{message}',
+				datasetDownloadJson: '下载 JSON',
+				datasetDownloadJsonl: '下载 JSONL',
+				datasetLabelStatuses: {
+					candidate: 'Candidate',
+					silver: 'Silver',
+					gold: 'Gold',
+					rejected: 'Rejected'
+				},
 				allClaimTypes: '全部类型',
 				allStatuses: '全部状态',
 				allSupportGrades: '全部等级',

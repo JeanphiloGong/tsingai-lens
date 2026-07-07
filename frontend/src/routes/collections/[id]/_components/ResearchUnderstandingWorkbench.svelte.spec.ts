@@ -27,6 +27,12 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function requestUrl(input: string | URL | Request) {
+	const rawUrl =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	return new URL(rawUrl, 'http://localhost');
+}
+
 function understandingFixture(): ResearchUnderstanding {
 	return {
 		schema_version: 'research_understanding.v1',
@@ -710,6 +716,29 @@ describe('ResearchUnderstandingWorkbench', () => {
 			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({
+						schema_version: 'research_understanding_dataset.v1',
+						dataset_id: 'rud_col_123_objective_obj_1',
+						collection_id: 'col_123',
+						scope_type: 'objective',
+						scope_id: 'obj_1',
+						task_type: 'research_understanding_finding',
+						metric_profile: 'research_understanding_finding.v1',
+						label_status_filter: null,
+						item_count: 4,
+						label_counts: {
+							candidate: 1,
+							silver: 1,
+							gold: 1,
+							rejected: 1
+						},
+						items: [],
+						warnings: []
+					})
+				);
+			}
 			if (path.endsWith('/research-understanding/curations')) {
 				return Promise.resolve(
 					jsonResponse({
@@ -833,6 +862,106 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await expect.element(browserPage.getByText('1 of 2')).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
+	});
+
+	it('shows dataset readiness counts and same-origin export links', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetRegion = browserPage.getByLabelText('Dataset export');
+		await expect.element(datasetRegion).toBeInTheDocument();
+		await expect
+			.element(
+				datasetRegion.getByText(
+					'4 finding sample(s) can be exported. Gold is expert-confirmed; candidate still needs review.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(datasetRegion.getByText('Candidate 1')).toBeInTheDocument();
+		await expect.element(datasetRegion.getByText('Silver 1')).toBeInTheDocument();
+		await expect.element(datasetRegion.getByText('Gold 1')).toBeInTheDocument();
+		await expect.element(datasetRegion.getByText('Rejected 1')).toBeInTheDocument();
+
+		const jsonUrl = new URL(
+			datasetRegion
+				.getByRole('link', { name: 'Download JSON', exact: true })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(jsonUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(jsonUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(jsonUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(jsonUrl.searchParams.get('format')).toBe('json');
+
+		const jsonlUrl = new URL(
+			datasetRegion.getByRole('link', { name: 'Download JSONL' }).element().getAttribute('href') ??
+				'',
+			'http://localhost'
+		);
+		expect(jsonlUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(jsonlUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(jsonlUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(jsonlUrl.searchParams.get('format')).toBe('jsonl');
+
+		const datasetGetCall = fetchMock.mock.calls.find(([input, init]) => {
+			const url = requestUrl(input as string | URL | Request);
+			return (
+				url.pathname.endsWith('/research-understanding/dataset') &&
+				((init as RequestInit | undefined)?.method ?? 'GET') === 'GET'
+			);
+		}) as [string | URL | Request, RequestInit | undefined] | undefined;
+		expect(datasetGetCall).toBeTruthy();
+		const [input] = datasetGetCall!;
+		const requestedUrl = requestUrl(input);
+		expect(requestedUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(requestedUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(requestedUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(requestedUrl.searchParams.get('format')).toBeNull();
+	});
+
+	it('shows a dataset export error when readiness cannot load', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ detail: 'dataset unavailable' }, 500, 'Failed'));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetRegion = browserPage.getByLabelText('Dataset export');
+		await expect.element(datasetRegion).toBeInTheDocument();
+		await expect
+			.element(datasetRegion.getByText(/Dataset export is unavailable:/))
+			.toBeInTheDocument();
+		await expect
+			.element(datasetRegion.getByRole('link', { name: 'Download JSON' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('opens finding-only detail with evidence and review actions', async () => {

@@ -4,12 +4,16 @@
 	import {
 		createResearchUnderstandingCuration,
 		createResearchUnderstandingFeedback,
+		fetchResearchUnderstandingDataset,
 		fetchResearchUnderstandingFeedback,
 		fetchResearchUnderstandingCurations,
 		formatShortIdentifier,
+		researchUnderstandingDatasetUrl,
 		type ResearchUnderstanding,
 		type ResearchUnderstandingClaim,
 		type ResearchUnderstandingCuration,
+		type ResearchUnderstandingDataset,
+		type ResearchUnderstandingDatasetLabelStatus,
 		type ResearchUnderstandingPresentationEffect,
 		type ResearchUnderstandingPresentationEvidence,
 		type ResearchUnderstandingPresentationFinding,
@@ -56,6 +60,12 @@
 	];
 	const CURATION_CLAIM_TYPE_OPTIONS = CLAIM_TYPE_ORDER.filter((type) => type !== 'all');
 	const CURATION_STATUS_OPTIONS = CLAIM_STATUS_ORDER.filter((status) => status !== 'all');
+	const DATASET_LABEL_STATUS_ORDER: ResearchUnderstandingDatasetLabelStatus[] = [
+		'candidate',
+		'silver',
+		'gold',
+		'rejected'
+	];
 	type FindingEvidenceRole = keyof ResearchUnderstandingPresentationFinding['evidence_bundle'];
 	const FINDING_MAIN_EVIDENCE_ROLES: FindingEvidenceRole[] = [
 		'direct_result',
@@ -121,6 +131,10 @@
 	let feedbackError = '';
 	let lastFeedbackTargetId = '';
 	let lastUsesFindings = false;
+	let datasetSummary: ResearchUnderstandingDataset | null = null;
+	let datasetScopeKey = '';
+	let datasetLoading = false;
+	let datasetError = '';
 
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
@@ -298,6 +312,13 @@
 		understanding && selectedScopeId
 			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
 			: '';
+	$: currentDatasetScopeKey =
+		understanding && collectionId && selectedScopeId
+			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
+			: '';
+	$: if (currentDatasetScopeKey && currentDatasetScopeKey !== datasetScopeKey) {
+		void loadDatasetSummary(currentDatasetScopeKey);
+	}
 	$: if (curationScopeKey && curationScopeKey !== loadedCurationScopeKey) {
 		void loadCurationsForScope(curationScopeKey);
 	}
@@ -358,6 +379,10 @@
 
 	function feedbackIssueLabel(issue: string) {
 		return translatedCatalogLabel('research.understanding.feedbackIssues', issue);
+	}
+
+	function datasetLabelStatusLabel(status: ResearchUnderstandingDatasetLabelStatus) {
+		return translatedCatalogLabel('research.understanding.datasetLabelStatuses', status);
 	}
 
 	function hasDisplayValue(value: unknown): boolean {
@@ -858,6 +883,24 @@
 		);
 	}
 
+	function datasetFilters() {
+		if (!understanding || !selectedScopeId) return null;
+		return {
+			scope_type: understanding.scope.scope_type,
+			scope_id: selectedScopeId
+		};
+	}
+
+	function datasetDownloadUrl(format: 'json' | 'jsonl') {
+		const filters = datasetFilters();
+		if (!collectionId || !filters) return '';
+		return researchUnderstandingDatasetUrl(collectionId, filters, format);
+	}
+
+	function datasetCount(status: ResearchUnderstandingDatasetLabelStatus) {
+		return datasetSummary?.label_counts[status] ?? 0;
+	}
+
 	function resetCurationForm() {
 		const curation = selectedCuration;
 		curationClaimType = curation?.curated_claim_type ?? selectedClaim?.claim_type ?? 'finding';
@@ -939,6 +982,22 @@
 			feedbackByTargetId = next;
 		} catch (error) {
 			feedbackLoadError = error instanceof Error ? error.message : $t('error.unexpected');
+		}
+	}
+
+	async function loadDatasetSummary(scopeKey: string) {
+		const filters = datasetFilters();
+		if (!understanding || !collectionId || !filters) return;
+		datasetScopeKey = scopeKey;
+		datasetLoading = true;
+		datasetError = '';
+		try {
+			datasetSummary = await fetchResearchUnderstandingDataset(collectionId, filters);
+		} catch (error) {
+			datasetSummary = null;
+			datasetError = error instanceof Error ? error.message : $t('error.unexpected');
+		} finally {
+			datasetLoading = false;
 		}
 	}
 
@@ -1049,6 +1108,55 @@
 				<span>{$t('research.understanding.reviewQueue')}</span>
 			</div>
 		</div>
+
+		{#if currentDatasetScopeKey}
+			<section
+				class="research-understanding-workbench__dataset"
+				aria-label={$t('research.understanding.datasetExportTitle')}
+				aria-busy={datasetLoading}
+			>
+				<div>
+					<strong>{$t('research.understanding.datasetExportTitle')}</strong>
+					<p>
+						{#if datasetLoading}
+							{$t('research.understanding.datasetLoading')}
+						{:else if datasetSummary}
+							{$t('research.understanding.datasetReady', {
+								count: datasetSummary.item_count
+							})}
+						{:else}
+							{$t('research.understanding.datasetUnavailable')}
+						{/if}
+					</p>
+				</div>
+				{#if datasetSummary}
+					<div class="research-understanding-workbench__dataset-counts">
+						{#each DATASET_LABEL_STATUS_ORDER as status (status)}
+							<span>
+								{datasetLabelStatusLabel(status)}
+								<strong>{datasetCount(status)}</strong>
+							</span>
+						{/each}
+					</div>
+					<div class="research-understanding-workbench__dataset-actions">
+						<a href={datasetDownloadUrl('json')} download>
+							{$t('research.understanding.datasetDownloadJson')}
+						</a>
+						<a href={datasetDownloadUrl('jsonl')} download>
+							{$t('research.understanding.datasetDownloadJsonl')}
+						</a>
+					</div>
+				{/if}
+				{#if datasetError}
+					<p
+						class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+						role="alert"
+					>
+						{$t('research.understanding.datasetError', { message: datasetError })}
+					</p>
+				{/if}
+			</section>
+		{/if}
 
 		{#if usesFindings || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
 			{#if usesFindings || effectRows.length}
@@ -2061,6 +2169,89 @@
 		line-height: 30px;
 	}
 
+	.research-understanding-workbench__dataset {
+		display: grid;
+		grid-template-columns: minmax(180px, 1fr) auto auto;
+		align-items: center;
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__dataset > div:first-child {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__dataset > div:first-child strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__dataset p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-counts,
+	.research-understanding-workbench__dataset-actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__dataset-counts span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 26px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__dataset-counts strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-actions a {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__dataset-actions a:hover,
+	.research-understanding-workbench__dataset-actions a:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
 	.research-understanding-workbench__summary span,
 	.research-understanding-workbench__meta span,
 	.research-understanding-workbench__card small,
@@ -2686,5 +2877,14 @@
 			grid-template-columns: 1fr;
 		}
 
+		.research-understanding-workbench__dataset {
+			grid-template-columns: 1fr;
+			align-items: start;
+		}
+
+		.research-understanding-workbench__dataset-counts,
+		.research-understanding-workbench__dataset-actions {
+			justify-content: flex-start;
+		}
 	}
 </style>

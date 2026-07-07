@@ -289,6 +289,26 @@ export type ResearchUnderstandingGoldDraftFilters = {
 	scope_type: string;
 	scope_id: string;
 };
+export type ResearchUnderstandingDatasetLabelStatus = 'candidate' | 'silver' | 'gold' | 'rejected';
+export type ResearchUnderstandingDatasetExportFormat = 'json' | 'jsonl';
+export type ResearchUnderstandingDatasetFilters = {
+	scope_type: string;
+	scope_id: string;
+	label_status?: ResearchUnderstandingDatasetLabelStatus;
+};
+export type ResearchUnderstandingDataset = {
+	schema_version: string;
+	dataset_id: string;
+	collection_id: string;
+	scope_type: string;
+	scope_id: string;
+	task_type: string;
+	metric_profile: string;
+	label_status_filter: ResearchUnderstandingDatasetLabelStatus | null;
+	item_count: number;
+	label_counts: Record<ResearchUnderstandingDatasetLabelStatus, number>;
+	warnings: string[];
+};
 
 export type EvidenceBackedValue = {
 	display_value: string;
@@ -922,6 +942,37 @@ function normalizeWarnings(value: unknown): ResearchViewWarning[] {
 	return asArray(value)
 		.map((item, index) => normalizeResearchWarning(item) ?? warningFromText(String(item), index))
 		.filter((item) => item.message);
+}
+
+function normalizeResearchUnderstandingDataset(value: unknown): ResearchUnderstandingDataset {
+	const record = asRecord(value);
+	const rawLabelCounts = asRecord(record?.label_counts) ?? {};
+	return {
+		schema_version: toText(record?.schema_version, 'research_understanding_dataset.v1'),
+		dataset_id: toText(record?.dataset_id),
+		collection_id: toText(record?.collection_id),
+		scope_type: toText(record?.scope_type),
+		scope_id: toText(record?.scope_id),
+		task_type: toText(record?.task_type, 'research_understanding_finding'),
+		metric_profile: toText(record?.metric_profile),
+		label_status_filter:
+			normalizeResearchUnderstandingDatasetLabelStatus(record?.label_status_filter),
+		item_count: toNumber(record?.item_count),
+		label_counts: {
+			candidate: toNumber(rawLabelCounts.candidate),
+			silver: toNumber(rawLabelCounts.silver),
+			gold: toNumber(rawLabelCounts.gold),
+			rejected: toNumber(rawLabelCounts.rejected)
+		},
+		warnings: toStringList(record?.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetLabelStatus(
+	value: unknown
+): ResearchUnderstandingDatasetLabelStatus | null {
+	const status = toText(value) as ResearchUnderstandingDatasetLabelStatus;
+	return ['candidate', 'silver', 'gold', 'rejected'].includes(status) ? status : null;
 }
 
 function normalizeEvidenceReference(value: unknown): EvidenceReference | null {
@@ -2384,6 +2435,40 @@ export async function exportResearchUnderstandingGoldDraft(
 	return requestJson(
 		`/collections/${encodedCollection}/research-understanding/gold-draft?${params.toString()}`
 	) as Promise<ResearchUnderstandingGoldDraft>;
+}
+
+function researchUnderstandingDatasetParams(
+	filters: ResearchUnderstandingDatasetFilters,
+	format?: ResearchUnderstandingDatasetExportFormat
+): URLSearchParams {
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	params.set('scope_id', filters.scope_id);
+	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (format) params.set('format', format);
+	return params;
+}
+
+export function researchUnderstandingDatasetUrl(
+	collectionId: string,
+	filters: ResearchUnderstandingDatasetFilters,
+	format: ResearchUnderstandingDatasetExportFormat
+): string {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = researchUnderstandingDatasetParams(filters, format);
+	return `/api/v1/collections/${encodedCollection}/research-understanding/dataset?${params.toString()}`;
+}
+
+export async function fetchResearchUnderstandingDataset(
+	collectionId: string,
+	filters: ResearchUnderstandingDatasetFilters
+): Promise<ResearchUnderstandingDataset> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = researchUnderstandingDatasetParams(filters);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/research-understanding/dataset?${params.toString()}`
+	);
+	return normalizeResearchUnderstandingDataset(data);
 }
 
 export async function fetchDocumentMaterials(

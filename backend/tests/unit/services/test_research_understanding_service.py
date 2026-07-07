@@ -2315,7 +2315,7 @@ def test_with_presentation_prefers_result_bearing_direct_evidence_source():
     )
 
 
-def test_with_presentation_prefers_concrete_result_sentence_over_lead_in_quote():
+def test_with_presentation_mechanism_quote_statement_prefers_concrete_result_sentence_over_lead_in_quote():
     conclusion_text = (
         "The effect of preheating the build platform on the microstructure "
         "and mechanical properties of LBPBF 316L SS was investigated. "
@@ -2423,6 +2423,13 @@ def test_with_presentation_prefers_concrete_result_sentence_over_lead_in_quote()
     understanding = service.with_presentation(stored)
 
     assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["statement"] == (
+        "Preheating the build platform to 150 C increased the ductility of "
+        "material by 14%. This is attributed to the more homogenized "
+        "microstructure as well as cellular structure with geometrically "
+        "necessary dislocations."
+    )
     evidence_item = understanding["presentation"]["evidence_items"][0]
     assert evidence_item["quote"] == (
         "Preheating the build platform to 150 C increased the ductility of "
@@ -4817,6 +4824,83 @@ def test_with_presentation_specific_outcomes_narrows_mechanical_properties():
     assert finding["title"] == "build platform preheating temperature -> ductility"
     assert finding["statement"] == (
         "Preheating the build platform to 150 C increased the ductility of material by 14%."
+    )
+
+
+def test_with_presentation_mechanism_quote_statement_keeps_result_only_without_attribution():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does VED affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_density",
+                    "claim_type": "finding",
+                    "statement": "VED increases density.",
+                    "status": "supported",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_density",
+                    "relation_type": "increases",
+                    "subject": "VED",
+                    "predicate": "increases",
+                    "object": "density",
+                    "statement": "VED increases density.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_density"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_density",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-density"},
+                    "fact_ids": ["unit_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "The achieved density measured using the Archimedes "
+                        "method was 91.9, 98.9 and 99.6% for L-VED, M-VED "
+                        "and H-VED, respectively. The samples were then used "
+                        "for fatigue testing."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "selective laser melting"},
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["statement"] == (
+        "The achieved density measured using the Archimedes method was 91.9, "
+        "98.9 and 99.6% for L-VED, M-VED and H-VED, respectively."
     )
 
 

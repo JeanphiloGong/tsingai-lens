@@ -2230,6 +2230,7 @@ class ResearchUnderstandingService:
         )
         narrowed_outcomes = self._specific_mechanical_outcomes(
             outcomes,
+            relations=relations,
             statement=" ".join(
                 value
                 for value in (_text(effect.get("statement")), statement)
@@ -2452,10 +2453,8 @@ class ResearchUnderstandingService:
             ) or _text(evidence_ref.get("quote"))
             if not source_text:
                 continue
-            snippet = self._best_matching_quote_snippet(source_text, quote_hints)
-            if not snippet:
-                continue
-            for sentence in _quote_sentences(snippet):
+            source_sentences = _quote_sentences(source_text)
+            for index, sentence in enumerate(source_sentences[:-1]):
                 if not _quote_has_concrete_result_cue(sentence):
                     continue
                 normalized = f" {_normalize_match_text(sentence)} "
@@ -2463,6 +2462,24 @@ class ResearchUnderstandingService:
                     continue
                 if not _quote_term_hits(normalized, quote_hints["outcome"]):
                     continue
+                if _is_mechanism_attribution_sentence(source_sentences[index + 1]):
+                    return f"{sentence} {source_sentences[index + 1]}"
+            snippet = self._best_matching_quote_snippet(source_text, quote_hints)
+            if not snippet:
+                continue
+            sentences = _quote_sentences(snippet)
+            for index, sentence in enumerate(sentences):
+                if not _quote_has_concrete_result_cue(sentence):
+                    continue
+                normalized = f" {_normalize_match_text(sentence)} "
+                if not _quote_term_hits(normalized, quote_hints["variable"]):
+                    continue
+                if not _quote_term_hits(normalized, quote_hints["outcome"]):
+                    continue
+                if index + 1 < len(sentences) and _is_mechanism_attribution_sentence(
+                    sentences[index + 1]
+                ):
+                    return f"{sentence} {sentences[index + 1]}"
                 return sentence
         return ""
 
@@ -2799,11 +2816,14 @@ class ResearchUnderstandingService:
         self,
         outcomes: list[str],
         *,
+        relations: list[dict[str, Any]],
         statement: str,
         evidence_by_id: Mapping[str, dict[str, Any]],
         evidence_bundle: Mapping[str, list[str]],
         blocks_by_id: Mapping[str, SourceBlock],
     ) -> list[str]:
+        if any(len(self._relation_object_chain(relation)) > 1 for relation in relations):
+            return outcomes
         if not any(
             _normalize_match_text(outcome) == "mechanical properties"
             for outcome in outcomes
@@ -4377,6 +4397,45 @@ def _quote_has_concrete_result_cue(candidate: str) -> bool:
             "sensitive",
             "prone",
             "formed",
+        )
+    )
+
+
+def _is_mechanism_attribution_sentence(candidate: str) -> bool:
+    normalized = f" {_normalize_match_text(candidate)} "
+    has_attribution = any(
+        f" {cue} " in normalized
+        for cue in (
+            "attributed",
+            "attributable",
+            "because",
+            "caused",
+            "due",
+            "owing",
+            "resulting",
+            "through",
+        )
+    )
+    if not has_attribution:
+        return False
+    return any(
+        f" {cue} " in normalized
+        for cue in (
+            "cellular",
+            "dislocation",
+            "dislocations",
+            "gnd",
+            "gnds",
+            "grain",
+            "grains",
+            "homogenized",
+            "microstructure",
+            "microstructural",
+            "passive film",
+            "pores",
+            "porosity",
+            "residual stress",
+            "texture",
         )
     )
 

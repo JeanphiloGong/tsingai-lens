@@ -667,7 +667,13 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `accepted_system_sample_count`、`curated_correction_count` 和
 `system_error_count`，以及以下分布：`by_label_status`、`by_review_status`、
 `by_issue_type`、`by_support_grade`、`by_trace_status`、`by_evidence_role`、
-`by_evidence_traceability_status` 和 `by_quality_decision`。`by_quality_decision`
+`by_evidence_traceability_status`、`by_quality_decision`、
+`by_presentation_bucket` 和 `by_bucket_quality_decision`。
+`by_presentation_bucket` 区分 `primary`、`review_queue` 和 `unbucketed`：`primary`
+对应专家界面默认展示的高信号研究发现，`review_queue` 对应仍需标注或复核的候选发现，
+`unbucketed` 对应历史或 fallback artifact 中没有 presentation 分桶的样本。
+`by_bucket_quality_decision` 用于判断系统主结论质量和待复核候选质量，避免把
+review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 用于区分 `accepted_system`、`curated_correction`、`rejected_system`、
 `partial_review` 和 `candidate`：因此 `label_status=gold` 仍可能表示专家校正后
 可用，而不是系统原始 finding 已完全正确。`warning_counts` 汇总缺失 evidence、缺失
@@ -676,7 +682,7 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 逐行 sample，不输出 envelope summary。
 
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
-`label_status`、`trace_status`、`input_blocks`、`prompt_version`、`model_output`、
+`label_status`、`presentation_bucket`、`trace_status`、`input_blocks`、`prompt_version`、`model_output`、
 `system_prediction`、`expert_target`、`evidence_refs`、`context_refs`、
 `feedback_refs` 和 `metadata`。`trace_status` 可以是 `available`、`failed` 或
 `unavailable`；`input_blocks` 当前保存 research-understanding relation trace 关联的

@@ -672,6 +672,17 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "rejected_system": 1,
             "candidate": 1,
         },
+        "by_presentation_bucket": {
+            "unbucketed": 4,
+        },
+        "by_bucket_quality_decision": {
+            "unbucketed": {
+                "curated_correction": 1,
+                "partial_review": 1,
+                "rejected_system": 1,
+                "candidate": 1,
+            },
+        },
         "warning_counts": {
             "missing_evidence": 0,
             "missing_source_text": 0,
@@ -683,6 +694,10 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     }
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     assert by_finding["finding-1"]["label_status"] == "gold"
+    assert by_finding["finding-1"]["presentation_bucket"] == "unbucketed"
+    assert by_finding["finding-1"]["system_prediction"]["presentation_bucket"] == (
+        "unbucketed"
+    )
     assert by_finding["finding-1"]["expert_target"]["source"] == "curation"
     assert by_finding["finding-1"]["expert_target"]["statement"] == (
         "Preheating improves ductility by 14% in LPBF 316L."
@@ -863,6 +878,49 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
         "Density increased from 91.9% to 99.6% from L-VED to H-VED."
     )
     assert dataset["quality_summary"]["by_support_grade"] == {"partial": 1}
+
+
+def test_research_understanding_feedback_service_exports_presentation_buckets():
+    stored = _sample_understanding()
+    projected = stored.to_record()
+    projected["presentation"]["primary_findings"] = [
+        projected["presentation"]["findings"][0],
+        projected["presentation"]["findings"][2],
+    ]
+    projected["presentation"]["review_queue_findings"] = [
+        projected["presentation"]["findings"][1],
+    ]
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    assert by_finding["finding-1"]["presentation_bucket"] == "primary"
+    assert by_finding["finding-1"]["metadata"]["presentation_bucket"] == "primary"
+    assert by_finding["finding-2"]["presentation_bucket"] == "review_queue"
+    assert by_finding["finding-3"]["presentation_bucket"] == "primary"
+    assert by_finding["finding-4"]["presentation_bucket"] == "unbucketed"
+    assert by_finding["finding-2"]["system_prediction"]["presentation_bucket"] == (
+        "review_queue"
+    )
+    assert dataset["quality_summary"]["by_presentation_bucket"] == {
+        "primary": 2,
+        "review_queue": 1,
+        "unbucketed": 1,
+    }
+    assert dataset["quality_summary"]["by_bucket_quality_decision"] == {
+        "primary": {"candidate": 2},
+        "review_queue": {"candidate": 1},
+        "unbucketed": {"candidate": 1},
+    }
 
 
 def test_research_understanding_feedback_service_current_label_alignment_ignores_stale_claim_level_correct_feedback():

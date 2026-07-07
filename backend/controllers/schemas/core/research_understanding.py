@@ -422,6 +422,8 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     by_evidence_role: dict[str, int] = Field(default_factory=dict)
     by_evidence_traceability_status: dict[str, int] = Field(default_factory=dict)
     by_quality_decision: dict[str, int] = Field(default_factory=dict)
+    by_presentation_bucket: dict[str, int] = Field(default_factory=dict)
+    by_bucket_quality_decision: dict[str, dict[str, int]] = Field(default_factory=dict)
     warning_counts: dict[str, int] = Field(default_factory=dict)
 
 
@@ -436,6 +438,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     finding_id: str
     claim_id: str | None = None
     label_status: ResearchUnderstandingDatasetLabelStatus
+    presentation_bucket: str = Field(default="unbucketed")
     trace_status: str = Field(default="unavailable")
     input_blocks: list[dict[str, Any]] = Field(default_factory=list)
     prompt_version: str | None = None

@@ -308,6 +308,7 @@ class ResearchUnderstandingFeedbackService:
             for relation in understanding.relations
         }
         model_traces = tuple(dict(trace) for trace in understanding.model_traces)
+        finding_buckets = _finding_bucket_index(presentation)
 
         items: list[dict[str, object]] = []
         for finding in self._finding_records(understanding_record):
@@ -324,6 +325,10 @@ class ResearchUnderstandingFeedbackService:
                 model_traces=model_traces,
                 feedback_index=feedback_index,
                 curation_index=curation_index,
+                presentation_bucket=_presentation_bucket_for_finding(
+                    finding,
+                    finding_buckets,
+                ),
             )
             if label_status and sample["label_status"] != label_status:
                 continue
@@ -419,6 +424,7 @@ class ResearchUnderstandingFeedbackService:
         model_traces: tuple[dict[str, Any], ...],
         feedback_index: Mapping[tuple[str, str], tuple[ResearchUnderstandingFeedback, ...]],
         curation_index: Mapping[tuple[str, str], tuple[ResearchUnderstandingCuration, ...]],
+        presentation_bucket: str,
     ) -> dict[str, object]:
         finding_id = _text(finding.get("finding_id")) or _sample_id("finding", finding)
         claim_id = _text(finding.get("claim_id"))
@@ -437,6 +443,7 @@ class ResearchUnderstandingFeedbackService:
         curation = curations[0] if curations else None
         label_status = _label_status(feedback, curation)
         system_prediction = _system_prediction(finding)
+        system_prediction["presentation_bucket"] = presentation_bucket
         base_evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
         evidence_ref_ids_list: list[str] = []
         bundle = _mapping(finding.get("evidence_bundle"))
@@ -485,6 +492,7 @@ class ResearchUnderstandingFeedbackService:
             "finding_id": finding_id,
             "claim_id": claim_id,
             "label_status": label_status,
+            "presentation_bucket": presentation_bucket,
             "trace_status": _trace_status(matched_trace),
             "input_blocks": _trace_input_blocks(matched_trace),
             "prompt_version": (
@@ -521,6 +529,7 @@ class ResearchUnderstandingFeedbackService:
                     if matched_trace
                     else "prompt/model trace is not captured for historical samples"
                 ),
+                "presentation_bucket": presentation_bucket,
             },
         }
 
@@ -637,6 +646,29 @@ def _label_status(
     if any(item.review_status == "partial" for item in feedback):
         return "silver"
     return "candidate"
+
+
+def _finding_bucket_index(presentation: Mapping[str, Any]) -> dict[str, str]:
+    buckets: dict[str, str] = {}
+    for bucket_name, field_name in (
+        ("primary", "primary_findings"),
+        ("review_queue", "review_queue_findings"),
+    ):
+        for finding in _mapping_list(presentation.get(field_name)):
+            finding_id = _text(finding.get("finding_id"))
+            if finding_id and finding_id not in buckets:
+                buckets[finding_id] = bucket_name
+    return buckets
+
+
+def _presentation_bucket_for_finding(
+    finding: Mapping[str, Any],
+    buckets: Mapping[str, str],
+) -> str:
+    finding_id = _text(finding.get("finding_id"))
+    if finding_id:
+        return buckets.get(finding_id, "unbucketed")
+    return "unbucketed"
 
 
 def _aligned_feedback_for_current_finding(
@@ -792,6 +824,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     by_evidence_role: dict[str, int] = {}
     by_evidence_traceability_status: dict[str, int] = {}
     by_quality_decision: dict[str, int] = {}
+    by_presentation_bucket: dict[str, int] = {}
+    by_bucket_quality_decision: dict[str, dict[str, int]] = {}
     warning_counts = {
         "missing_evidence": 0,
         "missing_source_text": 0,
@@ -810,7 +844,9 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
 
     for item in items:
         label_status = _text(item.get("label_status")) or "candidate"
+        presentation_bucket = _text(item.get("presentation_bucket")) or "unbucketed"
         _increment_count(by_label_status, label_status)
+        _increment_count(by_presentation_bucket, presentation_bucket)
         if label_status in {"gold", "silver"}:
             usable_sample_count += 1
         if label_status != "candidate":
@@ -876,6 +912,11 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         else:
             quality_decision = "candidate"
         _increment_count(by_quality_decision, quality_decision)
+        bucket_decisions = by_bucket_quality_decision.setdefault(
+            presentation_bucket,
+            {},
+        )
+        _increment_count(bucket_decisions, quality_decision)
         if quality_decision == "accepted_system":
             accepted_system_sample_count += 1
         elif quality_decision == "curated_correction":
@@ -930,6 +971,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "by_evidence_role": by_evidence_role,
         "by_evidence_traceability_status": by_evidence_traceability_status,
         "by_quality_decision": by_quality_decision,
+        "by_presentation_bucket": by_presentation_bucket,
+        "by_bucket_quality_decision": by_bucket_quality_decision,
         "warning_counts": warning_counts,
     }
 

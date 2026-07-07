@@ -170,6 +170,10 @@ class FakeResearchUnderstandingFeedbackService:
                 "by_evidence_role": {"direct_result": 1},
                 "by_evidence_traceability_status": {"direct": 1},
                 "by_quality_decision": {"curated_correction": 1},
+                "by_presentation_bucket": {"primary": 1},
+                "by_bucket_quality_decision": {
+                    "primary": {"curated_correction": 1}
+                },
                 "warning_counts": {
                     "missing_evidence": 0,
                     "missing_source_text": 0,
@@ -189,12 +193,14 @@ class FakeResearchUnderstandingFeedbackService:
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "label_status": "gold",
+                    "presentation_bucket": "primary",
                     "trace_status": "unavailable",
                     "input_blocks": [],
                     "prompt_version": None,
                     "model_output": None,
                     "system_prediction": {
-                        "statement": "Preheating improves ductility."
+                        "statement": "Preheating improves ductility.",
+                        "presentation_bucket": "primary",
                     },
                     "expert_target": {
                         "source": "curation",
@@ -436,7 +442,12 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.quality_summary.by_label_status["gold"] == 1
     assert response.quality_summary.by_issue_type == {"none": 1}
     assert response.quality_summary.by_quality_decision == {"curated_correction": 1}
+    assert response.quality_summary.by_presentation_bucket == {"primary": 1}
+    assert response.quality_summary.by_bucket_quality_decision == {
+        "primary": {"curated_correction": 1}
+    }
     assert response.items[0].label_status == "gold"
+    assert response.items[0].presentation_bucket == "primary"
     assert response.items[0].evidence_refs[0]["source_text"] == (
         "Preheating increased ductility by 14% in LPBF 316L."
     )
@@ -470,6 +481,7 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
     body = response.body.decode("utf-8")
     line = json.loads(body.strip())
     assert line["sample_id"] == "rus-1"
+    assert line["presentation_bucket"] == "primary"
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",

@@ -139,8 +139,8 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 							confidence: 0.82,
 							state: 'ready',
 							paper_frame_count: 2,
-							evidence_route_count: 0,
-							evidence_unit_count: 0,
+							evidence_route_count: 2,
+							evidence_unit_count: 1,
 							logic_chain_count: 0,
 							links: {},
 							warnings: []
@@ -231,5 +231,53 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				'/collections/col_4c54ffe568ec/goals/goal_heat_strength'
 			);
 		});
+	});
+
+	it('does not allow analysis for objectives without routed evidence', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_4c54ffe568ec/objectives') {
+				return jsonResponse({
+					collection_id: 'col_4c54ffe568ec',
+					count: 1,
+					objectives: [
+						{
+							objective_id: 'obj_empty',
+							question: 'How does scan strategy affect fatigue strength?',
+							material_scope: ['316L stainless steel'],
+							process_axes: ['scan strategy'],
+							property_axes: ['fatigue strength'],
+							comparison_intent: 'Compare scan strategies.',
+							confidence: 0.9,
+							state: 'empty',
+							paper_frame_count: 0,
+							evidence_route_count: 0,
+							evidence_unit_count: 0,
+							logic_chain_count: 0,
+							links: {},
+							warnings: []
+						}
+					]
+				});
+			}
+
+			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+		});
+
+		render(Page);
+
+		const button = browserPage.getByRole('button', { name: 'Confirm and analyze' });
+		await expect.element(button).toBeDisabled();
+		await expect
+			.element(
+				browserPage.getByText(
+					'No routed evidence is available for this objective yet. Open the workspace to inspect coverage.'
+				)
+			)
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some((call) => requestPath(call[0] as string | URL | Request).endsWith('/goals'))
+		).toBe(false);
 	});
 });

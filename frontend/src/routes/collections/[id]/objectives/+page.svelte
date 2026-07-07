@@ -69,7 +69,17 @@
 		return value > 0 ? `${Math.round(value * 100)}%` : $t('research.emptyValue');
 	}
 
+	function canAnalyzeObjective(objective: ObjectiveListItem) {
+		return (
+			objective.state !== 'empty' &&
+			objective.paper_frame_count > 0 &&
+			objective.evidence_route_count > 0 &&
+			objective.evidence_unit_count > 0
+		);
+	}
+
 	async function confirmAndAnalyze(objective: ObjectiveListItem) {
+		if (!canAnalyzeObjective(objective)) return;
 		analyzingObjectiveId = objective.objective_id;
 		analysisError = '';
 		try {
@@ -216,7 +226,7 @@
 						<button
 							class="btn btn--primary btn--small"
 							type="button"
-							disabled={Boolean(analyzingObjectiveId)}
+							disabled={Boolean(analyzingObjectiveId) || !canAnalyzeObjective(objective)}
 							on:click={() => confirmAndAnalyze(objective)}
 						>
 							{analyzingObjectiveId === objective.objective_id
@@ -233,6 +243,11 @@
 							{$t('research.objectives.openWorkspace')}
 						</a>
 					</div>
+					{#if !canAnalyzeObjective(objective)}
+						<p class="objective-card__analysis-note">
+							{$t('research.objectives.noAnalysisCoverage')}
+						</p>
+					{/if}
 				</article>
 			{/each}
 		</section>
@@ -407,6 +422,15 @@
 	.objective-card__actions {
 		display: flex;
 		justify-content: flex-end;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.objective-card__analysis-note {
+		margin: -8px 0 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.refresh-icon {

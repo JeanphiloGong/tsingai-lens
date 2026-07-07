@@ -537,6 +537,8 @@ const translations: Record<Language, Translations> = {
 				openWorkspace: 'Open objective workspace',
 				confirmAndAnalyze: 'Confirm and analyze',
 				analyzing: 'Analyzing...',
+				noAnalysisCoverage:
+					'No routed evidence is available for this objective yet. Open the workspace to inspect coverage.',
 				analysisErrorTitle: 'Goal analysis failed'
 			},
 			objectiveWorkspace: {
@@ -3175,6 +3177,7 @@ const translations: Record<Language, Translations> = {
 				openWorkspace: '打开目标工作区',
 				confirmAndAnalyze: '确认并分析',
 				analyzing: '分析中...',
+				noAnalysisCoverage: '该目标暂时没有可路由证据。可打开目标工作区检查覆盖情况。',
 				analysisErrorTitle: '目标分析失败'
 			},
 			objectiveWorkspace: {

@@ -3268,11 +3268,13 @@ class ResearchUnderstandingService:
                 "variable": set(),
                 "outcome": set(),
                 "relation": set(),
+                "statement": set(),
             }
             for value in _strings(finding.get("variables")):
                 hint_terms["variable"].update(_quote_hint_terms(value))
             for value in _strings(finding.get("outcomes")):
                 hint_terms["outcome"].update(_quote_hint_terms(value))
+            hint_terms["statement"].update(_quote_hint_terms(finding.get("statement")))
             for value in (
                 _text(finding.get("statement")),
                 _text(finding.get("title")),
@@ -3303,7 +3305,12 @@ class ResearchUnderstandingService:
             for ref_id in direct_ref_ids:
                 ref_hints = hints_by_ref.setdefault(
                     ref_id,
-                    {"variable": set(), "outcome": set(), "relation": set()},
+                    {
+                        "variable": set(),
+                        "outcome": set(),
+                        "relation": set(),
+                        "statement": set(),
+                    },
                 )
                 for key, terms in hint_terms.items():
                     ref_hints[key].update(terms)
@@ -3821,6 +3828,50 @@ class ResearchUnderstandingService:
             if sentence in candidates
             and _quote_has_variable_and_outcome(sentence, quote_hints)
         ]
+        statement_terms = quote_hints.get("statement", set())
+        non_variable_statement_terms = (
+            statement_terms - quote_hints.get("variable", set())
+        )
+        statement_aligned_sentences = [
+            sentence
+            for sentence in sentences
+            if sentence in candidates
+            and _quote_has_concrete_result_cue(sentence)
+            and _quote_candidate_score(sentence, quote_hints) > 0
+            and _quote_term_hits(
+                f" {_normalize_match_text(sentence)} ",
+                statement_terms,
+            )
+            >= 3
+            and _quote_term_hits(
+                f" {_normalize_match_text(sentence)} ",
+                non_variable_statement_terms,
+            )
+            >= 2
+        ]
+        if statement_aligned_sentences:
+            statement_aligned_candidates: list[str] = []
+            for index, sentence in enumerate(sentences):
+                if sentence not in statement_aligned_sentences:
+                    continue
+                if (
+                    index + 1 < len(sentences)
+                    and _is_mechanism_attribution_sentence(sentences[index + 1])
+                ):
+                    window = f"{sentence} {sentences[index + 1]}"
+                    if window in candidates:
+                        statement_aligned_candidates.append(window)
+                        continue
+                statement_aligned_candidates.append(sentence)
+            candidates = statement_aligned_candidates
+            if any(candidate not in sentences for candidate in candidates):
+                specific_sentences = []
+            else:
+                specific_sentences = [
+                    sentence
+                    for sentence in specific_sentences
+                    if sentence in statement_aligned_sentences
+                ]
         concrete_specific_sentences = [
             sentence
             for sentence in specific_sentences

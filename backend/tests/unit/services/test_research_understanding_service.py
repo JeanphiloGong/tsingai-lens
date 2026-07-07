@@ -2822,6 +2822,116 @@ def test_with_presentation_keeps_results_direct_evidence_over_introduction_revie
     assert finding["evidence_bundle"]["uncategorized"] == []
 
 
+def test_with_presentation_statement_aligned_quote_prefers_matching_result_sentence():
+    ved_text = (
+        "It can be noted that the effect of VED was more pronounced between "
+        "the LVED and M-VED, showing clear coarsening both in melt pool "
+        "average size as well as flattening of melt pool. "
+        "The increase in VED from the medium to high level did not notably "
+        "affect the melt pool size or grain size, but columnar grains were "
+        "observed in the H-VED structure after etching, as is shown as red "
+        "dashed lines in Fig. 2c."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-1",
+                    human_readable_id=1,
+                    title="VED effects in PBF-LB 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-ved-microstructure",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text=ved_text,
+                    block_order=65,
+                    page=3,
+                    heading_path="3.1. As-built microstructures",
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does VED affect microstructure?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_ved_microstructure",
+                    "claim_type": "finding",
+                    "statement": (
+                        "The increase in VED from the medium to high level "
+                        "did not notably affect the melt pool size or grain "
+                        "size, but columnar grains were observed in the H-VED "
+                        "structure after etching."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.8,
+                    "evidence_ref_ids": ["evref_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_ved"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_ved_microstructure",
+                    "relation_type": "affects",
+                    "subject": "VED",
+                    "predicate": "affects",
+                    "object": "microstructure",
+                    "statement": "VED affects microstructure.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_ved"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_ved",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-ved-microstructure"},
+                    "fact_ids": ["unit_ved"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"variable_process_axes": ["VED"]},
+                    "property_scope": ["microstructure"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["quote"] == (
+        "The increase in VED from the medium to high level did not notably "
+        "affect the melt pool size or grain size, but columnar grains were "
+        "observed in the H-VED structure after etching, as is shown as red "
+        "dashed lines in Fig. 2c."
+    )
+
+
 def test_with_presentation_keeps_only_reviewable_direct_relations():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

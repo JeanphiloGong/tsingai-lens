@@ -2822,8 +2822,6 @@ class ResearchUnderstandingService:
         evidence_bundle: Mapping[str, list[str]],
         blocks_by_id: Mapping[str, SourceBlock],
     ) -> list[str]:
-        if any(len(self._relation_object_chain(relation)) > 1 for relation in relations):
-            return outcomes
         if not any(
             _normalize_match_text(outcome) == "mechanical properties"
             for outcome in outcomes

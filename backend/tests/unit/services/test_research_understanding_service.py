@@ -4349,17 +4349,17 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
     assert understanding is not None
     finding = understanding["presentation"]["findings"][0]
     assert finding["title"] == (
-        "build platform preheating temperature -> mechanical properties"
+        "build platform preheating temperature -> ductility"
     )
     assert finding["variables"] == ["build platform preheating temperature"]
     assert finding["mediators"] == ["microstructure"]
-    assert finding["outcomes"] == ["mechanical properties"]
+    assert finding["outcomes"] == ["ductility"]
     assert finding["relation_chain"] == [
         {
             "relation_id": "rel_preheat_mechanical",
             "variable": "build platform preheating temperature",
             "mediators": ["microstructure"],
-            "outcome": "mechanical properties",
+            "outcome": "ductility",
             "direction": "improves",
             "statement": (
                 "Higher build platform preheating temperature improves "

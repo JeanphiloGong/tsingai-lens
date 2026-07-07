@@ -155,7 +155,8 @@ class FakeResearchUnderstandingFeedbackService:
                 "rejected_count": 0,
                 "labeled_sample_count": 1,
                 "accepted_system_sample_count": 0,
-                "curated_correction_count": 1,
+                "accepted_after_curation_match_count": 1,
+                "curated_correction_count": 0,
                 "system_error_count": 0,
                 "by_label_status": {
                     "candidate": 0,
@@ -169,10 +170,10 @@ class FakeResearchUnderstandingFeedbackService:
                 "by_trace_status": {"unavailable": 1},
                 "by_evidence_role": {"direct_result": 1},
                 "by_evidence_traceability_status": {"direct": 1},
-                "by_quality_decision": {"curated_correction": 1},
+                "by_quality_decision": {"accepted_after_curation_match": 1},
                 "by_presentation_bucket": {"primary": 1},
                 "by_bucket_quality_decision": {
-                    "primary": {"curated_correction": 1}
+                    "primary": {"accepted_after_curation_match": 1}
                 },
                 "warning_counts": {
                     "missing_evidence": 0,
@@ -441,10 +442,14 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.quality_summary.total_samples == 1
     assert response.quality_summary.by_label_status["gold"] == 1
     assert response.quality_summary.by_issue_type == {"none": 1}
-    assert response.quality_summary.by_quality_decision == {"curated_correction": 1}
+    assert response.quality_summary.accepted_after_curation_match_count == 1
+    assert response.quality_summary.curated_correction_count == 0
+    assert response.quality_summary.by_quality_decision == {
+        "accepted_after_curation_match": 1
+    }
     assert response.quality_summary.by_presentation_bucket == {"primary": 1}
     assert response.quality_summary.by_bucket_quality_decision == {
-        "primary": {"curated_correction": 1}
+        "primary": {"accepted_after_curation_match": 1}
     }
     assert response.items[0].label_status == "gold"
     assert response.items[0].presentation_bucket == "primary"

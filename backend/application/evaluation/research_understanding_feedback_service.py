@@ -850,6 +850,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     rejected_count = 0
     labeled_sample_count = 0
     accepted_system_sample_count = 0
+    accepted_after_curation_match_count = 0
     curated_correction_count = 0
     system_error_count = 0
 
@@ -912,7 +913,13 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         )
 
         target_source = _text(target.get("source"))
-        if target_source == "curation":
+        if target_source == "curation" and _curation_matches_system_prediction(
+            item,
+            system_prediction=system_prediction,
+            target=target,
+        ):
+            quality_decision = "accepted_after_curation_match"
+        elif target_source == "curation":
             quality_decision = "curated_correction"
         elif has_rejecting_feedback:
             quality_decision = "rejected_system"
@@ -930,6 +937,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         _increment_count(bucket_decisions, quality_decision)
         if quality_decision == "accepted_system":
             accepted_system_sample_count += 1
+        elif quality_decision == "accepted_after_curation_match":
+            accepted_after_curation_match_count += 1
         elif quality_decision == "curated_correction":
             curated_correction_count += 1
         if has_rejecting_feedback:
@@ -972,6 +981,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "rejected_count": rejected_count,
         "labeled_sample_count": labeled_sample_count,
         "accepted_system_sample_count": accepted_system_sample_count,
+        "accepted_after_curation_match_count": accepted_after_curation_match_count,
         "curated_correction_count": curated_correction_count,
         "system_error_count": system_error_count,
         "by_label_status": by_label_status,
@@ -990,6 +1000,82 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
 
 def _increment_count(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
+
+
+def _curation_matches_system_prediction(
+    item: Mapping[str, object],
+    *,
+    system_prediction: Mapping[str, Any],
+    target: Mapping[str, Any],
+) -> bool:
+    system_statement = _text(system_prediction.get("statement")) or ""
+    target_statement = _text(target.get("statement")) or ""
+    if not system_statement or not target_statement:
+        return False
+    target_refs = set(_strings(target.get("evidence_ref_ids")))
+    sample_refs = {
+        ref_id
+        for ref in _mapping_list(item.get("evidence_refs"))
+        if (ref_id := _text(ref.get("evidence_ref_id")))
+    }
+    if target_refs and not (target_refs & sample_refs):
+        return False
+    system_terms = set(
+        _quality_decision_terms(
+            " ".join(
+                [
+                    system_statement,
+                    *list(_strings(system_prediction.get("variables"))),
+                    *list(_strings(system_prediction.get("mediators"))),
+                    *list(_strings(system_prediction.get("outcomes"))),
+                ]
+            )
+        )
+    )
+    target_terms = set(_quality_decision_terms(target_statement))
+    if not system_terms or not target_terms:
+        return False
+    overlap = system_terms & target_terms
+    if len(overlap) >= 3:
+        return True
+    outcome_terms = set(
+        _quality_decision_terms(" ".join(_strings(system_prediction.get("outcomes"))))
+    )
+    return bool(outcome_terms and outcome_terms <= overlap)
+
+
+def _quality_decision_terms(value: str | None) -> tuple[str, ...]:
+    text = _text(value)
+    if not text:
+        return ()
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_term in re.split(r"[^a-z0-9]+", text.lower()):
+        if len(raw_term) < 4 or raw_term in _LABEL_TERM_STOPWORDS:
+            continue
+        if raw_term in {
+            "about",
+            "better",
+            "claim",
+            "finding",
+            "formed",
+            "higher",
+            "improved",
+            "increased",
+            "lower",
+            "more",
+            "sample",
+            "samples",
+            "statement",
+            "system",
+            "while",
+        }:
+            continue
+        if raw_term in seen:
+            continue
+        seen.add(raw_term)
+        terms.append(raw_term)
+    return tuple(terms)
 
 
 def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:

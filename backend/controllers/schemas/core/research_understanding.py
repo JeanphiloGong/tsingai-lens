@@ -412,6 +412,7 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     rejected_count: int = Field(default=0)
     labeled_sample_count: int = Field(default=0)
     accepted_system_sample_count: int = Field(default=0)
+    accepted_after_curation_match_count: int = Field(default=0)
     curated_correction_count: int = Field(default=0)
     system_error_count: int = Field(default=0)
     by_label_status: dict[str, int] = Field(default_factory=dict)

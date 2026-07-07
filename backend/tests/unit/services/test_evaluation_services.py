@@ -632,7 +632,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "rejected_count": 1,
         "labeled_sample_count": 3,
         "accepted_system_sample_count": 0,
-        "curated_correction_count": 1,
+        "accepted_after_curation_match_count": 1,
+        "curated_correction_count": 0,
         "system_error_count": 1,
         "by_label_status": {
             "candidate": 1,
@@ -667,7 +668,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "direct": 4,
         },
         "by_quality_decision": {
-            "curated_correction": 1,
+            "accepted_after_curation_match": 1,
             "partial_review": 1,
             "rejected_system": 1,
             "candidate": 1,
@@ -677,7 +678,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         },
         "by_bucket_quality_decision": {
             "unbucketed": {
-                "curated_correction": 1,
+                "accepted_after_curation_match": 1,
                 "partial_review": 1,
                 "rejected_system": 1,
                 "candidate": 1,
@@ -1215,8 +1216,66 @@ def test_research_understanding_feedback_service_current_label_alignment_aligns_
     assert curated_sample["metadata"]["ignored_curation_refs"] == []
     assert dataset["quality_summary"]["by_quality_decision"] == {
         "candidate": 3,
+        "accepted_after_curation_match": 1,
+    }
+    assert dataset["quality_summary"]["accepted_after_curation_match_count"] == 1
+    assert dataset["quality_summary"]["curated_correction_count"] == 0
+
+
+def test_research_understanding_feedback_service_curation_match_keeps_unmatched_curation_as_correction():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-unmatched",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": (
+                    "Laser scan strategy changes residual stress and crack formation."
+                ),
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["scan strategy"],
+                "curated_mediators": ["residual stress"],
+                "curated_outcomes": ["cracking"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "LPBF alloys",
+                "curated_evidence_ref_ids": ["ev-missing"],
+                "curated_context_ids": ["ctx-1"],
+                "note": "Different target than the current VED density finding.",
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    curated_sample = by_finding["finding-2"]
+    assert curated_sample["label_status"] == "gold"
+    assert curated_sample["expert_target"]["source"] == "curation"
+    assert curated_sample["metadata"]["curation_id"] == "ruc-unmatched"
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "candidate": 3,
         "curated_correction": 1,
     }
+    assert dataset["quality_summary"]["accepted_after_curation_match_count"] == 0
+    assert dataset["quality_summary"]["curated_correction_count"] == 1
 
 
 def test_research_understanding_feedback_service_filters_dataset_by_label():

@@ -664,8 +664,9 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `quality_summary` 从本次返回的 sample 列表直接派生，用于真实 goal 质量验证和
 优化排查。它包含 `total_samples`、`usable_sample_count`、
 `needs_review_count`、`rejected_count`、`labeled_sample_count`、
-`accepted_system_sample_count`、`curated_correction_count` 和
-`system_error_count`，以及以下分布：`by_label_status`、`by_review_status`、
+`accepted_system_sample_count`、`accepted_after_curation_match_count`、
+`curated_correction_count` 和 `system_error_count`，以及以下分布：
+`by_label_status`、`by_review_status`、
 `by_issue_type`、`by_support_grade`、`by_trace_status`、`by_evidence_role`、
 `by_evidence_traceability_status`、`by_quality_decision`、
 `by_presentation_bucket` 和 `by_bucket_quality_decision`。
@@ -674,9 +675,12 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `unbucketed` 对应历史或 fallback artifact 中没有 presentation 分桶的样本。
 `by_bucket_quality_decision` 用于判断系统主结论质量和待复核候选质量，避免把
 review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
-用于区分 `accepted_system`、`curated_correction`、`rejected_system`、
-`partial_review` 和 `candidate`：因此 `label_status=gold` 仍可能表示专家校正后
-可用，而不是系统原始 finding 已完全正确。`warning_counts` 汇总缺失 evidence、缺失
+用于区分 `accepted_system`、`accepted_after_curation_match`、
+`curated_correction`、`rejected_system`、`partial_review` 和 `candidate`。
+`accepted_after_curation_match` 表示该样本仍保留专家 curation 作为 gold target，
+但当前系统 prediction 已与 curation 的 statement/evidence 高度对齐；因此
+`label_status=gold` 仍可能表示专家校正后可用，而不是系统原始 finding 已完全正确。
+`warning_counts` 汇总缺失 evidence、缺失
 原文片段、缺失 context、trace 不可用/失败和 rejected feedback 等诊断信号。若请求带
 `label_status` 过滤，`quality_summary` 只统计过滤后的返回样本；`jsonl` 格式仍只输出
 逐行 sample，不输出 envelope summary。

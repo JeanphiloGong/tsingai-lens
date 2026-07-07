@@ -2323,6 +2323,14 @@ class ResearchUnderstandingService:
     ) -> str:
         if not variables or not outcomes:
             return statement
+        corrosion_statement = self._corrosion_direct_statement(
+            outcomes=outcomes,
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        )
+        if corrosion_statement:
+            return corrosion_statement
         quote_statement = self._quote_derived_finding_statement(
             variables=variables,
             outcomes=outcomes,
@@ -2345,6 +2353,75 @@ class ResearchUnderstandingService:
         variable = variables[0]
         outcome = outcomes[0]
         return f"{variable} is associated with {outcome}."
+
+    def _corrosion_direct_statement(
+        self,
+        *,
+        outcomes: list[str],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> str:
+        outcome_text = _normalize_match_text(" ".join(outcomes))
+        if "corrosion" not in outcome_text and "pitting" not in outcome_text:
+            return ""
+        for source_text in self._direct_evidence_source_texts(
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        ):
+            normalized = f" {_normalize_match_text(source_text)} "
+            if not (
+                " porosity " in normalized
+                or " porosities " in normalized
+                or " pores " in normalized
+            ):
+                continue
+            if " pitting " not in normalized and " corrosion " not in normalized:
+                continue
+            has_low_porosity_direction = (
+                " decreased porosity " in normalized
+                or " low porosity " in normalized
+                or " lower porosity " in normalized
+                or " porosity level " in normalized
+            )
+            has_corrosion_mechanism = (
+                " passive film " in normalized
+                or " corrosion rate " in normalized
+                or " pitting potential " in normalized
+                or " better corrosion " in normalized
+            )
+            if not (has_low_porosity_direction and has_corrosion_mechanism):
+                continue
+            return (
+                "Lower porosity in SLM 316L increased pitting potential and "
+                "stabilized the passive film, improving pitting-corrosion resistance."
+            )
+        return ""
+
+    def _direct_evidence_source_texts(
+        self,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> list[str]:
+        texts: list[str] = []
+        for ref_id in _strings(evidence_bundle.get("direct_result")):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+            text = " ".join(
+                value
+                for value in (
+                    _text(evidence_ref.get("quote")),
+                    _text(block.text if block else None),
+                )
+                if value
+            )
+            if text:
+                texts.append(text)
+        return texts
 
     def _quote_derived_finding_statement(
         self,

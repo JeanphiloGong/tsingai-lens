@@ -3327,8 +3327,27 @@ def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized
     assert finding["support_grade"] == "insufficient"
 
 
-def test_with_presentation_recalls_target_matching_corrosion_relation_evidence():
-    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+def test_with_presentation_corrosion_statement_recalls_target_matching_relation_evidence():
+    service = ResearchUnderstandingService(
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[
+                SourceBlock(
+                    block_id="blk-corrosion",
+                    document_id="paper-5",
+                    block_type="paragraph",
+                    text=(
+                        "The pitting potential gradually increases with the decreased "
+                        "porosity. Meanwhile, higher resistance can slow the corrosion "
+                        "rate in the polarization reaction. Therefore, the passive film "
+                        "formed on the surface of low porosity sample was more stable "
+                        "and exhibited better corrosion properties."
+                    ),
+                    block_order=1,
+                )
+            ]
+        ),
+        structured_extractor=_FakeSemanticExtractor(),
+    )
     stored = ResearchUnderstanding.from_mapping(
         {
             "state": "ready",
@@ -3414,8 +3433,7 @@ def test_with_presentation_recalls_target_matching_corrosion_relation_evidence()
                     "fact_ids": ["unit_corrosion_text"],
                     "traceability_status": "resolved",
                     "quote": (
-                        "Porosities were highly sensitive to pitting corrosion "
-                        "behavior, with pores reducing passive film stability."
+                        "Porosities were highly sensitive to pitting corrosion."
                     ),
                 },
             ],
@@ -3445,7 +3463,31 @@ def test_with_presentation_recalls_target_matching_corrosion_relation_evidence()
     ]
     assert finding["evidence_bundle"]["direct_result"] == ["evref_corrosion_text"]
     assert finding["evidence_bundle"]["uncategorized"] == ["evref_density_table"]
+    assert finding["statement"] == (
+        "Lower porosity in SLM 316L increased pitting potential and stabilized "
+        "the passive film, improving pitting-corrosion resistance."
+    )
     assert finding["support_grade"] == "partial"
+
+
+def test_with_presentation_corrosion_statement_keeps_generic_when_mechanism_missing():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+
+    statement = service._finding_statement(
+        statement="Porosities were highly sensitive to pitting corrosion.",
+        variables=["porosity level"],
+        outcomes=["pitting corrosion behavior"],
+        evidence_by_id={
+            "evref_corrosion": {
+                "quote": "Porosities were highly sensitive to pitting corrosion.",
+                "locator": {"source_ref": "blk-corrosion"},
+            }
+        },
+        evidence_bundle={"direct_result": ["evref_corrosion"]},
+        blocks_by_id={},
+    )
+
+    assert statement == "Porosities were highly sensitive to pitting corrosion."
 
 
 def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_targets():

@@ -166,6 +166,16 @@ class FakeResearchUnderstandingRepository:
         return self.understanding
 
 
+class FakeResearchUnderstandingProjectionService:
+    def __init__(self, projected: dict | None = None) -> None:
+        self.projected = projected
+        self.inputs = []
+
+    def with_presentation(self, understanding):
+        self.inputs.append(understanding)
+        return self.projected if self.projected is not None else understanding.to_record()
+
+
 def _sample_understanding() -> ResearchUnderstanding:
     return ResearchUnderstanding.from_mapping(
         {
@@ -597,6 +607,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
     dataset = service.export_dataset(
@@ -703,6 +714,157 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-4"]["trace_status"] == "unavailable"
 
 
+def test_research_understanding_feedback_service_exports_current_presentation_findings():
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-gold",
+                "goal_id": "goal-1",
+                "title": "How does VED affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim-legacy",
+                    "claim_type": "finding",
+                    "statement": "Legacy claim text should not drive the dataset.",
+                    "status": "limited",
+                    "evidence_ref_ids": ["ev-legacy"],
+                    "context_ids": ["ctx-1"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "ev-off-target",
+                    "source_kind": "table",
+                    "document_id": "doc-1",
+                    "label": "P001 table context",
+                    "locator": {"source_ref": "tbl-density"},
+                    "traceability_status": "partial",
+                    "quote": "Table reports specimen labels and density metadata.",
+                },
+                {
+                    "evidence_ref_id": "ev-current",
+                    "source_kind": "text",
+                    "document_id": "doc-1",
+                    "label": "P001 density result",
+                    "locator": {"source_ref": "blk-density"},
+                    "traceability_status": "direct",
+                    "evidence_role": "direct_support",
+                    "quote": "Density increased from 91.9% to 99.6% from L-VED to H-VED.",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx-1",
+                    "label": "LPBF 316L",
+                    "material_scope": ["316L"],
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+    projected = stored.to_record()
+    projected["presentation"] = {
+        "findings": [
+            {
+                "finding_id": "finding-current",
+                "claim_id": "claim-current",
+                "title": "VED -> density",
+                "statement": "H-VED achieved 99.6% density.",
+                "variables": ["VED"],
+                "mediators": [],
+                "outcomes": ["density"],
+                "direction": "increase",
+                "scope_summary": "LPBF 316L",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "confidence": 0.78,
+                "paper_count": 1,
+                "evidence_count": 1,
+                "evidence_ref_ids": ["ev-off-target"],
+                "context_ids": ["ctx-1"],
+                "relation_ids": [],
+                "evidence_bundle": {
+                    "direct_result": ["ev-current"],
+                    "uncategorized": ["ev-off-target"],
+                },
+            }
+        ],
+        "evidence_items": [
+            {
+                "evidence_ref_id": "ev-off-target",
+                "document_id": "doc-1",
+                "title": "P001 table context",
+                "source_label": "P001 table",
+                "source_kind": "table",
+                "source_ref": "tbl-density",
+                "quote": "Table reports specimen labels and density metadata.",
+                "source_text": "Table reports specimen labels and density metadata.",
+                "traceability_status": "partial",
+            },
+            {
+                "evidence_ref_id": "ev-current",
+                "document_id": "doc-1",
+                "title": "P001 density result",
+                "source_label": "P001 p.4",
+                "source_kind": "text",
+                "source_ref": "blk-density",
+                "heading_path": "Results / Density",
+                "page": "4",
+                "quote": "Density increased from 91.9% to 99.6% from L-VED to H-VED.",
+                "source_text": "Density increased from 91.9% to 99.6% from L-VED to H-VED.",
+                "value_summary": "density 99.6%",
+                "traceability_status": "direct",
+                "evidence_role": "direct_support",
+            }
+        ],
+        "context_summaries": [
+            {
+                "context_id": "ctx-1",
+                "label": "LPBF 316L",
+                "material_scope": ["316L"],
+                "property_scope": ["density"],
+            }
+        ],
+    }
+    projection_service = FakeResearchUnderstandingProjectionService(projected)
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=projection_service,
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    assert projection_service.inputs == [stored]
+    assert dataset["item_count"] == 1
+    sample = dataset["items"][0]
+    assert sample["finding_id"] == "finding-current"
+    assert sample["claim_id"] == "claim-current"
+    assert sample["system_prediction"]["title"] == "VED -> density"
+    assert sample["system_prediction"]["statement"] == "H-VED achieved 99.6% density."
+    assert sample["system_prediction"]["variables"] == ["VED"]
+    assert sample["system_prediction"]["outcomes"] == ["density"]
+    assert sample["system_prediction"]["evidence_bundle"] == {
+        "direct_result": ["ev-current"],
+        "uncategorized": ["ev-off-target"],
+    }
+    assert [ref["evidence_ref_id"] for ref in sample["evidence_refs"]] == [
+        "ev-current",
+        "ev-off-target",
+    ]
+    assert sample["evidence_refs"][0]["source_text"] == (
+        "Density increased from 91.9% to 99.6% from L-VED to H-VED."
+    )
+    assert dataset["quality_summary"]["by_support_grade"] == {"partial": 1}
+
+
 def test_research_understanding_feedback_service_filters_dataset_by_label():
     repository = FakeEvaluationRepository()
     repository.feedback = (
@@ -723,6 +885,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
     dataset = service.export_dataset(

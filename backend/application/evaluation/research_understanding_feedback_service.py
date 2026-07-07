@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Mapping
 
+from application.core.research_understanding_service import ResearchUnderstandingService
 from domain.evaluation import (
     ResearchUnderstandingCuration,
     ResearchUnderstandingFeedback,
@@ -37,11 +38,15 @@ class ResearchUnderstandingFeedbackService:
         self,
         evaluation_repository: EvaluationRepository | None = None,
         core_fact_repository: CoreFactRepository | None = None,
+        research_understanding_service: ResearchUnderstandingService | None = None,
     ) -> None:
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()
         )
         self.core_fact_repository = core_fact_repository or build_core_fact_repository()
+        self.research_understanding_service = (
+            research_understanding_service or ResearchUnderstandingService()
+        )
 
     def record_feedback(
         self,
@@ -264,6 +269,10 @@ class ResearchUnderstandingFeedbackService:
                 warnings=["research understanding artifact is not available"],
             )
 
+        understanding_record = (
+            self.research_understanding_service.with_presentation(understanding)
+            or understanding.to_record()
+        )
         feedback = self.list_feedback(
             collection_id=collection_id,
             scope_type=scope_type,
@@ -276,7 +285,7 @@ class ResearchUnderstandingFeedbackService:
         )
         feedback_index = _feedback_index(feedback)
         curation_index = _curation_index(curations)
-        presentation = _mapping(understanding.presentation)
+        presentation = _mapping(understanding_record.get("presentation"))
         evidence_items = _by_id(
             _mapping_list(presentation.get("evidence_items")),
             "evidence_ref_id",
@@ -300,7 +309,7 @@ class ResearchUnderstandingFeedbackService:
         model_traces = tuple(dict(trace) for trace in understanding.model_traces)
 
         items: list[dict[str, object]] = []
-        for finding in self._finding_records(understanding.to_record()):
+        for finding in self._finding_records(understanding_record):
             sample = self._dataset_sample(
                 collection_id=collection_id,
                 scope_type=scope_type,
@@ -417,7 +426,25 @@ class ResearchUnderstandingFeedbackService:
         curation = curations[0] if curations else None
         label_status = _label_status(feedback, curation)
         system_prediction = _system_prediction(finding)
-        evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
+        base_evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
+        evidence_ref_ids_list: list[str] = []
+        bundle = _mapping(finding.get("evidence_bundle"))
+        for role in (
+            "direct_result",
+            "mechanism",
+            "condition_context",
+            "conflict",
+            "background",
+            "noise",
+            "uncategorized",
+        ):
+            for ref_id in _strings(bundle.get(role)):
+                if ref_id in evidence_refs and ref_id not in evidence_ref_ids_list:
+                    evidence_ref_ids_list.append(ref_id)
+        evidence_ref_ids_list.extend(
+            ref_id for ref_id in base_evidence_ref_ids if ref_id not in evidence_ref_ids_list
+        )
+        evidence_ref_ids = tuple(evidence_ref_ids_list)
         context_ids = _strings(finding.get("context_ids"))
         matched_trace = _matched_trace_for_finding(
             finding,
@@ -765,6 +792,7 @@ def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_ref_ids": list(_strings(finding.get("evidence_ref_ids"))),
         "context_ids": list(_strings(finding.get("context_ids"))),
         "relation_ids": list(_strings(finding.get("relation_ids"))),
+        "evidence_bundle": _mapping(finding.get("evidence_bundle")),
         "warnings": list(_strings(finding.get("warnings"))),
     }
 

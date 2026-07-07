@@ -4581,6 +4581,14 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     assert findings[0]["evidence_bundle"]["direct_result"] == ["evref_direct"]
     assert findings[1]["support_grade"] == "insufficient"
     assert findings[1]["evidence_bundle"]["background"] == ["evref_context"]
+    evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    assert evidence_by_id["evref_direct"]["href"] == (
+        "/collections/col-1/documents/paper-1"
+        "?view=parsed-paper&source_ref=blk-results"
+    )
     assert understanding["presentation"]["primary_findings"] == [findings[0]]
     assert understanding["presentation"]["review_queue_findings"] == [findings[1]]
     assert (
@@ -4613,6 +4621,14 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     assert serialized_review[0]["evidence_bundle"]["background"] == [
         "evref_context"
     ]
+    serialized_evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in response_payload["presentation"]["evidence_items"]
+    }
+    assert serialized_evidence_by_id["evref_direct"]["href"] == (
+        "/collections/col-1/documents/paper-1"
+        "?view=parsed-paper&source_ref=blk-results"
+    )
     assert (
         response_payload["presentation"]["summary"][
             "primary_finding_count"

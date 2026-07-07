@@ -5,6 +5,7 @@ import logging
 import re
 from hashlib import sha1
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from domain.core import ResearchUnderstanding
@@ -1939,6 +1940,7 @@ class ResearchUnderstandingService:
         evidence_items = [
             self._presentation_evidence_item(
                 ref,
+                collection_id=_text(scope.get("collection_id")),
                 blocks_by_id=blocks_by_id,
                 documents_by_id=documents_by_id,
                 quote_hints=quote_hints_by_ref.get(
@@ -3670,6 +3672,7 @@ class ResearchUnderstandingService:
         self,
         ref: Mapping[str, Any],
         *,
+        collection_id: str,
         blocks_by_id: Mapping[str, SourceBlock],
         documents_by_id: Mapping[str, SourceDocument],
         quote_hints: Mapping[str, set[str]] | None = None,
@@ -3727,6 +3730,12 @@ class ResearchUnderstandingService:
             _block_context_label(block)
             or (label if _looks_user_facing(label) else "")
         )
+        href = _text(ref.get("href")) or _presentation_evidence_href(
+            collection_id=collection_id,
+            document_id=document_id or (block.document_id if block else None),
+            source_ref=source_ref,
+            page=page,
+        )
         return {
             "evidence_ref_id": _text(ref.get("evidence_ref_id")) or "",
             "document_id": document_id or (block.document_id if block else None),
@@ -3743,7 +3752,7 @@ class ResearchUnderstandingService:
             "traceability_status": _text(ref.get("traceability_status")) or "unknown",
             "evidence_role": _text(ref.get("evidence_role")),
             "confidence": ref.get("confidence"),
-            "href": _text(ref.get("href")),
+            "href": href,
         }
 
     def _presentation_source_text_for_quote(
@@ -4294,6 +4303,27 @@ def _block_context_label(block: SourceBlock | None) -> str:
     if heading and _looks_user_facing(heading):
         return _short_text(heading, limit=160)
     return _block_kind_label(block)
+
+
+def _presentation_evidence_href(
+    *,
+    collection_id: str,
+    document_id: Any,
+    source_ref: str,
+    page: str,
+) -> str | None:
+    document = _text(document_id)
+    source = _text(source_ref)
+    if not collection_id or not document or not source:
+        return None
+    params = [("view", "parsed-paper"), ("source_ref", source)]
+    if page:
+        params.append(("page", page))
+    query = "&".join(f"{quote(key)}={quote(value)}" for key, value in params)
+    return (
+        f"/collections/{quote(collection_id)}/documents/{quote(document)}"
+        f"?{query}"
+    )
 
 
 def _mapping(value: Any) -> dict[str, Any]:

@@ -923,6 +923,132 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
     }
 
 
+def test_research_understanding_feedback_service_curation_evidence_priority():
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-gold",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect corrosion?",
+            },
+            "claims": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "ev-off-target",
+                    "source_kind": "table",
+                    "document_id": "doc-1",
+                    "label": "Density table",
+                    "locator": {"source_ref": "tbl-density"},
+                    "traceability_status": "partial",
+                    "quote": "Table reports density values.",
+                },
+                {
+                    "evidence_ref_id": "ev-corrosion",
+                    "source_kind": "text",
+                    "document_id": "doc-1",
+                    "label": "Corrosion result",
+                    "locator": {"source_ref": "blk-corrosion"},
+                    "traceability_status": "direct",
+                    "quote": "Higher porosity made the passive film less stable.",
+                },
+            ],
+            "contexts": [],
+        }
+    )
+    projected = stored.to_record()
+    projected["presentation"] = {
+        "findings": [
+            {
+                "finding_id": "finding-corrosion",
+                "claim_id": "claim-corrosion",
+                "title": "porosity -> corrosion",
+                "statement": "Porosity is associated with corrosion.",
+                "variables": ["porosity"],
+                "mediators": [],
+                "outcomes": ["corrosion behavior"],
+                "direction": "increase",
+                "scope_summary": "SLM 316L",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "confidence": 0.7,
+                "paper_count": 1,
+                "evidence_count": 2,
+                "evidence_ref_ids": ["ev-off-target", "ev-corrosion"],
+                "context_ids": [],
+                "relation_ids": [],
+                "evidence_bundle": {
+                    "direct_result": ["ev-off-target"],
+                    "uncategorized": ["ev-corrosion"],
+                },
+            }
+        ],
+        "primary_findings": [],
+        "review_queue_findings": [],
+        "evidence_items": [
+            {
+                "evidence_ref_id": "ev-off-target",
+                "document_id": "doc-1",
+                "title": "Density table",
+                "source_kind": "table",
+                "quote": "Table reports density values.",
+                "source_text": "Table reports density values.",
+            },
+            {
+                "evidence_ref_id": "ev-corrosion",
+                "document_id": "doc-1",
+                "title": "Corrosion result",
+                "source_kind": "text",
+                "quote": "Higher porosity made the passive film less stable.",
+                "source_text": "Higher porosity made the passive film less stable.",
+            },
+        ],
+    }
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-corrosion",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-corrosion",
+                "claim_id": "claim-corrosion",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": (
+                    "Higher porosity made SLM 316L more vulnerable to corrosion."
+                ),
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_evidence_ref_ids": ["ev-corrosion"],
+                "curated_context_ids": [],
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    sample = dataset["items"][0]
+    assert sample["label_status"] == "gold"
+    assert sample["expert_target"]["source"] == "curation"
+    assert [ref["evidence_ref_id"] for ref in sample["evidence_refs"]] == [
+        "ev-corrosion",
+        "ev-off-target",
+    ]
+
+
 def test_research_understanding_feedback_service_current_label_alignment_ignores_stale_claim_level_correct_feedback():
     stored = _sample_understanding()
     projected = stored.to_record()

@@ -462,6 +462,17 @@ class ResearchUnderstandingFeedbackService:
         evidence_ref_ids_list.extend(
             ref_id for ref_id in base_evidence_ref_ids if ref_id not in evidence_ref_ids_list
         )
+        if curation is not None:
+            evidence_ref_ids_list = list(
+                _strings(
+                    [
+                        ref_id
+                        for ref_id in curation.curated_evidence_ref_ids
+                        if ref_id in evidence_refs
+                    ]
+                    + evidence_ref_ids_list
+                )
+            )
         evidence_ref_ids = tuple(evidence_ref_ids_list)
         context_ids = _strings(finding.get("context_ids"))
         matched_trace = _matched_trace_for_finding(

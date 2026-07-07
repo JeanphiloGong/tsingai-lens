@@ -635,6 +635,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "accepted_after_curation_match_count": 1,
         "curated_correction_count": 0,
         "system_error_count": 1,
+        "resolved_feedback_count": 0,
         "by_label_status": {
             "candidate": 1,
             "silver": 1,
@@ -691,6 +692,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "unavailable_trace": 3,
             "failed_trace": 0,
             "rejected_feedback": 1,
+            "resolved_feedback": 0,
         },
     }
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -1220,6 +1222,79 @@ def test_research_understanding_feedback_service_current_label_alignment_aligns_
     }
     assert dataset["quality_summary"]["accepted_after_curation_match_count"] == 1
     assert dataset["quality_summary"]["curated_correction_count"] == 0
+
+
+def test_research_understanding_feedback_service_resolved_feedback_does_not_count_as_current_system_error():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-resolved",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["preheating"],
+                "curated_mediators": ["porosity"],
+                "curated_outcomes": ["ductility"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "LPBF 316L",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "note": "Current statement now matches the accepted correction.",
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-old-overclaim",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "review_status": "partial",
+                "issue_type": "overclaim",
+                "note": "Older review said the system claim was too broad.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    resolved_sample = by_finding["finding-1"]
+    assert resolved_sample["label_status"] == "gold"
+    assert resolved_sample["expert_target"]["source"] == "curation"
+    assert resolved_sample["feedback_refs"][0]["feedback_id"] == "ruf-old-overclaim"
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "accepted_after_curation_match": 1,
+        "candidate": 3,
+    }
+    assert dataset["quality_summary"]["system_error_count"] == 0
+    assert dataset["quality_summary"]["resolved_feedback_count"] == 1
+    assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 0
+    assert dataset["quality_summary"]["warning_counts"]["resolved_feedback"] == 1
 
 
 def test_research_understanding_feedback_service_curation_match_keeps_unmatched_curation_as_correction():

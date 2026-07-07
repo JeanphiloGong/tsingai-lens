@@ -158,6 +158,7 @@ class FakeResearchUnderstandingFeedbackService:
                 "accepted_after_curation_match_count": 1,
                 "curated_correction_count": 0,
                 "system_error_count": 0,
+                "resolved_feedback_count": 0,
                 "by_label_status": {
                     "candidate": 0,
                     "silver": 0,
@@ -182,6 +183,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "unavailable_trace": 1,
                     "failed_trace": 0,
                     "rejected_feedback": 0,
+                    "resolved_feedback": 0,
                 },
             },
             "items": [
@@ -444,6 +446,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.quality_summary.by_issue_type == {"none": 1}
     assert response.quality_summary.accepted_after_curation_match_count == 1
     assert response.quality_summary.curated_correction_count == 0
+    assert response.quality_summary.resolved_feedback_count == 0
     assert response.quality_summary.by_quality_decision == {
         "accepted_after_curation_match": 1
     }

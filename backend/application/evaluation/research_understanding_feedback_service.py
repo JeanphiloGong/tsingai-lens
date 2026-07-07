@@ -844,6 +844,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "unavailable_trace": 0,
         "failed_trace": 0,
         "rejected_feedback": 0,
+        "resolved_feedback": 0,
     }
     usable_sample_count = 0
     needs_review_count = 0
@@ -853,6 +854,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     accepted_after_curation_match_count = 0
     curated_correction_count = 0
     system_error_count = 0
+    resolved_feedback_count = 0
 
     for item in items:
         label_status = _text(item.get("label_status")) or "candidate"
@@ -941,7 +943,10 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
             accepted_after_curation_match_count += 1
         elif quality_decision == "curated_correction":
             curated_correction_count += 1
-        if has_rejecting_feedback:
+        if has_rejecting_feedback and quality_decision == "accepted_after_curation_match":
+            resolved_feedback_count += 1
+            warning_counts["resolved_feedback"] += 1
+        elif has_rejecting_feedback:
             system_error_count += 1
             warning_counts["rejected_feedback"] += 1
 
@@ -984,6 +989,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "accepted_after_curation_match_count": accepted_after_curation_match_count,
         "curated_correction_count": curated_correction_count,
         "system_error_count": system_error_count,
+        "resolved_feedback_count": resolved_feedback_count,
         "by_label_status": by_label_status,
         "by_review_status": by_review_status,
         "by_issue_type": by_issue_type,

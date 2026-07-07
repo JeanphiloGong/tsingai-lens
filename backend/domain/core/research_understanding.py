@@ -283,6 +283,7 @@ class ResearchUnderstanding:
     contexts: tuple[ResearchContext, ...]
     warnings: tuple[str, ...]
     presentation: dict[str, Any]
+    model_traces: tuple[dict[str, Any], ...]
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstanding":
@@ -308,6 +309,7 @@ class ResearchUnderstanding:
             ),
             warnings=_strings(payload.get("warnings")),
             presentation=_mapping(payload.get("presentation")),
+            model_traces=_mapping_list(payload.get("model_traces")),
         )
 
     @classmethod
@@ -334,6 +336,7 @@ class ResearchUnderstanding:
                     "title": title,
                 },
                 "warnings": list(warnings),
+                "model_traces": [],
             }
         )
 
@@ -347,6 +350,7 @@ class ResearchUnderstanding:
             "evidence_refs": [ref.to_record() for ref in self.evidence_refs],
             "contexts": [context.to_record() for context in self.contexts],
             "warnings": list(self.warnings),
+            "model_traces": [dict(trace) for trace in self.model_traces],
             "summary": {
                 "claim_count": len(self.claims),
                 "relation_count": len(self.relations),

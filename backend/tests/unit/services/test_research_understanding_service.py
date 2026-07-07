@@ -30,18 +30,36 @@ class _FakeSourceArtifactRepository:
 
 
 class _FakeSemanticExtractor:
-    def __init__(self, relations: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        relations: list[dict] | None = None,
+        trace: dict | None = None,
+    ) -> None:
         self.relations = relations or []
+        self.trace = trace
         self.payloads: list[dict] = []
 
     def extract_research_understanding_relations(self, payload: dict):
         self.payloads.append(payload)
         return _FakeSemanticRelations(self.relations)
 
+    def consume_last_trace(self):
+        trace = self.trace
+        self.trace = None
+        return trace
+
 
 class _FailingSemanticExtractor:
+    def __init__(self, trace: dict | None = None) -> None:
+        self.trace = trace
+
     def extract_research_understanding_relations(self, payload: dict):
         raise RuntimeError("relation extractor unavailable")
+
+    def consume_last_trace(self):
+        trace = self.trace
+        self.trace = None
+        return trace
 
 
 class _FakeSemanticRelations:
@@ -248,6 +266,71 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["effects"][0]["evidence_count"] == 1
     assert presentation["effects"][0]["needs_review"] is True
     assert presentation["evidence_items"][0]["title"] == "table-1"
+
+
+def test_objective_understanding_persists_relation_model_trace():
+    extractor = _FakeSemanticExtractor(
+        relations=[],
+        trace={
+            "task_type": "research_understanding_relation",
+            "prompt_version": "research_understanding_relation.v1",
+            "model": "fake-model",
+            "trace_status": "available",
+            "messages": [{"role": "user", "content": "Input JSON: ..."}],
+            "raw_output": "{\"relations\":[]}",
+            "parsed_output": {"relations": []},
+        },
+    )
+    service = ResearchUnderstandingService(structured_extractor=extractor)
+
+    understanding = service.build_objective_understanding(_oversized_relation_payload(4))
+
+    ResearchUnderstanding.from_mapping(understanding)
+    trace = understanding["model_traces"][0]
+    assert trace["trace_id"].startswith("rut_")
+    assert trace["task_type"] == "research_understanding_relation"
+    assert trace["prompt_version"] == "research_understanding_relation.v1"
+    assert trace["model"] == "fake-model"
+    assert trace["trace_status"] == "available"
+    assert trace["scope_type"] == "objective"
+    assert trace["scope_id"] == "obj-density"
+    assert trace["input_blocks"][0] == {
+        "source_object_id": "oeu-density-0",
+        "source_kind": "objective_evidence_unit",
+    }
+    assert set(trace["source_object_ids"]) == {
+        "oeu-density-0",
+        "oeu-density-1",
+        "oeu-density-2",
+        "oeu-density-3",
+    }
+    assert "api_key" not in json.dumps(trace, ensure_ascii=False).lower()
+
+
+def test_objective_understanding_persists_failed_relation_model_trace():
+    extractor = _FailingSemanticExtractor(
+        {
+            "task_type": "research_understanding_relation",
+            "prompt_version": "research_understanding_relation.v1",
+            "model": "fake-model",
+            "trace_status": "failed",
+            "error": "structured extraction failed",
+        }
+    )
+    service = ResearchUnderstandingService(structured_extractor=extractor)
+
+    understanding = service.build_objective_understanding(_oversized_relation_payload(4))
+
+    assert "relation_extraction_failed" in understanding["warnings"]
+    trace = understanding["model_traces"][0]
+    assert trace["trace_status"] == "failed"
+    assert trace["error"] == "structured extraction failed"
+    assert set(trace["source_object_ids"]) == {
+        "oeu-density-0",
+        "oeu-density-1",
+        "oeu-density-2",
+        "oeu-density-3",
+    }
 
 
 def test_objective_relation_payload_excludes_full_audit_context_details():

@@ -293,6 +293,11 @@ class ResearchUnderstandingFeedbackService:
             context.context_id: context.to_record()
             for context in understanding.contexts
         }
+        relations = {
+            relation.relation_id: relation.to_record()
+            for relation in understanding.relations
+        }
+        model_traces = tuple(dict(trace) for trace in understanding.model_traces)
 
         items: list[dict[str, object]] = []
         for finding in self._finding_records(understanding.to_record()):
@@ -305,6 +310,8 @@ class ResearchUnderstandingFeedbackService:
                 evidence_items=evidence_items,
                 contexts=contexts,
                 context_summaries=context_summaries,
+                relations=relations,
+                model_traces=model_traces,
                 feedback_index=feedback_index,
                 curation_index=curation_index,
             )
@@ -397,6 +404,8 @@ class ResearchUnderstandingFeedbackService:
         evidence_items: Mapping[str, Mapping[str, Any]],
         contexts: Mapping[str, Mapping[str, Any]],
         context_summaries: Mapping[str, Mapping[str, Any]],
+        relations: Mapping[str, Mapping[str, Any]],
+        model_traces: tuple[dict[str, Any], ...],
         feedback_index: Mapping[tuple[str, str], tuple[ResearchUnderstandingFeedback, ...]],
         curation_index: Mapping[tuple[str, str], tuple[ResearchUnderstandingCuration, ...]],
     ) -> dict[str, object]:
@@ -409,6 +418,13 @@ class ResearchUnderstandingFeedbackService:
         system_prediction = _system_prediction(finding)
         evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
         context_ids = _strings(finding.get("context_ids"))
+        matched_trace = _matched_trace_for_finding(
+            finding,
+            evidence_ref_ids=evidence_ref_ids,
+            evidence_refs=evidence_refs,
+            relations=relations,
+            model_traces=model_traces,
+        )
         expert_target = (
             _expert_target_from_curation(curation)
             if curation is not None
@@ -430,10 +446,12 @@ class ResearchUnderstandingFeedbackService:
             "finding_id": finding_id,
             "claim_id": claim_id,
             "label_status": label_status,
-            "trace_status": "unavailable",
-            "input_blocks": [],
-            "prompt_version": None,
-            "model_output": None,
+            "trace_status": _trace_status(matched_trace),
+            "input_blocks": _trace_input_blocks(matched_trace),
+            "prompt_version": (
+                _text(matched_trace.get("prompt_version")) if matched_trace else None
+            ),
+            "model_output": _trace_model_output(matched_trace),
             "system_prediction": system_prediction,
             "expert_target": expert_target,
             "evidence_refs": [
@@ -448,7 +466,12 @@ class ResearchUnderstandingFeedbackService:
             "metadata": {
                 "curation_id": curation.curation_id if curation else None,
                 "feedback_count": len(feedback),
-                "trace_note": "prompt/model trace is not captured for historical samples",
+                "trace_id": _text(matched_trace.get("trace_id")) if matched_trace else None,
+                "trace_note": (
+                    "matched research-understanding model trace"
+                    if matched_trace
+                    else "prompt/model trace is not captured for historical samples"
+                ),
             },
         }
 
@@ -625,6 +648,56 @@ def _expert_target_from_feedback(
         "source": "accepted_system_prediction",
         "statement": system_prediction.get("statement"),
         "system_prediction": dict(system_prediction),
+    }
+
+
+def _matched_trace_for_finding(
+    finding: Mapping[str, Any],
+    *,
+    evidence_ref_ids: tuple[str, ...],
+    evidence_refs: Mapping[str, Mapping[str, Any]],
+    relations: Mapping[str, Mapping[str, Any]],
+    model_traces: tuple[dict[str, Any], ...],
+) -> dict[str, Any] | None:
+    source_ids = set(_strings(finding.get("source_object_ids")))
+    for evidence_ref_id in evidence_ref_ids:
+        source_ids.update(_strings(evidence_refs.get(evidence_ref_id, {}).get("fact_ids")))
+    for relation_id in _strings(finding.get("relation_ids")):
+        relation = relations.get(relation_id, {})
+        source_ids.update(_strings(relation.get("source_object_ids")))
+    if not source_ids:
+        return None
+    for trace in model_traces:
+        trace_source_ids = set(_strings(trace.get("source_object_ids")))
+        if source_ids & trace_source_ids:
+            return trace
+    return None
+
+
+def _trace_status(trace: Mapping[str, Any] | None) -> str:
+    if not trace:
+        return "unavailable"
+    return _text(trace.get("trace_status")) or "available"
+
+
+def _trace_input_blocks(trace: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    if not trace:
+        return []
+    return list(_mapping_list(trace.get("input_blocks")))
+
+
+def _trace_model_output(trace: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not trace:
+        return None
+    return {
+        "trace_id": _text(trace.get("trace_id")),
+        "task_type": _text(trace.get("task_type")),
+        "model": _text(trace.get("model")),
+        "extraction_mode": _text(trace.get("extraction_mode")),
+        "response_model": _text(trace.get("response_model")),
+        "raw_output": _text(trace.get("raw_output")),
+        "parsed_output": trace.get("parsed_output"),
+        "error": _text(trace.get("error")),
     }
 
 

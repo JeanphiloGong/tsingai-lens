@@ -18,6 +18,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjectives,
+    StructuredResearchUnderstandingRelations,
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
@@ -162,6 +163,36 @@ def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTextWindowMentions
     assert "JSON schema:" in parse_call["messages"][1]["content"]
+
+
+def test_core_llm_extractor_captures_provider_parse_trace_for_relations():
+    parsed = StructuredResearchUnderstandingRelations(relations=[])
+    client = _FakeOpenAIClient("unused", parsed=parsed)
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    result = extractor.extract_research_understanding_relations(
+        {
+            "objective": {"question": "How does preheating affect porosity?"},
+            "evidence_units": [
+                {
+                    "evidence_unit_id": "oeu-1",
+                    "summary": "Preheating reduces porosity.",
+                }
+            ],
+        }
+    )
+
+    assert result == parsed
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["task_type"] == "research_understanding_relation"
+    assert trace["prompt_version"] == "research_understanding_relation.v1"
+    assert trace["model"] == "fake-model"
+    assert trace["trace_status"] == "available"
+    assert trace["parsed_output"] == {"relations": []}
+    assert trace["raw_output"] is None
+    assert "api_key" not in str(trace).lower()
+    assert "authorization" not in str(trace).lower()
 
 
 def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):

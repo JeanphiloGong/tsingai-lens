@@ -663,8 +663,12 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
 `label_status`、`trace_status`、`input_blocks`、`prompt_version`、`model_output`、
 `system_prediction`、`expert_target`、`evidence_refs`、`context_refs`、
-`feedback_refs` 和 `metadata`。该接口只从已持久化 understanding artifact、
-feedback 和 curations 派生样本，不注册 gold set，也不修改原始 artifact。
+`feedback_refs` 和 `metadata`。`trace_status` 可以是 `available`、`failed` 或
+`unavailable`；`input_blocks` 当前保存 research-understanding relation trace 关联的
+objective evidence unit 输入引用；`model_output` 包含 bounded `raw_output` 和
+`parsed_output` 摘要，不包含 API key、Authorization header、完整环境变量或 client
+配置。该接口只从已持久化 understanding artifact、feedback 和 curations 派生样本，
+不注册 gold set，也不修改原始 artifact。
 
 标签语义：
 
@@ -675,9 +679,10 @@ feedback 和 curations 派生样本，不注册 gold set，也不修改原始 ar
   `evidence_not_grounded`、`missing_evidence`、`wrong_context`、
   `wrong_relation`、`overclaim`、`unclear_statement`
 
-历史样本在 model trace 功能完成前使用 `trace_status=unavailable`，不能伪造
-prompt/model trace。`evidence_refs` 应尽量带 `quote` 或 `source_text`、文献/页码/
-block/table provenance 和 source locator，便于从导出样本回查原文。
+历史样本或 deterministic-only finding 没有匹配模型调用时使用
+`trace_status=unavailable`，不能伪造 prompt/model trace。`evidence_refs` 应尽量带
+`quote` 或 `source_text`、文献/页码/block/table provenance 和 source locator，便于
+从导出样本回查原文。
 
 前端 workbench 应读取 `feedback` 和 `curations` 并叠加到 finding 视图：
 curation 可作为当前显示的专家校正副本，feedback 作为复核历史展示；两者都不修改

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import logging
 import re
+from hashlib import sha1
 from typing import Any, Mapping
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _RELATION_CONTEXT_LIMIT = 16
 _RELATION_EVIDENCE_UNIT_LIMIT = 24
+_RELATION_TRACE_TASK_TYPE = "research_understanding_relation"
 _FINDING_MATCH_STOPWORDS = {
     "affect",
     "affects",
@@ -127,7 +129,7 @@ class ResearchUnderstandingService:
             context_ids=context_ids,
             context_ids_by_unit=context_ids_by_unit,
         )
-        relations, relation_warnings = self._objective_relations(
+        relations, relation_warnings, model_traces = self._objective_relations(
             payload,
             evidence_units,
             claims=claims,
@@ -157,6 +159,7 @@ class ResearchUnderstandingService:
                         evidence_refs,
                         extra_warnings=relation_warnings,
                     ),
+                    "model_traces": model_traces,
                 }
             )
         ) or {}
@@ -198,6 +201,7 @@ class ResearchUnderstandingService:
                     "evidence_refs": evidence_refs,
                     "contexts": contexts,
                     "warnings": self._understanding_warnings(claims, evidence_refs),
+                    "model_traces": [],
                 }
             )
         ) or {}
@@ -588,7 +592,7 @@ class ResearchUnderstandingService:
         context_ids: list[str],
         context_ids_by_unit: dict[str, list[str]],
         contexts: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
         deterministic_relations = self._deterministic_objective_relations(
             evidence_units,
             evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
@@ -606,8 +610,21 @@ class ResearchUnderstandingService:
                 relation_payload
             )
         except Exception:  # noqa: BLE001
-            logger.warning("research understanding semantic relation extraction failed", exc_info=True)
-            return deterministic_relations, ["relation_extraction_failed"]
+            logger.warning(
+                "research understanding semantic relation extraction failed",
+                exc_info=True,
+            )
+            failed_trace = self._consume_relation_trace(
+                relation_payload,
+                scope_payload=payload,
+                trace_status="failed",
+            )
+            return deterministic_relations, ["relation_extraction_failed"], failed_trace
+        model_traces = self._consume_relation_trace(
+            relation_payload,
+            scope_payload=payload,
+            trace_status="available",
+        )
         relations: list[dict[str, Any]] = []
         for item in getattr(extracted, "relations", []):
             relation = self._semantic_relation_from_model(
@@ -617,7 +634,60 @@ class ResearchUnderstandingService:
             )
             if relation:
                 relations.append(relation)
-        return _dedupe_by_id((*relations, *deterministic_relations), "relation_id"), []
+        return (
+            _dedupe_by_id((*relations, *deterministic_relations), "relation_id"),
+            [],
+            model_traces,
+        )
+
+    def _consume_relation_trace(
+        self,
+        relation_payload: Mapping[str, Any],
+        *,
+        scope_payload: Mapping[str, Any],
+        trace_status: str,
+    ) -> list[dict[str, Any]]:
+        consumer = getattr(self.structured_extractor, "consume_last_trace", None)
+        if not callable(consumer):
+            return []
+        trace = consumer()
+        if not isinstance(trace, Mapping):
+            return []
+        input_source_ids = [
+            unit_id
+            for item in _mapping_list(relation_payload.get("evidence_units"))
+            if (unit_id := _text(item.get("evidence_unit_id")))
+        ]
+        collection_id = _text(scope_payload.get("collection_id"))
+        objective = _mapping(scope_payload.get("objective"))
+        context = _mapping(scope_payload.get("objective_context"))
+        goal_id = _text(scope_payload.get("goal_id"))
+        objective_id = _text(objective.get("objective_id")) or _text(
+            context.get("objective_id")
+        )
+        trace_record = dict(trace)
+        trace_record["trace_id"] = _trace_id(
+            trace_record.get("task_type"),
+            collection_id,
+            goal_id or objective_id,
+            input_source_ids,
+        )
+        trace_record["task_type"] = _text(trace_record.get("task_type")) or (
+            _RELATION_TRACE_TASK_TYPE
+        )
+        trace_record["trace_status"] = trace_status
+        trace_record["collection_id"] = collection_id
+        trace_record["scope_type"] = "goal" if goal_id else "objective"
+        trace_record["scope_id"] = goal_id or objective_id
+        trace_record["input_blocks"] = [
+            {
+                "source_object_id": unit_id,
+                "source_kind": "objective_evidence_unit",
+            }
+            for unit_id in input_source_ids
+        ]
+        trace_record["source_object_ids"] = input_source_ids
+        return [trace_record]
 
     def _deterministic_objective_relations(
         self,
@@ -4202,3 +4272,20 @@ def _confidence_or_none(value: Any) -> float | None:
         return round(min(1.0, max(0.0, numeric)), 2)
     except (TypeError, ValueError):
         return None
+
+
+def _trace_id(
+    task_type: Any,
+    collection_id: str | None,
+    scope_id: str | None,
+    source_object_ids: list[str],
+) -> str:
+    payload = "\x1f".join(
+        [
+            _text(task_type) or "",
+            collection_id or "",
+            scope_id or "",
+            *source_object_ids,
+        ]
+    )
+    return "rut_" + sha1(payload.encode("utf-8")).hexdigest()[:16]

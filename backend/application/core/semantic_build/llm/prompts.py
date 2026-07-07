@@ -4,6 +4,11 @@ import json
 from typing import Any
 
 
+RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION = (
+    "research_understanding_relation.v1"
+)
+
+
 _COMMON_SYSTEM_PROMPT = """
 You are extracting structured research facts for a materials-literature backend.
 

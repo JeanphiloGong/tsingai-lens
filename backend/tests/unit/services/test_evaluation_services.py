@@ -288,6 +288,7 @@ def _sample_understanding() -> ResearchUnderstanding:
                         "confidence": 0.7,
                         "paper_count": 1,
                         "evidence_count": 1,
+                        "source_object_ids": ["oeu-preheat"],
                         "evidence_ref_ids": ["ev-1"],
                         "context_ids": ["ctx-1"],
                         "relation_ids": ["rel-1"],
@@ -376,6 +377,26 @@ def _sample_understanding() -> ResearchUnderstanding:
                     }
                 ],
             },
+            "model_traces": [
+                {
+                    "trace_id": "rut-1",
+                    "task_type": "research_understanding_relation",
+                    "prompt_version": "research_understanding_relation.v1",
+                    "model": "fake-model",
+                    "extraction_mode": "provider_parse",
+                    "response_model": "StructuredResearchUnderstandingRelations",
+                    "trace_status": "available",
+                    "source_object_ids": ["oeu-preheat"],
+                    "input_blocks": [
+                        {
+                            "source_object_id": "oeu-preheat",
+                            "source_kind": "objective_evidence_unit",
+                        }
+                    ],
+                    "raw_output": "{\"relations\": []}",
+                    "parsed_output": {"relations": []},
+                }
+            ],
         }
     )
 
@@ -606,6 +627,20 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "Results / Mechanical properties"
     )
     assert by_finding["finding-1"]["context_refs"][0]["process_summary"] == "LPBF"
+    assert by_finding["finding-1"]["trace_status"] == "available"
+    assert by_finding["finding-1"]["prompt_version"] == (
+        "research_understanding_relation.v1"
+    )
+    assert by_finding["finding-1"]["input_blocks"] == [
+        {
+            "source_object_id": "oeu-preheat",
+            "source_kind": "objective_evidence_unit",
+        }
+    ]
+    assert by_finding["finding-1"]["model_output"]["trace_id"] == "rut-1"
+    assert by_finding["finding-1"]["model_output"]["parsed_output"] == {
+        "relations": []
+    }
     assert by_finding["finding-2"]["label_status"] == "silver"
     assert by_finding["finding-3"]["label_status"] == "rejected"
     assert by_finding["finding-4"]["label_status"] == "candidate"

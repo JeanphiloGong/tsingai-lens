@@ -2171,6 +2171,143 @@ def test_with_presentation_prefers_specific_single_sentence_quote():
     )
 
 
+def test_with_presentation_orders_result_specific_direct_evidence_first():
+    abstract_text = (
+        "In this study, 316L stainless steel was fabricated by selective laser "
+        "melting to evaluate porosity and corrosion behavior."
+    )
+    result_text = (
+        "The electrochemical polarization curves and EIS results revealed that "
+        "porosities were highly sensitive to pitting corrosion."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-5",
+                    human_readable_id=5,
+                    title="Porosity and corrosion in SLM 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-abstract",
+                    document_id="paper-5",
+                    block_type="paragraph",
+                    text=abstract_text,
+                    block_order=1,
+                    page=1,
+                    heading_path="Abstract",
+                ),
+                SourceBlock(
+                    block_id="blk-result",
+                    document_id="paper-5",
+                    block_type="paragraph",
+                    text=result_text,
+                    block_order=18,
+                    page=9,
+                    heading_path="Results and discussion",
+                ),
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect pitting corrosion?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_corrosion",
+                    "claim_type": "finding",
+                    "statement": (
+                        "Porosities were highly sensitive to pitting corrosion."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.82,
+                    "evidence_ref_ids": [
+                        "evref_abstract",
+                        "evref_result",
+                    ],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": [
+                        "unit_abstract",
+                        "unit_result",
+                    ],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_porosity_corrosion",
+                    "relation_type": "affects",
+                    "subject": "porosity level",
+                    "predicate": "affects",
+                    "object": "pitting corrosion behavior",
+                    "statement": (
+                        "Porosity level affects pitting corrosion behavior."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": [
+                        "evref_abstract",
+                        "evref_result",
+                    ],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": [
+                        "unit_abstract",
+                        "unit_result",
+                    ],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_abstract",
+                    "source_kind": "text_window",
+                    "document_id": "paper-5",
+                    "label": "P005 Abstract",
+                    "locator": {"source_ref": "blk-abstract"},
+                    "fact_ids": ["unit_abstract"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_result",
+                    "source_kind": "text_window",
+                    "document_id": "paper-5",
+                    "label": "P005 Results",
+                    "locator": {"source_ref": "blk-result"},
+                    "fact_ids": ["unit_result"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "SLM"},
+                    "property_scope": ["pitting corrosion behavior"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["evidence_bundle"]["direct_result"] == [
+        "evref_result",
+        "evref_abstract",
+    ]
+
+
 def test_with_presentation_prefers_result_bearing_direct_evidence_source():
     abstract_text = (
         "This study aims to understand the effect of build platform "

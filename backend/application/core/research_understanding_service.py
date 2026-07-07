@@ -2963,6 +2963,36 @@ class ResearchUnderstandingService:
             relation_terms.update(_quote_hint_terms(value))
         if not target_terms or not (variable_terms or relation_terms):
             return {key: list(value) for key, value in evidence_bundle.items()}
+        ranked_direct_refs: list[tuple[tuple[int, int, int, int, int], str]] = []
+        for index, ref_id in enumerate(direct_ref_ids):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            searchable = self._evidence_ref_source_text(
+                evidence_ref,
+                blocks_by_id=blocks_by_id,
+            )
+            bounded = f" {searchable} "
+            ranked_direct_refs.append(
+                (
+                    (
+                        self._evidence_result_source_score(
+                            evidence_ref,
+                            blocks_by_id=blocks_by_id,
+                        ),
+                        1 if _quote_has_concrete_result_cue(searchable) else 0,
+                        _quote_term_hits(bounded, target_terms),
+                        _quote_term_hits(bounded, variable_terms)
+                        + _quote_term_hits(bounded, relation_terms),
+                        -index,
+                    ),
+                    ref_id,
+                )
+            )
+        ordered_direct_ref_ids = [
+            ref_id
+            for _, ref_id in sorted(ranked_direct_refs, reverse=True)
+        ]
+        updated_direct_bundle = {key: list(value) for key, value in evidence_bundle.items()}
+        updated_direct_bundle["direct_result"] = ordered_direct_ref_ids
         current_best_score = max(
             self._evidence_result_source_score(
                 evidence_by_id.get(ref_id, {}),
@@ -2971,7 +3001,7 @@ class ResearchUnderstandingService:
             for ref_id in direct_ref_ids
         )
         if current_best_score >= 4:
-            return {key: list(value) for key, value in evidence_bundle.items()}
+            return updated_direct_bundle
         def document_id_for(evidence_ref: Mapping[str, Any]) -> str:
             document_id = _text(evidence_ref.get("document_id"))
             if document_id:
@@ -3017,7 +3047,7 @@ class ResearchUnderstandingService:
                 continue
             candidates.append((score, -index, ref_id))
         if not candidates:
-            return {key: list(value) for key, value in evidence_bundle.items()}
+            return updated_direct_bundle
         preferred_ref_id = max(candidates)[2]
         updated = {
             key: [ref_id for ref_id in value if ref_id != preferred_ref_id]
@@ -3029,7 +3059,7 @@ class ResearchUnderstandingService:
                 *updated.get("uncategorized", []),
                 *[
                     ref_id
-                    for ref_id in direct_ref_ids
+                    for ref_id in ordered_direct_ref_ids
                     if ref_id != preferred_ref_id
                     and ref_id not in updated.get("uncategorized", [])
                 ],
@@ -3793,7 +3823,14 @@ class ResearchUnderstandingService:
             if sentence in candidates
             and _quote_has_variable_and_outcome(sentence, quote_hints)
         ]
-        if specific_sentences:
+        concrete_specific_sentences = [
+            sentence
+            for sentence in specific_sentences
+            if _quote_has_concrete_result_cue(sentence)
+        ]
+        if concrete_specific_sentences:
+            candidates = concrete_specific_sentences
+        elif specific_sentences:
             best_specific_score = max(
                 _quote_candidate_score(sentence, quote_hints)
                 for sentence in specific_sentences

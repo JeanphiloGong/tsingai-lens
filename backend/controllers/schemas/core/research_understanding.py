@@ -403,6 +403,28 @@ class ResearchUnderstandingGoldDraftResponse(BaseModel):
     items: list[ResearchUnderstandingGoldDraftItemResponse] = Field(default_factory=list)
 
 
+class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
+    """Scope-level quality summary derived from exported dataset samples."""
+
+    total_samples: int = Field(default=0)
+    usable_sample_count: int = Field(default=0)
+    needs_review_count: int = Field(default=0)
+    rejected_count: int = Field(default=0)
+    labeled_sample_count: int = Field(default=0)
+    accepted_system_sample_count: int = Field(default=0)
+    curated_correction_count: int = Field(default=0)
+    system_error_count: int = Field(default=0)
+    by_label_status: dict[str, int] = Field(default_factory=dict)
+    by_review_status: dict[str, int] = Field(default_factory=dict)
+    by_issue_type: dict[str, int] = Field(default_factory=dict)
+    by_support_grade: dict[str, int] = Field(default_factory=dict)
+    by_trace_status: dict[str, int] = Field(default_factory=dict)
+    by_evidence_role: dict[str, int] = Field(default_factory=dict)
+    by_evidence_traceability_status: dict[str, int] = Field(default_factory=dict)
+    by_quality_decision: dict[str, int] = Field(default_factory=dict)
+    warning_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     """Dataset sample derived from one research-understanding finding."""
 
@@ -439,5 +461,8 @@ class ResearchUnderstandingDatasetResponse(BaseModel):
     label_status_filter: ResearchUnderstandingDatasetLabelStatus | None = None
     item_count: int
     label_counts: dict[str, int] = Field(default_factory=dict)
+    quality_summary: ResearchUnderstandingDatasetQualitySummaryResponse = Field(
+        default_factory=ResearchUnderstandingDatasetQualitySummaryResponse
+    )
     items: list[ResearchUnderstandingDatasetSampleResponse] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

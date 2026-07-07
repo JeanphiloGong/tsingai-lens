@@ -614,6 +614,62 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "gold": 1,
         "rejected": 1,
     }
+    assert dataset["quality_summary"] == {
+        "total_samples": 4,
+        "usable_sample_count": 2,
+        "needs_review_count": 2,
+        "rejected_count": 1,
+        "labeled_sample_count": 3,
+        "accepted_system_sample_count": 0,
+        "curated_correction_count": 1,
+        "system_error_count": 1,
+        "by_label_status": {
+            "candidate": 1,
+            "silver": 1,
+            "gold": 1,
+            "rejected": 1,
+        },
+        "by_review_status": {
+            "accepted": 1,
+            "partial": 1,
+            "incorrect": 1,
+            "needs_review": 1,
+        },
+        "by_issue_type": {
+            "none": 2,
+            "evidence_not_grounded": 1,
+            "unreviewed": 1,
+        },
+        "by_support_grade": {
+            "partial": 2,
+            "weak": 2,
+        },
+        "by_trace_status": {
+            "available": 1,
+            "unavailable": 3,
+        },
+        "by_evidence_role": {
+            "direct_result": 3,
+            "background": 1,
+        },
+        "by_evidence_traceability_status": {
+            "direct": 4,
+        },
+        "by_quality_decision": {
+            "curated_correction": 1,
+            "partial_review": 1,
+            "rejected_system": 1,
+            "candidate": 1,
+        },
+        "warning_counts": {
+            "missing_evidence": 0,
+            "missing_source_text": 0,
+            "missing_context": 0,
+            "unavailable_trace": 3,
+            "failed_trace": 0,
+            "rejected_feedback": 1,
+        },
+    }
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     assert by_finding["finding-1"]["label_status"] == "gold"
     assert by_finding["finding-1"]["expert_target"]["source"] == "curation"
@@ -685,6 +741,17 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
         "gold": 0,
         "rejected": 1,
     }
+    assert dataset["quality_summary"]["total_samples"] == 1
+    assert dataset["quality_summary"]["by_label_status"] == {
+        "candidate": 0,
+        "silver": 0,
+        "gold": 0,
+        "rejected": 1,
+    }
+    assert dataset["quality_summary"]["by_quality_decision"] == {"rejected_system": 1}
+    assert dataset["quality_summary"]["system_error_count"] == 1
+    assert dataset["quality_summary"]["by_issue_type"] == {"wrong_relation": 1}
+    assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 1
 
 
 def test_research_understanding_feedback_service_reports_missing_dataset_scope():
@@ -701,6 +768,13 @@ def test_research_understanding_feedback_service_reports_missing_dataset_scope()
 
     assert dataset["item_count"] == 0
     assert dataset["warnings"] == ["research understanding artifact is not available"]
+    assert dataset["quality_summary"]["total_samples"] == 0
+    assert dataset["quality_summary"]["by_label_status"] == {
+        "candidate": 0,
+        "silver": 0,
+        "gold": 0,
+        "rejected": 0,
+    }
 
 
 def test_prediction_snapshot_service_exports_objective_first_measurements():

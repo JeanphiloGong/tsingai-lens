@@ -148,6 +148,37 @@ class FakeResearchUnderstandingFeedbackService:
                 "gold": 1,
                 "rejected": 0,
             },
+            "quality_summary": {
+                "total_samples": 1,
+                "usable_sample_count": 1,
+                "needs_review_count": 0,
+                "rejected_count": 0,
+                "labeled_sample_count": 1,
+                "accepted_system_sample_count": 0,
+                "curated_correction_count": 1,
+                "system_error_count": 0,
+                "by_label_status": {
+                    "candidate": 0,
+                    "silver": 0,
+                    "gold": 1,
+                    "rejected": 0,
+                },
+                "by_review_status": {"accepted": 1},
+                "by_issue_type": {"none": 1},
+                "by_support_grade": {"partial": 1},
+                "by_trace_status": {"unavailable": 1},
+                "by_evidence_role": {"direct_result": 1},
+                "by_evidence_traceability_status": {"direct": 1},
+                "by_quality_decision": {"curated_correction": 1},
+                "warning_counts": {
+                    "missing_evidence": 0,
+                    "missing_source_text": 0,
+                    "missing_context": 0,
+                    "unavailable_trace": 1,
+                    "failed_trace": 0,
+                    "rejected_feedback": 0,
+                },
+            },
             "items": [
                 {
                     "sample_id": "rus-1",
@@ -401,6 +432,10 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.scope_id == "goal-1"
     assert response.label_status_filter == "gold"
     assert response.item_count == 1
+    assert response.quality_summary.total_samples == 1
+    assert response.quality_summary.by_label_status["gold"] == 1
+    assert response.quality_summary.by_issue_type == {"none": 1}
+    assert response.quality_summary.by_quality_decision == {"curated_correction": 1}
     assert response.items[0].label_status == "gold"
     assert response.items[0].evidence_refs[0]["source_text"] == (
         "Preheating increased ductility by 14% in LPBF 316L."

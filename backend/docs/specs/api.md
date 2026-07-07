@@ -657,8 +657,23 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 - `label_status_filter`
 - `item_count`
 - `label_counts`
+- `quality_summary`
 - `items`
 - `warnings`
+
+`quality_summary` 从本次返回的 sample 列表直接派生，用于真实 goal 质量验证和
+优化排查。它包含 `total_samples`、`usable_sample_count`、
+`needs_review_count`、`rejected_count`、`labeled_sample_count`、
+`accepted_system_sample_count`、`curated_correction_count` 和
+`system_error_count`，以及以下分布：`by_label_status`、`by_review_status`、
+`by_issue_type`、`by_support_grade`、`by_trace_status`、`by_evidence_role`、
+`by_evidence_traceability_status` 和 `by_quality_decision`。`by_quality_decision`
+用于区分 `accepted_system`、`curated_correction`、`rejected_system`、
+`partial_review` 和 `candidate`：因此 `label_status=gold` 仍可能表示专家校正后
+可用，而不是系统原始 finding 已完全正确。`warning_counts` 汇总缺失 evidence、缺失
+原文片段、缺失 context、trace 不可用/失败和 rejected feedback 等诊断信号。若请求带
+`label_status` 过滤，`quality_summary` 只统计过滤后的返回样本；`jsonl` 格式仍只输出
+逐行 sample，不输出 envelope summary。
 
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
 `label_status`、`trace_status`、`input_blocks`、`prompt_version`、`model_output`、

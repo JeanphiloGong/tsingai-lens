@@ -354,6 +354,7 @@ class ResearchUnderstandingFeedbackService:
             "label_status_filter": label_status_filter,
             "item_count": len(items),
             "label_counts": label_counts,
+            "quality_summary": _dataset_quality_summary(items),
             "items": items,
             "warnings": warnings,
         }
@@ -588,6 +589,161 @@ def _label_status(
     if any(item.review_status == "partial" for item in feedback):
         return "silver"
     return "candidate"
+
+
+def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object]:
+    by_label_status = {status: 0 for status in DATASET_LABEL_STATUSES}
+    by_review_status: dict[str, int] = {}
+    by_issue_type: dict[str, int] = {}
+    by_support_grade: dict[str, int] = {}
+    by_trace_status: dict[str, int] = {}
+    by_evidence_role: dict[str, int] = {}
+    by_evidence_traceability_status: dict[str, int] = {}
+    by_quality_decision: dict[str, int] = {}
+    warning_counts = {
+        "missing_evidence": 0,
+        "missing_source_text": 0,
+        "missing_context": 0,
+        "unavailable_trace": 0,
+        "failed_trace": 0,
+        "rejected_feedback": 0,
+    }
+    usable_sample_count = 0
+    needs_review_count = 0
+    rejected_count = 0
+    labeled_sample_count = 0
+    accepted_system_sample_count = 0
+    curated_correction_count = 0
+    system_error_count = 0
+
+    for item in items:
+        label_status = _text(item.get("label_status")) or "candidate"
+        _increment_count(by_label_status, label_status)
+        if label_status in {"gold", "silver"}:
+            usable_sample_count += 1
+        if label_status != "candidate":
+            labeled_sample_count += 1
+        if label_status == "rejected":
+            rejected_count += 1
+
+        target = _mapping(item.get("expert_target"))
+        feedback_records = _mapping_list(item.get("feedback_refs"))
+        system_prediction = _mapping(item.get("system_prediction"))
+
+        review_status = _text(target.get("review_status"))
+        if not review_status:
+            for feedback in feedback_records:
+                review_status = _text(feedback.get("review_status"))
+                if review_status:
+                    break
+        review_status = review_status or _text(system_prediction.get("review_status")) or "unreviewed"
+        _increment_count(by_review_status, review_status)
+        if label_status in {"candidate", "silver"} or review_status in {
+            "needs_review",
+            "pending_review",
+            "partial",
+            "unclear",
+        }:
+            needs_review_count += 1
+
+        issue_type = ""
+        has_rejecting_feedback = False
+        for feedback in feedback_records:
+            current_issue_type = _text(feedback.get("issue_type"))
+            current_review_status = _text(feedback.get("review_status"))
+            if (
+                current_review_status == "incorrect"
+                or current_issue_type in _REJECTING_ISSUE_TYPES
+            ):
+                has_rejecting_feedback = True
+            if current_issue_type and current_issue_type != "none" and not issue_type:
+                issue_type = current_issue_type
+        if not issue_type:
+            issue_type = (
+                "none"
+                if feedback_records or _text(target.get("source")) == "curation"
+                else "unreviewed"
+            )
+        _increment_count(by_issue_type, issue_type)
+        _increment_count(
+            by_support_grade,
+            _text(target.get("support_grade"))
+            or _text(system_prediction.get("support_grade"))
+            or "unknown",
+        )
+
+        target_source = _text(target.get("source"))
+        if target_source == "curation":
+            quality_decision = "curated_correction"
+        elif has_rejecting_feedback:
+            quality_decision = "rejected_system"
+        elif label_status == "gold":
+            quality_decision = "accepted_system"
+        elif label_status == "silver":
+            quality_decision = "partial_review"
+        else:
+            quality_decision = "candidate"
+        _increment_count(by_quality_decision, quality_decision)
+        if quality_decision == "accepted_system":
+            accepted_system_sample_count += 1
+        elif quality_decision == "curated_correction":
+            curated_correction_count += 1
+        if has_rejecting_feedback:
+            system_error_count += 1
+            warning_counts["rejected_feedback"] += 1
+
+        trace_status = _text(item.get("trace_status")) or "unavailable"
+        _increment_count(by_trace_status, trace_status)
+        if trace_status == "unavailable":
+            warning_counts["unavailable_trace"] += 1
+        elif trace_status == "failed":
+            warning_counts["failed_trace"] += 1
+
+        evidence_records = _mapping_list(item.get("evidence_refs"))
+        if not evidence_records:
+            warning_counts["missing_evidence"] += 1
+            warning_counts["missing_source_text"] += 1
+        elif not any(
+            _text(record.get("quote")) or _text(record.get("source_text"))
+            for record in evidence_records
+        ):
+            warning_counts["missing_source_text"] += 1
+        for record in evidence_records:
+            _increment_count(
+                by_evidence_role,
+                _text(record.get("evidence_role")) or "uncategorized",
+            )
+            _increment_count(
+                by_evidence_traceability_status,
+                _text(record.get("traceability_status")) or "unknown",
+            )
+
+        if not _mapping_list(item.get("context_refs")):
+            warning_counts["missing_context"] += 1
+
+    return {
+        "total_samples": len(items),
+        "usable_sample_count": usable_sample_count,
+        "needs_review_count": needs_review_count,
+        "rejected_count": rejected_count,
+        "labeled_sample_count": labeled_sample_count,
+        "accepted_system_sample_count": accepted_system_sample_count,
+        "curated_correction_count": curated_correction_count,
+        "system_error_count": system_error_count,
+        "by_label_status": by_label_status,
+        "by_review_status": by_review_status,
+        "by_issue_type": by_issue_type,
+        "by_support_grade": by_support_grade,
+        "by_trace_status": by_trace_status,
+        "by_evidence_role": by_evidence_role,
+        "by_evidence_traceability_status": by_evidence_traceability_status,
+        "by_quality_decision": by_quality_decision,
+        "warning_counts": warning_counts,
+    }
+
+
+def _increment_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
 
 
 def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:

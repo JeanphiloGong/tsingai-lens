@@ -4678,8 +4678,24 @@ def test_with_presentation_relation_chain_uses_each_display_variable():
     ] == ["porosity level", "pore size"]
 
 
-def test_with_presentation_concrete_variable_keeps_specific_process_variable():
-    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+def test_with_presentation_specific_outcomes_narrows_mechanical_properties():
+    service = ResearchUnderstandingService(
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[
+                SourceBlock(
+                    block_id="blk-results",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text=(
+                        "Preheating the build platform to 150 C increased the "
+                        "ductility of material by 14%."
+                    ),
+                    block_order=1,
+                )
+            ]
+        ),
+        structured_extractor=_FakeSemanticExtractor(),
+    )
     stored = ResearchUnderstanding.from_mapping(
         {
             "state": "ready",
@@ -4731,7 +4747,7 @@ def test_with_presentation_concrete_variable_keeps_specific_process_variable():
                     "fact_ids": ["unit_preheat"],
                     "traceability_status": "resolved",
                     "evidence_role": "direct_support",
-                    "quote": "Preheating temperature increased ductility by 14%.",
+                    "quote": "Preheating changed mechanical properties.",
                 }
             ],
             "contexts": [
@@ -4755,10 +4771,87 @@ def test_with_presentation_concrete_variable_keeps_specific_process_variable():
     assert understanding is not None
     finding = understanding["presentation"]["findings"][0]
     assert finding["variables"] == ["build platform preheating temperature"]
+    assert finding["outcomes"] == ["ductility"]
+    assert finding["title"] == "build platform preheating temperature -> ductility"
+    assert finding["statement"] == (
+        "Preheating the build platform to 150 C increased the ductility of material by 14%."
+    )
+
+
+def test_with_presentation_specific_outcomes_keeps_broad_bucket_without_property_hit():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect properties?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat",
+                    "claim_type": "finding",
+                    "statement": "Build platform preheating changes mechanical properties.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat",
+                    "relation_type": "affects",
+                    "subject": "build platform preheating temperature",
+                    "predicate": "affects",
+                    "object": "mechanical properties",
+                    "statement": "Build platform preheating changes mechanical properties.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_preheat"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_preheat",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_preheat"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": "Build platform preheating changed mechanical properties.",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "build platform preheating temperature"
+                        ]
+                    },
+                    "property_scope": ["mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["outcomes"] == ["mechanical properties"]
     assert finding["title"] == (
         "build platform preheating temperature -> mechanical properties"
     )
-    assert finding["statement"] == "Preheating temperature increased ductility by 14%."
 
 
 def test_specific_quote_statement_preserves_equivalent_aligned_statement():

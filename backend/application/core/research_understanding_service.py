@@ -2220,6 +2220,35 @@ class ResearchUnderstandingService:
             evidence_by_id=evidence_by_id,
             evidence_bundle=evidence_bundle,
         )
+        statement = self._finding_statement(
+            statement=_text(effect.get("statement")) or "",
+            variables=display_variables,
+            outcomes=outcomes,
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        )
+        narrowed_outcomes = self._specific_mechanical_outcomes(
+            outcomes,
+            statement=" ".join(
+                value
+                for value in (_text(effect.get("statement")), statement)
+                if value
+            ),
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        )
+        if narrowed_outcomes != outcomes:
+            outcomes = narrowed_outcomes
+            statement = self._finding_statement(
+                statement=_text(effect.get("statement")) or "",
+                variables=display_variables,
+                outcomes=outcomes,
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=evidence_bundle,
+                blocks_by_id=blocks_by_id,
+            )
         review_status = self._finding_review_status(effect)
         scope_summary = _compact_finding_scope_summary(
             _text(effect.get("context_summary")) or "",
@@ -2234,14 +2263,7 @@ class ResearchUnderstandingService:
                 outcomes=outcomes,
                 fallback=_text(effect.get("title")) or _text(effect.get("statement")),
             ),
-            "statement": self._finding_statement(
-                statement=_text(effect.get("statement")) or "",
-                variables=display_variables,
-                outcomes=outcomes,
-                evidence_by_id=evidence_by_id,
-                evidence_bundle=evidence_bundle,
-                blocks_by_id=blocks_by_id,
-            ),
+            "statement": statement,
             "variables": display_variables,
             "mediators": mediators,
             "outcomes": outcomes,
@@ -2250,6 +2272,7 @@ class ResearchUnderstandingService:
                 relations,
                 variables=display_variables,
                 direction=direction,
+                outcomes=outcomes,
             ),
             "scope_summary": scope_summary,
             "support_grade": self._finding_support_grade(
@@ -2448,9 +2471,11 @@ class ResearchUnderstandingService:
         *,
         variables: list[str] | None = None,
         direction: str = "",
+        outcomes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         chain: list[dict[str, Any]] = []
         display_variables = variables or []
+        display_outcomes = outcomes or []
         for index, relation in enumerate(relations):
             variable = self._presentation_relation_side(relation.get("subject"))
             object_chain = self._relation_object_chain(relation)
@@ -2472,7 +2497,17 @@ class ResearchUnderstandingService:
                     "relation_id": _text(relation.get("relation_id")) or "",
                     "variable": display_variable,
                     "mediators": object_chain[:-1],
-                    "outcome": object_chain[-1],
+                    "outcome": (
+                        display_outcomes[0]
+                        if (
+                            display_outcomes
+                            and _normalize_match_text(object_chain[-1])
+                            == "mechanical properties"
+                            and _normalize_match_text(display_outcomes[0])
+                            != "mechanical properties"
+                        )
+                        else object_chain[-1]
+                    ),
                     "direction": segment_direction or direction,
                     "statement": self._presentation_relation_summary(relation),
                 }
@@ -2682,6 +2717,53 @@ class ResearchUnderstandingService:
             return outcomes
         fallback = _text(effect.get("target_property"))
         return [fallback] if fallback else []
+
+    def _specific_mechanical_outcomes(
+        self,
+        outcomes: list[str],
+        *,
+        statement: str,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> list[str]:
+        if not any(
+            _normalize_match_text(outcome) == "mechanical properties"
+            for outcome in outcomes
+        ):
+            return outcomes
+        text_parts = [statement]
+        for ref_id in _strings(evidence_bundle.get("direct_result")):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+            text_parts.extend(
+                [
+                    _text(evidence_ref.get("quote")) or "",
+                    _text(evidence_ref.get("label")) or "",
+                    _text(block.text if block else None) or "",
+                ]
+            )
+        normalized = f" {_normalize_match_text(' '.join(text_parts))} "
+        specific: list[str] = []
+        for display, terms in (
+            ("ductility", ("ductility", "elongation")),
+            ("yield strength", ("yield strength",)),
+            ("tensile strength", ("tensile strength",)),
+            ("hardness", ("hardness", "microhardness")),
+            ("fatigue", ("fatigue",)),
+        ):
+            if any(f" {term} " in normalized for term in terms):
+                specific.append(display)
+        if not specific:
+            return outcomes
+        result: list[str] = []
+        for outcome in outcomes:
+            if _normalize_match_text(outcome) == "mechanical properties":
+                result.extend(specific)
+            else:
+                result.append(outcome)
+        return _dedupe_strings(result)
 
     def _relation_object_chain(self, relation: Mapping[str, Any]) -> list[str]:
         object_text = _text(relation.get("object")) or ""

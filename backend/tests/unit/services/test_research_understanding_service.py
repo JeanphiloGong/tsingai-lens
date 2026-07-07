@@ -2696,9 +2696,10 @@ def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
 
     assert understanding is not None
     evidence_item = understanding["presentation"]["evidence_items"][0]
-    assert evidence_item["source_ref"] == "blk-conclusion-lead-in"
+    assert evidence_item["source_ref"] == "blk-conclusion-result"
     assert evidence_item["source_text"] == result_text
     assert evidence_item["quote"] == result_text
+    assert "source_ref=blk-conclusion-result" in (evidence_item["href"] or "")
 
 
 def test_with_presentation_keeps_results_direct_evidence_over_introduction_review():

@@ -2045,11 +2045,14 @@ class ResearchUnderstandingService:
             evidence_ref = evidence_by_id.get(ref_id, {})
             locator = _locator_mapping(evidence_ref.get("locator"))
             block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
-            source_text = self._presentation_source_text_for_quote(
+            source_block = self._presentation_source_block_for_quote(
                 block,
                 blocks_by_id=blocks_by_id,
                 quote_hints=quote_hints,
-            ) or _text(evidence_ref.get("quote"))
+            )
+            source_text = _text(source_block.text if source_block else None) or _text(
+                evidence_ref.get("quote")
+            )
             visible_quote = self._presentation_quote_for_ref(
                 quote=_text(evidence_ref.get("quote")),
                 source_text=source_text,
@@ -2448,11 +2451,14 @@ class ResearchUnderstandingService:
             evidence_ref = evidence_by_id.get(ref_id, {})
             locator = _locator_mapping(evidence_ref.get("locator"))
             block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
-            source_text = self._presentation_source_text_for_quote(
+            source_block = self._presentation_source_block_for_quote(
                 block,
                 blocks_by_id=blocks_by_id,
                 quote_hints=quote_hints,
-            ) or _text(evidence_ref.get("quote"))
+            )
+            source_text = _text(source_block.text if source_block else None) or _text(
+                evidence_ref.get("quote")
+            )
             if not source_text:
                 continue
             source_sentences = _quote_sentences(source_text)
@@ -3702,50 +3708,57 @@ class ResearchUnderstandingService:
             source_label = block_label
         else:
             source_label = _source_kind_label(source_kind)
-        page = (
-            _text(locator.get("page"))
-            or _text(locator.get("page_no"))
-            or _text(block.page if block else None)
-        )
-        title_parts = [source_label]
-        if page:
-            title_parts.append(f"p. {page}")
-        title = " / ".join(title_parts)
         quote = _text(ref.get("quote"))
         if not quote and block:
             quote = _short_text(block.text, limit=420)
-        source_text = self._presentation_source_text_for_quote(
+        source_block = self._presentation_source_block_for_quote(
             block,
             blocks_by_id=blocks_by_id,
             quote_hints=quote_hints or {},
-        ) or quote
+        )
+        source_text = _text(source_block.text if source_block else None) or quote
         quote = self._presentation_quote_for_ref(
             quote=quote,
             source_text=source_text,
             quote_hints=quote_hints or {},
         )
-        heading_path = _text(block.heading_path if block else None)
-        block_type = _text(block.block_type if block else None)
+        display_block = source_block or block
+        display_source_ref = (
+            _text(display_block.block_id if display_block else None) or source_ref
+        )
+        display_page = (
+            _text(locator.get("page"))
+            or _text(locator.get("page_no"))
+            or _text(display_block.page if display_block else None)
+        )
+        display_document_id = (
+            document_id or _text(display_block.document_id if display_block else None)
+        )
+        display_title_parts = [source_label]
+        if display_page:
+            display_title_parts.append(f"p. {display_page}")
+        heading_path = _text(display_block.heading_path if display_block else None)
+        block_type = _text(display_block.block_type if display_block else None)
         value_summary = (
-            _block_context_label(block)
+            _block_context_label(display_block)
             or (label if _looks_user_facing(label) else "")
         )
         href = _text(ref.get("href")) or _presentation_evidence_href(
             collection_id=collection_id,
-            document_id=document_id or (block.document_id if block else None),
-            source_ref=source_ref,
-            page=page,
+            document_id=display_document_id,
+            source_ref=display_source_ref,
+            page=display_page,
         )
         return {
             "evidence_ref_id": _text(ref.get("evidence_ref_id")) or "",
-            "document_id": document_id or (block.document_id if block else None),
-            "title": title,
+            "document_id": display_document_id,
+            "title": " / ".join(display_title_parts),
             "source_label": source_label,
             "source_kind": source_kind,
-            "source_ref": source_ref,
+            "source_ref": display_source_ref,
             "block_type": block_type,
             "heading_path": heading_path,
-            "page": page,
+            "page": display_page,
             "quote": quote,
             "source_text": source_text,
             "value_summary": value_summary,
@@ -3755,13 +3768,13 @@ class ResearchUnderstandingService:
             "href": href,
         }
 
-    def _presentation_source_text_for_quote(
+    def _presentation_source_block_for_quote(
         self,
         block: SourceBlock | None,
         *,
         blocks_by_id: Mapping[str, SourceBlock],
         quote_hints: Mapping[str, set[str]],
-    ) -> str:
+    ) -> SourceBlock | None:
         source_text = _text(block.text if block else None) or ""
         if (
             not block
@@ -3770,7 +3783,7 @@ class ResearchUnderstandingService:
             or _quote_has_concrete_result_cue(source_text)
             or not _quote_has_background_cue(source_text)
         ):
-            return source_text
+            return block
         source_heading = _normalize_match_text(_text(block.heading_path) or "")
         candidates = [
             candidate
@@ -3784,8 +3797,8 @@ class ResearchUnderstandingService:
             == source_heading
             and _quote_has_concrete_result_cue(_text(candidate.text) or "")
         ]
-        best: tuple[int, int, str] | None = None
-        for candidate in candidates:
+        best: tuple[int, int, int, SourceBlock] | None = None
+        for index, candidate in enumerate(candidates):
             text = _text(candidate.text) or ""
             snippet = self._best_matching_quote_snippet(text, quote_hints)
             if not snippet:
@@ -3793,10 +3806,10 @@ class ResearchUnderstandingService:
             score = _quote_candidate_score(snippet, quote_hints)
             if score <= 0:
                 continue
-            ranked = (score, -(candidate.block_order or 0), text)
+            ranked = (score, -(candidate.block_order or 0), -index, candidate)
             if best is None or ranked > best:
                 best = ranked
-        return best[2] if best else source_text
+        return best[3] if best else block
 
     def _presentation_quote_for_ref(
         self,

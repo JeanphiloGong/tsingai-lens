@@ -3827,7 +3827,6 @@ class ResearchUnderstandingService:
             candidate
             for candidate in candidates
             if not _quote_has_background_cue(candidate)
-            or _quote_has_concrete_result_cue(candidate)
         ]
         if non_background_candidates:
             candidates = non_background_candidates
@@ -3912,7 +3911,14 @@ class ResearchUnderstandingService:
                 best = ranked
         if best is None:
             return ""
-        return _short_text(best[2], limit=420)
+        return _short_text(
+            _extend_quote_with_following_result_sentence(
+                best[2],
+                sentences=sentences,
+                quote_hints=quote_hints,
+            ),
+            limit=520,
+        )
 
     def _source_artifact_lookups(
         self,
@@ -4493,6 +4499,79 @@ def _quote_candidate_score(candidate: str, quote_hints: Mapping[str, set[str]]) 
     return score
 
 
+def _extend_quote_with_following_result_sentence(
+    selected: str,
+    *,
+    sentences: list[str],
+    quote_hints: Mapping[str, set[str]],
+) -> str:
+    selected_sentences = _quote_sentences(selected)
+    if not selected_sentences:
+        return selected
+    last_sentence = selected_sentences[-1]
+    if last_sentence not in sentences:
+        return selected
+    index = sentences.index(last_sentence)
+    extended = selected
+    if index + 1 >= len(sentences):
+        return extended
+    while index + 1 < len(sentences):
+        following = sentences[index + 1]
+        if not _following_sentence_extends_quote(following, extended, quote_hints):
+            break
+        extended = f"{extended} {following}"
+        index += 1
+    return extended
+
+
+def _following_sentence_extends_quote(
+    following: str,
+    selected: str,
+    quote_hints: Mapping[str, set[str]],
+) -> bool:
+    normalized_following = f" {_normalize_match_text(following)} "
+    normalized_selected = f" {_normalize_match_text(selected)} "
+    if not _quote_hints_allow_result_extension(quote_hints):
+        return False
+    if not _quote_has_concrete_result_cue(following):
+        return False
+    shared_statement_hits = _quote_term_hits(
+        normalized_following,
+        quote_hints.get("statement", set()),
+    )
+    relation_hits = _quote_term_hits(
+        normalized_following,
+        quote_hints.get("relation", set()),
+    )
+    outcome_hits = _quote_term_hits(
+        normalized_following,
+        quote_hints.get("outcome", set()),
+    )
+    return shared_statement_hits >= 2 and (relation_hits or outcome_hits)
+
+
+def _quote_hints_allow_result_extension(
+    quote_hints: Mapping[str, set[str]],
+) -> bool:
+    terms = set(quote_hints.get("outcome", set())) | set(
+        quote_hints.get("statement", set())
+    )
+    return bool(
+        terms
+        & {
+            "better corrosion",
+            "corrosion",
+            "corrosion rate",
+            "electrochemical",
+            "passive film",
+            "pitting",
+            "pitting corrosion",
+            "pitting potential",
+            "polarization",
+        }
+    )
+
+
 def _quote_has_concrete_result_cue(candidate: str) -> bool:
     normalized = f" {_normalize_match_text(candidate)} "
     if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|c|k|w|mpa|gpa|hv|mm/s|um)\b", candidate.lower()):
@@ -4512,6 +4591,8 @@ def _quote_has_concrete_result_cue(candidate: str) -> bool:
             "revealed",
             "sensitive",
             "prone",
+            "slow",
+            "slows",
             "formed",
         )
     )

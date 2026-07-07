@@ -3590,6 +3590,9 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
                     document_id="paper-5",
                     block_type="paragraph",
                     text=(
+                        "The electrochemical polarization curves and EIS results "
+                        "revealed that porosities were highly sensitive to pitting "
+                        "corrosion. "
                         "The pitting potential gradually increases with the decreased "
                         "porosity. Meanwhile, higher resistance can slow the corrosion "
                         "rate in the polarization reaction. Therefore, the passive film "
@@ -3722,6 +3725,19 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
         "the passive film, improving pitting-corrosion resistance."
     )
     assert finding["support_grade"] == "partial"
+    evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    assert evidence_by_id["evref_corrosion_text"]["quote"] == (
+        "The electrochemical polarization curves and EIS results revealed that "
+        "porosities were highly sensitive to pitting corrosion. The pitting "
+        "potential gradually increases with the decreased porosity. Meanwhile, "
+        "higher resistance can slow the corrosion rate in the polarization "
+        "reaction. Therefore, the passive film formed on the surface of low "
+        "porosity sample was more stable and exhibited better corrosion "
+        "properties."
+    )
 
 
 def test_with_presentation_corrosion_statement_keeps_generic_when_mechanism_missing():

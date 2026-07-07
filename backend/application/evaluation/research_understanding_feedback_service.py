@@ -462,17 +462,36 @@ class ResearchUnderstandingFeedbackService:
         evidence_ref_ids_list.extend(
             ref_id for ref_id in base_evidence_ref_ids if ref_id not in evidence_ref_ids_list
         )
+        expert_target = (
+            _expert_target_from_curation(curation)
+            if curation is not None
+            else _expert_target_from_feedback(system_prediction, feedback)
+        )
         if curation is not None:
-            evidence_ref_ids_list = list(
-                _strings(
-                    [
-                        ref_id
-                        for ref_id in curation.curated_evidence_ref_ids
-                        if ref_id in evidence_refs
-                    ]
-                    + evidence_ref_ids_list
-                )
+            curated_ref_ids = [
+                ref_id
+                for ref_id in curation.curated_evidence_ref_ids
+                if ref_id in evidence_refs
+            ]
+            curation_first_ref_ids = list(
+                _strings(curated_ref_ids + evidence_ref_ids_list)
             )
+            curation_matches_current = _curation_matches_system_prediction(
+                {
+                    "evidence_refs": [
+                        _evidence_record(ref_id, evidence_refs, evidence_items)
+                        for ref_id in curation_first_ref_ids
+                    ]
+                },
+                system_prediction=system_prediction,
+                target=_mapping(expert_target),
+            )
+            if curation_matches_current:
+                evidence_ref_ids_list = list(
+                    _strings(evidence_ref_ids_list + curated_ref_ids)
+                )
+            else:
+                evidence_ref_ids_list = curation_first_ref_ids
         evidence_ref_ids = tuple(evidence_ref_ids_list)
         context_ids = _strings(finding.get("context_ids"))
         matched_trace = _matched_trace_for_finding(
@@ -481,11 +500,6 @@ class ResearchUnderstandingFeedbackService:
             evidence_refs=evidence_refs,
             relations=relations,
             model_traces=model_traces,
-        )
-        expert_target = (
-            _expert_target_from_curation(curation)
-            if curation is not None
-            else _expert_target_from_feedback(system_prediction, feedback)
         )
         return {
             "sample_id": _sample_id(

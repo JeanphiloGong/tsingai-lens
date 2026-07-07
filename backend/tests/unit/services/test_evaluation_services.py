@@ -1052,6 +1052,184 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
     ]
 
 
+def test_research_understanding_feedback_service_curation_match_evidence_order_keeps_current_direct_evidence_first():
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-gold",
+                "goal_id": "goal-1",
+                "title": "How does porosity affect corrosion?",
+            },
+            "claims": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "ev-broad",
+                    "source_kind": "text",
+                    "document_id": "doc-1",
+                    "label": "Abstract",
+                    "locator": {"source_ref": "blk-abstract"},
+                    "traceability_status": "partial",
+                    "quote": (
+                        "The mechanical and corrosion properties were "
+                        "investigated by subsequent testing."
+                    ),
+                },
+                {
+                    "evidence_ref_id": "ev-corrosion",
+                    "source_kind": "text",
+                    "document_id": "doc-1",
+                    "label": "Corrosion result",
+                    "locator": {"source_ref": "blk-corrosion"},
+                    "traceability_status": "direct",
+                    "quote": (
+                        "Porosities were highly sensitive to pitting corrosion."
+                    ),
+                },
+                {
+                    "evidence_ref_id": "ev-table",
+                    "source_kind": "table",
+                    "document_id": "doc-1",
+                    "label": "Density table",
+                    "locator": {"source_ref": "tbl-density"},
+                    "traceability_status": "partial",
+                    "quote": "Table reports density values.",
+                },
+            ],
+            "contexts": [],
+        }
+    )
+    projected = stored.to_record()
+    projected["presentation"] = {
+        "findings": [
+            {
+                "finding_id": "finding-corrosion",
+                "claim_id": "claim-corrosion",
+                "title": "porosity -> pitting corrosion behavior",
+                "statement": (
+                    "Porosities were highly sensitive to pitting corrosion."
+                ),
+                "variables": ["porosity"],
+                "mediators": [],
+                "outcomes": ["pitting corrosion"],
+                "direction": "increase",
+                "scope_summary": "SLM 316L",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "confidence": 0.7,
+                "paper_count": 1,
+                "evidence_count": 3,
+                "evidence_ref_ids": [
+                    "ev-table",
+                    "ev-broad",
+                    "ev-corrosion",
+                ],
+                "context_ids": [],
+                "relation_ids": [],
+                "evidence_bundle": {
+                    "direct_result": ["ev-corrosion"],
+                    "uncategorized": ["ev-table", "ev-broad"],
+                },
+            }
+        ],
+        "primary_findings": [
+            {"finding_id": "finding-corrosion"},
+        ],
+        "review_queue_findings": [],
+        "evidence_items": [
+            {
+                "evidence_ref_id": "ev-broad",
+                "document_id": "doc-1",
+                "title": "Abstract",
+                "source_kind": "text",
+                "quote": (
+                    "The mechanical and corrosion properties were "
+                    "investigated by subsequent testing."
+                ),
+                "source_text": (
+                    "The mechanical and corrosion properties were "
+                    "investigated by subsequent testing."
+                ),
+            },
+            {
+                "evidence_ref_id": "ev-corrosion",
+                "document_id": "doc-1",
+                "title": "Corrosion result",
+                "source_kind": "text",
+                "quote": (
+                    "Porosities were highly sensitive to pitting corrosion."
+                ),
+                "source_text": (
+                    "Porosities were highly sensitive to pitting corrosion."
+                ),
+            },
+            {
+                "evidence_ref_id": "ev-table",
+                "document_id": "doc-1",
+                "title": "Density table",
+                "source_kind": "table",
+                "quote": "Table reports density values.",
+                "source_text": "Table reports density values.",
+            },
+        ],
+    }
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-corrosion",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-corrosion",
+                "claim_id": "claim-corrosion",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": (
+                    "Porosities were highly sensitive to pitting corrosion."
+                ),
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["porosity"],
+                "curated_mediators": [],
+                "curated_outcomes": ["pitting corrosion"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "SLM 316L",
+                "curated_evidence_ref_ids": ["ev-broad", "ev-corrosion"],
+                "curated_context_ids": [],
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    sample = dataset["items"][0]
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "accepted_after_curation_match": 1,
+    }
+    assert sample["expert_target"]["source"] == "curation"
+    assert sample["expert_target"]["evidence_ref_ids"] == [
+        "ev-broad",
+        "ev-corrosion",
+    ]
+    assert [ref["evidence_ref_id"] for ref in sample["evidence_refs"]] == [
+        "ev-corrosion",
+        "ev-table",
+        "ev-broad",
+    ]
+
+
 def test_research_understanding_feedback_service_current_label_alignment_ignores_stale_claim_level_correct_feedback():
     stored = _sample_understanding()
     projected = stored.to_record()

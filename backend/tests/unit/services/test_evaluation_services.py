@@ -865,6 +865,176 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
     assert dataset["quality_summary"]["by_support_grade"] == {"partial": 1}
 
 
+def test_research_understanding_feedback_service_current_label_alignment_ignores_stale_claim_level_correct_feedback():
+    stored = _sample_understanding()
+    projected = stored.to_record()
+    projected["presentation"]["findings"][1]["title"] = "energy density -> microstructure"
+    projected["presentation"]["findings"][1]["statement"] = (
+        "Energy density is associated with microstructure variation."
+    )
+    projected["presentation"]["findings"][1]["support_grade"] = "insufficient"
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-stale-correct",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "",
+                "claim_id": "claim-2",
+                "review_status": "correct",
+                "issue_type": "none",
+                "note": "Reviewed an older claim-level VED density finding.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    stale_sample = by_finding["finding-2"]
+    assert stale_sample["label_status"] == "candidate"
+    assert stale_sample["expert_target"] is None
+    assert stale_sample["feedback_refs"] == []
+    assert stale_sample["metadata"]["ignored_feedback_refs"][0]["feedback_id"] == (
+        "ruf-stale-correct"
+    )
+    assert dataset["quality_summary"]["by_quality_decision"] == {"candidate": 4}
+    assert dataset["quality_summary"]["accepted_system_sample_count"] == 0
+
+
+def test_research_understanding_feedback_service_current_label_alignment_keeps_exact_finding_rejection():
+    stored = _sample_understanding()
+    projected = stored.to_record()
+    projected["presentation"]["findings"][1]["support_grade"] = "insufficient"
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-stale-correct",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "",
+                "claim_id": "claim-2",
+                "review_status": "correct",
+                "issue_type": "none",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-exact-wrong-context",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "review_status": "partial",
+                "issue_type": "wrong_context",
+                "note": "The current finding uses the wrong process context.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:30:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    rejected_sample = by_finding["finding-2"]
+    assert rejected_sample["label_status"] == "rejected"
+    assert [item["feedback_id"] for item in rejected_sample["feedback_refs"]] == [
+        "ruf-exact-wrong-context"
+    ]
+    assert rejected_sample["metadata"]["ignored_feedback_refs"][0]["feedback_id"] == (
+        "ruf-stale-correct"
+    )
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "candidate": 3,
+        "rejected_system": 1,
+    }
+    assert dataset["quality_summary"]["system_error_count"] == 1
+
+
+def test_research_understanding_feedback_service_current_label_alignment_aligns_claim_curation_by_evidence_overlap():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-claim-evidence-overlap",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "",
+                "claim_id": "claim-3",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": (
+                    "Porosity provides defect sites that support pitting corrosion."
+                ),
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["porosity"],
+                "curated_mediators": ["defect sites"],
+                "curated_outcomes": ["pitting corrosion"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "SLM 316L corrosion",
+                "curated_evidence_ref_ids": ["ev-3"],
+                "curated_context_ids": ["ctx-2"],
+                "note": "Same direct corrosion evidence as the current finding.",
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    curated_sample = by_finding["finding-3"]
+    assert curated_sample["label_status"] == "gold"
+    assert curated_sample["expert_target"]["source"] == "curation"
+    assert curated_sample["expert_target"]["curation_id"] == (
+        "ruc-claim-evidence-overlap"
+    )
+    assert curated_sample["metadata"]["ignored_curation_refs"] == []
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "candidate": 3,
+        "curated_correction": 1,
+    }
+
+
 def test_research_understanding_feedback_service_filters_dataset_by_label():
     repository = FakeEvaluationRepository()
     repository.feedback = (

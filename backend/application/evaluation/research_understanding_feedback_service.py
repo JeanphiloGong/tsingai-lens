@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Mapping
@@ -421,8 +422,18 @@ class ResearchUnderstandingFeedbackService:
     ) -> dict[str, object]:
         finding_id = _text(finding.get("finding_id")) or _sample_id("finding", finding)
         claim_id = _text(finding.get("claim_id"))
-        feedback = _feedback_for(feedback_index, finding_id, claim_id)
-        curations = _curations_for(curation_index, finding_id, claim_id)
+        raw_feedback = _feedback_for(feedback_index, finding_id, claim_id)
+        raw_curations = _curations_for(curation_index, finding_id, claim_id)
+        feedback = _aligned_feedback_for_current_finding(
+            raw_feedback,
+            finding=finding,
+            finding_id=finding_id,
+        )
+        curations = _aligned_curations_for_current_finding(
+            raw_curations,
+            finding=finding,
+            finding_id=finding_id,
+        )
         curation = curations[0] if curations else None
         label_status = _label_status(feedback, curation)
         system_prediction = _system_prediction(finding)
@@ -494,6 +505,16 @@ class ResearchUnderstandingFeedbackService:
             "metadata": {
                 "curation_id": curation.curation_id if curation else None,
                 "feedback_count": len(feedback),
+                "ignored_feedback_refs": [
+                    item.to_record()
+                    for item in raw_feedback
+                    if item not in feedback
+                ],
+                "ignored_curation_refs": [
+                    item.to_record()
+                    for item in raw_curations
+                    if item not in curations
+                ],
                 "trace_id": _text(matched_trace.get("trace_id")) if matched_trace else None,
                 "trace_note": (
                     "matched research-understanding model trace"
@@ -616,6 +637,150 @@ def _label_status(
     if any(item.review_status == "partial" for item in feedback):
         return "silver"
     return "candidate"
+
+
+def _aligned_feedback_for_current_finding(
+    records: tuple[ResearchUnderstandingFeedback, ...],
+    *,
+    finding: Mapping[str, Any],
+    finding_id: str,
+) -> tuple[ResearchUnderstandingFeedback, ...]:
+    aligned: list[ResearchUnderstandingFeedback] = []
+    has_exact_rejecting_feedback = any(
+        record.finding_id == finding_id
+        and (
+            record.review_status == "incorrect"
+            or record.issue_type in _REJECTING_ISSUE_TYPES
+        )
+        for record in records
+    )
+    for record in records:
+        if record.finding_id == finding_id:
+            aligned.append(record)
+            continue
+        if record.finding_id:
+            continue
+        if has_exact_rejecting_feedback:
+            continue
+        if _claim_record_matches_current_finding(
+            finding,
+            review_status=record.review_status,
+            issue_type=record.issue_type,
+            evidence_ref_ids=(),
+            statement=None,
+        ):
+            aligned.append(record)
+    return tuple(aligned)
+
+
+def _aligned_curations_for_current_finding(
+    records: tuple[ResearchUnderstandingCuration, ...],
+    *,
+    finding: Mapping[str, Any],
+    finding_id: str,
+) -> tuple[ResearchUnderstandingCuration, ...]:
+    aligned: list[ResearchUnderstandingCuration] = []
+    for record in records:
+        if record.finding_id == finding_id:
+            aligned.append(record)
+            continue
+        if record.finding_id:
+            continue
+        if _claim_record_matches_current_finding(
+            finding,
+            review_status=record.curated_review_status,
+            issue_type=None,
+            evidence_ref_ids=record.curated_evidence_ref_ids,
+            statement=record.curated_statement,
+        ):
+            aligned.append(record)
+    return tuple(aligned)
+
+
+def _claim_record_matches_current_finding(
+    finding: Mapping[str, Any],
+    *,
+    review_status: str | None,
+    issue_type: str | None,
+    evidence_ref_ids: tuple[str, ...] | list[str],
+    statement: str | None,
+) -> bool:
+    current_refs = set(_strings(finding.get("evidence_ref_ids")))
+    for refs in _mapping(finding.get("evidence_bundle")).values():
+        current_refs.update(_strings(refs))
+    if current_refs and current_refs & set(_strings(evidence_ref_ids)):
+        return True
+    statement_terms = set(_meaningful_label_terms(statement))
+    current_terms = set(
+        _meaningful_label_terms(
+            " ".join(
+                value
+                for value in (
+                    _text(finding.get("title")),
+                    _text(finding.get("statement")),
+                    *_strings(finding.get("variables")),
+                    *_strings(finding.get("outcomes")),
+                )
+                if value
+            )
+        )
+    )
+    if statement_terms and current_terms and len(statement_terms & current_terms) >= 2:
+        return True
+    current_grade = _text(finding.get("support_grade")) or ""
+    if current_grade == "insufficient":
+        return False
+    if (_text(issue_type) or "none") in _REJECTING_ISSUE_TYPES:
+        return True
+    return _text(review_status) in {"correct", "partial", "unclear", "incorrect"}
+
+
+_LABEL_TERM_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "can",
+        "claim",
+        "finding",
+        "for",
+        "from",
+        "has",
+        "have",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "with",
+    }
+)
+
+
+def _meaningful_label_terms(value: str | None) -> tuple[str, ...]:
+    text = _text(value)
+    if not text:
+        return ()
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_term in re.split(r"[^a-z0-9]+", text.lower()):
+        if len(raw_term) < 3 or raw_term in _LABEL_TERM_STOPWORDS:
+            continue
+        if raw_term in seen:
+            continue
+        seen.add(raw_term)
+        terms.append(raw_term)
+    return tuple(terms)
 
 
 def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object]:

@@ -27,6 +27,8 @@ RelationType = Literal[
     "compares",
 ]
 ResearchUnderstandingFeedbackStatus = Literal["correct", "incorrect", "partial", "unclear"]
+ResearchUnderstandingDatasetLabelStatus = Literal["candidate", "silver", "gold", "rejected"]
+ResearchUnderstandingDatasetExportFormat = Literal["json", "jsonl"]
 ResearchUnderstandingFeedbackIssueType = Literal[
     "none",
     "evidence_not_grounded",
@@ -399,3 +401,43 @@ class ResearchUnderstandingGoldDraftResponse(BaseModel):
     metric_profile: str
     item_count: int
     items: list[ResearchUnderstandingGoldDraftItemResponse] = Field(default_factory=list)
+
+
+class ResearchUnderstandingDatasetSampleResponse(BaseModel):
+    """Dataset sample derived from one research-understanding finding."""
+
+    sample_id: str
+    task_type: str
+    collection_id: str
+    scope_type: str
+    scope_id: str
+    finding_id: str
+    claim_id: str | None = None
+    label_status: ResearchUnderstandingDatasetLabelStatus
+    trace_status: str = Field(default="unavailable")
+    input_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_version: str | None = None
+    model_output: dict[str, Any] | None = None
+    system_prediction: dict[str, Any] = Field(default_factory=dict)
+    expert_target: dict[str, Any] | None = None
+    evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    context_refs: list[dict[str, Any]] = Field(default_factory=list)
+    feedback_refs: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchUnderstandingDatasetResponse(BaseModel):
+    """Read-only dataset export for evaluation and fine-tuning preparation."""
+
+    schema_version: str
+    dataset_id: str
+    collection_id: str
+    scope_type: str
+    scope_id: str
+    task_type: str
+    metric_profile: str
+    label_status_filter: ResearchUnderstandingDatasetLabelStatus | None = None
+    item_count: int
+    label_counts: dict[str, int] = Field(default_factory=dict)
+    items: list[ResearchUnderstandingDatasetSampleResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

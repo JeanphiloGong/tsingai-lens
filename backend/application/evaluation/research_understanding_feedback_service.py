@@ -2,13 +2,32 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from hashlib import sha1
+from typing import Any, Mapping
 
 from domain.evaluation import (
     ResearchUnderstandingCuration,
     ResearchUnderstandingFeedback,
 )
-from domain.ports import EvaluationRepository
-from infra.persistence.factory import build_evaluation_repository
+from domain.ports import CoreFactRepository, EvaluationRepository
+from infra.persistence.factory import (
+    build_core_fact_repository,
+    build_evaluation_repository,
+)
+
+
+DATASET_SCHEMA_VERSION = "research_understanding_dataset.v1"
+DATASET_TASK_TYPE = "research_understanding_finding"
+DATASET_LABEL_STATUSES = ("candidate", "silver", "gold", "rejected")
+_REJECTING_ISSUE_TYPES = frozenset(
+    {
+        "evidence_not_grounded",
+        "missing_evidence",
+        "wrong_context",
+        "wrong_relation",
+        "overclaim",
+        "unclear_statement",
+    }
+)
 
 
 class ResearchUnderstandingFeedbackService:
@@ -17,10 +36,12 @@ class ResearchUnderstandingFeedbackService:
     def __init__(
         self,
         evaluation_repository: EvaluationRepository | None = None,
+        core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()
         )
+        self.core_fact_repository = core_fact_repository or build_core_fact_repository()
 
     def record_feedback(
         self,
@@ -217,6 +238,220 @@ class ResearchUnderstandingFeedbackService:
             "items": items,
         }
 
+    def export_dataset(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+        label_status: str | None = None,
+    ) -> dict[str, object]:
+        if label_status and label_status not in DATASET_LABEL_STATUSES:
+            raise ValueError(f"unsupported label_status: {label_status}")
+
+        understanding = self.core_fact_repository.read_research_understanding(
+            collection_id,
+            scope_type,
+            scope_id,
+        )
+        if understanding is None:
+            return self._dataset_payload(
+                collection_id=collection_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                label_status_filter=label_status,
+                items=[],
+                warnings=["research understanding artifact is not available"],
+            )
+
+        feedback = self.list_feedback(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        curations = self.list_curations(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        feedback_index = _feedback_index(feedback)
+        curation_index = _curation_index(curations)
+        presentation = _mapping(understanding.presentation)
+        evidence_items = _by_id(
+            _mapping_list(presentation.get("evidence_items")),
+            "evidence_ref_id",
+        )
+        context_summaries = _by_id(
+            _mapping_list(presentation.get("context_summaries")),
+            "context_id",
+        )
+        evidence_refs = {
+            ref.evidence_ref_id: ref.to_record()
+            for ref in understanding.evidence_refs
+        }
+        contexts = {
+            context.context_id: context.to_record()
+            for context in understanding.contexts
+        }
+
+        items: list[dict[str, object]] = []
+        for finding in self._finding_records(understanding.to_record()):
+            sample = self._dataset_sample(
+                collection_id=collection_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                finding=finding,
+                evidence_refs=evidence_refs,
+                evidence_items=evidence_items,
+                contexts=contexts,
+                context_summaries=context_summaries,
+                feedback_index=feedback_index,
+                curation_index=curation_index,
+            )
+            if label_status and sample["label_status"] != label_status:
+                continue
+            items.append(sample)
+
+        return self._dataset_payload(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            label_status_filter=label_status,
+            items=items,
+            warnings=[],
+        )
+
+    def _dataset_payload(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+        label_status_filter: str | None,
+        items: list[dict[str, object]],
+        warnings: list[str],
+    ) -> dict[str, object]:
+        label_counts = {status: 0 for status in DATASET_LABEL_STATUSES}
+        for item in items:
+            status = _text(item.get("label_status")) or "candidate"
+            if status in label_counts:
+                label_counts[status] += 1
+        return {
+            "schema_version": DATASET_SCHEMA_VERSION,
+            "dataset_id": _dataset_id(collection_id, scope_type, scope_id),
+            "collection_id": collection_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "task_type": DATASET_TASK_TYPE,
+            "metric_profile": "research_understanding_v1",
+            "label_status_filter": label_status_filter,
+            "item_count": len(items),
+            "label_counts": label_counts,
+            "items": items,
+            "warnings": warnings,
+        }
+
+    def _finding_records(
+        self,
+        understanding: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        presentation = _mapping(understanding.get("presentation"))
+        findings = _mapping_list(presentation.get("findings"))
+        if findings:
+            return findings
+        records: list[dict[str, Any]] = []
+        for claim in _mapping_list(understanding.get("claims")):
+            claim_id = _text(claim.get("claim_id")) or _sample_id("claim", claim)
+            records.append(
+                {
+                    "finding_id": f"finding_{claim_id}",
+                    "claim_id": claim_id,
+                    "title": _text(claim.get("statement")) or claim_id,
+                    "statement": _text(claim.get("statement")) or "",
+                    "variables": [],
+                    "mediators": [],
+                    "outcomes": [],
+                    "direction": "",
+                    "scope_summary": "",
+                    "support_grade": _text(claim.get("strength")) or "weak",
+                    "review_status": "pending_review",
+                    "confidence": claim.get("confidence"),
+                    "paper_count": 0,
+                    "evidence_count": len(_strings(claim.get("evidence_ref_ids"))),
+                    "evidence_ref_ids": list(_strings(claim.get("evidence_ref_ids"))),
+                    "context_ids": list(_strings(claim.get("context_ids"))),
+                    "relation_ids": [],
+                    "warnings": list(_strings(claim.get("warnings"))),
+                }
+            )
+        return tuple(records)
+
+    def _dataset_sample(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+        finding: Mapping[str, Any],
+        evidence_refs: Mapping[str, Mapping[str, Any]],
+        evidence_items: Mapping[str, Mapping[str, Any]],
+        contexts: Mapping[str, Mapping[str, Any]],
+        context_summaries: Mapping[str, Mapping[str, Any]],
+        feedback_index: Mapping[tuple[str, str], tuple[ResearchUnderstandingFeedback, ...]],
+        curation_index: Mapping[tuple[str, str], tuple[ResearchUnderstandingCuration, ...]],
+    ) -> dict[str, object]:
+        finding_id = _text(finding.get("finding_id")) or _sample_id("finding", finding)
+        claim_id = _text(finding.get("claim_id"))
+        feedback = _feedback_for(feedback_index, finding_id, claim_id)
+        curations = _curations_for(curation_index, finding_id, claim_id)
+        curation = curations[0] if curations else None
+        label_status = _label_status(feedback, curation)
+        system_prediction = _system_prediction(finding)
+        evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
+        context_ids = _strings(finding.get("context_ids"))
+        expert_target = (
+            _expert_target_from_curation(curation)
+            if curation is not None
+            else _expert_target_from_feedback(system_prediction, feedback)
+        )
+        return {
+            "sample_id": _sample_id(
+                "rus",
+                collection_id,
+                scope_type,
+                scope_id,
+                finding_id,
+                label_status,
+            ),
+            "task_type": DATASET_TASK_TYPE,
+            "collection_id": collection_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "finding_id": finding_id,
+            "claim_id": claim_id,
+            "label_status": label_status,
+            "trace_status": "unavailable",
+            "input_blocks": [],
+            "prompt_version": None,
+            "model_output": None,
+            "system_prediction": system_prediction,
+            "expert_target": expert_target,
+            "evidence_refs": [
+                _evidence_record(evidence_ref_id, evidence_refs, evidence_items)
+                for evidence_ref_id in evidence_ref_ids
+            ],
+            "context_refs": [
+                _context_record(context_id, contexts, context_summaries)
+                for context_id in context_ids
+            ],
+            "feedback_refs": [item.to_record() for item in feedback],
+            "metadata": {
+                "curation_id": curation.curation_id if curation else None,
+                "feedback_count": len(feedback),
+                "trace_note": "prompt/model trace is not captured for historical samples",
+            },
+        }
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -239,3 +474,287 @@ def _gold_draft_id(collection_id: str, scope_type: str, scope_id: str) -> str:
         if part.strip()
     )
     return f"gold_{payload}_research_understanding"
+
+
+def _dataset_id(collection_id: str, scope_type: str, scope_id: str) -> str:
+    payload = "_".join(
+        part.strip().replace(" ", "_")
+        for part in (collection_id, scope_type, scope_id)
+        if part.strip()
+    )
+    return f"dataset_{payload}_research_understanding"
+
+
+def _feedback_index(
+    records: tuple[ResearchUnderstandingFeedback, ...],
+) -> dict[tuple[str, str], tuple[ResearchUnderstandingFeedback, ...]]:
+    indexed: dict[tuple[str, str], list[ResearchUnderstandingFeedback]] = {}
+    for record in records:
+        for key in _record_keys(record.finding_id, record.claim_id):
+            indexed.setdefault(key, []).append(record)
+    return {key: tuple(value) for key, value in indexed.items()}
+
+
+def _curation_index(
+    records: tuple[ResearchUnderstandingCuration, ...],
+) -> dict[tuple[str, str], tuple[ResearchUnderstandingCuration, ...]]:
+    indexed: dict[tuple[str, str], list[ResearchUnderstandingCuration]] = {}
+    for record in records:
+        for key in _record_keys(record.finding_id, record.claim_id):
+            indexed.setdefault(key, []).append(record)
+    return {key: tuple(value) for key, value in indexed.items()}
+
+
+def _record_keys(
+    finding_id: str | None,
+    claim_id: str | None,
+) -> tuple[tuple[str, str], ...]:
+    keys: list[tuple[str, str]] = []
+    if finding_id:
+        keys.append(("finding", finding_id))
+    if claim_id:
+        keys.append(("claim", claim_id))
+    return tuple(keys)
+
+
+def _feedback_for(
+    index: Mapping[tuple[str, str], tuple[ResearchUnderstandingFeedback, ...]],
+    finding_id: str,
+    claim_id: str | None,
+) -> tuple[ResearchUnderstandingFeedback, ...]:
+    records: list[ResearchUnderstandingFeedback] = []
+    seen: set[str] = set()
+    for key in _record_keys(finding_id, claim_id):
+        for record in index.get(key, ()):
+            if record.feedback_id in seen:
+                continue
+            seen.add(record.feedback_id)
+            records.append(record)
+    return tuple(records)
+
+
+def _curations_for(
+    index: Mapping[tuple[str, str], tuple[ResearchUnderstandingCuration, ...]],
+    finding_id: str,
+    claim_id: str | None,
+) -> tuple[ResearchUnderstandingCuration, ...]:
+    records: list[ResearchUnderstandingCuration] = []
+    seen: set[str] = set()
+    for key in _record_keys(finding_id, claim_id):
+        for record in index.get(key, ()):
+            if record.curation_id in seen:
+                continue
+            seen.add(record.curation_id)
+            records.append(record)
+    return tuple(records)
+
+
+def _label_status(
+    feedback: tuple[ResearchUnderstandingFeedback, ...],
+    curation: ResearchUnderstandingCuration | None,
+) -> str:
+    if curation is not None:
+        return "gold"
+    if any(
+        item.review_status == "incorrect" or item.issue_type in _REJECTING_ISSUE_TYPES
+        for item in feedback
+    ):
+        return "rejected"
+    if any(item.review_status == "correct" for item in feedback):
+        return "gold"
+    if any(item.review_status == "partial" for item in feedback):
+        return "silver"
+    return "candidate"
+
+
+def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "finding_id": _text(finding.get("finding_id")) or "",
+        "claim_id": _text(finding.get("claim_id")),
+        "title": _text(finding.get("title")) or "",
+        "statement": _text(finding.get("statement")) or "",
+        "variables": list(_strings(finding.get("variables"))),
+        "mediators": list(_strings(finding.get("mediators"))),
+        "outcomes": list(_strings(finding.get("outcomes"))),
+        "direction": _text(finding.get("direction")),
+        "scope_summary": _text(finding.get("scope_summary")),
+        "support_grade": _text(finding.get("support_grade")),
+        "review_status": _text(finding.get("review_status")),
+        "confidence": finding.get("confidence"),
+        "paper_count": _int(finding.get("paper_count")),
+        "evidence_count": _int(finding.get("evidence_count")),
+        "evidence_ref_ids": list(_strings(finding.get("evidence_ref_ids"))),
+        "context_ids": list(_strings(finding.get("context_ids"))),
+        "relation_ids": list(_strings(finding.get("relation_ids"))),
+        "warnings": list(_strings(finding.get("warnings"))),
+    }
+
+
+def _expert_target_from_curation(
+    curation: ResearchUnderstandingCuration,
+) -> dict[str, Any]:
+    return {
+        "source": "curation",
+        "curation_id": curation.curation_id,
+        "claim_id": curation.claim_id,
+        "claim_type": curation.curated_claim_type,
+        "status": curation.curated_status,
+        "statement": curation.curated_statement,
+        "support_grade": curation.curated_support_grade,
+        "review_status": curation.curated_review_status,
+        "variables": list(curation.curated_variables),
+        "mediators": list(curation.curated_mediators),
+        "outcomes": list(curation.curated_outcomes),
+        "direction": curation.curated_direction,
+        "scope_summary": curation.curated_scope_summary,
+        "evidence_ref_ids": list(curation.curated_evidence_ref_ids),
+        "context_ids": list(curation.curated_context_ids),
+        "note": curation.note,
+        "reviewer": curation.reviewer,
+        "updated_at": curation.updated_at,
+    }
+
+
+def _expert_target_from_feedback(
+    system_prediction: Mapping[str, Any],
+    feedback: tuple[ResearchUnderstandingFeedback, ...],
+) -> dict[str, Any] | None:
+    if not any(item.review_status == "correct" for item in feedback):
+        return None
+    return {
+        "source": "accepted_system_prediction",
+        "statement": system_prediction.get("statement"),
+        "system_prediction": dict(system_prediction),
+    }
+
+
+def _evidence_record(
+    evidence_ref_id: str,
+    evidence_refs: Mapping[str, Mapping[str, Any]],
+    evidence_items: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    ref = _mapping(evidence_refs.get(evidence_ref_id))
+    item = _mapping(evidence_items.get(evidence_ref_id))
+    locator = _mapping(ref.get("locator"))
+    return {
+        "evidence_ref_id": evidence_ref_id,
+        "document_id": _text(item.get("document_id")) or _text(ref.get("document_id")),
+        "source_kind": (
+            _text(item.get("source_kind"))
+            or _text(ref.get("source_kind"))
+            or "unknown"
+        ),
+        "label": _text(item.get("title")) or _text(ref.get("label")) or evidence_ref_id,
+        "source_label": _text(item.get("source_label")),
+        "source_ref": _text(item.get("source_ref")) or _text(locator.get("source_ref")),
+        "block_type": _text(item.get("block_type")),
+        "heading_path": _text(item.get("heading_path")),
+        "page": _text(item.get("page")),
+        "quote": _text(item.get("quote")) or _text(ref.get("quote")),
+        "source_text": _text(item.get("source_text")),
+        "value_summary": _text(item.get("value_summary")),
+        "locator": locator,
+        "fact_ids": list(_strings(ref.get("fact_ids"))),
+        "anchor_ids": list(_strings(ref.get("anchor_ids"))),
+        "traceability_status": (
+            _text(item.get("traceability_status"))
+            or _text(ref.get("traceability_status"))
+            or "unknown"
+        ),
+        "evidence_role": (
+            _text(item.get("evidence_role")) or _text(ref.get("evidence_role"))
+        ),
+        "confidence": (
+            item.get("confidence")
+            if item.get("confidence") is not None
+            else ref.get("confidence")
+        ),
+        "href": _text(item.get("href")) or _text(ref.get("href")),
+    }
+
+
+def _context_record(
+    context_id: str,
+    contexts: Mapping[str, Mapping[str, Any]],
+    context_summaries: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    context = _mapping(contexts.get(context_id))
+    summary = _mapping(context_summaries.get(context_id))
+    return {
+        "context_id": context_id,
+        "label": _text(summary.get("label")) or _text(context.get("label")) or context_id,
+        "material_scope": list(
+            _strings(summary.get("material_scope") or context.get("material_scope"))
+        ),
+        "property_scope": list(
+            _strings(summary.get("property_scope") or context.get("property_scope"))
+        ),
+        "process_summary": _text(summary.get("process_summary")),
+        "test_summary": _text(summary.get("test_summary")),
+        "limitations": list(_strings(summary.get("limitations") or context.get("limitations"))),
+        "process_context": _mapping(context.get("process_context")),
+        "test_condition": _mapping(context.get("test_condition")),
+    }
+
+
+def _by_id(
+    records: tuple[dict[str, Any], ...],
+    key: str,
+) -> dict[str, dict[str, Any]]:
+    return {
+        identifier: record
+        for record in records
+        if (identifier := _text(record.get(key)))
+    }
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _mapping_list(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, Mapping))
+
+
+def _strings(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, Mapping):
+        items = value.values()
+    elif isinstance(value, (list, tuple, set)):
+        items = value
+    else:
+        items = (value,)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = _text(item)
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+    return tuple(normalized)
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sample_id(prefix: str, *parts: object) -> str:
+    payload = "\x1f".join(str(part or "") for part in parts)
+    return prefix + "_" + sha1(payload.encode("utf-8")).hexdigest()[:16]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from controllers.core import research_understanding_feedback as feedback_controller
 from controllers.schemas.core.research_understanding import (
@@ -127,6 +128,62 @@ class FakeResearchUnderstandingFeedbackService:
                     "metadata": {"curation_id": "ruc-existing"},
                 }
             ],
+        }
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003
+        self.dataset_exported = kwargs
+        return {
+            "schema_version": "research_understanding_dataset.v1",
+            "dataset_id": "dataset_col-1_goal_goal-1_research_understanding",
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "task_type": "research_understanding_finding",
+            "metric_profile": "research_understanding_v1",
+            "label_status_filter": kwargs["label_status"],
+            "item_count": 1,
+            "label_counts": {
+                "candidate": 0,
+                "silver": 0,
+                "gold": 1,
+                "rejected": 0,
+            },
+            "items": [
+                {
+                    "sample_id": "rus-1",
+                    "task_type": "research_understanding_finding",
+                    "collection_id": kwargs["collection_id"],
+                    "scope_type": kwargs["scope_type"],
+                    "scope_id": kwargs["scope_id"],
+                    "finding_id": "finding-1",
+                    "claim_id": "claim-1",
+                    "label_status": "gold",
+                    "trace_status": "unavailable",
+                    "input_blocks": [],
+                    "prompt_version": None,
+                    "model_output": None,
+                    "system_prediction": {
+                        "statement": "Preheating improves ductility."
+                    },
+                    "expert_target": {
+                        "source": "curation",
+                        "statement": "Preheating improves ductility by 14%.",
+                    },
+                    "evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev-1",
+                            "quote": "Preheating increased ductility by 14%.",
+                            "source_text": (
+                                "Preheating increased ductility by 14% in LPBF 316L."
+                            ),
+                        }
+                    ],
+                    "context_refs": [],
+                    "feedback_refs": [],
+                    "metadata": {"curation_id": "ruc-existing"},
+                }
+            ],
+            "warnings": [],
         }
 
 
@@ -318,4 +375,70 @@ def test_research_understanding_gold_draft_route_exports_curations(monkeypatch):
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+    }
+
+
+def test_research_understanding_dataset_route_exports_json(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            format="json",
+        )
+    )
+
+    assert response.collection_id == "col-1"
+    assert response.scope_type == "goal"
+    assert response.scope_id == "goal-1"
+    assert response.label_status_filter == "gold"
+    assert response.item_count == 1
+    assert response.items[0].label_status == "gold"
+    assert response.items[0].evidence_refs[0]["source_text"] == (
+        "Preheating increased ductility by 14% in LPBF 316L."
+    )
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": "gold",
+    }
+
+
+def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            format="jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["sample_id"] == "rus-1"
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
     }

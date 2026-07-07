@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Query
+from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from application.evaluation import ResearchUnderstandingFeedbackService
@@ -11,6 +14,9 @@ from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingFeedbackCreateRequest,
     ResearchUnderstandingFeedbackListResponse,
     ResearchUnderstandingFeedbackResponse,
+    ResearchUnderstandingDatasetExportFormat,
+    ResearchUnderstandingDatasetLabelStatus,
+    ResearchUnderstandingDatasetResponse,
     ResearchUnderstandingGoldDraftResponse,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
@@ -158,3 +164,34 @@ async def export_research_understanding_gold_draft(
         scope_id=scope_id,
     )
     return ResearchUnderstandingGoldDraftResponse(**draft)
+
+
+@router.get(
+    "/{collection_id}/research-understanding/dataset",
+    response_model=ResearchUnderstandingDatasetResponse,
+    summary="导出 research understanding finding 数据集样本",
+)
+async def export_research_understanding_dataset(
+    collection_id: str,
+    scope_type: str = Query(..., max_length=32),
+    scope_id: str = Query(..., min_length=1, max_length=160),
+    label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
+    format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
+) -> ResearchUnderstandingDatasetResponse | Response:
+    dataset = await run_in_threadpool(
+        feedback_service.export_dataset,
+        collection_id=collection_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        label_status=label_status,
+    )
+    response = ResearchUnderstandingDatasetResponse(**dataset)
+    if format == "jsonl":
+        body = "\n".join(
+            json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
+            for item in response.items
+        )
+        if body:
+            body += "\n"
+        return Response(content=body, media_type="application/x-ndjson")
+    return response

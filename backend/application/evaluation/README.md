@@ -30,6 +30,7 @@ artifacts.
   Compares materials Core gold answers with prediction snapshots and records
   metrics plus failures.
 - `research_understanding_feedback_service.py`
-  Persists claim-level expert feedback and curation records, then exports
-  curation-derived `research_understanding_claims` gold drafts for review or
-  later gold registration.
+  Persists finding-level expert feedback and curation records, exports
+  curation-derived `research_understanding_findings` gold drafts, and exports
+  read-only research-understanding dataset samples for evaluation or
+  fine-tuning preparation.

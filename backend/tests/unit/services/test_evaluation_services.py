@@ -11,8 +11,13 @@ from application.evaluation.prediction_snapshot_service import (
 from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
-from domain.core import CoreFactSet, MeasurementResult, ObjectiveEvidenceUnit
-from domain.evaluation import ResearchUnderstandingCuration
+from domain.core import (
+    CoreFactSet,
+    MeasurementResult,
+    ObjectiveEvidenceUnit,
+    ResearchUnderstanding,
+)
+from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
 
 
 class FakeCollectionService:
@@ -109,6 +114,24 @@ class FakeEvaluationRepository:
             and (claim_id is None or curation.claim_id == claim_id)
         )
 
+    def list_research_understanding_feedback(
+        self,
+        collection_id: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        finding_id: str | None = None,
+        claim_id: str | None = None,
+    ):
+        return tuple(
+            feedback
+            for feedback in getattr(self, "feedback", ())
+            if feedback.collection_id == collection_id
+            and (scope_type is None or feedback.scope_type == scope_type)
+            and (scope_id is None or feedback.scope_id == scope_id)
+            and (finding_id is None or feedback.finding_id == finding_id)
+            and (claim_id is None or feedback.claim_id == claim_id)
+        )
+
 
 class FakeCoreFactRepository:
     backend_name = "fake"
@@ -118,6 +141,243 @@ class FakeCoreFactRepository:
 
     def read_collection_facts(self, collection_id: str) -> CoreFactSet:  # noqa: ARG002
         return self.facts
+
+    def read_research_understanding(
+        self,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+    ):
+        return None
+
+
+class FakeResearchUnderstandingRepository:
+    backend_name = "fake"
+
+    def __init__(self, understanding: ResearchUnderstanding | None) -> None:
+        self.understanding = understanding
+
+    def read_research_understanding(
+        self,
+        collection_id: str,  # noqa: ARG002
+        scope_type: str,  # noqa: ARG002
+        scope_id: str,  # noqa: ARG002
+    ):
+        return self.understanding
+
+
+def _sample_understanding() -> ResearchUnderstanding:
+    return ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-gold",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect ductility?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim-1",
+                    "claim_type": "finding",
+                    "statement": "Preheating improves ductility.",
+                    "status": "limited",
+                    "evidence_ref_ids": ["ev-1"],
+                    "context_ids": ["ctx-1"],
+                },
+                {
+                    "claim_id": "claim-2",
+                    "claim_type": "finding",
+                    "statement": "VED controls density.",
+                    "status": "limited",
+                    "evidence_ref_ids": ["ev-2"],
+                    "context_ids": ["ctx-1"],
+                },
+                {
+                    "claim_id": "claim-3",
+                    "claim_type": "finding",
+                    "statement": "Porosity governs pitting.",
+                    "status": "limited",
+                    "evidence_ref_ids": ["ev-3"],
+                    "context_ids": ["ctx-2"],
+                },
+                {
+                    "claim_id": "claim-4",
+                    "claim_type": "finding",
+                    "statement": "Heat treatment controls fatigue.",
+                    "status": "limited",
+                    "evidence_ref_ids": ["ev-4"],
+                    "context_ids": ["ctx-2"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "ev-1",
+                    "source_kind": "text",
+                    "document_id": "doc-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-preheat"},
+                    "traceability_status": "direct",
+                    "evidence_role": "direct_result",
+                    "quote": "Preheating increased ductility by 14%.",
+                    "href": "/documents/doc-1#blk-preheat",
+                },
+                {
+                    "evidence_ref_id": "ev-2",
+                    "source_kind": "table",
+                    "document_id": "doc-2",
+                    "label": "P002 Table 2",
+                    "locator": {"source_ref": "table-density"},
+                    "traceability_status": "direct",
+                    "evidence_role": "direct_result",
+                    "quote": "Density reached 99.6%.",
+                },
+                {
+                    "evidence_ref_id": "ev-3",
+                    "source_kind": "text",
+                    "document_id": "doc-3",
+                    "label": "P003 Corrosion",
+                    "locator": {"source_ref": "blk-pitting"},
+                    "traceability_status": "direct",
+                    "evidence_role": "direct_result",
+                    "quote": "Pores acted as pitting sites.",
+                },
+                {
+                    "evidence_ref_id": "ev-4",
+                    "source_kind": "text",
+                    "document_id": "doc-4",
+                    "label": "P004 Fatigue",
+                    "locator": {"source_ref": "blk-fatigue"},
+                    "traceability_status": "direct",
+                    "evidence_role": "background",
+                    "quote": "Fatigue was discussed in a review section.",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx-1",
+                    "label": "LPBF 316L",
+                    "material_scope": ["316L"],
+                    "process_context": {"process": "LPBF"},
+                    "test_condition": {"temperature": "room"},
+                    "property_scope": ["ductility", "density"],
+                },
+                {
+                    "context_id": "ctx-2",
+                    "label": "SLM corrosion",
+                    "material_scope": ["316L"],
+                    "process_context": {"process": "SLM"},
+                    "test_condition": {"solution": "NaCl"},
+                    "property_scope": ["corrosion"],
+                },
+            ],
+            "presentation": {
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "claim_id": "claim-1",
+                        "title": "preheating -> ductility",
+                        "statement": "Preheating improves ductility.",
+                        "variables": ["preheating"],
+                        "mediators": ["porosity"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "scope_summary": "LPBF 316L",
+                        "support_grade": "partial",
+                        "review_status": "needs_review",
+                        "confidence": 0.7,
+                        "paper_count": 1,
+                        "evidence_count": 1,
+                        "evidence_ref_ids": ["ev-1"],
+                        "context_ids": ["ctx-1"],
+                        "relation_ids": ["rel-1"],
+                    },
+                    {
+                        "finding_id": "finding-2",
+                        "claim_id": "claim-2",
+                        "title": "VED -> density",
+                        "statement": "VED controls density.",
+                        "variables": ["VED"],
+                        "outcomes": ["density"],
+                        "direction": "increase",
+                        "scope_summary": "SLM 316L",
+                        "support_grade": "weak",
+                        "review_status": "needs_review",
+                        "confidence": 0.6,
+                        "paper_count": 1,
+                        "evidence_count": 1,
+                        "evidence_ref_ids": ["ev-2"],
+                        "context_ids": ["ctx-1"],
+                    },
+                    {
+                        "finding_id": "finding-3",
+                        "claim_id": "claim-3",
+                        "title": "porosity -> pitting",
+                        "statement": "Porosity governs pitting.",
+                        "variables": ["porosity"],
+                        "outcomes": ["pitting corrosion"],
+                        "direction": "increase",
+                        "scope_summary": "SLM 316L",
+                        "support_grade": "partial",
+                        "review_status": "needs_review",
+                        "confidence": 0.6,
+                        "paper_count": 1,
+                        "evidence_count": 1,
+                        "evidence_ref_ids": ["ev-3"],
+                        "context_ids": ["ctx-2"],
+                    },
+                    {
+                        "finding_id": "finding-4",
+                        "claim_id": "claim-4",
+                        "title": "heat treatment -> fatigue",
+                        "statement": "Heat treatment controls fatigue.",
+                        "variables": ["heat treatment"],
+                        "outcomes": ["fatigue"],
+                        "direction": "unclear",
+                        "scope_summary": "review context",
+                        "support_grade": "weak",
+                        "review_status": "needs_review",
+                        "confidence": 0.4,
+                        "paper_count": 1,
+                        "evidence_count": 1,
+                        "evidence_ref_ids": ["ev-4"],
+                        "context_ids": ["ctx-2"],
+                    },
+                ],
+                "evidence_items": [
+                    {
+                        "evidence_ref_id": "ev-1",
+                        "document_id": "doc-1",
+                        "title": "P001 Results",
+                        "source_label": "P001 p.3",
+                        "source_kind": "text",
+                        "source_ref": "blk-preheat",
+                        "block_type": "paragraph",
+                        "heading_path": "Results / Mechanical properties",
+                        "page": "3",
+                        "quote": "Preheating increased ductility by 14%.",
+                        "source_text": "Preheating increased ductility by 14% in LPBF 316L.",
+                        "value_summary": "ductility +14%",
+                        "traceability_status": "direct",
+                        "evidence_role": "direct_result",
+                        "confidence": 0.82,
+                        "href": "/documents/doc-1#blk-preheat",
+                    }
+                ],
+                "context_summaries": [
+                    {
+                        "context_id": "ctx-1",
+                        "label": "LPBF 316L",
+                        "material_scope": ["316L"],
+                        "property_scope": ["ductility", "density"],
+                        "process_summary": "LPBF",
+                        "test_summary": "room temperature",
+                        "limitations": [],
+                    }
+                ],
+            },
+        }
+    )
 
 
 def test_evaluation_gold_service_registers_gold_set_for_collection():
@@ -250,6 +510,162 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
         {"evidence_ref_id": "ev-2"},
     ]
     assert item["metadata"]["curation_id"] == "ruc-abc123"
+
+
+def test_research_understanding_feedback_service_exports_dataset_samples():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["preheating"],
+                "curated_mediators": ["porosity"],
+                "curated_outcomes": ["ductility"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "LPBF 316L",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "note": "Quote supports the result.",
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-partial",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "review_status": "partial",
+                "issue_type": "none",
+                "note": "Density trend needs one more source.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-wrong",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-3",
+                "claim_id": "claim-3",
+                "review_status": "incorrect",
+                "issue_type": "evidence_not_grounded",
+                "note": "The quote does not support a causal corrosion claim.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:30:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    assert dataset["schema_version"] == "research_understanding_dataset.v1"
+    assert dataset["task_type"] == "research_understanding_finding"
+    assert dataset["item_count"] == 4
+    assert dataset["label_counts"] == {
+        "candidate": 1,
+        "silver": 1,
+        "gold": 1,
+        "rejected": 1,
+    }
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    assert by_finding["finding-1"]["label_status"] == "gold"
+    assert by_finding["finding-1"]["expert_target"]["source"] == "curation"
+    assert by_finding["finding-1"]["expert_target"]["statement"] == (
+        "Preheating improves ductility by 14% in LPBF 316L."
+    )
+    assert by_finding["finding-1"]["evidence_refs"][0]["source_text"] == (
+        "Preheating increased ductility by 14% in LPBF 316L."
+    )
+    assert by_finding["finding-1"]["evidence_refs"][0]["heading_path"] == (
+        "Results / Mechanical properties"
+    )
+    assert by_finding["finding-1"]["context_refs"][0]["process_summary"] == "LPBF"
+    assert by_finding["finding-2"]["label_status"] == "silver"
+    assert by_finding["finding-3"]["label_status"] == "rejected"
+    assert by_finding["finding-4"]["label_status"] == "candidate"
+    assert by_finding["finding-4"]["trace_status"] == "unavailable"
+
+
+def test_research_understanding_feedback_service_filters_dataset_by_label():
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-wrong",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-3",
+                "claim_id": "claim-3",
+                "review_status": "incorrect",
+                "issue_type": "wrong_relation",
+                "created_at": "2026-06-18T10:30:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        label_status="rejected",
+    )
+
+    assert dataset["label_status_filter"] == "rejected"
+    assert dataset["item_count"] == 1
+    assert dataset["items"][0]["finding_id"] == "finding-3"
+    assert dataset["label_counts"] == {
+        "candidate": 0,
+        "silver": 0,
+        "gold": 0,
+        "rejected": 1,
+    }
+
+
+def test_research_understanding_feedback_service_reports_missing_dataset_scope():
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(None),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="missing-goal",
+    )
+
+    assert dataset["item_count"] == 0
+    assert dataset["warnings"] == ["research understanding artifact is not available"]
 
 
 def test_prediction_snapshot_service_exports_objective_first_measurements():

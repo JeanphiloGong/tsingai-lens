@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 from controllers.core import research_understanding_feedback as feedback_controller
 from controllers.schemas.core.research_understanding import (
@@ -9,6 +10,23 @@ from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingFeedbackCreateRequest,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
+
+
+def request_with_user(
+    *,
+    user_id: str = "user-materials-expert",
+    email: str = "materials-expert@example.com",
+    display_name: str | None = "Materials Expert",
+):
+    return SimpleNamespace(
+        state=SimpleNamespace(
+            current_user={
+                "user_id": user_id,
+                "email": email,
+                "display_name": display_name,
+            }
+        )
+    )
 
 
 class FakeResearchUnderstandingFeedbackService:
@@ -141,6 +159,7 @@ class FakeResearchUnderstandingFeedbackService:
             "task_type": "research_understanding_finding",
             "metric_profile": "research_understanding_v1",
             "label_status_filter": kwargs["label_status"],
+            "dataset_use_status_filter": kwargs["dataset_use_status"],
             "item_count": 1,
             "label_counts": {
                 "candidate": 0,
@@ -151,6 +170,8 @@ class FakeResearchUnderstandingFeedbackService:
             "quality_summary": {
                 "total_samples": 1,
                 "usable_sample_count": 1,
+                "training_ready_sample_count": 1,
+                "review_candidate_sample_count": 0,
                 "needs_review_count": 0,
                 "rejected_count": 0,
                 "labeled_sample_count": 1,
@@ -163,6 +184,11 @@ class FakeResearchUnderstandingFeedbackService:
                     "candidate": 0,
                     "silver": 0,
                     "gold": 1,
+                    "rejected": 0,
+                },
+                "by_dataset_use_status": {
+                    "training_ready": 1,
+                    "review_candidate": 0,
                     "rejected": 0,
                 },
                 "by_review_status": {"accepted": 1},
@@ -196,6 +222,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "label_status": "gold",
+                    "dataset_use_status": "training_ready",
                     "presentation_bucket": "primary",
                     "trace_status": "unavailable",
                     "input_blocks": [],
@@ -216,6 +243,17 @@ class FakeResearchUnderstandingFeedbackService:
                             "source_text": (
                                 "Preheating increased ductility by 14% in LPBF 316L."
                             ),
+                            "training_source_text": "Preheating increased ductility by 14%.",
+                        }
+                    ],
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev-1",
+                            "quote": "Preheating increased ductility by 14%.",
+                            "source_text": (
+                                "Preheating increased ductility by 14% in LPBF 316L."
+                            ),
+                            "training_source_text": "Preheating increased ductility by 14%.",
                         }
                     ],
                     "context_refs": [],
@@ -248,6 +286,7 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
                 note="The cited table does not support the mechanism claim.",
                 reviewer="materials-expert",
             ),
+            request_with_user(),
         )
     )
 
@@ -266,8 +305,37 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
         "review_status": "incorrect",
         "issue_type": "evidence_not_grounded",
         "note": "The cited table does not support the mechanism claim.",
-        "reviewer": "materials-expert",
+        "reviewer": "materials-expert@example.com",
     }
+
+
+def test_research_understanding_feedback_route_preserves_agent_reviewer(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.create_research_understanding_feedback(
+            "col-1",
+            ResearchUnderstandingFeedbackCreateRequest(
+                scope_type="objective",
+                scope_id="obj-1",
+                finding_id="finding-1",
+                claim_id="claim-1",
+                review_status="correct",
+                issue_type="none",
+                note="AI source audit accepted the evidence.",
+                reviewer="ai-reviewer-codex-evidence-audit",
+            ),
+            request_with_user(),
+        )
+    )
+
+    assert response.reviewer == "ai-reviewer-codex-evidence-audit"
+    assert service.created["reviewer"] == "ai-reviewer-codex-evidence-audit"
 
 
 def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch):
@@ -326,6 +394,7 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
                 note="Needs microstructure evidence before marking supported.",
                 reviewer="materials-expert",
             ),
+            request_with_user(),
         )
     )
 
@@ -355,8 +424,42 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
         "curated_evidence_ref_ids": ["ev-1"],
         "curated_context_ids": ["ctx-1"],
         "note": "Needs microstructure evidence before marking supported.",
-        "reviewer": "materials-expert",
+        "reviewer": "materials-expert@example.com",
     }
+
+
+def test_research_understanding_curation_route_preserves_agent_reviewer(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.create_research_understanding_curation(
+            "col-1",
+            ResearchUnderstandingCurationCreateRequest(
+                scope_type="objective",
+                scope_id="obj-1",
+                finding_id="finding-1",
+                claim_id="claim-1",
+                curated_claim_type="mechanism",
+                curated_status="limited",
+                curated_statement=(
+                    "Nitrogen improves strength with limited mechanism evidence."
+                ),
+                curated_evidence_ref_ids=["ev-1"],
+                curated_context_ids=["ctx-1"],
+                note="AI curation candidate, keep silver.",
+                reviewer="agent-lens-claim-review",
+            ),
+            request_with_user(),
+        )
+    )
+
+    assert response.reviewer == "agent-lens-claim-review"
+    assert service.curated["reviewer"] == "agent-lens-claim-review"
 
 
 def test_research_understanding_curation_route_lists_expert_claim_curations(monkeypatch):
@@ -432,6 +535,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
             scope_type="goal",
             scope_id="goal-1",
             label_status="gold",
+            dataset_use_status="training_ready",
             format="json",
         )
     )
@@ -440,6 +544,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.scope_type == "goal"
     assert response.scope_id == "goal-1"
     assert response.label_status_filter == "gold"
+    assert response.dataset_use_status_filter == "training_ready"
     assert response.item_count == 1
     assert response.quality_summary.total_samples == 1
     assert response.quality_summary.by_label_status["gold"] == 1
@@ -459,11 +564,15 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.items[0].evidence_refs[0]["source_text"] == (
         "Preheating increased ductility by 14% in LPBF 316L."
     )
+    assert response.items[0].training_evidence_refs[0]["training_source_text"] == (
+        "Preheating increased ductility by 14%."
+    )
     assert service.dataset_exported == {
         "collection_id": "col-1",
         "scope_type": "goal",
         "scope_id": "goal-1",
         "label_status": "gold",
+        "dataset_use_status": "training_ready",
     }
 
 
@@ -481,6 +590,7 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
             scope_type="goal",
             scope_id="goal-1",
             label_status=None,
+            dataset_use_status=None,
             format="jsonl",
         )
     )
@@ -496,4 +606,5 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
         "scope_type": "goal",
         "scope_id": "goal-1",
         "label_status": None,
+        "dataset_use_status": None,
     }

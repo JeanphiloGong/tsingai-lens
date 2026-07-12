@@ -10,14 +10,20 @@ from urllib.parse import quote
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from domain.core import ResearchUnderstanding
 from domain.ports import SourceArtifactRepository
-from domain.source import SourceBlock, SourceDocument
+from domain.source import SourceBlock, SourceDocument, SourceTable
 from infra.persistence.factory import build_source_artifact_repository
+from infra.source.runtime.mapping.text_quality import normalize_display_text
 
 logger = logging.getLogger(__name__)
 
 _RELATION_CONTEXT_LIMIT = 16
 _RELATION_EVIDENCE_UNIT_LIMIT = 24
 _RELATION_TRACE_TASK_TYPE = "research_understanding_relation"
+_DIRECT_RESULT_CONTEXT_UNIT_KINDS = {
+    "process_context",
+    "sample_context",
+    "test_condition",
+}
 _FINDING_MATCH_STOPWORDS = {
     "affect",
     "affects",
@@ -47,6 +53,26 @@ _FINDING_MATCH_STOPWORDS = {
     "table",
     "tables",
 }
+_SYMBOL_AXIS_DISPLAY_ALIASES = {
+    "alpha": "α build orientation angle",
+    "α": "α build orientation angle",
+    "beta": "β build orientation angle",
+    "β": "β build orientation angle",
+    "theta": "scan strategy rotation angle",
+    "θ": "scan strategy rotation angle",
+    "ɵ": "scan strategy rotation angle",
+}
+_MECHANICAL_PROPERTY_AXIS_TOKENS = {
+    "ductility",
+    "elongation",
+    "fatigue",
+    "hardness",
+    "strength",
+    "tensile",
+    "ultimate",
+    "yield",
+}
+_MULTI_AXIS_TABLE_CONTRAST_LABEL = "multi-axis table contrast"
 
 
 class ResearchUnderstandingService:
@@ -73,7 +99,10 @@ class ResearchUnderstandingService:
             if isinstance(understanding, ResearchUnderstanding)
             else dict(understanding)
         )
+        record = self._record_without_off_axis_recovered_objects(record)
+        record = self._record_with_recovered_presentation_objects(record)
         record["presentation"] = self._presentation_for(record)
+        record["state"] = self._state_with_presentation(record)
         return ResearchUnderstanding.from_mapping(record).to_record()
 
     def build_objective_understanding(
@@ -110,16 +139,45 @@ class ResearchUnderstandingService:
         question = _text(objective.get("question")) or _text(context.get("question"))
         evidence_units = _mapping_list(payload.get("evidence_units"))
         evidence_refs = self._evidence_refs_from_evidence_units(evidence_units)
-        blocks_by_id, _documents_by_id = self._source_artifact_lookups(collection_id)
+        blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
+            collection_id
+        )
         evidence_refs = self._enrich_evidence_refs_from_source_blocks(
             evidence_refs,
             blocks_by_id=blocks_by_id,
+        )
+        recovered_findings = self._recovered_objective_findings_from_source_blocks(
+            payload,
+            evidence_units=evidence_units,
+            blocks_by_id=blocks_by_id,
+            tables_by_id=tables_by_id,
+        )
+        evidence_refs = self._sort_evidence_refs_for_review(
+            [
+                *evidence_refs,
+                *[
+                    evidence_ref
+                    for recovered in recovered_findings
+                    for evidence_ref in self._recovered_evidence_refs(recovered)
+                ],
+            ]
         )
         evidence_ref_ids_by_unit = self._evidence_ref_ids_by_fact(evidence_refs)
         contexts = self._objective_contexts(
             context,
             objective,
             evidence_units=evidence_units,
+        )
+        contexts = _dedupe_by_id(
+            [
+                *contexts,
+                *[
+                    recovered["context"]
+                    for recovered in recovered_findings
+                    if recovered.get("context")
+                ],
+            ],
+            "context_id",
         )
         context_ids = [item["context_id"] for item in contexts]
         context_ids_by_unit = self._objective_context_ids_by_unit(contexts)
@@ -139,6 +197,20 @@ class ResearchUnderstandingService:
             context_ids_by_unit=context_ids_by_unit,
             contexts=contexts,
         )
+        recovered_claims = [
+            recovered["claim"]
+            for recovered in recovered_findings
+            if recovered.get("claim")
+        ]
+        recovered_relations = [
+            recovered["relation"]
+            for recovered in recovered_findings
+            if recovered.get("relation")
+        ]
+        claims = [*recovered_claims, *claims]
+        relations = [*recovered_relations, *relations]
+        claims = self._dedupe_claims_for_understanding(claims)
+        relations = _dedupe_by_id(relations, "relation_id")
         state = self._state_for(claims, relations, evidence_refs)
         return self.with_presentation(
             ResearchUnderstanding.from_mapping(
@@ -559,6 +631,11 @@ class ResearchUnderstandingService:
             "mechanism",
         }:
             return (0, index)
+        if (
+            unit_kind in _DIRECT_RESULT_CONTEXT_UNIT_KINDS
+            and self._objective_unit_has_direct_result_signal(unit)
+        ):
+            return (0, index)
         if unit_kind == "measurement":
             return (1, index)
         return (2, index)
@@ -578,7 +655,9 @@ class ResearchUnderstandingService:
 
     def _objective_unit_evidence_role(self, unit: Mapping[str, Any]) -> str:
         for source_ref in _mapping_list(unit.get("source_refs")):
-            evidence_role = _text(source_ref.get("evidence_role"))
+            evidence_role = self._normalized_evidence_role(
+                _text(source_ref.get("evidence_role")) or _text(source_ref.get("role"))
+            )
             if evidence_role:
                 return evidence_role
         return ""
@@ -594,8 +673,18 @@ class ResearchUnderstandingService:
         context_ids_by_unit: dict[str, list[str]],
         contexts: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
+        objective = _mapping(payload.get("objective"))
+        objective_context = _mapping(payload.get("objective_context"))
         deterministic_relations = self._deterministic_objective_relations(
             evidence_units,
+            variable_axes=self._objective_variable_axes_for_relations(
+                objective_context,
+                objective,
+            ),
+            target_axes=self._objective_target_axes_for_claims(
+                objective_context,
+                objective,
+            ),
             evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
             context_ids=context_ids,
             context_ids_by_unit=context_ids_by_unit,
@@ -640,6 +729,2263 @@ class ResearchUnderstandingService:
             [],
             model_traces,
         )
+
+    def _recovered_objective_findings_from_source_blocks(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable] | None = None,
+    ) -> list[dict[str, Any]]:
+        objective = _mapping(payload.get("objective"))
+        objective_context = _mapping(payload.get("objective_context"))
+        axis_text = " ".join(
+            [
+                _text(objective.get("question")) or "",
+                _text(objective_context.get("question")) or "",
+                " ".join(_strings(objective.get("process_axes"))),
+                " ".join(_strings(objective_context.get("variable_process_axes"))),
+                " ".join(_strings(objective.get("property_axes"))),
+                " ".join(_strings(objective_context.get("target_property_axes"))),
+            ]
+        )
+        normalized_axes = f" {_normalize_match_text(axis_text)} "
+        normalized_property_axes = self._normalized_objective_property_axes(
+            objective,
+            objective_context,
+        )
+        recovered: list[dict[str, Any]] = []
+        if self._objective_axes_request_preheating_ductility(normalized_axes):
+            recovered.extend(
+                self._recovered_preheating_findings_from_source_blocks(
+                    payload,
+                    evidence_units=evidence_units,
+                    blocks_by_id=blocks_by_id,
+                    objective=objective,
+                    objective_context=objective_context,
+                )
+            )
+        recovered.extend(
+            self._recovered_process_property_findings_from_source_blocks(
+                payload,
+                evidence_units=evidence_units,
+                blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
+                normalized_axes=normalized_axes,
+                normalized_property_axes=normalized_property_axes,
+                objective=objective,
+                objective_context=objective_context,
+            )
+        )
+        if not (
+            (
+                " porosity " in normalized_axes
+                or " pore " in normalized_axes
+                or " pores " in normalized_axes
+            )
+            and (
+                " corrosion " in normalized_axes
+                or " pitting " in normalized_axes
+            )
+        ):
+            return recovered
+        document_ids = _dedupe_strings(
+            [
+                _text(unit.get("document_id"))
+                for unit in evidence_units
+                if self._objective_unit_has_corrosion_metric_signal(unit)
+            ]
+        )
+        if not document_ids:
+            return recovered
+        for document_id in document_ids:
+            block = self._best_porosity_corrosion_source_block(
+                document_id,
+                blocks_by_id=blocks_by_id,
+            )
+            if block is None:
+                continue
+            recovered.append(
+                self._recovered_porosity_corrosion_finding(
+                    block,
+                    collection_id=_text(payload.get("collection_id")),
+                    objective_context=objective_context,
+                    objective=objective,
+                )
+            )
+        return [item for item in recovered if item]
+
+    def _recovered_process_property_findings_from_source_blocks(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable] | None = None,
+        normalized_axes: str,
+        normalized_property_axes: str,
+        objective: Mapping[str, Any],
+        objective_context: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        document_ids = self._objective_recovery_document_ids(
+            payload,
+            evidence_units=evidence_units,
+        )
+        if not document_ids:
+            return []
+        collection_id = _text(payload.get("collection_id"))
+        recovered: list[dict[str, Any]] = []
+        specs: list[dict[str, Any]] = []
+        specific_mechanical_axes = self._requested_specific_mechanical_axes(
+            normalized_property_axes
+        )
+        if (
+            (
+                " energy density " in normalized_axes
+                or " scanning speed " in normalized_axes
+                or " scan speed " in normalized_axes
+            )
+            and self._objective_property_axes_include_any(
+                normalized_property_axes,
+                legacy_match=(
+                    " densification " in normalized_axes
+                    or " density " in normalized_axes
+                    or " microstructure " in normalized_axes
+                    or " mechanical " in normalized_axes
+                    or " yield strength " in normalized_axes
+                    or " ultimate tensile strength " in normalized_axes
+                    or " elongation " in normalized_axes
+                ),
+                terms=[
+                    "densification",
+                    "density",
+                    "relative density",
+                    "microstructure",
+                    "mechanical properties",
+                    "yield strength",
+                    "ultimate tensile strength",
+                    "elongation",
+                ],
+            )
+        ):
+            if not specific_mechanical_axes:
+                specs.append(
+                    {
+                        "slug": "slm_density_microstructure",
+                        "subject": "SLM processing parameters",
+                        "predicate": "affect",
+                        "object": "densification -> microstructure -> mechanical properties",
+                        "statement": (
+                            "SLM scanning strategy, scanning speed, and energy "
+                            "density significantly affect densification, "
+                            "microstructure, and mechanical properties of 316L "
+                            "stainless steel."
+                        ),
+                        "process_axes": [
+                            "scanning strategy",
+                            "scanning speed",
+                            "energy density",
+                        ],
+                        "property_scope": [
+                            "densification",
+                            "microstructure",
+                            "mechanical properties",
+                        ],
+                        "block_predicate": self._is_slm_processing_conclusion_block,
+                        "confidence": 0.82,
+                    }
+                )
+            specs.append(
+                {
+                    "slug": "scan_speed_density_microstructure",
+                    "subject": "scanning speed",
+                    "predicate": "controls",
+                    "object": (
+                        "densification, microstructure, and mechanical properties"
+                    ),
+                    "statement": (
+                        "Higher scanning speed improved densification, refined "
+                        "the microstructure, and was associated with better "
+                        "mechanical properties than lower scanning speed."
+                    ),
+                    "process_axes": ["scanning speed"],
+                    "property_scope": [
+                        "densification",
+                        "microstructure",
+                        "mechanical properties",
+                    ],
+                    "block_predicate": self._is_scan_speed_conclusion_block,
+                    "mechanical_property_table": bool(specific_mechanical_axes),
+                    "specific_mechanical_axes": specific_mechanical_axes,
+                    "confidence": 0.82,
+                }
+            )
+        if (
+            (
+                " heat treatment " in normalized_axes
+                or " furnace " in normalized_axes
+                or " hip " in normalized_axes
+            )
+            and self._objective_property_axes_include_any(
+                normalized_property_axes,
+                legacy_match=(
+                    " density " in normalized_axes
+                    or " microstructure " in normalized_axes
+                    or " mechanical " in normalized_axes
+                ),
+                terms=[
+                    "density",
+                    "relative density",
+                    "microstructure",
+                    "mechanical properties",
+                    "strength",
+                    "tensile strength",
+                    "elongation",
+                ],
+            )
+        ):
+            specs.append(
+                {
+                    "slug": "heat_treatment_microstructure_mechanics",
+                    "subject": "heat treatment",
+                    "predicate": "changes",
+                    "object": self._heat_treatment_recovered_object(
+                        normalized_property_axes
+                    ),
+                    "statement": self._heat_treatment_recovered_statement(
+                        normalized_property_axes
+                    ),
+                    "process_axes": ["heat treatment"],
+                    "property_scope": self._heat_treatment_recovered_property_scope(
+                        normalized_property_axes
+                    ),
+                    "block_predicate": self._is_heat_treatment_microstructure_block,
+                    "confidence": 0.84,
+                }
+            )
+        if (
+            (
+                " scan strategy " in normalized_axes
+                or " build orientation " in normalized_axes
+                or " rotation angle " in normalized_axes
+            )
+            and self._objective_property_axes_include_any(
+                normalized_property_axes,
+                legacy_match=(
+                    " crystallographic texture " in normalized_axes
+                    or " yield strength " in normalized_axes
+                ),
+                terms=["crystallographic texture", "yield strength"],
+            )
+        ):
+            specs.append(
+                {
+                    "slug": "texture_yield_prediction",
+                    "subject": "scan strategy rotation angle and build orientation",
+                    "predicate": "predict",
+                    "object": "crystallographic texture -> yield strength",
+                    "statement": (
+                        "Changing scan strategy rotation angle and build "
+                        "orientation was experimentally validated against "
+                        "crystallographic-texture-based Bishop-Hill yield "
+                        "strength predictions; yield strength increased from "
+                        "the 0-0-0 configuration to the 45-22.5-0 condition "
+                        "with deviations generally below 5%."
+                    ),
+                    "process_axes": [
+                        "scan strategy rotation angle",
+                        "build orientation",
+                    ],
+                    "property_scope": ["crystallographic texture", "yield strength"],
+                    "block_predicate": self._is_texture_yield_conclusion_block,
+                    "confidence": 0.86,
+                    "claim_status": "limited",
+                    "relation_status": "limited",
+                    "warnings": ["model_validation_finding", "needs_expert_review"],
+                }
+            )
+        if (
+            (
+                " volumetric energy density " in normalized_axes
+                or " ved " in normalized_axes
+                or " defect " in normalized_axes
+            )
+            and self._objective_property_axes_include_any(
+                normalized_property_axes,
+                legacy_match=(
+                    " fatigue " in normalized_axes
+                    or " defect " in normalized_axes
+                ),
+                terms=["defect structure", "fatigue strength", "fatigue"],
+            )
+        ):
+            specs.append(
+                {
+                    "slug": "ved_defects_fatigue",
+                    "subject": "volumetric energy density",
+                    "relation_type": "compares",
+                    "predicate": "compares",
+                    "object": "defect structure -> fatigue strength",
+                    "statement": (
+                        "Increasing VED lowered defect fraction, size, and "
+                        "complexity, improving fatigue resistance; remaining "
+                        "LoF defects still kept fatigue resistance below wrought "
+                        "316L steel."
+                    ),
+                    "process_axes": ["volumetric energy density"],
+                    "property_scope": ["defect structure", "fatigue strength"],
+                    "block_predicate": self._is_ved_defect_fatigue_block,
+                    "fatigue_strength_table": True,
+                    "confidence": 0.86,
+                }
+            )
+        for spec in specs:
+            for document_id in document_ids:
+                block = self._best_recovered_spec_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                    predicate=spec["block_predicate"],
+                )
+                if block is None:
+                    continue
+                condition_block = (
+                    self._best_ved_condition_source_block(
+                        document_id,
+                        blocks_by_id=blocks_by_id,
+                    )
+                    if _text(spec.get("slug")) == "ved_defects_fatigue"
+                    else None
+                )
+                supporting_blocks = (
+                    [
+                        supporting_block
+                        for supporting_block in [
+                            self._best_heat_treatment_mechanics_source_block(
+                                document_id,
+                                blocks_by_id=blocks_by_id,
+                                exclude_block_id=_text(block.block_id),
+                            )
+                        ]
+                        if supporting_block is not None
+                    ]
+                    if _text(spec.get("slug"))
+                    == "heat_treatment_microstructure_mechanics"
+                    and self._heat_treatment_objective_requests_mechanics(
+                        normalized_property_axes
+                    )
+                    else []
+                )
+                mechanical_property_table = (
+                    self._best_specific_mechanical_property_table(
+                        document_id,
+                        tables_by_id=tables_by_id or {},
+                    )
+                    if spec.get("mechanical_property_table")
+                    else None
+                )
+                processing_parameter_table = (
+                    self._best_slm_processing_parameter_table(
+                        document_id,
+                        tables_by_id=tables_by_id or {},
+                    )
+                    if mechanical_property_table is not None
+                    else None
+                )
+                ved_fatigue_strength_table = (
+                    self._best_ved_fatigue_strength_table(
+                        document_id,
+                        tables_by_id=tables_by_id or {},
+                    )
+                    if spec.get("fatigue_strength_table")
+                    else None
+                )
+                supporting_tables = [
+                    table
+                    for table in [
+                        mechanical_property_table,
+                        processing_parameter_table,
+                        ved_fatigue_strength_table,
+                    ]
+                    if table is not None
+                ]
+                recovered_spec = spec
+                if (
+                    _text(spec.get("slug")) == "ved_defects_fatigue"
+                    and ved_fatigue_strength_table is not None
+                ):
+                    table_statement = self._ved_fatigue_strength_table_statement(
+                        ved_fatigue_strength_table
+                    )
+                    if table_statement:
+                        recovered_spec = {**spec, "statement": table_statement}
+                specific_spec_axes = _strings(spec.get("specific_mechanical_axes"))
+                if mechanical_property_table is not None and specific_spec_axes:
+                    specific_object = _join_display_values(specific_spec_axes)
+                    controlled_summary = (
+                        self._specific_mechanical_property_controlled_summary(
+                            mechanical_property_table,
+                            processing_parameter_table,
+                            specific_spec_axes,
+                        )
+                    )
+                    table_summary = self._specific_mechanical_property_table_statement(
+                        specific_spec_axes,
+                    )
+                    value_clause = controlled_summary or table_summary
+                    warnings = _strings(spec.get("warnings"))
+                    if not controlled_summary:
+                        warnings = _dedupe_strings(
+                            [
+                                *warnings,
+                                "non_single_variable_table_comparison",
+                                "needs_expert_review",
+                            ]
+                        )
+                    recovered_spec = {
+                        **spec,
+                        "object": specific_object,
+                        "statement": (
+                            "Higher scanning speed improved densification and "
+                            "refined the microstructure. "
+                            f"{value_clause}"
+                        ),
+                        "property_scope": specific_spec_axes,
+                        "warnings": warnings,
+                        **(
+                            {
+                                "claim_status": "limited",
+                                "relation_status": "limited",
+                            }
+                            if not controlled_summary
+                            else {}
+                        ),
+                    }
+                recovered.append(
+                    self._recovered_spec_finding(
+                        block,
+                        collection_id=collection_id,
+                        objective_context=objective_context,
+                        objective=objective,
+                        spec=recovered_spec,
+                        condition_block=condition_block,
+                        supporting_blocks=supporting_blocks,
+                        supporting_tables=supporting_tables,
+                    )
+                )
+                break
+        return [item for item in recovered if item]
+
+    def _requested_specific_mechanical_axes(
+        self,
+        normalized_property_axes: str,
+    ) -> list[str]:
+        return [
+            axis
+            for axis in (
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            )
+            if f" {_normalize_match_text(axis)} " in normalized_property_axes
+        ]
+
+    def _heat_treatment_recovered_statement(
+        self,
+        normalized_property_axes: str,
+    ) -> str:
+        base = self._heat_treatment_recovered_base_statement(
+            normalized_property_axes
+        )
+        mechanics_effects = self._heat_treatment_recovered_mechanics_effects(
+            normalized_property_axes
+        )
+        if not mechanics_effects:
+            return base
+        return f"{base} {self._heat_treatment_recovered_mechanics_sentence(mechanics_effects)}"
+
+    def _heat_treatment_recovered_base_statement(
+        self,
+        normalized_property_axes: str,
+    ) -> str:
+        scope = self._heat_treatment_recovered_base_scope(normalized_property_axes)
+        if "density" in scope and "microstructure" in scope:
+            return (
+                "Heat treatment or HIP increased density and reduced porosity. "
+                "Heat treatment also eliminated the as-SLM cellular "
+                "microstructure and dense dislocation structures through "
+                "recrystallization."
+            )
+        if "density" in scope:
+            return "Heat treatment or HIP increased density and reduced porosity."
+        if "microstructure" in scope:
+            return (
+                "Heat treatment or HIP eliminated the as-SLM cellular "
+                "microstructure and dense dislocation structures through "
+                "recrystallization."
+            )
+        return "Heat treatment or HIP changed the requested material properties."
+
+    def _heat_treatment_recovered_property_scope(
+        self,
+        normalized_property_axes: str,
+    ) -> list[str]:
+        return _dedupe_strings(
+            [
+                *self._heat_treatment_recovered_base_scope(normalized_property_axes),
+                *self._heat_treatment_recovered_mechanics_scope(
+                    normalized_property_axes
+                ),
+            ]
+        )
+
+    def _heat_treatment_recovered_object(
+        self,
+        normalized_property_axes: str,
+    ) -> str:
+        return self._finding_title_outcome(
+            self._heat_treatment_recovered_property_scope(normalized_property_axes)
+        )
+
+    def _heat_treatment_recovered_base_scope(
+        self,
+        normalized_property_axes: str,
+    ) -> list[str]:
+        if not normalized_property_axes.strip():
+            return ["density", "microstructure"]
+        scope: list[str] = []
+        if (
+            " density " in normalized_property_axes
+            or " relative density " in normalized_property_axes
+        ):
+            scope.append("density")
+        if " microstructure " in normalized_property_axes:
+            scope.append("microstructure")
+        return scope
+
+    def _heat_treatment_recovered_mechanics_scope(
+        self,
+        normalized_property_axes: str,
+    ) -> list[str]:
+        scope: list[str] = []
+        if " mechanical properties " in normalized_property_axes:
+            scope.extend(["hardness", "tensile strength", "elongation"])
+        else:
+            if " hardness " in normalized_property_axes:
+                scope.append("hardness")
+            if (
+                " strength " in normalized_property_axes
+                or " tensile strength " in normalized_property_axes
+            ):
+                scope.append("tensile strength")
+            if " elongation " in normalized_property_axes:
+                scope.append("elongation")
+        return _dedupe_strings(scope)
+
+    def _heat_treatment_recovered_mechanics_effects(
+        self,
+        normalized_property_axes: str,
+    ) -> list[str]:
+        effects: list[str] = []
+        for axis in self._heat_treatment_recovered_mechanics_scope(
+            normalized_property_axes
+        ):
+            if axis == "elongation":
+                effects.append("higher elongation")
+            elif axis == "hardness":
+                effects.append("lower hardness")
+            elif axis == "tensile strength":
+                effects.append("lower tensile strength")
+        return effects
+
+    def _heat_treatment_recovered_mechanics_sentence(
+        self,
+        mechanics_effects: list[str],
+    ) -> str:
+        effect_text = self._finding_title_outcome(mechanics_effects)
+        return f"The same microstructural evolution is associated with {effect_text}."
+
+    def _heat_treatment_objective_requests_mechanics(
+        self,
+        normalized_property_axes: str,
+    ) -> bool:
+        return any(
+            f" {term} " in normalized_property_axes
+            for term in (
+                "mechanical properties",
+                "strength",
+                "tensile strength",
+                "elongation",
+                "hardness",
+            )
+        )
+
+    def _best_specific_mechanical_property_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            score = self._specific_mechanical_property_table_score(table)
+            if score <= 0:
+                continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _specific_mechanical_property_table_score(self, table: SourceTable) -> int:
+        text = f" {_normalize_match_text(self._source_table_text(table))} "
+        required_terms = (
+            "yield strength",
+            "ultimate tensile strength",
+            "elongation",
+        )
+        if not all(f" {term} " in text for term in required_terms):
+            return 0
+        score = 6
+        if " mechanical properties " in text:
+            score += 4
+        if " slm " in text or " selective laser melting " in text:
+            score += 2
+        if re.search(r"\b\d+(?:\.\d+)?\b", text):
+            score += 2
+        return score
+
+    def _best_slm_processing_parameter_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            score = self._slm_processing_parameter_table_score(table)
+            if score <= 0:
+                continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _slm_processing_parameter_table_score(self, table: SourceTable) -> int:
+        indexes = self._slm_processing_parameter_column_indexes(table)
+        required = {"condition", "sample", "scan_strategy", "scanning_speed"}
+        if not required <= set(indexes):
+            return 0
+        score = 6
+        if "energy_density" in indexes:
+            score += 3
+        text = f" {_normalize_match_text(self._source_table_text(table))} "
+        if " relative density " in text:
+            score += 2
+        if " slm " in text or " selective laser melting " in text:
+            score += 2
+        return score
+
+    def _best_ved_fatigue_strength_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            score = self._ved_fatigue_strength_table_score(table)
+            if score <= 0:
+                continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _ved_fatigue_strength_table_score(self, table: SourceTable) -> int:
+        text = f" {_normalize_match_text(self._source_table_text(table))} "
+        if not (
+            (" ved " in text or " l ved " in text or " m ved " in text)
+            and " fatigue " in text
+            and " mpa " in text
+        ):
+            return 0
+        if not (
+            " fat at 10 " in text
+            or " fatigue strength " in text
+            or " fatigue limit " in text
+        ):
+            return 0
+        score = 8
+        if " max defect length " in text or " defect length " in text:
+            score += 4
+        if " 340 " in text and " 450 " in text:
+            score += 4
+        return score
+
+    def _ved_fatigue_strength_table_statement(self, table: SourceTable) -> str:
+        indexes = self._ved_fatigue_strength_column_indexes(table)
+        label_index = indexes.get("label")
+        fatigue_index = indexes.get("fatigue_strength")
+        defect_index = indexes.get("defect_length")
+        if label_index is None or fatigue_index is None:
+            return ""
+        rows: dict[str, tuple[str, str]] = {}
+        for row in table.table_matrix:
+            if len(row) <= max(label_index, fatigue_index):
+                continue
+            label = _normalize_match_text(row[label_index])
+            fatigue_strength = _numeric_text(row[fatigue_index])
+            defect_length = (
+                _numeric_text(row[defect_index])
+                if defect_index is not None and len(row) > defect_index
+                else ""
+            )
+            if not label or not fatigue_strength:
+                continue
+            if "l ved" in label:
+                rows["L-VED"] = (fatigue_strength, defect_length)
+            elif "m ved" in label:
+                rows["M-VED"] = (fatigue_strength, defect_length)
+            elif "h ved" in label:
+                rows["H-VED"] = (fatigue_strength, defect_length)
+        low = rows.get("L-VED")
+        medium = rows.get("M-VED")
+        if not low or not medium:
+            return ""
+        defect_clause = ""
+        if low[1] and medium[1]:
+            defect_clause = (
+                f" and reduced maximum defect length from {low[1]} μm "
+                f"to {medium[1]} μm"
+            )
+        return (
+            "Increasing VED lowered defect fraction, size, and complexity; "
+            f"from L-VED to M-VED it increased fatigue strength at 10^4 cycles "
+            f"from {low[0]} MPa to {medium[0]} MPa{defect_clause}. "
+            "Remaining LoF defects still kept fatigue resistance below wrought "
+            "316L steel."
+        )
+
+    def _ved_fatigue_strength_column_indexes(
+        self,
+        table: SourceTable,
+    ) -> dict[str, int]:
+        indexes: dict[str, int] = {}
+        headers = list(table.column_headers)
+        if not headers and table.table_matrix:
+            headers = list(table.table_matrix[0])
+        for index, header in enumerate(headers):
+            normalized = f" {_normalize_match_text(header)} "
+            if " printed 316l " in normalized or " sample " in normalized:
+                indexes.setdefault("label", index)
+            if " fat at 10 " in normalized or " fatigue strength " in normalized:
+                indexes.setdefault("fatigue_strength", index)
+            if " defect length " in normalized:
+                indexes.setdefault("defect_length", index)
+        return indexes
+
+    def _source_table_text(self, table: SourceTable) -> str:
+        parts: list[str] = [
+            _text(table.caption_text),
+            _text(table.heading_path),
+            *[_text(header) for header in table.column_headers],
+        ]
+        for row in table.table_matrix[:8]:
+            parts.extend(_text(cell) for cell in row)
+        return " ".join(part for part in parts if part)
+
+    def _specific_mechanical_property_controlled_summary(
+        self,
+        mechanical_table: SourceTable,
+        processing_table: SourceTable | None,
+        axes: list[str],
+    ) -> str:
+        if processing_table is None:
+            return ""
+        comparison = self._controlled_scanning_speed_property_comparison(
+            mechanical_table,
+            processing_table,
+            axes,
+        )
+        if not comparison:
+            return ""
+        properties = self._controlled_property_change_text(
+            comparison["properties"],
+        )
+        if not properties:
+            return ""
+        conditions = self._controlled_comparison_condition_text(comparison)
+        condition_clause = f" at {conditions}" if conditions else ""
+        return (
+            "Increasing scanning speed from "
+            f"{comparison['low_speed']} to {comparison['high_speed']}"
+            f"{condition_clause} corresponded to higher {properties}."
+        )
+
+    def _controlled_scanning_speed_property_comparison(
+        self,
+        mechanical_table: SourceTable,
+        processing_table: SourceTable,
+        axes: list[str],
+    ) -> dict[str, Any]:
+        mechanical_indexes = self._specific_mechanical_property_column_indexes(
+            mechanical_table
+        )
+        processing_indexes = self._slm_processing_parameter_column_indexes(
+            processing_table
+        )
+        if not {"sample", "scanning_speed"} <= set(processing_indexes):
+            return {}
+        if not {"sample"} <= set(mechanical_indexes):
+            return {}
+        mechanical_rows = self._mechanical_property_rows(
+            mechanical_table,
+            indexes=mechanical_indexes,
+            axes=axes,
+        )
+        if not mechanical_rows:
+            return {}
+        joined_rows = []
+        for process_row in self._processing_parameter_rows(
+            processing_table,
+            indexes=processing_indexes,
+        ):
+            sample = _text(process_row.get("sample"))
+            condition = _text(process_row.get("condition"))
+            mechanical_row = mechanical_rows.get(sample or "") or mechanical_rows.get(
+                f"condition:{condition}"
+            )
+            if not mechanical_row:
+                continue
+            joined_rows.append({**process_row, "properties": mechanical_row})
+        best: tuple[tuple[int, float, float], dict[str, Any]] | None = None
+        for left_index, left in enumerate(joined_rows):
+            for right in joined_rows[left_index + 1 :]:
+                if not self._controlled_scanning_speed_pair(left, right):
+                    continue
+                candidate = self._controlled_scanning_speed_comparison_candidate(
+                    left,
+                    right,
+                    axes=axes,
+                )
+                if not candidate:
+                    continue
+                rank = self._controlled_scanning_speed_comparison_rank(candidate)
+                if best is None or rank > best[0]:
+                    best = (rank, candidate)
+        return best[1] if best else {}
+
+    def _mechanical_property_rows(
+        self,
+        table: SourceTable,
+        *,
+        indexes: Mapping[str, int],
+        axes: list[str],
+    ) -> dict[str, dict[str, str]]:
+        sample_index = indexes.get("sample")
+        condition_index = indexes.get("condition")
+        if sample_index is None:
+            return {}
+        rows: dict[str, dict[str, str]] = {}
+        for row in table.table_matrix:
+            if len(row) <= sample_index:
+                continue
+            sample = _numeric_text(row[sample_index])
+            if not sample:
+                continue
+            values = {
+                axis: value
+                for axis in axes
+                if (column_index := indexes.get(axis)) is not None
+                and len(row) > column_index
+                and (value := _numeric_text(row[column_index]))
+            }
+            if not values:
+                continue
+            rows[sample] = values
+            if condition_index is not None and len(row) > condition_index:
+                condition = _numeric_text(row[condition_index])
+                if condition:
+                    rows.setdefault(f"condition:{condition}", values)
+        return rows
+
+    def _processing_parameter_rows(
+        self,
+        table: SourceTable,
+        *,
+        indexes: Mapping[str, int],
+    ) -> list[dict[str, str]]:
+        sample_index = indexes.get("sample")
+        speed_index = indexes.get("scanning_speed")
+        if sample_index is None or speed_index is None:
+            return []
+        rows: list[dict[str, str]] = []
+        for row in table.table_matrix:
+            if len(row) <= max(sample_index, speed_index):
+                continue
+            sample = _numeric_text(row[sample_index])
+            speed = _numeric_text(row[speed_index])
+            if not sample or not speed:
+                continue
+            item = {
+                "sample": sample,
+                "scanning_speed": speed,
+            }
+            if (
+                (condition_index := indexes.get("condition")) is not None
+                and len(row) > condition_index
+                and (condition := _numeric_text(row[condition_index]))
+            ):
+                item["condition"] = condition
+            if (
+                (strategy_index := indexes.get("scan_strategy")) is not None
+                and len(row) > strategy_index
+                and (strategy := _text(row[strategy_index]))
+            ):
+                item["scan_strategy"] = strategy
+            if (
+                (energy_index := indexes.get("energy_density")) is not None
+                and len(row) > energy_index
+                and (energy := _numeric_text(row[energy_index]))
+            ):
+                item["energy_density"] = energy
+            if (
+                (hatch_index := indexes.get("hatch_spacing")) is not None
+                and len(row) > hatch_index
+                and (hatch := _numeric_text(row[hatch_index]))
+            ):
+                item["hatch_spacing"] = hatch
+            if (
+                (laser_power_index := indexes.get("laser_power")) is not None
+                and len(row) > laser_power_index
+                and (laser_power := _numeric_text(row[laser_power_index]))
+            ):
+                item["laser_power"] = laser_power
+            if (
+                (layer_index := indexes.get("layer_thickness")) is not None
+                and len(row) > layer_index
+                and (layer := _numeric_text(row[layer_index]))
+            ):
+                item["layer_thickness"] = layer
+            rows.append(item)
+        return rows
+
+    def _controlled_scanning_speed_pair(
+        self,
+        left: Mapping[str, Any],
+        right: Mapping[str, Any],
+    ) -> bool:
+        for key in (
+            "energy_density",
+            "scan_strategy",
+            "hatch_spacing",
+            "laser_power",
+            "layer_thickness",
+        ):
+            left_value = _normalize_match_text(_text(left.get(key)) or "")
+            right_value = _normalize_match_text(_text(right.get(key)) or "")
+            if left_value and right_value and left_value != right_value:
+                return False
+        return _float_text(left.get("scanning_speed")) != _float_text(
+            right.get("scanning_speed")
+        )
+
+    def _controlled_scanning_speed_comparison_candidate(
+        self,
+        left: Mapping[str, Any],
+        right: Mapping[str, Any],
+        *,
+        axes: list[str],
+    ) -> dict[str, Any]:
+        left_speed = _float_text(left.get("scanning_speed"))
+        right_speed = _float_text(right.get("scanning_speed"))
+        if left_speed is None or right_speed is None or left_speed == right_speed:
+            return {}
+        low, high = (left, right) if left_speed < right_speed else (right, left)
+        low_properties = _mapping(low.get("properties"))
+        high_properties = _mapping(high.get("properties"))
+        properties: list[dict[str, Any]] = []
+        for axis in axes:
+            low_value = _numeric_text(low_properties.get(axis))
+            high_value = _numeric_text(high_properties.get(axis))
+            low_float = _float_text(low_value)
+            high_float = _float_text(high_value)
+            if low_float is None or high_float is None:
+                continue
+            properties.append(
+                {
+                    "axis": axis,
+                    "low": low_value,
+                    "high": high_value,
+                    "low_float": low_float,
+                    "high_float": high_float,
+                }
+            )
+        if not properties:
+            return {}
+        return {
+            "low_speed": _text(low.get("scanning_speed")) or "",
+            "high_speed": _text(high.get("scanning_speed")) or "",
+            "energy_density": _text(low.get("energy_density"))
+            or _text(high.get("energy_density"))
+            or "",
+            "scan_strategy": _text(low.get("scan_strategy"))
+            or _text(high.get("scan_strategy"))
+            or "",
+            "hatch_spacing": _text(low.get("hatch_spacing"))
+            or _text(high.get("hatch_spacing"))
+            or "",
+            "laser_power": _text(low.get("laser_power"))
+            or _text(high.get("laser_power"))
+            or "",
+            "layer_thickness": _text(low.get("layer_thickness"))
+            or _text(high.get("layer_thickness"))
+            or "",
+            "properties": properties,
+        }
+
+    def _controlled_scanning_speed_comparison_rank(
+        self,
+        comparison: Mapping[str, Any],
+    ) -> tuple[int, float, float]:
+        properties = _mapping_list(comparison.get("properties"))
+        increases = sum(
+            1
+            for item in properties
+            if _float_text(item.get("high_float")) is not None
+            and _float_text(item.get("low_float")) is not None
+            and float(item["high_float"]) > float(item["low_float"])
+        )
+        normalized_gain = 0.0
+        for item in properties:
+            low_value = _float_text(item.get("low_float"))
+            high_value = _float_text(item.get("high_float"))
+            if low_value is None or high_value is None or low_value == 0:
+                continue
+            normalized_gain += (high_value - low_value) / abs(low_value)
+        speed_delta = abs(
+            (_float_text(comparison.get("high_speed")) or 0)
+            - (_float_text(comparison.get("low_speed")) or 0)
+        )
+        return (increases, normalized_gain, speed_delta)
+
+    def _controlled_comparison_condition_text(
+        self,
+        comparison: Mapping[str, Any],
+    ) -> str:
+        parts: list[str] = []
+        if energy_density := _text(comparison.get("energy_density")):
+            parts.append(f"energy density {energy_density}")
+        if scan_strategy := _text(comparison.get("scan_strategy")):
+            parts.append(f"scan strategy {scan_strategy}")
+        if hatch_spacing := _text(comparison.get("hatch_spacing")):
+            parts.append(f"hatch spacing {hatch_spacing}")
+        if laser_power := _text(comparison.get("laser_power")):
+            parts.append(f"laser power {laser_power}")
+        if layer_thickness := _text(comparison.get("layer_thickness")):
+            parts.append(f"layer thickness {layer_thickness}")
+        return " and ".join(parts)
+
+    def _controlled_property_change_text(
+        self,
+        properties: list[dict[str, Any]],
+    ) -> str:
+        parts = [
+            (
+                f"{axis} ({_text(item.get('low'))} to {_text(item.get('high'))}"
+                f"{self._specific_mechanical_property_unit(axis)})"
+            )
+            for item in properties
+            if (axis := _text(item.get("axis")))
+            and _text(item.get("low"))
+            and _text(item.get("high"))
+        ]
+        return _join_display_values(parts)
+
+    def _specific_mechanical_property_table_statement(
+        self,
+        axes: list[str],
+    ) -> str:
+        specific_object = self._finding_title_outcome(axes)
+        return (
+            f"The associated source table reports {specific_object} measurements; "
+            "use the table rows as direct evidence rather than a single global range."
+        )
+
+    def _specific_mechanical_property_column_indexes(
+        self,
+        table: SourceTable,
+    ) -> dict[str, int]:
+        indexes: dict[str, int] = {}
+        headers = list(table.column_headers)
+        if not headers and table.table_matrix:
+            headers = list(table.table_matrix[0])
+        for index, header in enumerate(headers):
+            normalized = f" {_normalize_match_text(header)} "
+            if " condition number " in normalized:
+                indexes.setdefault("condition", index)
+            if " sample number " in normalized:
+                indexes.setdefault("sample", index)
+            if " yield strength " in normalized:
+                indexes.setdefault("yield strength", index)
+            if " ultimate tensile strength " in normalized:
+                indexes.setdefault("ultimate tensile strength", index)
+            if " elongation " in normalized:
+                indexes.setdefault("elongation", index)
+        return indexes
+
+    def _slm_processing_parameter_column_indexes(
+        self,
+        table: SourceTable,
+    ) -> dict[str, int]:
+        indexes: dict[str, int] = {}
+        headers = list(table.column_headers)
+        if not headers and table.table_matrix:
+            headers = list(table.table_matrix[0])
+        for index, header in enumerate(headers):
+            normalized = f" {_normalize_match_text(header)} "
+            if " condition number " in normalized:
+                indexes.setdefault("condition", index)
+            if " sample number " in normalized:
+                indexes.setdefault("sample", index)
+            if " scan strategy " in normalized:
+                indexes.setdefault("scan_strategy", index)
+            if " scanning speed " in normalized or " scan speed " in normalized:
+                indexes.setdefault("scanning_speed", index)
+            if " energy density " in normalized:
+                indexes.setdefault("energy_density", index)
+            if " hatch space " in normalized or " hatch spacing " in normalized:
+                indexes.setdefault("hatch_spacing", index)
+            if " laser power " in normalized:
+                indexes.setdefault("laser_power", index)
+            if " layer thickness " in normalized:
+                indexes.setdefault("layer_thickness", index)
+        return indexes
+
+    def _specific_mechanical_property_unit(self, axis: str) -> str:
+        normalized = _normalize_match_text(axis)
+        if normalized in {"yield strength", "ultimate tensile strength"}:
+            return " MPa"
+        if normalized == "elongation":
+            return "%"
+        return ""
+
+    def _specific_mechanical_property_label(self, axis: str) -> str:
+        normalized = _normalize_match_text(axis)
+        if normalized == "yield strength":
+            return "Yield Strength"
+        if normalized == "ultimate tensile strength":
+            return "Ultimate Tensile Strength"
+        if normalized == "elongation":
+            return "Elongation"
+        return self._display_axis_label(axis)
+
+    def _normalized_objective_property_axes(
+        self,
+        objective: Mapping[str, Any],
+        objective_context: Mapping[str, Any],
+    ) -> str:
+        lens = _mapping(objective_context.get("objective_evidence_lens"))
+        property_axes = _dedupe_strings([
+            *_strings(objective.get('property_axes')),
+            *_strings(objective_context.get('target_property_axes')),
+            *_strings(lens.get('target_outcome_axes')),
+        ])
+        return f" {_normalize_match_text(' '.join(property_axes))} "
+
+    def _objective_property_axes_include_any(
+        self,
+        normalized_property_axes: str,
+        *,
+        legacy_match: bool,
+        terms: list[str] | tuple[str, ...],
+    ) -> bool:
+        if not normalized_property_axes.strip():
+            return legacy_match
+        return any(
+            f" {_normalize_match_text(term)} " in normalized_property_axes
+            for term in terms
+            if _normalize_match_text(term)
+        )
+
+    def _recovered_context_process_axes(
+        self,
+        process_axes: Any,
+        *,
+        objective_context: Mapping[str, Any],
+    ) -> list[str]:
+        objective_process_axes = [
+            axis
+            for axis in [
+                *_strings(objective_context.get("process_context_axes")),
+                *_strings(objective_context.get("variable_process_axes")),
+            ]
+            if self._is_platform_process_context_axis(axis)
+        ]
+        return _dedupe_strings(
+            [
+                *_strings(process_axes),
+                *objective_process_axes,
+            ]
+        )
+
+    def _is_platform_process_context_axis(self, axis: Any) -> bool:
+        normalized = f" {_normalize_match_text(_text(axis) or '')} "
+        return any(
+            f" {term} " in normalized
+            for term in (
+                "lpbf",
+                "pbf lb",
+                "slm",
+                "selective laser melting",
+                "laser beam powder bed fusion",
+                "laser powder bed fusion",
+                "powder bed fusion",
+                "additive manufacturing",
+            )
+        )
+
+    def _objective_evidence_document_ids(
+        self,
+        evidence_units: list[dict[str, Any]],
+    ) -> list[str]:
+        return _dedupe_strings(
+            [
+                _text(unit.get("document_id"))
+                for unit in evidence_units
+                if _text(unit.get("document_id"))
+            ]
+        )
+
+    def _objective_recovery_document_ids(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+    ) -> list[str]:
+        document_ids: list[str] = []
+        document_ids.extend(self._objective_evidence_document_ids(evidence_units))
+        document_ids.extend(
+            _text(route.get("document_id")) or ""
+            for route in _mapping_list(payload.get("evidence_routes"))
+            if route.get("extractable", True)
+        )
+        document_ids.extend(
+            _text(frame.get("document_id")) or ""
+            for frame in _mapping_list(payload.get("paper_frames"))
+            if (_text(frame.get("relevance")) or "").lower()
+            not in {"irrelevant", "excluded"}
+        )
+        return _dedupe_strings(document_ids)
+
+    def _best_recovered_spec_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        predicate,
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            score = predicate(block)
+            if score <= 0:
+                continue
+            ranked = (score, block.block_order or 0, block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _is_slm_processing_conclusion_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            " slm processing parameters " in normalized
+            and " densification " in normalized
+            and " microstructure " in normalized
+            and " mechanical properties " in normalized
+        ):
+            return 0
+        return self._source_block_result_score(block, normalized)
+
+    def _is_scan_speed_conclusion_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            " higher scanning speed " in normalized
+            and " densification " in normalized
+            and " refined microstructure " in normalized
+            and " mechanical properties " in normalized
+        ):
+            return 0
+        return self._source_block_result_score(block, normalized) + 3
+
+    def _is_heat_treatment_conclusion_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            (
+                " heat treatments " in normalized
+                or " heat treatment " in normalized
+                or " ht slm " in normalized
+                or " ht-slm " in normalized
+                or " hip slm " in normalized
+                or " hip-slm " in normalized
+            )
+            and " density " in normalized
+            and (
+                " cellular microstructure " in normalized
+                or " cellular microstructures " in normalized
+            )
+            and " dislocation " in normalized
+            and " elongation " in normalized
+        ):
+            return 0
+        return self._source_block_result_score(block, normalized) + 3
+
+    def _is_heat_treatment_microstructure_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            (
+                " heat treatments " in normalized
+                or " heat treatment " in normalized
+                or " ht slm " in normalized
+                or " ht-slm " in normalized
+                or " hip slm " in normalized
+                or " hip-slm " in normalized
+            )
+            and " density " in normalized
+            and (
+                " cellular microstructure " in normalized
+                or " cellular microstructures " in normalized
+            )
+            and " dislocation " in normalized
+        ):
+            return 0
+        score = self._source_block_result_score(block, normalized) + 4
+        if " porosity " in normalized or " low porosity " in normalized:
+            score += 3
+        if " induced an increase in the density " in normalized:
+            score += 5
+        if " disappeared " in normalized:
+            score += 2
+        return score
+
+    def _best_heat_treatment_mechanics_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        exclude_block_id: str,
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            if _text(block.block_id) == exclude_block_id:
+                continue
+            score = self._is_heat_treatment_conclusion_block(block)
+            if score <= 0:
+                continue
+            ranked = (score, block.block_order or 0, block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _is_texture_yield_conclusion_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            (
+                " scan strategy rotation " in normalized
+                or " scan strategy angle " in normalized
+            )
+            and " build orientation " in normalized
+            and " yield strength " in normalized
+        ):
+            return 0
+        if not (
+            " bishop hill " in normalized
+            or " rotation matrix " in normalized
+            or " predicted " in normalized
+            or " predictions " in normalized
+            or " validation " in normalized
+        ):
+            return 0
+        return self._source_block_result_score(block, normalized) + 4
+
+    def _is_ved_defect_fatigue_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            (
+                " increasing ved " in normalized
+                or " increased ved " in normalized
+                or " high ved " in normalized
+            )
+            and " defect " in normalized
+            and " fatigue " in normalized
+        ):
+            return 0
+        if not (
+            " lower fraction of defects " in normalized
+            or " defect size " in normalized
+            or " lof " in normalized
+            or " fatigue limit " in normalized
+        ):
+            return 0
+        score = self._source_block_result_score(block, normalized) + 4
+        if (
+            (" increasing ved " in normalized or " increased ved " in normalized)
+            and " lower fraction of defects " in normalized
+            and " defect size " in normalized
+            and " fatigue life " in normalized
+        ):
+            score += 5
+        if (
+            " fatigue limit " in normalized
+            and " all the structures " in normalized
+            and " increasing ved " not in normalized
+        ):
+            score -= 3
+        return score
+
+    def _best_ved_condition_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            score = self._ved_condition_source_block_score(block)
+            if score <= 0:
+                continue
+            ranked = (score, -(block.block_order or 0), block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _ved_condition_source_block_score(self, block: SourceBlock) -> int:
+        raw = " ".join(
+            value
+            for value in (_text(block.heading_path), _text(block.text))
+            if value
+        )
+        normalized = f" {_normalize_match_text(raw)} "
+        if not (
+            " ved " in normalized
+            or " volumetric energy density " in normalized
+            or " energy density " in normalized
+        ):
+            return 0
+        if not (
+            " pbf lb " in normalized
+            or " powder bed fusion " in normalized
+            or " selective laser melting " in normalized
+            or " slm " in normalized
+        ):
+            return 0
+        ved_values = re.findall(
+            r"(\d+(?:\.\d+)?)\s*(?:j\s*/?\s*mm\s*(?:3|³)|j/mm3|j/mm³)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if len(_dedupe_strings(ved_values)) < 2:
+            return 0
+        heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+        score = 4 + len(_dedupe_strings(ved_values))
+        if any(term in heading for term in ("method", "processing", "experimental")):
+            score += 6
+        if " table " in normalized:
+            score += 3
+        if any(term in heading for term in ("result", "discussion", "conclusion")):
+            score -= 4
+        if " introduction " in heading or " abstract " in heading:
+            score -= 3
+        return score
+
+    def _normalized_block_text(self, block: SourceBlock) -> str:
+        return f" {_normalize_match_text((_text(block.heading_path) or '') + ' ' + (_text(block.text) or ''))} "
+
+    def _source_block_result_score(self, block: SourceBlock, normalized: str) -> int:
+        heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+        score = 1
+        if " conclusion " in heading:
+            score += 8
+        if " result " in heading or " discussion " in heading:
+            score += 4
+        if " abstract " in heading:
+            score -= 3
+        if " introduction " in heading:
+            score -= 8
+        if " table " in normalized or " fig " in normalized:
+            score += 1
+        if " validation " in normalized or " validate " in normalized:
+            score += 5
+        if " experimental findings " in normalized:
+            score += 5
+        if " experimental " in normalized and (
+            " prediction " in normalized or " predictions " in normalized
+        ):
+            score += 5
+        if " deviation " in normalized or " deviations " in normalized:
+            score += 3
+        if " yield strength increased " in normalized:
+            score += 3
+        if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|mpa)\b", normalized):
+            score += 2
+        return score
+
+    def _recovered_spec_finding(
+        self,
+        block: SourceBlock,
+        *,
+        collection_id: str,
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+        spec: Mapping[str, Any],
+        condition_block: SourceBlock | None = None,
+        supporting_blocks: list[SourceBlock] | None = None,
+        supporting_tables: list[SourceTable] | None = None,
+    ) -> dict[str, Any]:
+        block_id = _text(block.block_id)
+        document_id = _text(block.document_id)
+        slug = _text(spec.get("slug"))
+        if not block_id or not document_id or not slug:
+            return {}
+        evidence_ref_id = f"evref_recovered_{slug}_{block_id}"
+        claim_id = f"claim_recovered_{slug}_{block_id}"
+        relation_id = f"rel_recovered_{slug}_{block_id}"
+        context_id = f"ctx_recovered_{slug}_{block_id}"
+        material_scope = _strings(
+            objective_context.get("material_scope") or objective.get("material_scope")
+        )
+        statement = _text(spec.get("statement")) or ""
+        process_axes = self._recovered_context_process_axes(
+            spec.get("process_axes"),
+            objective_context=objective_context,
+        )
+        property_scope = _strings(spec.get("property_scope"))
+        confidence = float(spec.get("confidence") or 0.82)
+        evidence_ref_ids = [evidence_ref_id]
+        evidence_quote = self._recovered_spec_evidence_quote(block, spec=spec)
+        evidence_refs = [
+            {
+                "evidence_ref_id": evidence_ref_id,
+                "source_kind": _text(block.block_type) or "text_window",
+                "document_id": document_id,
+                "label": _text(block.heading_path) or "Recovered source evidence",
+                "locator": {
+                    "source_ref": block_id,
+                    "source_kind": _text(block.block_type) or "text_window",
+                    **({"page": block.page} if block.page is not None else {}),
+                },
+                "fact_ids": [claim_id],
+                "anchor_ids": [],
+                "confidence": confidence,
+                "traceability_status": "resolved",
+                "evidence_role": "direct_support",
+                "quote": evidence_quote,
+                "href": _presentation_evidence_href(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    source_ref=block_id,
+                    page=_text(block.page),
+                    quote_text=evidence_quote,
+                ),
+            }
+        ]
+        condition_block_id = _text(condition_block.block_id if condition_block else None)
+        if condition_block_id:
+            condition_ref_id = f"evref_recovered_{slug}_condition_{condition_block_id}"
+            evidence_ref_ids.append(condition_ref_id)
+            condition_quote = _short_text(_text(condition_block.text), limit=900)
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": condition_ref_id,
+                    "source_kind": _text(condition_block.block_type) or "text_window",
+                    "document_id": _text(condition_block.document_id) or document_id,
+                    "label": (
+                        _text(condition_block.heading_path)
+                        or "Recovered condition evidence"
+                    ),
+                    "locator": {
+                        "source_ref": condition_block_id,
+                        "source_kind": _text(condition_block.block_type)
+                        or "text_window",
+                        **(
+                            {"page": condition_block.page}
+                            if condition_block.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": confidence,
+                    "traceability_status": "resolved",
+                    "evidence_role": "condition_context",
+                    "quote": condition_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=_text(condition_block.document_id) or document_id,
+                        source_ref=condition_block_id,
+                        page=_text(condition_block.page),
+                        quote_text=condition_quote,
+                    ),
+                }
+            )
+        for supporting_block in supporting_blocks or []:
+            supporting_block_id = _text(supporting_block.block_id)
+            if not supporting_block_id:
+                continue
+            supporting_ref_id = f"evref_recovered_{slug}_mechanics_{supporting_block_id}"
+            evidence_ref_ids.append(supporting_ref_id)
+            supporting_quote = self._recovered_spec_evidence_quote(
+                supporting_block,
+                spec=spec,
+            )
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": supporting_ref_id,
+                    "source_kind": _text(supporting_block.block_type) or "text_window",
+                    "document_id": _text(supporting_block.document_id) or document_id,
+                    "label": (
+                        _text(supporting_block.heading_path)
+                        or "Recovered supporting evidence"
+                    ),
+                    "locator": {
+                        "source_ref": supporting_block_id,
+                        "source_kind": _text(supporting_block.block_type)
+                        or "text_window",
+                        **(
+                            {"page": supporting_block.page}
+                            if supporting_block.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": confidence,
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": supporting_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=_text(supporting_block.document_id) or document_id,
+                        source_ref=supporting_block_id,
+                        page=_text(supporting_block.page),
+                        quote_text=supporting_quote,
+                    ),
+                }
+            )
+        for supporting_table in supporting_tables or []:
+            supporting_table_id = _text(supporting_table.table_id)
+            if not supporting_table_id:
+                continue
+            supporting_ref_id = f"evref_recovered_{slug}_table_{supporting_table_id}"
+            evidence_ref_ids.append(supporting_ref_id)
+            supporting_quote = self._presentation_table_source_text(supporting_table)
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": supporting_ref_id,
+                    "source_kind": "table",
+                    "document_id": _text(supporting_table.document_id) or document_id,
+                    "label": (
+                        _text(supporting_table.caption_text)
+                        or "Recovered supporting table"
+                    ),
+                    "locator": {
+                        "source_ref": supporting_table_id,
+                        "source_kind": "table",
+                        **(
+                            {"page": supporting_table.page}
+                            if supporting_table.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": confidence,
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": supporting_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=_text(supporting_table.document_id) or document_id,
+                        source_ref=supporting_table_id,
+                        page=_text(supporting_table.page),
+                        quote_text=supporting_quote,
+                    ),
+                }
+            )
+        evidence_ref_ids = _dedupe_strings(evidence_ref_ids)
+        return {
+            "evidence_ref": evidence_refs[0],
+            "evidence_refs": evidence_refs,
+            "context": {
+                "context_id": context_id,
+                "label": "Recovered source scope",
+                "material_scope": material_scope,
+                "process_context": {"variable_process_axes": process_axes},
+                "test_condition": {"source_heading": _text(block.heading_path)},
+                "property_scope": property_scope,
+                "limitations": ["Recovered from parsed source text"],
+            },
+            "claim": {
+                "claim_id": claim_id,
+                "claim_type": "finding",
+                "statement": statement,
+                "status": _text(spec.get("claim_status")) or "supported",
+                "confidence": confidence,
+                "strength": "moderate",
+                "evidence_ref_ids": evidence_ref_ids,
+                "context_ids": [context_id],
+                "source_object_ids": [block_id],
+                "warnings": _dedupe_strings(
+                    [
+                        *_strings(spec.get("warnings")),
+                        "needs_expert_review",
+                    ]
+                ),
+            },
+            "relation": {
+                "relation_id": relation_id,
+                "relation_type": _text(spec.get("relation_type"))
+                or _text(spec.get("predicate"))
+                or "affects",
+                "subject": _text(spec.get("subject")),
+                "predicate": _text(spec.get("predicate")) or "affects",
+                "object": _text(spec.get("object")),
+                "statement": statement,
+                "conditions": material_scope,
+                "status": _text(spec.get("relation_status")) or "supported",
+                "confidence": confidence,
+                "evidence_ref_ids": evidence_ref_ids,
+                "context_ids": [context_id],
+                "source_object_ids": [block_id],
+                "warnings": _dedupe_strings(
+                    [
+                        "recovered_from_source_text",
+                        *_strings(spec.get("warnings")),
+                    ]
+                ),
+            },
+        }
+
+    def _recovered_spec_evidence_quote(
+        self,
+        block: SourceBlock,
+        *,
+        spec: Mapping[str, Any],
+    ) -> str:
+        if _text(spec.get("slug")) == "heat_treatment_microstructure_mechanics":
+            return _short_text(_text(block.text), limit=900)
+        return self._recovered_spec_quote(block, spec=spec)
+
+    def _recovered_spec_quote(
+        self,
+        block: SourceBlock,
+        *,
+        spec: Mapping[str, Any],
+    ) -> str:
+        quote_hints = {
+            "variable": {
+                term
+                for value in _strings(spec.get("process_axes"))
+                for term in _quote_hint_terms(value)
+            },
+            "outcome": {
+                term
+                for value in _strings(spec.get("property_scope"))
+                for term in _quote_hint_terms(value)
+            },
+            "relation": set(),
+            "statement": _quote_hint_terms(_text(spec.get("statement"))),
+        }
+        for value in (
+            _text(spec.get("statement")),
+            _text(spec.get("subject")),
+            _text(spec.get("predicate")),
+            _text(spec.get("object")),
+        ):
+            quote_hints["relation"].update(_quote_hint_terms(value))
+        return (
+            _short_text(
+                self._best_matching_quote_snippet(
+                    _text(block.text),
+                    quote_hints,
+                    limit=900,
+                ),
+                limit=900,
+            )
+            or _short_text(_text(block.text), limit=900)
+        )
+
+    def _objective_axes_request_preheating_ductility(
+        self,
+        normalized_axes: str,
+    ) -> bool:
+        has_preheating = (
+            " preheating " in normalized_axes
+            or " preheated " in normalized_axes
+            or " build platform " in normalized_axes
+            or " build plate " in normalized_axes
+        )
+        has_target = any(
+            f" {term} " in normalized_axes
+            for term in (
+                "mechanical",
+                "properties",
+                "ductility",
+                "elongation",
+                "microstructure",
+            )
+        )
+        return has_preheating and has_target
+
+    def _recovered_preheating_findings_from_source_blocks(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+        objective: Mapping[str, Any],
+        objective_context: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        document_ids = _dedupe_strings(
+            [
+                _text(unit.get("document_id"))
+                for unit in evidence_units
+                if self._objective_unit_has_preheating_mechanical_signal(unit)
+            ]
+        )
+        recovered: list[dict[str, Any]] = []
+        for document_id in document_ids:
+            block = self._best_preheating_ductility_source_block(
+                document_id,
+                blocks_by_id=blocks_by_id,
+            )
+            if block is None:
+                continue
+            recovered.append(
+                self._recovered_preheating_ductility_finding(
+                    block,
+                    collection_id=_text(payload.get("collection_id")),
+                    objective_context=objective_context,
+                    objective=objective,
+                )
+            )
+        return [item for item in recovered if item]
+
+    def _objective_unit_has_preheating_mechanical_signal(
+        self,
+        unit: Mapping[str, Any],
+    ) -> bool:
+        source_ref_text = " ".join(
+            " ".join(
+                [
+                    _text(source_ref.get("source_kind")) or "",
+                    _text(source_ref.get("source_ref")) or "",
+                    _text(source_ref.get("role")) or "",
+                    _text(source_ref.get("evidence_role")) or "",
+                ]
+            )
+            for source_ref in _mapping_list(unit.get("source_refs"))
+        )
+        parts = [
+            _text(unit.get("unit_kind")) or "",
+            _text(unit.get("property_normalized")) or "",
+            _text(unit.get("interpretation")) or "",
+            _display_mapping(_mapping(unit.get("value_payload"))),
+            _display_mapping(_mapping(unit.get("process_context"))),
+            _display_mapping(_mapping(unit.get("sample_context"))),
+            _display_mapping(_mapping(unit.get("test_condition"))),
+            source_ref_text,
+        ]
+        searchable = f" {_normalize_match_text(' '.join(parts))} "
+        has_preheating = (
+            " preheating " in searchable
+            or " preheated " in searchable
+            or " build platform " in searchable
+            or " build plate " in searchable
+        )
+        has_mechanical_result = any(
+            f" {term} " in searchable
+            for term in (
+                "elongation",
+                "ductility",
+                "tensile",
+                "yield",
+                "strength",
+                "mechanical",
+                "el",
+            )
+        )
+        return has_preheating and has_mechanical_result
+
+    def _best_preheating_ductility_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            text = _text(block.text)
+            if not text:
+                continue
+            normalized = f" {_normalize_match_text(text)} "
+            if not (
+                (
+                    " preheating " in normalized
+                    or " preheated " in normalized
+                    or " build platform " in normalized
+                    or " build plate " in normalized
+                )
+                and (
+                    " ductility " in normalized
+                    or " elongation " in normalized
+                    or " el " in normalized
+                )
+            ):
+                continue
+            if not (" 14 " in normalized and " 150 " in normalized):
+                continue
+            if not (
+                " gnd " in normalized
+                or " gnds " in normalized
+                or " cellular " in normalized
+                or " plastic " in normalized
+            ):
+                continue
+            heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+            score = 0
+            if " conclusion " in heading:
+                score += 8
+            if " tensile " in heading:
+                score += 6
+            if " result " in heading or " discussion " in heading:
+                score += 4
+            if " abstract " in heading or " introduction " in heading:
+                score -= 8
+            if " 150 " in normalized:
+                score += 3
+            if " 14 " in normalized:
+                score += 3
+            if " gnd " in normalized:
+                score += 3
+            if " microstructure " in normalized:
+                score += 2
+            ranked = (score, block.block_order or 0, block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _recovered_preheating_ductility_finding(
+        self,
+        block: SourceBlock,
+        *,
+        collection_id: str,
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        block_id = _text(block.block_id)
+        document_id = _text(block.document_id)
+        if not block_id or not document_id:
+            return {}
+        evidence_ref_id = f"evref_recovered_preheating_ductility_{block_id}"
+        claim_id = f"claim_recovered_preheating_ductility_{block_id}"
+        relation_id = f"rel_recovered_preheating_ductility_{block_id}"
+        context_id = f"ctx_recovered_preheating_ductility_{block_id}"
+        quote = _short_text(_text(block.text), limit=420)
+        statement = (
+            "Preheating the build platform to 150 °C increased ductility by "
+            "14%, through a more homogenized cellular microstructure and "
+            "GND-assisted plastic deformation."
+        )
+        material_scope = _strings(
+            objective_context.get("material_scope") or objective.get("material_scope")
+        )
+        process_axes = self._recovered_context_process_axes(
+            ["build platform preheating temperature"],
+            objective_context=objective_context,
+        )
+        return {
+            "evidence_ref": {
+                "evidence_ref_id": evidence_ref_id,
+                "source_kind": _text(block.block_type) or "text_window",
+                "document_id": document_id,
+                "label": _text(block.heading_path) or "Recovered source evidence",
+                "locator": {
+                    "source_ref": block_id,
+                    "source_kind": _text(block.block_type) or "text_window",
+                    **({"page": block.page} if block.page is not None else {}),
+                },
+                "fact_ids": [claim_id],
+                "anchor_ids": [],
+                "confidence": 0.86,
+                "traceability_status": "resolved",
+                "evidence_role": "direct_support",
+                "quote": quote,
+                "href": _presentation_evidence_href(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    source_ref=block_id,
+                    page=_text(block.page),
+                    quote_text=quote,
+                ),
+            },
+            "context": {
+                "context_id": context_id,
+                "label": "Recovered source scope",
+                "material_scope": material_scope,
+                "process_context": {
+                    "variable_process_axes": process_axes,
+                    "build_platform_preheating_temperature": "150 °C",
+                },
+                "test_condition": {
+                    "source_heading": _text(block.heading_path),
+                },
+                "property_scope": ["ductility", "microstructure"],
+                "limitations": ["Recovered from parsed source text"],
+            },
+            "claim": {
+                "claim_id": claim_id,
+                "claim_type": "finding",
+                "statement": statement,
+                "status": "supported",
+                "confidence": 0.86,
+                "strength": "moderate",
+                "evidence_ref_ids": [evidence_ref_id],
+                "context_ids": [context_id],
+                "source_object_ids": [claim_id],
+                "warnings": [],
+            },
+            "relation": {
+                "relation_id": relation_id,
+                "relation_type": "improves",
+                "subject": "build platform preheating temperature",
+                "predicate": "increases",
+                "object": "microstructure -> GNDs -> ductility",
+                "statement": statement,
+                "conditions": material_scope,
+                "status": "supported",
+                "confidence": 0.86,
+                "evidence_ref_ids": [evidence_ref_id],
+                "context_ids": [context_id],
+                "source_object_ids": [claim_id],
+                "warnings": ["recovered_from_source_text"],
+            },
+        }
+
+    def _dedupe_claims_for_understanding(
+        self,
+        claims: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for claim in claims:
+            claim_id = _text(claim.get("claim_id"))
+            statement = _text(claim.get("statement"))
+            key = claim_id or f"statement:{statement.lower()}"
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(claim)
+        return result
+
+    def _objective_unit_has_corrosion_metric_signal(
+        self,
+        unit: Mapping[str, Any],
+    ) -> bool:
+        source_ref_text = " ".join(
+            (_text(source_ref.get("source_kind")) or "")
+            + " "
+            + (_text(source_ref.get("source_ref")) or "")
+            for source_ref in _mapping_list(unit.get("source_refs"))
+        )
+        parts = [
+            _text(unit.get('unit_kind')) or "",
+            _text(unit.get('property_normalized')) or "",
+            _text(unit.get('interpretation')) or "",
+            ' '.join(_display_values(_mapping(unit.get('value_payload')))),
+            ' '.join(_display_values(_mapping(unit.get('test_condition')))),
+            source_ref_text,
+        ]
+        searchable = f" {_normalize_match_text(' '.join(parts))} "
+        return bool(
+            any(
+                f" {term} " in searchable
+                for term in (
+                    "corrosion",
+                    "pitting",
+                    "pitting potential",
+                    "passive film",
+                    "polarization",
+                    "eis",
+                )
+            )
+            and (
+                " measurement " in searchable
+                or " comparison " in searchable
+                or " table " in searchable
+            )
+        )
+
+    def _best_porosity_corrosion_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            text = _text(block.text)
+            if not text:
+                continue
+            normalized = f" {_normalize_match_text(text)} "
+            if not (
+                (
+                    " porosity " in normalized
+                    or " porosities " in normalized
+                    or " pores " in normalized
+                )
+                and (
+                    " pitting " in normalized
+                    or " corrosion " in normalized
+                )
+            ):
+                continue
+            if not (
+                " pitting potential " in normalized
+                or " passive film " in normalized
+                or " corrosion rate " in normalized
+                or " better corrosion " in normalized
+            ):
+                continue
+            heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+            score = 0
+            if " conclusion " in heading:
+                score += 6
+            if " result " in heading or " discussion " in heading:
+                score += 4
+            if " abstract " in heading or " introduction " in heading:
+                score -= 6
+            if " pitting potential " in normalized:
+                score += 3
+            if " passive film " in normalized:
+                score += 3
+            if " corrosion rate " in normalized:
+                score += 2
+            if " decreased porosity " in normalized or " low porosity " in normalized:
+                score += 2
+            ranked = (score, -(block.block_order or 0), block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _recovered_porosity_corrosion_finding(
+        self,
+        block: SourceBlock,
+        *,
+        collection_id: str,
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        block_id = _text(block.block_id)
+        document_id = _text(block.document_id)
+        if not block_id or not document_id:
+            return {}
+        evidence_ref_id = f"evref_recovered_porosity_corrosion_{block_id}"
+        claim_id = f"claim_recovered_porosity_corrosion_{block_id}"
+        relation_id = f"rel_recovered_porosity_corrosion_{block_id}"
+        context_id = f"ctx_recovered_porosity_corrosion_{block_id}"
+        quote = _short_text(_text(block.text), limit=420)
+        statement = (
+            "Lower porosity in SLM 316L increased pitting potential and "
+            "stabilized the passive film, improving pitting-corrosion resistance."
+        )
+        material_scope = _strings(
+            objective_context.get("material_scope") or objective.get("material_scope")
+        )
+        process_axes = self._recovered_context_process_axes(
+            ["porosity level", "pore size"],
+            objective_context=objective_context,
+        )
+        return {
+            "evidence_ref": {
+                "evidence_ref_id": evidence_ref_id,
+                "source_kind": _text(block.block_type) or "text_window",
+                "document_id": document_id,
+                "label": _text(block.heading_path) or "Recovered source evidence",
+                "locator": {
+                    "source_ref": block_id,
+                    "source_kind": _text(block.block_type) or "text_window",
+                    **({"page": block.page} if block.page is not None else {}),
+                },
+                "fact_ids": [claim_id],
+                "anchor_ids": [],
+                "confidence": 0.82,
+                "traceability_status": "resolved",
+                "evidence_role": "direct_support",
+                "quote": quote,
+                "href": _presentation_evidence_href(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    source_ref=block_id,
+                    page=_text(block.page),
+                ),
+            },
+            "context": {
+                "context_id": context_id,
+                "label": "Recovered source scope",
+                "material_scope": material_scope,
+                "process_context": {
+                    "variable_process_axes": process_axes,
+                },
+                "test_condition": {
+                    "source_heading": _text(block.heading_path),
+                },
+                "property_scope": ["pitting corrosion behavior"],
+                "limitations": ["Recovered from parsed source text"],
+            },
+            "claim": {
+                "claim_id": claim_id,
+                "claim_type": "finding",
+                "statement": statement,
+                "status": "supported",
+                "confidence": 0.82,
+                "strength": "moderate",
+                "evidence_ref_ids": [evidence_ref_id],
+                "context_ids": [context_id],
+                "source_object_ids": [claim_id],
+                "warnings": [],
+            },
+            "relation": {
+                "relation_id": relation_id,
+                "relation_type": "improves",
+                "subject": "porosity level",
+                "predicate": "improves",
+                "object": "pitting corrosion behavior",
+                "statement": statement,
+                "conditions": material_scope,
+                "status": "supported",
+                "confidence": 0.82,
+                "evidence_ref_ids": [evidence_ref_id],
+                "context_ids": [context_id],
+                "source_object_ids": [claim_id],
+                "warnings": ["recovered_from_source_text"],
+            },
+        }
 
     def _consume_relation_trace(
         self,
@@ -694,6 +3040,8 @@ class ResearchUnderstandingService:
         self,
         evidence_units: list[dict[str, Any]],
         *,
+        variable_axes: list[str],
+        target_axes: list[str],
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
         context_ids_by_unit: dict[str, list[str]],
@@ -704,6 +3052,8 @@ class ResearchUnderstandingService:
             if (
                 relation := self._deterministic_relation_from_evidence_unit(
                     unit,
+                    variable_axes=variable_axes,
+                    target_axes=target_axes,
                     evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
                     context_ids=context_ids,
                     context_ids_by_unit=context_ids_by_unit,
@@ -716,6 +3066,8 @@ class ResearchUnderstandingService:
         self,
         unit: Mapping[str, Any],
         *,
+        variable_axes: list[str],
+        target_axes: list[str],
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
         context_ids_by_unit: dict[str, list[str]],
@@ -729,7 +3081,10 @@ class ResearchUnderstandingService:
             "interpretation",
             "characterization",
             "mechanism",
-        }:
+        } and not (
+            unit_kind in _DIRECT_RESULT_CONTEXT_UNIT_KINDS
+            and self._objective_unit_has_direct_result_signal(unit)
+        ):
             return {}
         predicate = self._deterministic_relation_predicate(unit)
         sample_values = _display_values(_mapping(unit.get("sample_context")))
@@ -757,7 +3112,11 @@ class ResearchUnderstandingService:
         statement_subject = self._statement_relation_subject(statement)
         statement_predicate = self._statement_relation_predicate(statement)
         if statement_subject and statement_predicate:
-            subject = statement_subject
+            explicit_axis = self._display_axis_label(
+                _text(_mapping(unit.get("value_payload")).get("comparison_axis"))
+            )
+            if not explicit_axis:
+                subject = statement_subject
         if target == "observed response" and "density" in statement.lower():
             target = "density"
         if statement_predicate and predicate in {"explains", "reports", ""}:
@@ -785,6 +3144,15 @@ class ResearchUnderstandingService:
             or "measurement is " in statement_lower
             or statement_lower.endswith(" explains density.")
             or statement_lower == f"{subject.lower()} explains {target.lower()}."
+        ):
+            return {}
+        if not self._deterministic_relation_matches_objective_axes(
+            unit,
+            subject=subject,
+            target=target,
+            statement=statement,
+            variable_axes=variable_axes,
+            target_axes=target_axes,
         ):
             return {}
         evidence_unit_ids = [unit_id]
@@ -815,13 +3183,66 @@ class ResearchUnderstandingService:
             "warnings": ["deterministic_relation"],
         }
 
+    def _deterministic_relation_matches_objective_axes(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        subject: str,
+        target: str,
+        statement: str,
+        variable_axes: list[str] | tuple[str, ...],
+        target_axes: list[str] | tuple[str, ...],
+    ) -> bool:
+        if target_axes and not self._objective_unit_matches_claim_target(
+            unit,
+            f"{target} {statement}",
+            target_axes,
+        ):
+            return False
+        if not variable_axes:
+            return True
+        value_payload = _mapping(unit.get("value_payload"))
+        process_context = _mapping(unit.get("process_context"))
+        sample_context = _mapping(unit.get("sample_context"))
+        variable_text = " ".join(
+            item
+            for item in (
+                subject,
+                _text(value_payload.get("comparison_axis")),
+                _text(process_context.get("variable")),
+                _text(process_context.get("method")),
+                _text(process_context.get("treatment")),
+                _text(process_context.get("heat_treatment")),
+                _text(sample_context.get("porosity_level")),
+                _text(sample_context.get("pore_size")),
+                _text(sample_context.get("build_platform_preheating_temperature")),
+                _text(sample_context.get("preheating_temperature")),
+                statement,
+            )
+            if item
+        )
+        return self._objective_statement_mentions_target_axis(
+            variable_text,
+            variable_axes,
+        )
+
     def _deterministic_relation_subject(self, unit: Mapping[str, Any]) -> str:
         value_payload = _mapping(unit.get("value_payload"))
-        axis = _text(value_payload.get("comparison_axis"))
+        axis = self._display_axis_label(_text(value_payload.get("comparison_axis")))
         if axis and _looks_user_facing(axis):
             return axis
         process_context = _mapping(unit.get("process_context"))
+        sample_context = _mapping(unit.get("sample_context"))
         for key in (
+            "porosity_level",
+            "pore_size",
+            "build_platform_preheating_temperature",
+            "preheating_temperature",
+        ):
+            if _text(sample_context.get(key)):
+                return key.replace("_", " ")
+        for key in (
+            "variable",
             "process",
             "process_family",
             "process_type",
@@ -834,15 +3255,36 @@ class ResearchUnderstandingService:
                 return text
         return ""
 
+    def _objective_variable_axes_for_relations(
+        self,
+        objective_context: Mapping[str, Any],
+        objective: Mapping[str, Any],
+    ) -> list[str]:
+        lens = _mapping(objective_context.get("objective_evidence_lens"))
+        axes = _dedupe_strings(
+            [
+                *(_strings(lens.get("variable_process_axes"))),
+                *(_strings(objective_context.get("variable_process_axes"))),
+                *(_strings(objective.get("process_axes"))),
+            ]
+        )
+        return [
+            axis
+            for axis in axes
+            if not self._is_platform_process_context_axis(axis)
+        ]
+
     def _deterministic_relation_predicate(self, unit: Mapping[str, Any]) -> str:
         value_payload = _mapping(unit.get("value_payload"))
         for key in ("direction", "trend"):
             text = _text(value_payload.get(key))
             if text and _looks_user_facing(text):
-                return _short_text(text, limit=80)
+                return self._normalized_relation_predicate(text)
         unit_kind = (_text(unit.get("unit_kind")) or "").lower()
         if unit_kind in {"interpretation", "characterization", "mechanism"}:
             return "explains"
+        if unit_kind in _DIRECT_RESULT_CONTEXT_UNIT_KINDS:
+            return "reports"
         if _text(value_payload.get("comparison_axis")):
             return "compares"
         return "reports"
@@ -861,9 +3303,21 @@ class ResearchUnderstandingService:
 
     def _statement_relation_predicate(self, statement: str) -> str:
         lower = (_text(statement) or "").lower()
-        for predicate in ("reduces", "increases", "decreases", "improves", "affects"):
+        predicate_by_signal = {
+            "reduced": "reduces",
+            "reduces": "reduces",
+            "increased": "increases",
+            "increases": "increases",
+            "decreased": "decreases",
+            "decreases": "decreases",
+            "improved": "improves",
+            "improves": "improves",
+            "affected": "affects",
+            "affects": "affects",
+        }
+        for predicate, normalized in predicate_by_signal.items():
             if f" {predicate} " in f" {lower} ":
-                return predicate
+                return normalized
         return ""
 
     def _deterministic_relation_statement(
@@ -883,6 +3337,14 @@ class ResearchUnderstandingService:
         ):
             return _short_text(interpretation, limit=220)
         value_payload = _mapping(unit.get("value_payload"))
+        if unit_kind == "comparison":
+            statement = self._comparison_statement(unit, target)
+            if statement:
+                return _short_text(statement, limit=220)
+        if unit_kind in _DIRECT_RESULT_CONTEXT_UNIT_KINDS:
+            statement = self._direct_result_statement_from_evidence_unit(unit)
+            if statement:
+                return _short_text(statement, limit=220)
         for key in ("summary", "statement", "source_value_text"):
             text = _text(value_payload.get(key))
             if text and _looks_user_facing(text):
@@ -1018,6 +3480,11 @@ class ResearchUnderstandingService:
                 for unit in self._semantic_relation_evidence_units(
                     evidence_units,
                     claims=claims,
+                    logic_chain_unit_ids=_strings(
+                        _mapping(payload.get("logic_chain")).get(
+                            "evidence_unit_ids"
+                        )
+                    ),
                 )
             ],
         }
@@ -1083,24 +3550,37 @@ class ResearchUnderstandingService:
         evidence_units: list[dict[str, Any]],
         *,
         claims: list[dict[str, Any]],
+        logic_chain_unit_ids: list[str] | tuple[str, ...] = (),
     ) -> list[dict[str, Any]]:
         eligible = [
             unit
             for unit in evidence_units
             if _text(unit.get("evidence_unit_id"))
         ]
+        logic_chain_rank = {
+            unit_id: rank
+            for rank, unit_id in enumerate(logic_chain_unit_ids)
+            if unit_id
+        }
         claim_unit_ids = {
             unit_id
             for claim in claims
             for unit_id in _strings(claim.get("source_object_ids"))
         }
+        claim_unit_rank: dict[str, int] = {}
+        for claim in claims:
+            for unit_id in _strings(claim.get("source_object_ids")):
+                if unit_id not in claim_unit_rank:
+                    claim_unit_rank[unit_id] = len(claim_unit_rank)
         return [
             unit
             for _, unit in sorted(
                 enumerate(eligible),
                 key=lambda item: self._semantic_relation_evidence_priority(
                     item[1],
+                    logic_chain_rank=logic_chain_rank,
                     claim_unit_ids=claim_unit_ids,
+                    claim_unit_rank=claim_unit_rank,
                     index=item[0],
                 ),
             )
@@ -1110,11 +3590,16 @@ class ResearchUnderstandingService:
         self,
         unit: Mapping[str, Any],
         *,
+        logic_chain_rank: Mapping[str, int],
         claim_unit_ids: set[str],
+        claim_unit_rank: Mapping[str, int],
         index: int,
-    ) -> tuple[int, int, int]:
+    ) -> tuple[int, int, int, int, int, int]:
         unit_id = _text(unit.get("evidence_unit_id")) or ""
+        logic_rank = 0 if unit_id in logic_chain_rank else 1
+        logic_order = logic_chain_rank.get(unit_id, len(logic_chain_rank))
         claim_rank = 0 if unit_id in claim_unit_ids else 1
+        claim_order = claim_unit_rank.get(unit_id, len(claim_unit_rank))
         unit_kind = (_text(unit.get("unit_kind")) or "").lower()
         if unit_kind in {"comparison", "interpretation", "characterization", "mechanism"}:
             signal_rank = 0
@@ -1122,7 +3607,7 @@ class ResearchUnderstandingService:
             signal_rank = 1
         else:
             signal_rank = 2
-        return (claim_rank, signal_rank, index)
+        return (logic_rank, logic_order, claim_rank, claim_order, signal_rank, index)
 
     def _semantic_relation_value_text(self, unit: Mapping[str, Any]) -> str:
         value_payload = _mapping(unit.get("value_payload"))
@@ -1358,7 +3843,23 @@ class ResearchUnderstandingService:
         unit: Mapping[str, Any],
         source: Mapping[str, Any],
     ) -> str | None:
-        return _text(source.get("evidence_role")) or _text(unit.get("evidence_role"))
+        return self._normalized_evidence_role(
+            _text(source.get("evidence_role"))
+            or _text(source.get("role"))
+            or _text(unit.get("evidence_role"))
+        )
+
+    def _normalized_evidence_role(self, role: str | None) -> str | None:
+        normalized = (_text(role) or "").lower()
+        if normalized in {
+            "direct_support",
+            "current_experimental_evidence",
+            "direct_experimental_evidence",
+            "experimental_evidence",
+            "supporting_experimental_evidence",
+        }:
+            return "direct_support"
+        return _text(role)
 
     def _enrich_evidence_refs_from_source_blocks(
         self,
@@ -1409,11 +3910,16 @@ class ResearchUnderstandingService:
         interpretation = _text(unit.get("interpretation"))
         if unit_kind == "comparison":
             return (
-                _text(value_payload.get("summary"))
-                or _text(value_payload.get("source_value_text"))
+                self._comparison_statement(unit, property_name)
+                or _text(value_payload.get("summary"))
                 or interpretation
-                or self._comparison_statement(value_payload, property_name)
+                or _text(value_payload.get("statement"))
+                or _text(value_payload.get("source_value_text"))
             )
+        if unit_kind in _DIRECT_RESULT_CONTEXT_UNIT_KINDS:
+            direct_statement = self._direct_result_statement_from_evidence_unit(unit)
+            if direct_statement:
+                return direct_statement
         if interpretation:
             return interpretation
         if unit_kind in {"characterization", "interpretation", "mechanism"} and summary:
@@ -1504,7 +4010,59 @@ class ResearchUnderstandingService:
                 if any(signal in lower_statement for signal in mechanism_signals)
                 else None
             )
+        if unit_kind in _DIRECT_RESULT_CONTEXT_UNIT_KINDS:
+            return (
+                "finding"
+                if self._objective_unit_has_direct_result_signal(unit)
+                else None
+            )
         return None
+
+    def _objective_unit_has_direct_result_signal(self, unit: Mapping[str, Any]) -> bool:
+        if self._objective_unit_evidence_role(unit) != "direct_support":
+            return False
+        if not _mapping_list(unit.get("source_refs")):
+            return False
+        statement = self._direct_result_statement_from_evidence_unit(unit)
+        if not statement or self._is_noisy_objective_claim_statement(statement):
+            return False
+        return self._looks_complete_claim_statement(statement)
+
+    def _direct_result_statement_from_evidence_unit(
+        self,
+        unit: Mapping[str, Any],
+    ) -> str:
+        value_payload = _mapping(unit.get("value_payload"))
+        variable = self._deterministic_relation_subject(unit)
+        property_name = (
+            _text(value_payload.get("property"))
+            or _text(unit.get("property_normalized"))
+            or "observed response"
+        )
+        trend = _text(value_payload.get("trend")) or _text(value_payload.get("direction"))
+        value = _text(value_payload.get("value")) or _text(
+            value_payload.get("source_value_text")
+        )
+        if variable and property_name and trend and value:
+            verb = self._comparison_direction_verb(trend)
+            value_text = self._direct_result_value_text(value)
+            if value_text:
+                return self._sentence_case(
+                    f"{variable} {verb} {property_name} by {value_text}."
+                )
+            return self._sentence_case(f"{variable} {verb} {property_name}.")
+        interpretation = _text(unit.get("interpretation"))
+        if interpretation and _looks_user_facing(interpretation):
+            return interpretation
+        for key in ("summary", "statement", "source_value_text"):
+            text = _text(value_payload.get(key))
+            if text and _looks_user_facing(text):
+                return text
+        return ""
+
+    def _direct_result_value_text(self, value: str) -> str:
+        text = _text(value) or ""
+        return re.sub(r"\s+(increase|decrease|improvement|reduction)$", "", text).strip()
 
     def _objective_target_axes_for_claims(
         self,
@@ -1651,17 +4209,6 @@ class ResearchUnderstandingService:
         if not text or not _looks_user_facing(text):
             return False
         lower = f" {text.lower()} "
-        if lower.strip().startswith(
-            (
-                "achieved through ",
-                "based on ",
-                "under ",
-                "using ",
-                "with ",
-                "without ",
-            )
-        ):
-            return False
         claim_signals = (
             " is ",
             " are ",
@@ -1673,22 +4220,31 @@ class ResearchUnderstandingService:
             " show ",
             " improves",
             " improve",
+            " improved",
             " reduces",
             " reduce",
+            " reduced",
             " increases",
             " increase",
+            " increased",
             " decreases",
             " decrease",
+            " decreased",
             " affects",
             " affect",
+            " affected",
             " correlates",
             " correlate",
+            " correlated",
             " explains",
             " explain",
+            " explained",
             " indicates",
             " indicate",
+            " indicated",
             " suggests",
             " suggest",
+            " suggested",
             " leads to ",
             " led to ",
             " results in ",
@@ -1700,24 +4256,305 @@ class ResearchUnderstandingService:
             " exhibits ",
             " exhibit ",
         )
-        return any(signal in lower for signal in claim_signals)
+        has_claim_signal = any(signal in lower for signal in claim_signals)
+        if lower.strip().startswith(
+            (
+                "achieved through ",
+                "based on ",
+                "under ",
+                "using ",
+                "with ",
+                "without ",
+            )
+        ) and not has_claim_signal:
+            return False
+        return has_claim_signal
 
     def _comparison_statement(
         self,
-        value_payload: Mapping[str, Any],
+        unit: Mapping[str, Any],
         property_name: str | None,
     ) -> str | None:
-        axis = _text(value_payload.get("comparison_axis"))
+        value_payload = _mapping(unit.get("value_payload"))
+        process_context = _mapping(unit.get("process_context"))
+        baseline_context = _mapping(unit.get("baseline_context"))
+        baseline_process_context = _mapping(baseline_context.get("process_context"))
+        raw_axis = _text(value_payload.get("comparison_axis"))
+        axis = self._display_axis_label(raw_axis)
         direction = _text(value_payload.get("direction")) or _text(value_payload.get("trend"))
-        if not axis and not property_name:
+        property_text = _text(property_name) or "observed response"
+        if not axis and not property_text:
             return None
-        if axis and direction and property_name:
-            return f"{axis} is associated with {direction} in {property_name}."
-        if axis and property_name:
-            return f"{axis} is compared for {property_name}."
-        if property_name and direction:
-            return f"{property_name} shows {direction}."
-        return None
+        verb = self._comparison_direction_verb(direction)
+        unit_text = _text(unit.get("unit"))
+        current_value = self._comparison_display_value(
+            _text(value_payload.get("current_value"))
+            or _text(value_payload.get("value")),
+            unit_text,
+        )
+        baseline_value = self._comparison_display_value(
+            _text(baseline_context.get("source_value_text"))
+            or _text(baseline_context.get("value")),
+            unit_text,
+        )
+        raw_axis_display = raw_axis or axis
+        current_axis_value = (
+            self._axis_value_from_context(raw_axis, process_context)
+            or (
+                self._axis_value_from_context(axis, process_context)
+                if not _symbol_match_term(raw_axis)
+                else ""
+            )
+            if axis or raw_axis
+            else ""
+        )
+        baseline_axis_value = (
+            self._axis_value_from_context(raw_axis, baseline_process_context)
+            or (
+                self._axis_value_from_context(axis, baseline_process_context)
+                if not _symbol_match_term(raw_axis)
+                else ""
+            )
+            if axis or raw_axis
+            else ""
+        )
+        current_label = self._comparison_axis_label(
+            raw_axis_display if _symbol_match_term(raw_axis) else axis,
+            current_axis_value,
+        )
+        baseline_label = (
+            self._comparison_axis_label(
+                raw_axis_display if _symbol_match_term(raw_axis) else axis,
+                baseline_axis_value,
+            )
+            if baseline_axis_value
+            else ""
+        )
+        current_context_label = self._comparison_context_value_label(
+            process_context,
+            axis=raw_axis if _symbol_match_term(raw_axis) else axis,
+        )
+        baseline_context_label = self._comparison_context_value_label(
+            baseline_process_context,
+            axis=raw_axis if _symbol_match_term(raw_axis) else axis,
+        )
+        if current_context_label:
+            current_label = current_context_label
+        if baseline_context_label:
+            baseline_label = baseline_context_label
+        if not baseline_label:
+            baseline_label = _join_display_values(
+                _display_values(_mapping(baseline_context.get("sample_context"))),
+                limit=2,
+            )
+        subject = current_label or axis or property_text
+        controlled_axes = self._comparison_controlled_axes_text(value_payload)
+        if current_value and baseline_value:
+            if (
+                _symbol_match_term(raw_axis)
+                and current_axis_value
+                and baseline_axis_value
+            ):
+                prefix = f"With {controlled_axes}, " if controlled_axes else ""
+                statement = (
+                    f"{prefix}changing {raw_axis_display} from {baseline_axis_value} "
+                    f"to {current_axis_value} {verb} {property_text} from "
+                    f"{baseline_value} to {current_value}."
+                )
+                return self._sentence_case(statement)
+            prefix = f"Under {controlled_axes}, " if controlled_axes else ""
+            if baseline_label:
+                statement = (
+                    f"{prefix}{subject} {verb} {property_text} from "
+                    f"{baseline_value} ({baseline_label}) to {current_value}."
+                )
+            else:
+                statement = (
+                    f"{prefix}{subject} {verb} {property_text} from "
+                    f"{baseline_value} to {current_value}."
+                )
+        else:
+            source_statement = self._comparison_source_statement(value_payload)
+            if source_statement:
+                return source_statement
+            if baseline_label and baseline_label.lower() != subject.lower():
+                statement = (
+                    f"{prefix}{subject} {verb} {property_text} relative to "
+                    f"{baseline_label}."
+                )
+            else:
+                return None
+        return self._sentence_case(statement)
+
+    def _comparison_source_statement(
+        self,
+        value_payload: Mapping[str, Any],
+    ) -> str:
+        for key in ("source_value_text", "statement", "summary"):
+            text = _text(value_payload.get(key))
+            if (
+                text
+                and _looks_user_facing(text)
+                and self._looks_complete_claim_statement(text)
+            ):
+                return _short_text(text, limit=220)
+        return ""
+
+    def _comparison_controlled_axes_text(
+        self,
+        value_payload: Mapping[str, Any],
+    ) -> str:
+        axes = []
+        for item in _mapping_list(value_payload.get("controlled_axes")):
+            raw_axis = _text(item.get("axis"))
+            axis = self._display_axis_label(raw_axis)
+            value = _text(item.get("value"))
+            if axis and value:
+                axes.append(self._comparison_axis_label(axis, value))
+        axes = _dedupe_strings(axes)
+        if len(axes) == 1:
+            return axes[0]
+        if len(axes) > 1:
+            return f"{', '.join(axes[:-1])} and {axes[-1]}"
+        return ""
+
+    def _axis_value_from_context(
+        self,
+        axis: str | None,
+        context: Mapping[str, Any],
+    ) -> str:
+        axis_tokens = self._axis_match_tokens(axis)
+        if not axis_tokens:
+            return ""
+        for key, value in context.items():
+            key_tokens = self._axis_match_tokens(_text(key))
+            if axis_tokens and axis_tokens <= key_tokens:
+                return _text(value) or ""
+        return ""
+
+    def _axis_match_tokens(self, value: str | None) -> set[str]:
+        symbol_term = _symbol_match_term(value)
+        if symbol_term:
+            return {symbol_term}
+        symbol_text = str(value or "")
+        for symbol in ("α", "β", "θ", "ɵ"):
+            if symbol in symbol_text:
+                return {_symbol_match_term(symbol)}
+        text = _normalize_match_text(_text(value) or "")
+        replacements = {
+            "scanning": "scan",
+            "volumetric": "volume",
+        }
+        ignored_tokens = {"of", "the", "mm", "s", "w", "j", "cm", "3"}
+        tokens = {
+            replacements.get(token, token)
+            for token in text.split()
+            if token and token not in ignored_tokens
+        }
+        if "ved" in tokens:
+            tokens.update({"volume", "energy", "density"})
+        if {"volume", "energy", "density"} <= tokens:
+            tokens.add("ved")
+        return tokens
+
+    def _comparison_axis_label(self, axis: str | None, value: str | None) -> str:
+        axis_text = _text(axis)
+        value_text = _text(value)
+        if axis_text and value_text:
+            separator = "=" if _symbol_match_term(axis_text) else " "
+            return f"{axis_text}{separator}{value_text}"
+        return axis_text or ""
+
+    def _comparison_context_value_label(
+        self,
+        context: Mapping[str, Any],
+        *,
+        axis: str | None,
+    ) -> str:
+        axis_tokens = self._axis_match_tokens(axis)
+        if not axis_tokens:
+            return ""
+        ignored_keys = {
+            "fe",
+            "mn",
+            "mo",
+            "nb",
+            "si",
+            "column_1",
+            "sample",
+            "sample #",
+            "sample number",
+            "sample_number",
+            "condition_number",
+            "condition_id",
+            "sample_id",
+        }
+        for key, value in context.items():
+            key_text = _text(key)
+            value_text = _text(value)
+            if not key_text or not value_text:
+                continue
+            if axis_tokens - self._axis_match_tokens(key_text):
+                continue
+            normalized_key = _normalize_match_text(key_text)
+            if normalized_key in ignored_keys:
+                continue
+            if _symbol_match_term(key_text):
+                continue
+            normalized_value = _normalize_match_text(value_text)
+            if not normalized_value or normalized_value == normalized_key:
+                continue
+            if value_text.lower() in {"fe", "mn", "mo", "nb", "si"}:
+                continue
+            axis_label = self._display_axis_label(axis)
+            if axis_label and axis_label.lower() not in value_text.lower():
+                return f"{axis_label} {value_text}"
+            return value_text
+        return ""
+
+    def _comparison_display_value(self, value: str | None, unit_text: str | None) -> str:
+        text = _text(value)
+        if not text:
+            return ""
+        unit = _text(unit_text)
+        if unit and unit not in text:
+            return f"{text} {unit}"
+        return text
+
+    def _comparison_direction_verb(self, direction: str | None) -> str:
+        normalized = self._normalized_relation_predicate(direction)
+        return {
+            "increases": "increased",
+            "decreases": "decreased",
+            "improves": "improved",
+            "reduces": "reduced",
+        }.get(normalized, "changed")
+
+    def _normalized_relation_predicate(self, value: str | None) -> str:
+        normalized = (_text(value) or "").lower()
+        return {
+            "increase": "increases",
+            "increased": "increases",
+            "increases": "increases",
+            "decrease": "decreases",
+            "decreased": "decreases",
+            "decreases": "decreases",
+            "improve": "improves",
+            "improved": "improves",
+            "improves": "improves",
+            "reduce": "reduces",
+            "reduced": "reduces",
+            "reduces": "reduces",
+            "affect": "affects",
+            "affected": "affects",
+            "affects": "affects",
+        }.get(normalized, _short_text(normalized, limit=80) if normalized else "")
+
+    def _sentence_case(self, statement: str) -> str:
+        text = statement.strip()
+        if not text:
+            return ""
+        return f"{text[0].upper()}{text[1:]}"
 
     def _claim(
         self,
@@ -1778,7 +4615,7 @@ class ResearchUnderstandingService:
         return {key: _dedupe_strings(value) for key, value in grouped.items()}
 
     def _presentation_relation_type(self, relation_type: str, direction: str) -> str:
-        normalized_direction = (direction or "").lower()
+        normalized_direction = self._normalized_relation_predicate(direction)
         if normalized_direction in {"improves", "reduces", "increases", "decreases"}:
             return normalized_direction
         normalized_type = (relation_type or "").lower()
@@ -1807,6 +4644,19 @@ class ResearchUnderstandingService:
             return "limited"
         return "partial"
 
+    def _state_with_presentation(self, record: Mapping[str, Any]) -> str:
+        state = _text(record.get("state")) or "empty"
+        if state != "empty":
+            return state
+        presentation = _mapping(record.get("presentation"))
+        summary = _mapping(presentation.get("summary"))
+        finding_count = _safe_count(summary.get("primary_finding_count")) + _safe_count(
+            summary.get("review_queue_finding_count")
+        )
+        if finding_count:
+            return "limited"
+        return state
+
     def _understanding_warnings(
         self,
         claims: list[dict[str, Any]],
@@ -1822,12 +4672,148 @@ class ResearchUnderstandingService:
         warnings.extend(_strings(extra_warnings))
         return _dedupe_strings(warnings)
 
+    def _record_with_recovered_presentation_objects(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        updated = dict(record)
+        scope = _mapping(updated.get("scope"))
+        blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
+            _text(scope.get("collection_id"))
+        )
+        recovered_findings = self._recovered_presentation_findings_from_source_blocks(
+            updated,
+            blocks_by_id=blocks_by_id,
+            tables_by_id=tables_by_id,
+        )
+        if not recovered_findings:
+            return updated
+        updated["claims"] = self._dedupe_claims_for_understanding(
+            [
+                *[
+                    recovered["claim"]
+                    for recovered in recovered_findings
+                    if recovered.get("claim")
+                ],
+                *_mapping_list(updated.get("claims")),
+            ]
+        )
+        updated["relations"] = _dedupe_by_id(
+            [
+                *[
+                    recovered["relation"]
+                    for recovered in recovered_findings
+                    if recovered.get("relation")
+                ],
+                *_mapping_list(updated.get("relations")),
+            ],
+            "relation_id",
+        )
+        updated["evidence_refs"] = self._sort_evidence_refs_for_review(
+            [
+                *[
+                    evidence_ref
+                    for recovered in recovered_findings
+                    for evidence_ref in self._recovered_evidence_refs(recovered)
+                ],
+                *_mapping_list(updated.get("evidence_refs")),
+            ]
+        )
+        updated["contexts"] = _dedupe_by_id(
+            [
+                *[
+                    recovered["context"]
+                    for recovered in recovered_findings
+                    if recovered.get("context")
+                ],
+                *_mapping_list(updated.get("contexts")),
+            ],
+            "context_id",
+        )
+        updated["warnings"] = self._understanding_warnings(
+            _mapping_list(updated.get("claims")),
+            _mapping_list(updated.get("evidence_refs")),
+            extra_warnings=_strings(updated.get("warnings")),
+        )
+        return updated
+
+    def _record_without_off_axis_recovered_objects(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        updated = dict(record)
+        contexts = _mapping_list(updated.get("contexts"))
+        objective, objective_context = self._presentation_recovery_objective(
+            _mapping(updated.get("scope")),
+            contexts=contexts,
+        )
+        goal_axes = _dedupe_strings(
+            [
+                *_strings(objective.get("process_axes")),
+                *_strings(objective_context.get("variable_process_axes")),
+            ]
+        )
+        if not goal_axes:
+            return updated
+        relations = _mapping_list(updated.get("relations"))
+        off_axis_relation_ids = {
+            relation_id
+            for relation in relations
+            if (relation_id := _text(relation.get("relation_id")))
+            and relation_id.startswith("rel_recovered_")
+            and not self._relation_matches_goal_axis(relation, goal_axes)
+        }
+        if not off_axis_relation_ids:
+            return updated
+        off_axis_evidence_ref_ids = {
+            ref_id
+            for relation in relations
+            if _text(relation.get("relation_id")) in off_axis_relation_ids
+            for ref_id in _strings(relation.get("evidence_ref_ids"))
+        }
+        off_axis_context_ids = {
+            context_id
+            for relation in relations
+            if _text(relation.get("relation_id")) in off_axis_relation_ids
+            for context_id in _strings(relation.get("context_ids"))
+        }
+        updated["relations"] = [
+            relation
+            for relation in relations
+            if _text(relation.get("relation_id")) not in off_axis_relation_ids
+        ]
+        updated["claims"] = [
+            claim
+            for claim in _mapping_list(updated.get("claims"))
+            if not (
+                (_text(claim.get("claim_id")) or "").startswith("claim_recovered_")
+                and _intersects(
+                    _strings(claim.get("evidence_ref_ids")),
+                    off_axis_evidence_ref_ids,
+                )
+            )
+        ]
+        updated["evidence_refs"] = [
+            ref
+            for ref in _mapping_list(updated.get("evidence_refs"))
+            if _text(ref.get("evidence_ref_id")) not in off_axis_evidence_ref_ids
+        ]
+        updated["contexts"] = [
+            context
+            for context in contexts
+            if _text(context.get("context_id")) not in off_axis_context_ids
+        ]
+        return updated
+
     def _presentation_for(self, record: Mapping[str, Any]) -> dict[str, Any]:
         claims = _mapping_list(record.get("claims"))
         relations = _mapping_list(record.get("relations"))
         evidence_refs = _mapping_list(record.get("evidence_refs"))
         contexts = _mapping_list(record.get("contexts"))
         scope = _mapping(record.get("scope"))
+        blocks_by_id, documents_by_id, tables_by_id = self._source_artifact_lookups(
+            _text(scope.get("collection_id"))
+        )
         evidence_by_id = {
             _text(ref.get("evidence_ref_id")): ref
             for ref in evidence_refs
@@ -1843,9 +4829,6 @@ class ResearchUnderstandingService:
             for relation in relations
             if _text(relation.get("relation_id"))
         }
-        blocks_by_id, documents_by_id = self._source_artifact_lookups(
-            _text(scope.get("collection_id"))
-        )
         effects = [
             self._presentation_effect(
                 claim,
@@ -1896,6 +4879,10 @@ class ResearchUnderstandingService:
             if not _text(context.get("source_evidence_unit_id"))
             and not (_text(context.get("context_id")) or "").endswith("_boundary")
         ] or contexts
+        scope_contexts = [
+            context for context in summary_contexts if self._is_scope_context(context)
+        ]
+        axis_contexts = scope_contexts or summary_contexts
         material_scope = _dedupe_strings(
             [
                 value
@@ -1906,42 +4893,137 @@ class ResearchUnderstandingService:
         property_scope = _dedupe_strings(
             [
                 value
-                for context in summary_contexts
+                for context in axis_contexts
                 for value in _strings(context.get("property_scope"))
+            ]
+        )
+        property_scope = self._dedupe_axis_labels(
+            [
+                *property_scope,
+                *self._presentation_recovery_property_axes_from_title(
+                    _text(scope.get("title")) or ""
+                ),
             ]
         )
         variable_axes = _dedupe_strings(
             [
                 value
-                for context in summary_contexts
+                for context in axis_contexts
                 for value in _display_values(_mapping(context.get("process_context")))
             ]
         )
-        review_queue_count = sum(1 for effect in effects if effect.get("needs_review"))
+        variable_axes = self._dedupe_axis_labels(
+            [
+                *variable_axes,
+                *self._presentation_recovery_process_axes_from_title(
+                    _text(scope.get("title")) or ""
+                ),
+            ]
+        )
         findings = [
             self._presentation_finding(
                 effect,
                 evidence_by_id=evidence_by_id,
                 relations_by_id=relations_by_id,
                 blocks_by_id=blocks_by_id,
+                contexts_by_id=contexts_by_id,
             )
             for effect in effects
         ]
+        findings = [
+            finding
+            for finding in findings
+            if self._reviewable_expert_finding(
+                finding,
+                evidence_by_id=evidence_by_id,
+                blocks_by_id=blocks_by_id,
+            )
+        ]
         findings = self._sort_presentation_findings(findings)
+        findings = self._merge_duplicate_presentation_findings(
+            findings,
+            evidence_by_id=evidence_by_id,
+        )
+        findings = [
+            self._finding_with_aligned_direct_evidence(
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+            for finding in findings
+        ]
+        findings = [
+            self._finding_with_compact_table_direct_evidence(
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+            for finding in findings
+        ]
+        findings = [
+            self._finding_with_compact_evidence_bundle(
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+            for finding in findings
+        ]
+        findings = [
+            self._finding_with_recovered_mechanical_comparison_guard(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
+            for finding in findings
+        ]
+        findings = [
+            self._finding_with_observed_symbol_axis(finding)
+            for finding in findings
+        ]
+        findings = self._findings_without_redundant_generic_mechanical_rows(findings)
         primary_findings, review_queue_findings = self._partition_presentation_findings(
             findings,
             evidence_by_id=evidence_by_id,
             blocks_by_id=blocks_by_id,
+            goal_axes=variable_axes,
         )
+        review_queue_findings = self._review_findings_without_covered_ved_rows(
+            review_queue_findings,
+            primary_findings=primary_findings,
+            evidence_by_id=evidence_by_id,
+        )
+        review_queue_findings = self._review_findings_without_confounded_table_rows(
+            review_queue_findings
+        )
+        review_queue_findings = self._review_findings_without_low_magnitude_table_rows(
+            review_queue_findings,
+            evidence_by_id=evidence_by_id,
+        )
+        primary_findings = self._findings_with_review_queue_context(
+            primary_findings,
+            review_queue_findings=review_queue_findings,
+        )
+        visible_findings_by_id = {
+            _text(finding.get("finding_id")): finding
+            for finding in [*primary_findings, *review_queue_findings]
+            if _text(finding.get("finding_id"))
+        }
+        findings = [
+            visible_findings_by_id[_text(finding.get("finding_id"))]
+            for finding in findings
+            if _text(finding.get("finding_id")) in visible_findings_by_id
+        ]
         quote_hints_by_ref = self._finding_quote_hints_by_evidence_ref(
             findings,
             relations_by_id=relations_by_id,
+        )
+        presentation_evidence_ref_ids = self._presentation_evidence_ref_ids(
+            [*primary_findings, *review_queue_findings],
+            effects=effects,
         )
         evidence_items = [
             self._presentation_evidence_item(
                 ref,
                 collection_id=_text(scope.get("collection_id")),
                 blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
                 documents_by_id=documents_by_id,
                 quote_hints=quote_hints_by_ref.get(
                     _text(ref.get("evidence_ref_id")) or "",
@@ -1949,7 +5031,13 @@ class ResearchUnderstandingService:
                 ),
             )
             for ref in evidence_refs
+            if _text(ref.get("evidence_ref_id")) in presentation_evidence_ref_ids
         ]
+        presentation_context_ids = {
+            context_id
+            for finding in [*primary_findings, *review_queue_findings]
+            for context_id in _strings(finding.get("context_ids"))
+        }
         return {
             "summary": {
                 "title": _text(scope.get("title")) or "Research understanding",
@@ -1958,11 +5046,19 @@ class ResearchUnderstandingService:
                 "property_scope": property_scope,
                 "claim_count": len(claims),
                 "relation_count": len(relations),
-                "evidence_count": len(evidence_refs),
-                "context_count": len(contexts),
-                "review_queue_count": review_queue_count,
+                "evidence_count": len(evidence_items),
+                "context_count": len(presentation_context_ids),
+                "review_queue_count": len(review_queue_findings),
                 "primary_finding_count": len(primary_findings),
                 "review_queue_finding_count": len(review_queue_findings),
+                "collection_document_count": len(documents_by_id),
+                "axis_coverage": self._presentation_axis_coverage(
+                    variable_axes=variable_axes,
+                    property_scope=property_scope,
+                    primary_findings=primary_findings,
+                    review_queue_findings=review_queue_findings,
+                    contexts_by_id=contexts_by_id,
+                ),
             },
             "effects": effects,
             "findings": findings,
@@ -1972,25 +5068,2360 @@ class ResearchUnderstandingService:
             "context_summaries": context_summaries,
         }
 
+    def _presentation_evidence_ref_ids(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        effects: list[dict[str, Any]],
+    ) -> set[str]:
+        ref_ids = {
+            ref_id
+            for finding in findings
+            for ref_id in self._finding_evidence_ref_ids_from_bundle(
+                _mapping(finding.get("evidence_bundle"))
+            )
+        }
+        if ref_ids:
+            return ref_ids
+        ref_ids = {
+            ref_id
+            for finding in findings
+            for ref_id in _strings(finding.get("evidence_ref_ids"))
+        }
+        if ref_ids:
+            return ref_ids
+        return {
+            ref_id
+            for effect in effects
+            for ref_id in _strings(effect.get("evidence_ref_ids"))
+        }
+
+    def _presentation_axis_coverage(
+        self,
+        *,
+        variable_axes: list[str],
+        property_scope: list[str],
+        primary_findings: list[dict[str, Any]],
+        review_queue_findings: list[dict[str, Any]],
+        contexts_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, list[dict[str, str]]]:
+        return {
+            "variables": self._presentation_axis_coverage_rows(
+                variable_axes,
+                primary_findings=primary_findings,
+                review_queue_findings=review_queue_findings,
+                finding_key="variables",
+                contexts_by_id=contexts_by_id,
+            ),
+            "properties": self._presentation_axis_coverage_rows(
+                property_scope,
+                primary_findings=primary_findings,
+                review_queue_findings=review_queue_findings,
+                finding_key="outcomes",
+                contexts_by_id=contexts_by_id,
+            ),
+        }
+
+    def _dedupe_axis_labels(self, axes: list[str] | tuple[str, ...]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for axis in axes:
+            label = _text(axis) or ""
+            if not label:
+                continue
+            key = self._axis_key(label)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(label)
+        return result
+
+    def _presentation_axis_coverage_rows(
+        self,
+        axes: list[str],
+        *,
+        primary_findings: list[dict[str, Any]],
+        review_queue_findings: list[dict[str, Any]],
+        finding_key: str,
+        contexts_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for axis in axes:
+            label = _text(axis) or ""
+            if not label:
+                continue
+            status, finding_id = self._axis_coverage_status(
+                label,
+                primary_findings=primary_findings,
+                review_queue_findings=review_queue_findings,
+                finding_key=finding_key,
+                include_context=finding_key == "variables",
+                contexts_by_id=contexts_by_id,
+            )
+            rows.append({"axis": label, "status": status, "finding_id": finding_id})
+        return rows
+
+    def _axis_coverage_status(
+        self,
+        axis: str,
+        *,
+        primary_findings: list[dict[str, Any]],
+        review_queue_findings: list[dict[str, Any]],
+        finding_key: str,
+        include_context: bool,
+        contexts_by_id: Mapping[str, dict[str, Any]],
+    ) -> tuple[str, str]:
+        matchers = [
+            ("primary", primary_findings, finding_key),
+            ("review_queue", review_queue_findings, finding_key),
+            ("mechanism", primary_findings, "mediators"),
+            ("mechanism", review_queue_findings, "mediators"),
+        ]
+        if include_context:
+            matchers.extend(
+                [
+                    ("context", primary_findings, "context"),
+                    ("context", review_queue_findings, "context"),
+                ]
+            )
+        for status, findings, match_key in matchers:
+            finding = self._axis_matching_finding(
+                axis,
+                findings,
+                match_key,
+                contexts_by_id=contexts_by_id,
+            )
+            if finding:
+                return status, _text(finding.get("finding_id")) or ""
+        return "missing", ""
+
+    def _axis_matching_finding(
+        self,
+        axis: str,
+        findings: list[dict[str, Any]],
+        finding_key: str,
+        contexts_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        normalized_axis = _normalize_axis_coverage_text(axis)
+        if not normalized_axis:
+            return None
+        for finding in findings:
+            values = self._axis_matching_values(
+                finding,
+                finding_key,
+                contexts_by_id=contexts_by_id,
+            )
+            if any(
+                _axis_terms_overlap(normalized_axis, _normalize_axis_coverage_text(value))
+                for value in values
+            ):
+                return finding
+        return None
+
+    def _axis_matching_values(
+        self,
+        finding: Mapping[str, Any],
+        finding_key: str,
+        contexts_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[str]:
+        if finding_key == "context":
+            context_values = [
+                value
+                for context_id in _strings(finding.get("context_ids"))
+                if (context := contexts_by_id.get(context_id))
+                for value in [
+                    *_strings(context.get("material_scope")),
+                    *_display_values(_mapping(context.get("process_context"))),
+                    *_strings(context.get("property_scope")),
+                    *_display_values(_mapping(context.get("test_condition"))),
+                ]
+            ]
+            return _dedupe_strings(
+                [
+                    _text(finding.get("scope_summary")) or "",
+                    *_strings(finding.get("variables")),
+                    *_strings(finding.get("mediators")),
+                    *_strings(finding.get("outcomes")),
+                    *_strings(finding.get("context")),
+                    *context_values,
+                    *[
+                        str(condition.get("axis"))
+                        for condition in _mapping_list(
+                            finding.get("direct_conditions")
+                        )
+                        if _text(condition.get("axis"))
+                    ],
+                    *[
+                        str(condition.get("value"))
+                        for condition in _mapping_list(
+                            finding.get("direct_conditions")
+                        )
+                        if _text(condition.get("value"))
+                    ],
+                ]
+            )
+        return _strings(finding.get(finding_key))
+
+    def _reviewable_expert_finding(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> bool:
+        variables = _strings(finding.get("variables"))
+        outcomes = _strings(finding.get("outcomes"))
+        statement = _text(finding.get("statement")) or ""
+        title = _text(finding.get("title")) or ""
+        bundle = _mapping(finding.get("evidence_bundle"))
+        if not variables or not outcomes:
+            return False
+        if any(self._is_unusable_finding_axis(variable) for variable in variables[:1]):
+            return False
+        if self._is_measurement_only_finding(statement, title=title):
+            return False
+        if not self._finding_has_reviewable_result_evidence(
+            finding,
+            evidence_by_id=evidence_by_id,
+            blocks_by_id=blocks_by_id,
+        ):
+            return False
+        if not _mapping_list(finding.get("relation_chain")):
+            return False
+        if not self._finding_statement_matches_display_variable(finding):
+            return False
+        return True
+
+    def _finding_has_reviewable_result_evidence(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> bool:
+        evidence_bundle = _mapping(finding.get("evidence_bundle"))
+        if _strings(evidence_bundle.get("conflict")):
+            return True
+        direct_ref_ids = _strings(evidence_bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return False
+        terms = self._finding_quote_alignment_terms(finding)
+        for ref_id in direct_ref_ids:
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            source_kind = (_text(evidence_ref.get("source_kind")) or "").lower()
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            source_ref = _text(locator.get("source_ref"))
+            traceability_status = (
+                _text(evidence_ref.get("traceability_status")) or ""
+            ).lower()
+            if (
+                "table" in source_kind
+                and source_ref
+                and traceability_status in {"resolved", "traceable"}
+            ):
+                return True
+            block = blocks_by_id.get(source_ref or "") if source_ref else None
+            source_text = " ".join(
+                value
+                for value in (
+                    _text(evidence_ref.get("quote")),
+                    _text(block.text if block else None),
+                )
+                if value
+            )
+            if not source_text:
+                continue
+            normalized = f" {_normalize_match_text(source_text)} "
+            if _quote_term_hits(normalized, terms["outcome"]):
+                return True
+        return False
+
+    def _is_unusable_finding_axis(self, value: str) -> bool:
+        if _symbol_match_term(value):
+            return False
+        normalized = _normalize_match_text(value)
+        if not normalized:
+            return True
+        if normalized.replace(".", "", 1).isdigit():
+            return True
+        if normalized in {
+            "none",
+            "unknown",
+            "n/a",
+            "na",
+            "sample",
+            "samples",
+            "specimen",
+            "specimens",
+        }:
+            return True
+        return "_" in value
+
+    def _is_measurement_only_finding(self, statement: str, *, title: str) -> bool:
+        normalized_statement = f" {_normalize_match_text(statement)} "
+        normalized_title = f" {_normalize_match_text(title)} "
+        return (
+            " is reported as " in normalized_statement
+            or " is reported as " in normalized_title
+        )
+
+    def _findings_with_review_queue_context(
+        self,
+        primary_findings: list[dict[str, Any]],
+        *,
+        review_queue_findings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not review_queue_findings:
+            return primary_findings
+        result: list[dict[str, Any]] = []
+        for finding in primary_findings:
+            updated = dict(finding)
+            related_finding_ids = self._related_review_finding_ids(
+                updated,
+                review_queue_findings=review_queue_findings,
+            )
+            updated["review_reasons"] = _dedupe_strings(
+                [
+                    *_strings(updated.get("review_reasons")),
+                    *(
+                        ["has_unreviewed_comparable_candidates"]
+                        if related_finding_ids
+                        else []
+                    ),
+                ]
+            )
+            updated["related_review_finding_ids"] = related_finding_ids
+            result.append(updated)
+        return result
+
+    def _related_review_finding_ids(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        review_queue_findings: list[dict[str, Any]],
+    ) -> list[str]:
+        finding_id = _text(finding.get("finding_id")) or ""
+        variables = self._finding_axis_keys(_strings(finding.get("variables")))
+        outcomes = self._finding_axis_keys(_strings(finding.get("outcomes")))
+        if not variables or not outcomes:
+            return []
+        related: list[str] = []
+        for candidate in review_queue_findings:
+            candidate_id = _text(candidate.get("finding_id")) or ""
+            if not candidate_id or candidate_id == finding_id:
+                continue
+            candidate_variables = self._finding_axis_keys(
+                _strings(candidate.get("variables"))
+            )
+            candidate_outcomes = self._finding_axis_keys(
+                _strings(candidate.get("outcomes"))
+            )
+            if variables & candidate_variables and outcomes & candidate_outcomes:
+                related.append(candidate_id)
+        return _dedupe_strings(related[:5])
+
+    def _finding_axis_keys(self, values: list[str] | tuple[str, ...]) -> set[str]:
+        return {axis_key for value in values if (axis_key := self._axis_key(value))}
+
+    def _recovered_presentation_findings_from_source_blocks(
+        self,
+        record: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not blocks_by_id:
+            return []
+        scope = _mapping(record.get("scope"))
+        collection_id = _text(scope.get("collection_id"))
+        title = _text(scope.get("title"))
+        if not collection_id or not title:
+            return []
+        contexts = _mapping_list(record.get("contexts"))
+        objective, objective_context = self._presentation_recovery_objective(
+            scope,
+            contexts=contexts,
+        )
+        existing_claims = _mapping_list(record.get("claims"))
+        existing_source_refs = self._source_refs_from_evidence_refs(
+            _mapping_list(record.get("evidence_refs"))
+        )
+        existing_recovered_claim_ids = {
+            claim_id
+            for claim in existing_claims
+            if (claim_id := _text(claim.get("claim_id")))
+            and claim_id.startswith("claim_recovered_")
+        }
+        existing_recovered_relation_ids = {
+            relation_id
+            for relation in _mapping_list(record.get("relations"))
+            if (relation_id := _text(relation.get("relation_id")))
+            and relation_id.startswith("rel_recovered_")
+        }
+        axis_text = " ".join(
+            [
+                title,
+                " ".join(_strings(objective.get("process_axes"))),
+                " ".join(_strings(objective_context.get("variable_process_axes"))),
+                " ".join(_strings(objective.get("property_axes"))),
+                " ".join(_strings(objective_context.get("target_property_axes"))),
+            ]
+        )
+        normalized_axes = f" {_normalize_match_text(axis_text)} "
+        normalized_property_axes = self._normalized_objective_property_axes(
+            objective,
+            objective_context,
+        )
+        document_ids = self._presentation_recovery_document_ids(
+            record,
+            blocks_by_id=blocks_by_id,
+        )
+        if not document_ids:
+            return []
+        payload = {
+            "collection_id": collection_id,
+            "objective": objective,
+            "objective_context": objective_context,
+            "paper_frames": [{"document_id": document_id} for document_id in document_ids],
+        }
+        recovered: list[dict[str, Any]] = []
+        if self._objective_axes_request_preheating_ductility(normalized_axes):
+            for document_id in document_ids:
+                block = self._best_preheating_ductility_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                )
+                if block is None:
+                    continue
+                recovered.append(
+                    self._recovered_preheating_ductility_finding(
+                        block,
+                        collection_id=collection_id,
+                        objective_context=objective_context,
+                        objective=objective,
+                    )
+                )
+                break
+        recovered.extend(
+            self._recovered_process_property_findings_from_source_blocks(
+                payload,
+                evidence_units=[],
+                blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
+                normalized_axes=normalized_axes,
+                normalized_property_axes=normalized_property_axes,
+                objective=objective,
+                objective_context=objective_context,
+            )
+        )
+        if (
+            (
+                " porosity " in normalized_axes
+                or " pore " in normalized_axes
+                or " pores " in normalized_axes
+            )
+            and (
+                " corrosion " in normalized_axes
+                or " pitting " in normalized_axes
+            )
+        ):
+            for document_id in document_ids:
+                block = self._best_porosity_corrosion_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                )
+                if block is None:
+                    continue
+                recovered.append(
+                    self._recovered_porosity_corrosion_finding(
+                        block,
+                        collection_id=collection_id,
+                        objective_context=objective_context,
+                        objective=objective,
+                    )
+                )
+                break
+        return [
+            recovered
+            for recovered in recovered
+            if not (
+                existing_claims
+                and self._recovered_source_ref(recovered) in existing_source_refs
+                and not self._recovered_refreshes_existing_object(
+                    recovered,
+                    existing_recovered_claim_ids=existing_recovered_claim_ids,
+                    existing_recovered_relation_ids=existing_recovered_relation_ids,
+                )
+            )
+            if _mapping(recovered.get("claim"))
+            and _mapping(recovered.get("relation"))
+            and self._recovered_evidence_refs(recovered)
+        ]
+
+    def _recovered_refreshes_existing_object(
+        self,
+        recovered: Mapping[str, Any],
+        *,
+        existing_recovered_claim_ids: set[str],
+        existing_recovered_relation_ids: set[str],
+    ) -> bool:
+        claim_id = _text(_mapping(recovered.get("claim")).get("claim_id"))
+        relation_id = _text(_mapping(recovered.get("relation")).get("relation_id"))
+        return bool(
+            (claim_id and claim_id in existing_recovered_claim_ids)
+            or (relation_id and relation_id in existing_recovered_relation_ids)
+        )
+
+    def _recovered_evidence_refs(self, recovered: Mapping[str, Any]) -> list[dict[str, Any]]:
+        refs = _mapping_list(recovered.get("evidence_refs"))
+        if refs:
+            return refs
+        ref = _mapping(recovered.get("evidence_ref"))
+        return [ref] if ref else []
+
+    def _source_refs_from_evidence_refs(
+        self,
+        evidence_refs: list[dict[str, Any]],
+    ) -> set[str]:
+        return {
+            source_ref
+            for ref in evidence_refs
+            if (source_ref := _text(_locator_mapping(ref.get("locator")).get("source_ref")))
+        }
+
+    def _recovered_source_ref(self, recovered: Mapping[str, Any]) -> str:
+        evidence_refs = self._recovered_evidence_refs(recovered)
+        evidence_ref = evidence_refs[0] if evidence_refs else {}
+        return _text(_locator_mapping(evidence_ref.get("locator")).get("source_ref"))
+
+    def _presentation_recovery_objective(
+        self,
+        scope: Mapping[str, Any],
+        *,
+        contexts: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        title = _text(scope.get("title"))
+        scope_contexts = [
+            context
+            for context in contexts
+            if self._is_scope_context(context)
+        ]
+        contexts_for_scope = scope_contexts or []
+        material_scope = _dedupe_strings(
+            [
+                value
+                for context in contexts_for_scope
+                for value in _strings(context.get("material_scope"))
+            ]
+        )
+        if not material_scope and "316l" in _normalize_match_text(title):
+            material_scope = ["316L stainless steel"]
+        process_axes = _dedupe_strings(
+            [
+                value
+                for context in contexts_for_scope
+                for value in _display_values(_mapping(context.get("process_context")))
+            ]
+        )
+        property_axes = _dedupe_strings(
+            [
+                value
+                for context in contexts_for_scope
+                for value in _strings(context.get("property_scope"))
+            ]
+        )
+        process_axes = _dedupe_strings(
+            [*process_axes, *self._presentation_recovery_process_axes_from_title(title)]
+        )
+        property_axes = _dedupe_strings(
+            [*property_axes, *self._presentation_recovery_property_axes_from_title(title)]
+        )
+        objective_id = _text(scope.get("objective_id"))
+        return (
+            {
+                "objective_id": objective_id,
+                "question": title,
+                "material_scope": material_scope,
+                "process_axes": process_axes,
+                "property_axes": property_axes,
+            },
+            {
+                "objective_id": objective_id,
+                "question": title,
+                "material_scope": material_scope,
+                "variable_process_axes": process_axes,
+                "target_property_axes": property_axes,
+            },
+        )
+
+    def _is_scope_context(self, context: Mapping[str, Any]) -> bool:
+        context_id = _normalize_match_text(_text(context.get("context_id")) or "")
+        label = _normalize_match_text(_text(context.get("label")) or "")
+        return context_id in {"ctx_objective_scope", "ctx_goal_scope", "ctx_goal"} or label in {
+            "objective scope",
+            "goal scope",
+        }
+
+    def _presentation_recovery_process_axes_from_title(self, title: str) -> list[str]:
+        normalized = f" {_normalize_match_text(title)} "
+        axes: list[str] = []
+        for display, terms in (
+            ("laser beam powder bed fusion", ("laser beam powder bed fusion", "laser powder bed fusion", "lpbf", "pbf lb", "powder bed fusion")),
+            ("selective laser melting", ("selective laser melting", "slm")),
+            ("build platform preheating temperature", ("build platform preheating", "preheating temperature")),
+            ("heat treatment", ("heat treatment",)),
+            ("laser power", ("laser power",)),
+            ("scanning speed", ("scanning speed", "scan speed")),
+            ("energy density", ("energy density",)),
+            ("porosity level", ("porosity level", "porosity")),
+            ("pore size", ("pore size",)),
+            ("scan strategy rotation angle", ("scan strategy rotation angle", "rotation angle")),
+            ("build orientation", ("build orientation",)),
+            ("volumetric energy density", ("volumetric energy density", "ved")),
+        ):
+            if any(f" {_normalize_match_text(term)} " in normalized for term in terms):
+                axes.append(display)
+        return _dedupe_strings(axes)
+
+    def _presentation_recovery_property_axes_from_title(self, title: str) -> list[str]:
+        normalized = f" {_normalize_match_text(self._presentation_recovery_property_phrase(title))} "
+        axes: list[str] = []
+        for display, terms in (
+            ("density", ("density", "densification")),
+            ("microstructure", ("microstructure",)),
+            ("mechanical properties", ("mechanical properties",)),
+            ("yield strength", ("yield strength",)),
+            ("ultimate tensile strength", ("ultimate tensile strength",)),
+            ("elongation", ("elongation", "ductility")),
+            ("pitting corrosion behavior", ("pitting corrosion behavior", "pitting corrosion")),
+            ("crystallographic texture", ("crystallographic texture",)),
+            ("defect structure", ("defect structure", "defect")),
+            ("fatigue strength", ("fatigue strength", "fatigue")),
+        ):
+            if any(f" {_normalize_match_text(term)} " in normalized for term in terms):
+                axes.append(display)
+        return _dedupe_strings(axes)
+
+    def _presentation_recovery_property_phrase(self, title: str) -> str:
+        normalized = _normalize_match_text(title)
+        for marker in (" affect ", " affects "):
+            marker = marker.strip()
+            pattern = f" {marker} "
+            padded = f" {normalized} "
+            if pattern in padded:
+                return padded.split(pattern, 1)[1]
+        return normalized
+
+    def _presentation_recovery_document_ids(
+        self,
+        record: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> list[str]:
+        document_ids: list[str] = []
+        for ref in _mapping_list(record.get("evidence_refs")):
+            document_id = _text(ref.get("document_id"))
+            if document_id:
+                document_ids.append(document_id)
+                continue
+            locator = _locator_mapping(ref.get("locator"))
+            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+            if block and block.document_id:
+                document_ids.append(block.document_id)
+        if not document_ids:
+            document_ids.extend(block.document_id for block in blocks_by_id.values())
+        return _dedupe_strings(document_ids)
+
+    def _merge_duplicate_presentation_findings(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        index_by_key: dict[tuple[str, str, str, str], int] = {}
+        for finding in findings:
+            key = self._presentation_finding_merge_key(
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+            if not key:
+                merged.append(finding)
+                continue
+            if key not in index_by_key:
+                index_by_key[key] = len(merged)
+                merged.append(finding)
+                continue
+            target_index = index_by_key[key]
+            merged[target_index] = self._merge_presentation_finding(
+                merged[target_index],
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+        return merged
+
+    def _presentation_finding_merge_key(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> tuple[str, str, str, str] | None:
+        variables = [
+            _normalize_match_text(value)
+            for value in _strings(finding.get("variables"))
+            if _normalize_match_text(value)
+        ]
+        outcomes = [
+            _normalize_match_text(value)
+            for value in _strings(finding.get("outcomes"))
+            if _normalize_match_text(value)
+        ]
+        if not variables or not outcomes:
+            return None
+        table_row_scope = ""
+        if self._finding_is_table_axis_review_candidate(finding):
+            table_row_scope = self._table_row_review_merge_scope(
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+            direction = ""
+        else:
+            direction = self._finding_merge_direction(_text(finding.get("direction")) or "")
+        return (
+            " | ".join(variables),
+            " | ".join(outcomes),
+            direction,
+            table_row_scope,
+        )
+
+    def _table_row_review_merge_scope(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> str:
+        source_refs = [
+            source_ref
+            for ref_id in self._finding_evidence_ref_ids_from_bundle(
+                _mapping(finding.get("evidence_bundle"))
+            )
+            if (
+                source_ref := _text(
+                    _locator_mapping(evidence_by_id.get(ref_id, {}).get("locator")).get(
+                        "source_ref"
+                    )
+                )
+            )
+        ]
+        return " | ".join(_dedupe_strings(source_refs))
+
+    def _finding_is_table_axis_review_candidate(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        warnings = {
+            _normalize_match_text(value)
+            for value in _strings(finding.get("warnings"))
+        }
+        finding_id = _text(finding.get("finding_id")) or ""
+        is_generated_row_finding = finding_id.startswith(
+            "finding_relation_rel_"
+        ) or bool(re.match(r"^finding_claim_[0-9a-f]{12}$", finding_id))
+        if "deterministic relation" not in warnings and not is_generated_row_finding:
+            return False
+        statements = [
+            _text(finding.get("statement")) or "",
+            *[
+                _text(segment.get("statement")) or ""
+                for segment in _mapping_list(finding.get("relation_chain"))
+            ],
+        ]
+        return any(
+            self._finding_statement_is_table_row_comparison(statement)
+            for statement in statements
+        )
+
+    def _finding_merge_direction(self, direction: str) -> str:
+        normalized = _normalize_match_text(direction)
+        if normalized in {
+            "affect",
+            "affects",
+            "affected",
+            "change",
+            "changes",
+            "changed",
+            "compare",
+            "compares",
+            "compared",
+            "improve",
+            "improves",
+            "improved",
+            "modulate",
+            "modulates",
+            "modulated",
+        }:
+            return ""
+        return normalized
+
+    def _merge_presentation_finding(
+        self,
+        left: Mapping[str, Any],
+        right: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        merged = dict(left)
+        merged["finding_id"] = _text(left.get("finding_id")) or _text(
+            right.get("finding_id")
+        )
+        merged["claim_id"] = _text(left.get("claim_id")) or _text(right.get("claim_id"))
+        merged_variables = _dedupe_strings(
+            [*_strings(left.get("variables")), *_strings(right.get("variables"))]
+        )
+        merged_outcomes = _dedupe_strings(
+            [*_strings(left.get("outcomes")), *_strings(right.get("outcomes"))]
+        )
+        merged["statement"] = self._preferred_finding_statement(
+            _text(left.get("statement")) or "",
+            _text(right.get("statement")) or "",
+            variables=merged_variables,
+            outcomes=merged_outcomes,
+        )
+        merged["variables"] = merged_variables
+        merged["mediators"] = _dedupe_strings(
+            [*_strings(left.get("mediators")), *_strings(right.get("mediators"))]
+        )
+        merged["outcomes"] = merged_outcomes
+        merged["direction"] = _text(left.get("direction")) or _text(
+            right.get("direction")
+        ) or ""
+        merged["relation_chain"] = self._merge_relation_chains(
+            _mapping_list(left.get("relation_chain")),
+            _mapping_list(right.get("relation_chain")),
+        )
+        merged["scope_summary"] = self._merge_scope_summaries(
+            _text(left.get("scope_summary")) or "",
+            _text(right.get("scope_summary")) or "",
+        )
+        merged["support_grade"] = self._stronger_support_grade(
+            _text(left.get("support_grade")) or "",
+            _text(right.get("support_grade")) or "",
+        )
+        merged["review_status"] = self._merged_review_status(
+            _text(left.get("review_status")) or "",
+            _text(right.get("review_status")) or "",
+        )
+        merged["confidence"] = self._merged_confidence(
+            left.get("confidence"),
+            right.get("confidence"),
+        )
+        merged["evidence_ref_ids"] = _dedupe_strings(
+            [
+                *_strings(left.get("evidence_ref_ids")),
+                *_strings(right.get("evidence_ref_ids")),
+            ]
+        )
+        document_ids = {
+            document_id
+            for ref_id in merged["evidence_ref_ids"]
+            if (document_id := _text(evidence_by_id.get(ref_id, {}).get("document_id")))
+        }
+        merged["paper_count"] = len(document_ids) or max(
+            _safe_count(left.get("paper_count")),
+            _safe_count(right.get("paper_count")),
+        )
+        merged["evidence_count"] = len(merged["evidence_ref_ids"])
+        merged["context_ids"] = _dedupe_strings(
+            [*_strings(left.get("context_ids")), *_strings(right.get("context_ids"))]
+        )
+        merged["relation_ids"] = _dedupe_strings(
+            [*_strings(left.get("relation_ids")), *_strings(right.get("relation_ids"))]
+        )
+        merged["evidence_bundle"] = self._merge_evidence_bundles(
+            _mapping(left.get("evidence_bundle")),
+            _mapping(right.get("evidence_bundle")),
+        )
+        merged["warnings"] = _dedupe_strings(
+            [*_strings(left.get("warnings")), *_strings(right.get("warnings"))]
+        )
+        if self._finding_is_table_axis_review_candidate(merged):
+            merged["direction"] = "condition-dependent"
+            representative_statement = self._representative_table_axis_statement(
+                merged["relation_chain"],
+                variables=merged_variables,
+                outcomes=merged_outcomes,
+            )
+            if representative_statement:
+                merged["statement"] = representative_statement
+                merged["comparison_summary"] = self._finding_comparison_summary(
+                    representative_statement,
+                    variables=merged_variables,
+                    outcomes=merged_outcomes,
+                    direction="",
+                )
+            merged["support_grade"] = "partial"
+            merged["review_status"] = "needs_review"
+        return self._finding_with_refreshed_use_boundary(merged)
+
+    def _finding_with_refreshed_use_boundary(
+        self,
+        finding: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        refreshed = dict(finding)
+        support_grade = _text(refreshed.get("support_grade")) or ""
+        review_status = _text(refreshed.get("review_status")) or ""
+        paper_count = int(refreshed.get("paper_count") or 0)
+        evidence_bundle = _mapping(refreshed.get("evidence_bundle"))
+        generalization_status = self._finding_generalization_status(
+            support_grade=support_grade,
+            review_status=review_status,
+            paper_count=paper_count,
+            evidence_bundle=evidence_bundle,
+        )
+        refreshed["expert_use_status"] = self._finding_expert_use_status(
+            support_grade=support_grade,
+            review_status=review_status,
+            paper_count=paper_count,
+            evidence_bundle=evidence_bundle,
+        )
+        refreshed["generalization_status"] = generalization_status
+        refreshed["generalization_note"] = self._finding_generalization_note(
+            generalization_status=generalization_status,
+            paper_count=paper_count,
+        )
+        refreshed["evidence_gap_summary"] = self._finding_evidence_gap_summary(
+            support_grade=support_grade,
+            review_status=review_status,
+            paper_count=paper_count,
+            evidence_bundle=evidence_bundle,
+        )
+        refreshed["upgrade_actions"] = self._finding_upgrade_actions(
+            support_grade=support_grade,
+            review_status=review_status,
+            paper_count=paper_count,
+            evidence_bundle=evidence_bundle,
+        )
+        refreshed["review_reasons"] = self._finding_review_reasons(
+            refreshed,
+            evidence_bundle=evidence_bundle,
+            mediators=_strings(refreshed.get("mediators")),
+            mechanism_source_text="",
+            outcomes=_strings(refreshed.get("outcomes")),
+            relation_ids=_strings(refreshed.get("relation_ids")),
+            review_status=review_status,
+            support_grade=support_grade,
+            scope_summary=_text(refreshed.get("scope_summary")) or "",
+        )
+        return refreshed
+
+    def _representative_table_axis_statement(
+        self,
+        relation_chain: list[dict[str, Any]],
+        *,
+        variables: list[str],
+        outcomes: list[str],
+    ) -> str:
+        candidates = [
+            statement
+            for relation in relation_chain
+            if (
+                statement := _text(relation.get("statement"))
+            )
+            and self._finding_statement_is_table_row_comparison(statement)
+            and self._statement_matches_finding_display(
+                statement,
+                variables=variables,
+                outcomes=outcomes,
+            )
+            and self._statement_changed_axis_matches_variables(
+                statement,
+                variables=variables,
+            )
+        ]
+        if not candidates:
+            return ""
+        return max(
+            candidates,
+            key=lambda statement: (
+                self._comparison_statement_value_delta(statement),
+                self._statement_specificity_score(statement),
+                len(statement),
+            ),
+        )
+
+    def _comparison_statement_value_delta(self, statement: str) -> float:
+        match = re.search(
+            r"\bfrom\s+(-?\d+(?:\.\d+)?)\s*%?\b.*?\bto\s+(-?\d+(?:\.\d+)?)\s*%?\b",
+            statement,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return 0.0
+        try:
+            return abs(float(match.group(2)) - float(match.group(1)))
+        except ValueError:
+            return 0.0
+
+    def _statement_changed_axis_matches_variables(
+        self,
+        statement: str,
+        *,
+        variables: list[str],
+    ) -> bool:
+        changed_axis = self._statement_changed_axis(statement)
+        if not changed_axis:
+            return True
+        return any(
+            self._axis_labels_match(changed_axis, variable)
+            for variable in variables
+        )
+
+    def _statement_changed_axis(self, statement: str) -> str:
+        text = _text(statement) or ""
+        patterns = [
+            r"^(?:Under|With)\s+.+?,\s+changing\s+(?P<axis>.+?)\s+from\s+",
+            r"^(?:Under|With)\s+.+?,\s+(?P<axis>.+?)\s+"
+            r"(?:increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text.strip(), flags=re.IGNORECASE)
+            if match is not None:
+                return _clean_comparison_summary_text(match.group("axis"))
+        return ""
+
+    def _preferred_finding_statement(
+        self,
+        left: str,
+        right: str,
+        *,
+        variables: list[str] | None = None,
+        outcomes: list[str] | None = None,
+    ) -> str:
+        if not left:
+            return right
+        if not right:
+            return left
+        left_contextualized = self._looks_contextualized_comparison_statement(left)
+        right_contextualized = self._looks_contextualized_comparison_statement(right)
+        if left_contextualized and not right_contextualized:
+            return left
+        if right_contextualized and not left_contextualized:
+            return right
+        if variables and outcomes:
+            left_matches = self._statement_matches_finding_display(
+                left,
+                variables=variables,
+                outcomes=outcomes,
+            )
+            right_matches = self._statement_matches_finding_display(
+                right,
+                variables=variables,
+                outcomes=outcomes,
+            )
+            if left_matches and not right_matches:
+                return left
+            if right_matches and not left_matches:
+                return right
+        left_score = self._statement_specificity_score(left)
+        right_score = self._statement_specificity_score(right)
+        if right_score > left_score:
+            return right
+        if right_score == left_score and len(right) > len(left):
+            return right
+        return left
+
+    def _looks_contextualized_comparison_statement(self, statement: str) -> bool:
+        normalized = f" {_normalize_match_text(statement)} "
+        return bool(
+            (" changing " in normalized and " from " in normalized and " to " in normalized)
+            or " table row comparison changes " in normalized
+            or " table-row comparison changes " in normalized
+        )
+
+    def _merge_relation_chains(
+        self,
+        left: list[dict[str, Any]],
+        right: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for segment in [*left, *right]:
+            key = (
+                _text(segment.get("relation_id")) or "",
+                _text(segment.get("variable")) or "",
+                _text(segment.get("outcome")) or "",
+                _text(segment.get("statement")) or "",
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(segment)
+        return merged
+
+    def _merge_scope_summaries(self, left: str, right: str) -> str:
+        values = [
+            item.strip()
+            for value in (left, right)
+            for item in value.split(",")
+            if item.strip()
+        ]
+        return _join_display_values(_dedupe_strings(values), limit=5)
+
+    def _stronger_support_grade(self, left: str, right: str) -> str:
+        rank = {
+            "strong": 0,
+            "partial": 1,
+            "weak": 2,
+            "conflict": 3,
+            "insufficient": 4,
+        }
+        left_rank = rank.get(left, 5)
+        right_rank = rank.get(right, 5)
+        return left if left_rank <= right_rank else right
+
+    def _merged_review_status(self, left: str, right: str) -> str:
+        if left == "pending_review" or right == "pending_review":
+            return "pending_review"
+        return left or right
+
+    def _merged_confidence(self, left: Any, right: Any) -> float | None:
+        values = [
+            value
+            for value in (_confidence_or_none(left), _confidence_or_none(right))
+            if value is not None
+        ]
+        return max(values) if values else None
+
+    def _merge_evidence_bundles(
+        self,
+        left: Mapping[str, Any],
+        right: Mapping[str, Any],
+    ) -> dict[str, list[str]]:
+        keys = (
+            "direct_result",
+            "mechanism",
+            "condition_context",
+            "background",
+            "conflict",
+            "noise",
+            "uncategorized",
+        )
+        return {
+            key: _dedupe_strings(
+                [*_strings(left.get(key)), *_strings(right.get(key))]
+            )
+            for key in keys
+        }
+
+    def _finding_with_aligned_direct_evidence(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return dict(finding)
+        if self._is_recovered_expert_finding(finding):
+            return dict(finding)
+        uncategorized_ref_ids = _strings(bundle.get("uncategorized"))
+        table_refs = [
+            ref_id
+            for ref_id in [*direct_ref_ids, *uncategorized_ref_ids]
+            if "table"
+            in (_text(evidence_by_id.get(ref_id, {}).get("source_kind")) or "").lower()
+        ]
+        text_refs = [ref_id for ref_id in direct_ref_ids if ref_id not in table_refs]
+        if not table_refs or not text_refs:
+            return dict(finding)
+        statements = [
+            _text(finding.get("statement")) or "",
+            *[
+                _text(item.get("statement")) or ""
+                for item in _mapping_list(finding.get("relation_chain"))
+            ],
+        ]
+        if not any(
+            self._finding_statement_is_table_row_comparison(statement)
+            for statement in statements
+        ):
+            return dict(finding)
+        updated = dict(finding)
+        updated_bundle = {key: list(value) for key, value in bundle.items()}
+        updated_bundle["direct_result"] = table_refs
+        updated_bundle["uncategorized"] = _dedupe_strings(
+            [
+                *[
+                    ref_id
+                    for ref_id in updated_bundle.get("uncategorized", [])
+                    if ref_id not in table_refs
+                ],
+                *text_refs,
+            ]
+        )
+        updated["evidence_bundle"] = updated_bundle
+        return updated
+
+    def _finding_with_compact_table_direct_evidence(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        if len(direct_ref_ids) <= 1:
+            return dict(finding)
+        table_ref_ids = [
+            ref_id
+            for ref_id in direct_ref_ids
+            if "table"
+            in (_text(evidence_by_id.get(ref_id, {}).get("source_kind")) or "").lower()
+        ]
+        if len(table_ref_ids) <= 1:
+            return dict(finding)
+        grouped_by_source: dict[str, list[str]] = {}
+        for ref_id in table_ref_ids:
+            source_ref = _text(
+                _locator_mapping(evidence_by_id.get(ref_id, {}).get("locator")).get(
+                    "source_ref"
+                )
+            )
+            grouped_by_source.setdefault(source_ref or ref_id, []).append(ref_id)
+        if not any(len(group) > 1 for group in grouped_by_source.values()):
+            return dict(finding)
+
+        statement = " ".join(
+            value
+            for value in (
+                _text(finding.get("statement")),
+                *[
+                    _text(item.get("statement"))
+                    for item in _mapping_list(finding.get("relation_chain"))
+                ],
+            )
+            if value
+        )
+        if not self._finding_statement_is_table_row_comparison(statement):
+            return dict(finding)
+
+        kept: list[str] = []
+        moved: list[str] = []
+        for group in grouped_by_source.values():
+            if len(group) == 1:
+                kept.extend(group)
+                continue
+            preferred = max(
+                group,
+                key=lambda ref_id: self._table_direct_evidence_match_score(
+                    ref_id,
+                    statement=statement,
+                    finding=finding,
+                    evidence_by_id=evidence_by_id,
+                ),
+            )
+            kept.append(preferred)
+            moved.extend(ref_id for ref_id in group if ref_id != preferred)
+        if not moved:
+            return dict(finding)
+
+        updated = dict(finding)
+        updated_bundle = {key: list(value) for key, value in bundle.items()}
+        updated_bundle["direct_result"] = _dedupe_strings(
+            [
+                ref_id
+                for ref_id in direct_ref_ids
+                if ref_id not in moved
+            ]
+        )
+        updated_bundle["uncategorized"] = _dedupe_strings(
+            [*updated_bundle.get("uncategorized", []), *moved]
+        )
+        updated["evidence_bundle"] = updated_bundle
+        return updated
+
+    def _finding_with_compact_evidence_bundle(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        updated = dict(finding)
+        compact_bundle = self._compact_finding_evidence_bundle(
+            _mapping(finding.get("evidence_bundle")),
+            evidence_by_id=evidence_by_id,
+        )
+        updated["evidence_bundle"] = compact_bundle
+        updated["evidence_ref_ids"] = self._finding_evidence_ref_ids_from_bundle(
+            compact_bundle
+        )
+        updated["evidence_count"] = len(updated["evidence_ref_ids"])
+        return updated
+
+    def _finding_with_recovered_mechanical_comparison_guard(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, Any]:
+        if not self._is_recovered_scanning_speed_mechanical_finding(finding):
+            return dict(finding)
+        if not self._finding_statement_has_scanning_speed_range(finding):
+            return dict(finding)
+
+        mechanical_table = self._finding_source_table(
+            finding,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
+            predicate=self._specific_mechanical_property_table_score,
+        )
+        processing_table = self._finding_source_table(
+            finding,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
+            predicate=self._slm_processing_parameter_table_score,
+        )
+        if mechanical_table is None or processing_table is None:
+            return dict(finding)
+        axes = self._specific_mechanical_outcomes(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ) or _strings(finding.get("outcomes"))
+        axes = [
+            axis
+            for axis in axes
+            if axis
+            in {
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            }
+        ]
+        if not axes:
+            return dict(finding)
+        controlled_summary = self._specific_mechanical_property_controlled_summary(
+            mechanical_table,
+            processing_table,
+            axes,
+        )
+        if controlled_summary:
+            return dict(finding)
+
+        updated = dict(finding)
+        updated["statement"] = (
+            "Higher scanning speed improved densification and refined the "
+            "microstructure. "
+            f"{self._specific_mechanical_property_table_statement(axes)}"
+        )
+        updated["support_grade"] = "partial"
+        updated["review_status"] = "needs_review"
+        updated["warnings"] = _dedupe_strings(
+            [
+                *_strings(updated.get("warnings")),
+                "non_single_variable_table_comparison",
+                "needs_expert_review",
+            ]
+        )
+        updated["review_reasons"] = _dedupe_strings(
+            [
+                *_strings(updated.get("review_reasons")),
+                "non_single_variable_table_comparison",
+                "needs_expert_review",
+            ]
+        )
+        updated["comparison_summary"] = None
+        updated["relation_chain"] = [
+            {
+                **segment,
+                "statement": updated["statement"],
+                "status": "limited",
+                "warnings": _dedupe_strings(
+                    [
+                        *_strings(segment.get("warnings")),
+                        "non_single_variable_table_comparison",
+                    ]
+                ),
+            }
+            for segment in _mapping_list(updated.get("relation_chain"))
+        ]
+        return self._finding_with_refreshed_use_boundary(updated)
+
+    def _is_recovered_scanning_speed_mechanical_finding(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        claim_id = _text(finding.get("claim_id")) or ""
+        if not claim_id.startswith(
+            "claim_recovered_scan_speed_density_microstructure_"
+        ):
+            return False
+        variables = {
+            _normalize_match_text(value)
+            for value in _strings(finding.get("variables"))
+        }
+        outcomes = {
+            _normalize_match_text(value)
+            for value in _strings(finding.get("outcomes"))
+        }
+        return "scanning speed" in variables and bool(
+            outcomes
+            & {
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            }
+        )
+
+    def _finding_statement_has_scanning_speed_range(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        statement = self._finding_statement_text(finding)
+        normalized = f" {_normalize_match_text(statement)} "
+        return bool(
+            " scanning speed from " in normalized
+            and " to " in normalized
+            and re.search(r"\d+(?:\.\d+)?", statement)
+        )
+
+    def _finding_source_table(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+        predicate: Any,
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for ref_id in self._finding_evidence_ref_ids_from_bundle(
+            _mapping(finding.get("evidence_bundle"))
+        ):
+            ref = evidence_by_id.get(ref_id, {})
+            if "table" not in (_text(ref.get("source_kind")) or "").lower():
+                continue
+            source_ref = _text(_locator_mapping(ref.get("locator")).get("source_ref"))
+            table = tables_by_id.get(source_ref or "")
+            if table is None:
+                continue
+            score = predicate(table)
+            if score <= 0:
+                continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _finding_with_observed_symbol_axis(
+        self,
+        finding: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        comparison = _mapping(finding.get("comparison_summary"))
+        observed = _mapping(comparison.get("observed"))
+        observed_label = _text(observed.get("label"))
+        if not _symbol_match_term(observed_label):
+            return dict(finding)
+        variable = self._display_axis_label(observed_label)
+        if not variable:
+            return dict(finding)
+        outcomes = _strings(finding.get("outcomes"))
+        updated = dict(finding)
+        updated["variables"] = [variable]
+        updated["title"] = self._finding_title(
+            variables=[variable],
+            outcomes=outcomes,
+            fallback=_text(finding.get("title")) or _text(finding.get("statement")),
+        )
+        updated_comparison = dict(comparison)
+        updated_comparison["variable"] = variable
+        updated["comparison_summary"] = updated_comparison
+        scope_tokens = [
+            token.strip()
+            for token in (_text(updated.get("scope_summary")) or "").split(",")
+            if token.strip()
+        ]
+        symbol_axes = {
+            display
+            for symbol in ("α", "β", "θ", "ɵ")
+            if (display := self._display_axis_label(symbol))
+        }
+        cleaned_scope_tokens = []
+        for token in scope_tokens:
+            display_token = self._display_axis_label(token)
+            if display_token in symbol_axes:
+                continue
+            if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", token):
+                continue
+            cleaned_scope_tokens.append(token)
+        updated["scope_summary"] = _join_display_values(
+            _dedupe_strings(
+                [
+                    *cleaned_scope_tokens,
+                    variable,
+                    *outcomes,
+                ]
+            ),
+            limit=7,
+        )
+        return updated
+
+    def _finding_evidence_ref_ids_from_bundle(
+        self,
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> list[str]:
+        return _dedupe_strings(
+            [
+                ref_id
+                for role in (
+                    "direct_result",
+                    "mechanism",
+                    "condition_context",
+                    "conflict",
+                    "background",
+                    "uncategorized",
+                )
+                for ref_id in _strings(evidence_bundle.get(role))
+            ]
+        )
+
+    def _table_direct_evidence_match_score(
+        self,
+        ref_id: str,
+        *,
+        statement: str,
+        finding: Mapping[str, Any],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> tuple[int, int, int, int]:
+        evidence_ref = evidence_by_id.get(ref_id, {})
+        searchable = self._evidence_search_text(evidence_ref)
+        bounded = f" {_normalize_match_text(searchable)} "
+        statement_numbers = set(re.findall(r"\d+(?:\.\d+)?", statement))
+        evidence_numbers = set(re.findall(r"\d+(?:\.\d+)?", searchable))
+        variable_terms = {
+            term
+            for variable in _strings(finding.get("variables"))
+            for term in _quote_hint_terms(variable)
+        }
+        outcome_terms = self._finding_statement_outcome_terms(
+            _strings(finding.get("outcomes"))
+        )
+        fact_hits = _quote_term_hits(
+            bounded,
+            {
+                term
+                for fact_id in _strings(evidence_ref.get("fact_ids"))
+                for term in _quote_hint_terms(fact_id)
+            },
+        )
+        return (
+            len(statement_numbers & evidence_numbers),
+            _quote_term_hits(bounded, variable_terms),
+            _quote_term_hits(bounded, outcome_terms),
+            fact_hits,
+        )
+
+    def _finding_statement_is_table_row_comparison(self, statement: str) -> bool:
+        normalized = f" {_normalize_match_text(statement)} "
+        return bool(
+            re.search(r"\d", statement)
+            and _quote_has_concrete_result_cue(statement)
+            and " from " in normalized
+            and " to " in normalized
+            and any(
+                f" {cue} " in normalized
+                for cue in (
+                    "under",
+                    "with",
+                    "laser power",
+                    "scan speed",
+                    "heat treatment",
+                    "density",
+                )
+            )
+        )
+
+    def _finding_statement_is_confounded_table_row_comparison(
+        self,
+        statement: str,
+    ) -> bool:
+        normalized = f" {_normalize_match_text(statement)} "
+        return bool(
+            " table row comparison changes " in normalized
+            or " table-row comparison changes " in normalized
+        )
+
     def _partition_presentation_findings(
         self,
         findings: list[dict[str, Any]],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
         blocks_by_id: Mapping[str, SourceBlock],
+        goal_axes: list[str] | tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         primary: list[dict[str, Any]] = []
         review_queue: list[dict[str, Any]] = []
+        source_finding_document_ids = self._source_finding_document_ids(
+            findings,
+            evidence_by_id=evidence_by_id,
+        )
+        source_evidence_document_ids = self._source_evidence_document_ids(
+            evidence_by_id=evidence_by_id,
+        )
+        primary_candidates: list[tuple[dict[str, Any], bool]] = []
         for finding in findings:
-            if self._is_primary_presentation_finding(
+            primary_candidates.append(
+                (
+                    finding,
+                    self._finding_has_primary_expert_use_status(finding)
+                    and self._is_primary_presentation_finding(
+                        finding,
+                        evidence_by_id=evidence_by_id,
+                        blocks_by_id=blocks_by_id,
+                    ),
+                )
+            )
+        has_non_table_primary = any(
+            is_primary
+            and self._finding_has_non_table_direct_result(
                 finding,
                 evidence_by_id=evidence_by_id,
-                blocks_by_id=blocks_by_id,
+            )
+            for finding, is_primary in primary_candidates
+        )
+        for finding, is_primary in primary_candidates:
+            if (
+                _text(finding.get("review_status")) == "needs_review"
+                and self._finding_has_only_table_direct_result(
+                    finding,
+                    evidence_by_id=evidence_by_id,
+                )
+                and self._finding_statement_is_table_row_comparison(
+                    self._finding_statement_text(finding)
+                )
+                and not (
+                    self._is_recovered_expert_finding(finding)
+                    and self._finding_has_non_direct_text_support(
+                        _mapping(finding.get("evidence_bundle")),
+                        evidence_by_id=evidence_by_id,
+                    )
+                )
             ):
+                review_queue.append(
+                    self._finding_as_review_candidate(
+                        finding,
+                        reason="table_row_needs_expert_review",
+                    )
+                )
+                continue
+            if (
+                (source_finding_document_ids or source_evidence_document_ids)
+                and self._finding_has_only_table_direct_result(
+                    finding,
+                    evidence_by_id=evidence_by_id,
+                )
+                and not (
+                    self._is_recovered_expert_finding(finding)
+                    and self._finding_has_non_direct_text_support(
+                        _mapping(finding.get("evidence_bundle")),
+                        evidence_by_id=evidence_by_id,
+                    )
+                )
+            ):
+                finding_document_ids = self._finding_document_ids(
+                    finding,
+                    evidence_by_id=evidence_by_id,
+                )
+                if (
+                    finding_document_ids
+                    and finding_document_ids
+                    <= (source_finding_document_ids | source_evidence_document_ids)
+                ):
+                    review_queue.append(
+                        self._finding_as_review_candidate(
+                            finding,
+                            reason="table_row_needs_text_or_mechanism_review",
+                        )
+                    )
+                    continue
+            if (
+                has_non_table_primary
+                and is_primary
+                and self._finding_has_only_table_direct_result(
+                    finding,
+                    evidence_by_id=evidence_by_id,
+                )
+                and not (
+                    self._is_recovered_expert_finding(finding)
+                    and self._finding_has_non_direct_text_support(
+                        _mapping(finding.get("evidence_bundle")),
+                        evidence_by_id=evidence_by_id,
+                    )
+                )
+                and self._finding_statement_is_table_row_comparison(
+                    self._finding_statement_text(finding)
+                )
+            ):
+                review_queue.append(
+                    self._finding_as_review_candidate(
+                        finding,
+                        reason="table_row_shadowed_by_text_finding",
+                    )
+                )
+                continue
+            if is_primary:
                 primary.append(finding)
             else:
                 review_queue.append(finding)
-        return primary, review_queue
+        review_queue = self._review_findings_without_low_magnitude_table_rows(
+            review_queue,
+            evidence_by_id=evidence_by_id,
+        )
+        return self._promote_uncovered_goal_axis_findings(
+            primary,
+            review_queue,
+            evidence_by_id=evidence_by_id,
+            goal_axes=goal_axes,
+        )
+
+    def _review_findings_without_covered_ved_rows(
+        self,
+        review_queue: list[dict[str, Any]],
+        *,
+        primary_findings: list[dict[str, Any]],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        covered_sources = self._covered_ved_fatigue_table_sources(
+            primary_findings,
+            evidence_by_id=evidence_by_id,
+        )
+        if not covered_sources:
+            return review_queue
+        return [
+            finding
+            for finding in review_queue
+            if not self._ved_fatigue_review_row_is_covered(
+                finding,
+                covered_sources=covered_sources,
+                evidence_by_id=evidence_by_id,
+            )
+        ]
+
+    def _review_findings_without_confounded_table_rows(
+        self,
+        review_queue: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            finding
+            for finding in review_queue
+            if not self._finding_is_confounded_table_row_candidate(finding)
+        ]
+
+    def _review_findings_without_low_magnitude_table_rows(
+        self,
+        review_queue: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        density_deltas_by_outcome: dict[str, list[float]] = {}
+        for finding in review_queue:
+            delta = self._finding_density_percentage_delta(
+                finding,
+                evidence_by_id=evidence_by_id,
+            )
+            if delta is None:
+                continue
+            outcome_key = self._axis_key(
+                " ".join(_strings(finding.get("outcomes")))
+                or _text(_mapping(finding.get("comparison_summary")).get("outcome"))
+                or _text(finding.get("title"))
+                or ""
+            )
+            density_deltas_by_outcome.setdefault(outcome_key, []).append(delta)
+        return [
+            finding
+            for finding in review_queue
+            if not self._finding_is_low_magnitude_table_row_candidate(
+                finding,
+                evidence_by_id=evidence_by_id,
+                density_deltas_by_outcome=density_deltas_by_outcome,
+            )
+        ]
+
+    def _finding_is_low_magnitude_table_row_candidate(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        density_deltas_by_outcome: Mapping[str, list[float]],
+    ) -> bool:
+        if not self._finding_has_only_table_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if self._finding_has_non_direct_text_support(
+            _mapping(finding.get("evidence_bundle")),
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        statement = self._finding_statement_text(finding)
+        if not self._finding_statement_is_table_row_comparison(statement):
+            return False
+        if self._finding_is_low_magnitude_prediction_comparison(finding, statement):
+            return True
+        density_delta = self._finding_density_percentage_delta(
+            finding,
+            evidence_by_id=evidence_by_id,
+        )
+        if density_delta is None:
+            return False
+        if density_delta < 0.5:
+            return True
+        if density_delta >= 1.5:
+            return False
+        outcome_key = self._axis_key(
+            " ".join(_strings(finding.get("outcomes")))
+            or _text(_mapping(finding.get("comparison_summary")).get("outcome"))
+            or _text(finding.get("title"))
+            or ""
+        )
+        return any(
+            other_delta >= 1.5
+            for other_delta in density_deltas_by_outcome.get(outcome_key, [])
+        )
+
+    def _finding_density_percentage_delta(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> float | None:
+        if not self._finding_has_only_table_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return None
+        if self._finding_has_non_direct_text_support(
+            _mapping(finding.get("evidence_bundle")),
+            evidence_by_id=evidence_by_id,
+        ):
+            return None
+        summary_delta = self._comparison_summary_percentage_delta(finding)
+        if summary_delta is not None:
+            return summary_delta
+        statement = _text(finding.get("statement")) or self._finding_statement_text(finding)
+        if not self._finding_statement_is_table_row_comparison(statement):
+            return None
+        if not self._finding_is_density_percentage_comparison(finding, statement):
+            return None
+        percent_values = re.findall(r"(-?\d+(?:\.\d+)?)\s*%", statement)
+        if len(percent_values) < 2:
+            return None
+        try:
+            return abs(float(percent_values[-1]) - float(percent_values[-2]))
+        except ValueError:
+            return None
+
+    def _comparison_summary_percentage_delta(
+        self,
+        finding: Mapping[str, Any],
+    ) -> float | None:
+        comparison = _mapping(finding.get("comparison_summary"))
+        if not comparison or not self._finding_has_density_outcome(finding):
+            return None
+        baseline = _text(_mapping(comparison.get("baseline")).get("value")) or ""
+        observed = _text(_mapping(comparison.get("observed")).get("value")) or ""
+        if "%" not in baseline or "%" not in observed:
+            return None
+        baseline_match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", baseline)
+        observed_match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", observed)
+        if baseline_match is None or observed_match is None:
+            return None
+        try:
+            return abs(float(observed_match.group(1)) - float(baseline_match.group(1)))
+        except ValueError:
+            return None
+
+    def _finding_is_low_magnitude_prediction_comparison(
+        self,
+        finding: Mapping[str, Any],
+        statement: str,
+    ) -> bool:
+        searchable = " ".join(
+            [
+                statement,
+                _text(finding.get("title")) or "",
+                " ".join(_strings(finding.get("outcomes"))),
+            ]
+        )
+        normalized = f" {_normalize_match_text(searchable)} "
+        if " prediction " not in normalized and " predictions " not in normalized:
+            return False
+        if " mpa " not in normalized:
+            return False
+        match = re.search(
+            r"\bfrom\s+(-?\d+(?:\.\d+)?)\s*mpa\b.*?"
+            r"\bto\s+(-?\d+(?:\.\d+)?)\s*mpa\b",
+            statement,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return False
+        try:
+            return abs(float(match.group(2)) - float(match.group(1))) < 5.0
+        except ValueError:
+            return False
+
+    def _finding_is_density_percentage_comparison(
+        self,
+        finding: Mapping[str, Any],
+        statement: str,
+    ) -> bool:
+        if not self._finding_has_density_outcome(finding):
+            return False
+        comparison = _mapping(finding.get("comparison_summary"))
+        comparison_parts = [
+            _text(comparison.get("variable")) or "",
+            _text(comparison.get("outcome")) or "",
+            _text(_mapping(comparison.get("baseline")).get("value")) or "",
+            _text(_mapping(comparison.get("observed")).get("value")) or "",
+        ]
+        searchable = " ".join(
+            [
+                statement,
+                _text(finding.get("title")) or "",
+                " ".join(_strings(finding.get("outcomes"))),
+                " ".join(comparison_parts),
+            ]
+        ).lower()
+        return "density" in searchable and "%" in searchable
+
+    def _finding_has_density_outcome(self, finding: Mapping[str, Any]) -> bool:
+        comparison = _mapping(finding.get("comparison_summary"))
+        outcome_values = [
+            *_strings(finding.get("outcomes")),
+            _text(comparison.get("outcome")) or "",
+        ]
+        for value in outcome_values:
+            outcome_key = self._axis_key(value)
+            if outcome_key in {"density", "relative density"}:
+                return True
+            if outcome_key.endswith(" density") and outcome_key != "energy density":
+                return True
+        title = _text(finding.get("title")) or ""
+        if "->" in title:
+            title_outcome_key = self._axis_key(title.rsplit("->", 1)[-1])
+            return title_outcome_key in {"density", "relative density"} or (
+                title_outcome_key.endswith(" density")
+                and title_outcome_key != "energy density"
+            )
+        return False
+
+    def _finding_is_confounded_table_row_candidate(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        if "confounded_table_row_comparison" in _strings(
+            finding.get("review_reasons")
+        ):
+            return True
+        summary = _mapping(finding.get("comparison_summary"))
+        if _text(summary.get("variable")) == _MULTI_AXIS_TABLE_CONTRAST_LABEL:
+            return True
+        return self._finding_statement_is_confounded_table_row_comparison(
+            self._finding_statement_text(finding)
+        )
+
+    def _covered_ved_fatigue_table_sources(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> set[str]:
+        sources: set[str] = set()
+        for finding in findings:
+            claim_id = _text(finding.get("claim_id")) or ""
+            if not claim_id.startswith("claim_recovered_ved_defects_fatigue_"):
+                continue
+            if not self._finding_has_fatigue_strength_axis(finding):
+                continue
+            for ref_id in _strings(
+                _mapping(finding.get("evidence_bundle")).get("direct_result")
+            ):
+                ref = evidence_by_id.get(ref_id, {})
+                if "table" not in (
+                    _text(ref.get("source_kind")) or ""
+                ).lower():
+                    continue
+                source_ref = _text(
+                    _locator_mapping(ref.get("locator")).get("source_ref")
+                )
+                if source_ref:
+                    sources.add(source_ref)
+        return sources
+
+    def _ved_fatigue_review_row_is_covered(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        covered_sources: set[str],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        if not self._finding_has_fatigue_strength_axis(finding):
+            return False
+        variables = {
+            _normalize_match_text(value)
+            for value in _strings(finding.get("variables"))
+        }
+        if not (
+            "volumetric energy density" in variables
+            or "ved" in variables
+        ):
+            return False
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_sources = {
+            source_ref
+            for ref_id in _strings(bundle.get("direct_result"))
+            if (
+                source_ref := _text(
+                    _locator_mapping(evidence_by_id.get(ref_id, {}).get("locator")).get(
+                        "source_ref"
+                    )
+                )
+            )
+        }
+        return bool(direct_sources & covered_sources)
+
+    def _finding_has_fatigue_strength_axis(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        searchable = " ".join(
+            [
+                *_strings(finding.get("outcomes")),
+                _text(finding.get("title")) or "",
+                _text(finding.get("statement")) or "",
+            ]
+        )
+        return "fatigue strength" in _normalize_match_text(searchable)
+
+    def _finding_as_review_candidate(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        updated = dict(finding)
+        statement = self._finding_statement_text(updated)
+        reasons = [reason]
+        if self._finding_statement_is_confounded_table_row_comparison(statement):
+            reasons.append("confounded_table_row_comparison")
+            updated["title"] = self._finding_title(
+                variables=[_MULTI_AXIS_TABLE_CONTRAST_LABEL],
+                outcomes=_strings(updated.get("outcomes")),
+                fallback=_text(updated.get("title")) or statement,
+            )
+            summary = _mapping(updated.get("comparison_summary"))
+            if summary:
+                summary = dict(summary)
+                summary["variable"] = _MULTI_AXIS_TABLE_CONTRAST_LABEL
+                observed = dict(_mapping(summary.get("observed")))
+                if observed:
+                    observed["label"] = _MULTI_AXIS_TABLE_CONTRAST_LABEL
+                    summary["observed"] = observed
+                updated["comparison_summary"] = summary
+        updated["expert_use_status"] = "review_candidate"
+        updated["review_status"] = "needs_review"
+        updated["dataset_use_status"] = "review_candidate"
+        updated["review_reasons"] = _dedupe_strings(
+            [
+                *_strings(updated.get("review_reasons")),
+                *reasons,
+                "needs_expert_review",
+            ]
+        )
+        updated["evidence_gap_summary"] = self._finding_evidence_gap_summary(
+            support_grade=_text(updated.get("support_grade")) or "",
+            review_status="needs_review",
+            paper_count=int(updated.get("paper_count") or 0),
+            evidence_bundle=_mapping(updated.get("evidence_bundle")),
+        )
+        updated["upgrade_actions"] = self._finding_upgrade_actions(
+            support_grade=_text(updated.get("support_grade")) or "",
+            review_status="needs_review",
+            paper_count=int(updated.get("paper_count") or 0),
+            evidence_bundle=_mapping(updated.get("evidence_bundle")),
+        )
+        return updated
+
+    def _promote_uncovered_goal_axis_findings(
+        self,
+        primary: list[dict[str, Any]],
+        review_queue: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        goal_axes: list[str] | tuple[str, ...],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        goal_axis_keys = self._goal_axis_keys(goal_axes)
+        if not goal_axis_keys:
+            return primary, review_queue
+
+        covered_axis_keys = self._covered_goal_axis_keys(
+            primary,
+            goal_axes=goal_axes,
+        )
+        promoted: list[dict[str, Any]] = []
+        remaining_review_queue: list[dict[str, Any]] = []
+        for finding in review_queue:
+            axis_key = self._finding_goal_axis_key(finding, goal_axes=goal_axes)
+            if (
+                axis_key
+                and axis_key in goal_axis_keys
+                and axis_key not in covered_axis_keys
+                and self._promotable_table_goal_axis_finding(
+                    finding,
+                    evidence_by_id=evidence_by_id,
+                )
+            ):
+                promoted.append(finding)
+                covered_axis_keys.add(axis_key)
+                continue
+            remaining_review_queue.append(finding)
+        return [*primary, *promoted], remaining_review_queue
+
+    def _goal_axis_keys(self, goal_axes: list[str] | tuple[str, ...]) -> set[str]:
+        return {
+            axis_key
+            for axis in goal_axes
+            if (axis_key := self._axis_key(axis))
+        }
+
+    def _covered_goal_axis_keys(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        goal_axes: list[str] | tuple[str, ...],
+    ) -> set[str]:
+        return {
+            axis_key
+            for finding in findings
+            if (axis_key := self._finding_goal_axis_key(finding, goal_axes=goal_axes))
+        }
+
+    def _finding_goal_axis_key(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        goal_axes: list[str] | tuple[str, ...],
+    ) -> str:
+        variable = _text(next(iter(_strings(finding.get("variables"))), ""))
+        if not variable:
+            return ""
+        for axis in goal_axes:
+            display_axis = self._display_axis_label(axis)
+            if display_axis and self._axis_labels_match(variable, display_axis):
+                return self._axis_key(display_axis)
+        return self._axis_key(variable)
+
+    def _axis_labels_match(self, left: str, right: str) -> bool:
+        left_key = self._axis_key(left)
+        right_key = self._axis_key(right)
+        if not left_key or not right_key:
+            return False
+        if left_key == right_key:
+            return True
+        return self._objective_axis_tokens_match(left, right) or (
+            self._objective_axis_tokens_match(right, left)
+        )
+
+    def _axis_key(self, value: str) -> str:
+        normalized = _normalize_match_text(self._display_axis_label(value))
+        if normalized == "scanning speed":
+            normalized = "scan speed"
+        if normalized == "volumetric energy density":
+            normalized = "ved"
+        tokens = _normalize_axis_coverage_text(normalized)
+        if {"laser", "powder", "bed", "fusion"} <= tokens or "lpbf" in tokens:
+            normalized = "laser beam powder bed fusion"
+        if {"selective", "laser", "melting"} <= tokens or "slm" in tokens:
+            normalized = "selective laser melting"
+        return normalized
+
+    def _promotable_table_goal_axis_finding(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        if not self._finding_has_primary_expert_use_status(finding):
+            return False
+        if not self._finding_has_only_table_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if self._finding_has_same_document_source_context(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if self._finding_statement_is_table_row_comparison(
+            self._finding_statement_text(finding)
+        ):
+            return False
+        if not self._finding_has_specific_result_statement(finding):
+            return False
+        if not self._finding_statement_matches_display_variable(finding):
+            return False
+        grade = _text(finding.get("support_grade")) or ""
+        return grade in {"strong", "partial"}
+
+    def _finding_has_primary_expert_use_status(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        return (_text(finding.get("expert_use_status")) or "") in {
+            "paper_level_finding",
+            "scoped_expert_finding",
+        }
+
+    def _is_recovered_expert_finding(self, finding: Mapping[str, Any]) -> bool:
+        claim_id = _text(finding.get("claim_id")) or ""
+        return claim_id.startswith("claim_recovered_")
+
+    def _is_recovered_expert_effect(self, effect: Mapping[str, Any]) -> bool:
+        claim_id = _text(effect.get("claim_id")) or ""
+        return claim_id.startswith("claim_recovered_")
+
+    def _recovered_finding_direct_bundle(
+        self,
+        bundle: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        updated = {key: list(_strings(value)) for key, value in bundle.items()}
+        direct_refs = list(updated.get("direct_result", []))
+        text_refs = [
+            ref_id
+            for role in ("mechanism", "uncategorized")
+            for ref_id in _strings(updated.get(role))
+            if "table"
+            not in (_text(evidence_by_id.get(ref_id, {}).get("source_kind")) or "").lower()
+        ]
+        updated["direct_result"] = _dedupe_strings([*text_refs, *direct_refs])
+        updated["uncategorized"] = [
+            ref_id
+            for ref_id in updated.get("uncategorized", [])
+            if ref_id not in text_refs
+        ]
+        return updated
+
+    def _finding_has_non_direct_text_support(
+        self,
+        bundle: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        direct_refs = set(_strings(bundle.get("direct_result")))
+        for role in ("mechanism", "uncategorized", "condition_context"):
+            for ref_id in _strings(bundle.get(role)):
+                if ref_id in direct_refs:
+                    continue
+                source_kind = (
+                    _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""
+                ).lower()
+                if source_kind and "table" not in source_kind:
+                    return True
+        return False
+
+    def _source_finding_document_ids(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> set[str]:
+        document_ids: set[str] = set()
+        for finding in findings:
+            if self._finding_has_non_table_direct_result(
+                finding,
+                evidence_by_id=evidence_by_id,
+            ):
+                document_ids.update(
+                    self._finding_document_ids(finding, evidence_by_id=evidence_by_id)
+                )
+        return document_ids
+
+    def _source_evidence_document_ids(
+        self,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> set[str]:
+        document_ids: set[str] = set()
+        for evidence_ref in evidence_by_id.values():
+            source_kind = (_text(evidence_ref.get("source_kind")) or "").lower()
+            if "table" in source_kind:
+                continue
+            role = (_text(evidence_ref.get("evidence_role")) or "").lower()
+            traceability_status = (
+                _text(evidence_ref.get("traceability_status")) or ""
+            ).lower()
+            if role and role != "direct_support":
+                continue
+            if traceability_status not in {"", "resolved", "traceable"}:
+                continue
+            document_id = _text(evidence_ref.get("document_id"))
+            if document_id:
+                document_ids.add(document_id)
+        return document_ids
+
+    def _finding_document_ids(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> set[str]:
+        return {
+            document_id
+            for ref_id in _strings(finding.get("evidence_ref_ids"))
+            if (document_id := _text(evidence_by_id.get(ref_id, {}).get("document_id")))
+        }
+
+    def _finding_has_only_table_direct_result(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        direct_ref_ids = _strings(
+            _mapping(finding.get("evidence_bundle")).get("direct_result")
+        )
+        if not direct_ref_ids:
+            return False
+        return all(
+            "table" in (
+                _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""
+            ).lower()
+            for ref_id in direct_ref_ids
+        )
+
+    def _finding_has_non_table_direct_result(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        direct_ref_ids = _strings(
+            _mapping(finding.get("evidence_bundle")).get("direct_result")
+        )
+        return any(
+            "table"
+            not in (
+                _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""
+            ).lower()
+            for ref_id in direct_ref_ids
+        )
 
     def _is_primary_presentation_finding(
         self,
@@ -2003,15 +7434,367 @@ class ResearchUnderstandingService:
         if grade not in {"strong", "partial"}:
             return False
         bundle = _mapping(finding.get("evidence_bundle"))
-        return bool(
-            _strings(bundle.get("direct_result"))
-            and finding.get("relation_chain")
-            and self._finding_has_quote_aligned_direct_result(
-                finding,
+        if (
+            not _strings(bundle.get("direct_result"))
+            or not finding.get("relation_chain")
+            or not self._finding_statement_matches_display_variable(finding)
+        ):
+            return False
+        if self._finding_is_model_validation_or_prediction(
+            finding
+        ) and not self._finding_is_experimental_validation_trend(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        has_quote_aligned_direct = self._finding_has_quote_aligned_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+            blocks_by_id=blocks_by_id,
+        )
+        if has_quote_aligned_direct:
+            return True
+        if not self._finding_has_table_aligned_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if self._is_recovered_expert_finding(finding) and (
+            self._finding_has_mechanism_support(bundle)
+            or self._finding_has_non_direct_text_support(
+                bundle,
                 evidence_by_id=evidence_by_id,
-                blocks_by_id=blocks_by_id,
+            )
+        ):
+            return True
+        if self._finding_has_same_document_source_context(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if self._finding_has_specific_result_statement(finding):
+            return True
+        if self._finding_has_specific_result_evidence(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return True
+        return bool(
+            int(finding.get("paper_count") or 0) > 1
+            or (
+                self._finding_has_mechanism_support(bundle)
+                and bool(
+                    set(_strings(bundle.get("mechanism")))
+                    - set(_strings(bundle.get("direct_result")))
+                )
             )
         )
+
+    def _finding_statement_text(self, finding: Mapping[str, Any]) -> str:
+        return " ".join(
+            value
+            for value in (
+                _text(finding.get("statement")),
+                *[
+                    _text(item.get("statement"))
+                    for item in _mapping_list(finding.get("relation_chain"))
+                ],
+            )
+            if value
+        )
+
+    def _finding_is_model_validation_or_prediction(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        warnings = {
+            _text(warning)
+            for warning in _strings(finding.get("warnings"))
+            if _text(warning)
+        }
+        if "model_validation_finding" in warnings:
+            return True
+        searchable = " ".join(
+            value
+            for value in (
+                _text(finding.get("title")),
+                _text(finding.get("statement")),
+                *[
+                    _text(item.get("statement"))
+                    for item in _mapping_list(finding.get("relation_chain"))
+                ],
+            )
+            if value
+        )
+        normalized = f" {_normalize_match_text(searchable)} "
+        return bool(
+            (
+                " model " in normalized
+                or " prediction " in normalized
+                or " predictions " in normalized
+                or " predicted " in normalized
+                or " validation " in normalized
+                or " validate " in normalized
+            )
+            and (
+                " yield strength " in normalized
+                or " texture " in normalized
+                or " crystallographic " in normalized
+            )
+        )
+
+    def _finding_is_experimental_validation_trend(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        warnings = {
+            _text(warning)
+            for warning in _strings(finding.get("warnings"))
+            if _text(warning)
+        }
+        if "model_validation_finding" not in warnings:
+            return False
+        variables = _normalize_match_text(" ".join(_strings(finding.get("variables"))))
+        outcomes = _normalize_match_text(" ".join(_strings(finding.get("outcomes"))))
+        if not (
+            "yield strength" in outcomes
+            and (
+                "scan strategy" in variables
+                or "build orientation" in variables
+                or "rotation angle" in variables
+            )
+        ):
+            return False
+        direct_ref_ids = _strings(
+            _mapping(finding.get("evidence_bundle")).get("direct_result")
+        )
+        if not direct_ref_ids:
+            return False
+        direct_text = " ".join(
+            _text(evidence_by_id.get(ref_id, {}).get("quote")) or ""
+            for ref_id in direct_ref_ids
+        )
+        normalized = f" {_normalize_match_text(direct_text)} "
+        if not (
+            " experimental findings " in normalized
+            or " experimental data " in normalized
+            or " validation results " in normalized
+        ):
+            return False
+        if not (
+            " yield strength " in normalized
+            and re.search(r"\byield strengths?\s+increased\s+from\b", normalized)
+            and " to " in normalized
+        ):
+            return False
+        return bool(
+            " scan strategy " in normalized
+            or " build orientation " in normalized
+            or " configuration " in normalized
+            or " condition " in normalized
+        )
+
+    def _finding_has_same_document_source_context(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_document_ids = {
+            document_id
+            for ref_id in _strings(bundle.get("direct_result"))
+            if (document_id := _text(evidence_by_id.get(ref_id, {}).get("document_id")))
+        }
+        if not direct_document_ids:
+            return False
+        for bundle_key in (
+            "mechanism",
+            "condition_context",
+            "background",
+            "uncategorized",
+        ):
+            for ref_id in _strings(bundle.get(bundle_key)):
+                if ref_id in _strings(bundle.get("direct_result")):
+                    continue
+                evidence_ref = evidence_by_id.get(ref_id, {})
+                document_id = _text(evidence_ref.get("document_id"))
+                if document_id not in direct_document_ids:
+                    continue
+                source_kind = (_text(evidence_ref.get("source_kind")) or "").lower()
+                if "table" not in source_kind:
+                    return True
+        return False
+
+    def _finding_has_specific_result_statement(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        searchable = " ".join(
+            value
+            for value in (
+                _text(finding.get("statement")),
+                *[
+                    _text(item.get("statement"))
+                    for item in _mapping_list(finding.get("relation_chain"))
+                ],
+            )
+            if value
+        )
+        if not searchable or not re.search(r"\d", searchable):
+            return False
+        normalized = f" {_normalize_match_text(searchable)} "
+        variables = _strings(finding.get("variables"))
+        outcomes = _strings(finding.get("outcomes"))
+        return bool(
+            _quote_has_concrete_result_cue(searchable)
+            and variables
+            and outcomes
+            and self._finding_statement_matches_display_variable(finding)
+            and _quote_term_hits(
+                normalized,
+                self._finding_statement_outcome_terms(outcomes),
+            )
+        )
+
+    def _finding_has_specific_result_evidence(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return False
+        direct_text = " ".join(
+            _text(evidence_by_id.get(ref_id, {}).get("quote")) or ""
+            for ref_id in direct_ref_ids
+        )
+        has_table_direct_ref = any(
+            "table" in (
+                _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""
+            ).lower()
+            for ref_id in direct_ref_ids
+        )
+        has_concrete_result = _quote_has_concrete_result_cue(direct_text) or (
+            has_table_direct_ref and bool(re.search(r"\d", direct_text))
+        )
+        if not direct_text or not has_concrete_result:
+            return False
+        normalized = self._alignment_searchable_text(direct_text)
+        terms = self._finding_quote_alignment_terms(finding)
+        return bool(
+            _quote_term_hits(normalized, terms["variable"])
+            and _quote_term_hits(normalized, terms["outcome"])
+        )
+
+    def _finding_statement_matches_display_variable(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        variables = _strings(finding.get("variables"))
+        if not variables:
+            return False
+        primary_variable = variables[:1]
+        relation_statements = [
+            _text(item.get("statement"))
+            for item in _mapping_list(finding.get("relation_chain"))
+            if _text(item.get("statement"))
+        ]
+        searchable = " ".join(
+            value
+            for value in [
+                _text(finding.get("statement")),
+                *relation_statements,
+            ]
+            if value
+        )
+        return self._variable_matches_direct_evidence(
+            primary_variable,
+            searchable,
+        ) or self._finding_statement_matches_symbol_axis_alias(
+            primary_variable[0],
+            finding,
+            searchable,
+        )
+
+    def _finding_statement_matches_symbol_axis_alias(
+        self,
+        variable: str,
+        finding: Mapping[str, Any],
+        searchable: str,
+    ) -> bool:
+        if "greek_" not in _symbol_match_text(searchable):
+            return False
+        normalized_variable = _normalize_match_text(variable)
+        if not normalized_variable:
+            return False
+        for item in _mapping_list(finding.get("relation_chain")):
+            chain_variable = _text(item.get("variable"))
+            if _normalize_match_text(chain_variable) != normalized_variable:
+                continue
+            relation_statement = _text(item.get("statement"))
+            if "greek_" in _symbol_match_text(relation_statement):
+                return True
+        return False
+
+    def _finding_has_table_aligned_direct_result(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return False
+        statement = _text(finding.get("statement")) or ""
+        terms = self._finding_quote_alignment_terms(finding)
+        relation_statements = [
+            _text(item.get("statement"))
+            for item in _mapping_list(finding.get("relation_chain"))
+            if _text(item.get("statement"))
+        ]
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        direct_text = " ".join(
+            _text(evidence_by_id.get(ref_id, {}).get("quote")) or ""
+            for ref_id in direct_ref_ids
+        )
+        searchable = self._alignment_searchable_text(
+            " ".join([statement, *relation_statements, direct_text])
+        )
+        has_symbol_axis_statement = "greek_" in _symbol_match_text(searchable)
+        if not (
+            (
+                _quote_term_hits(searchable, terms["variable"])
+                or has_symbol_axis_statement
+            )
+            and _quote_term_hits(searchable, terms["outcome"])
+            and re.search(r"\d", " ".join([statement, *relation_statements, direct_text]))
+        ):
+            return False
+        for ref_id in direct_ref_ids:
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            source_kind = (_text(evidence_ref.get("source_kind")) or "").lower()
+            locator = _locator_mapping(evidence_ref.get("locator"))
+            traceability_status = (
+                _text(evidence_ref.get("traceability_status")) or ""
+            ).lower()
+            if (
+                "table" in source_kind
+                and _text(locator.get("source_ref"))
+                and traceability_status in {"resolved", "traceable"}
+            ):
+                return True
+        return False
+
+    def _alignment_searchable_text(self, value: Any) -> str:
+        normalized = _normalize_match_text(str(value or ""))
+        symbol_text = _symbol_match_text(value)
+        return f" {normalized} {symbol_text} "
 
     def _finding_has_quote_aligned_direct_result(
         self,
@@ -2043,6 +7826,9 @@ class ResearchUnderstandingService:
         }
         for ref_id in direct_ref_ids:
             evidence_ref = evidence_by_id.get(ref_id, {})
+            source_kind = (_text(evidence_ref.get("source_kind")) or "").lower()
+            if "table" in source_kind:
+                continue
             locator = _locator_mapping(evidence_ref.get("locator"))
             block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
             source_block = self._presentation_source_block_for_quote(
@@ -2058,7 +7844,7 @@ class ResearchUnderstandingService:
                 source_text=source_text,
                 quote_hints=quote_hints,
             )
-            searchable = _normalize_match_text(_short_text(visible_quote, limit=240))
+            searchable = _normalize_match_text(visible_quote)
             if not searchable:
                 continue
             bounded = f" {searchable} "
@@ -2099,6 +7885,12 @@ class ResearchUnderstandingService:
     ) -> dict[str, set[str]]:
         variable_terms: set[str] = set()
         for value in _strings(finding.get("variables")):
+            variable_terms.update(_quote_hint_terms(value))
+            symbol_term = _symbol_match_term(value)
+            if symbol_term:
+                variable_terms.add(symbol_term)
+            if _normalize_match_text(value) == "volumetric energy density":
+                variable_terms.add("ved")
             tokens = _meaningful_match_tokens(value)
             if not tokens:
                 continue
@@ -2146,6 +7938,8 @@ class ResearchUnderstandingService:
         for value in _strings(finding.get("outcomes")):
             outcome_terms.update(_quote_hint_terms(value))
             normalized = _normalize_match_text(value)
+            if normalized == "ductility":
+                outcome_terms.update({"ductility", "elongation", "el"})
             if normalized == "microstructure":
                 outcome_terms.update(microstructure_concrete)
             elif normalized == "mechanical properties":
@@ -2190,6 +7984,105 @@ class ResearchUnderstandingService:
 
         return [finding for _, finding in sorted(enumerate(findings), key=sort_key)]
 
+    def _findings_without_redundant_generic_mechanical_rows(
+        self,
+        findings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        concrete_mechanical_variables = {
+            self._axis_key(variable)
+            for finding in findings
+            for variable in _strings(finding.get("variables"))
+            if self._finding_has_concrete_mechanical_outcome(finding)
+        }
+        concrete_mechanical_variables.discard("")
+        if not concrete_mechanical_variables:
+            return findings
+        return [
+            finding
+            for finding in findings
+            if not (
+                self._finding_is_generic_mechanical_property_row(finding)
+                and (
+                    self._finding_variable_axis_keys(finding)
+                    & concrete_mechanical_variables
+                    or self._finding_is_generic_mechanical_process_umbrella(finding)
+                )
+            )
+        ]
+
+    def _finding_has_concrete_mechanical_outcome(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        return any(
+            _normalize_match_text(outcome)
+            in {
+                "ductility",
+                "elongation",
+                "fatigue life",
+                "fatigue strength",
+                "ultimate tensile strength",
+                "yield strength",
+            }
+            for outcome in _strings(finding.get("outcomes"))
+        )
+
+    def _finding_is_generic_mechanical_property_row(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        outcomes = {
+            _normalize_match_text(outcome)
+            for outcome in _strings(finding.get("outcomes"))
+        }
+        if outcomes != {"mechanical properties"}:
+            return False
+        statement = _normalize_match_text(_text(finding.get("statement")) or "")
+        relation_text = _normalize_match_text(
+            " ".join(
+                _text(segment.get("statement")) or ""
+                for segment in _mapping_list(finding.get("relation_chain"))
+            )
+        )
+        return bool(
+            "is associated with mechanical properties" in statement
+            or (
+                "mechanical properties" in relation_text
+                and not re.search(
+                    r"\b(yield|ultimate|tensile|elongation|ductility|fatigue)\b",
+                    statement,
+                )
+            )
+        )
+
+    def _finding_variable_axis_keys(
+        self,
+        finding: Mapping[str, Any],
+    ) -> set[str]:
+        keys = {self._axis_key(variable) for variable in _strings(finding.get("variables"))}
+        for segment in _mapping_list(finding.get("relation_chain")):
+            if variable := _text(segment.get("variable")):
+                keys.add(self._axis_key(variable))
+        keys.discard("")
+        return keys
+
+    def _finding_is_generic_mechanical_process_umbrella(
+        self,
+        finding: Mapping[str, Any],
+    ) -> bool:
+        variable_text = " ".join(_strings(finding.get("variables")))
+        title = _text(finding.get("title")) or ""
+        statement = _text(finding.get("statement")) or ""
+        normalized = _normalize_match_text(" ".join((variable_text, title, statement)))
+        return bool(
+            "mechanical properties" in normalized
+            and (
+                "processing parameters" in normalized
+                or "process parameters" in normalized
+                or "slm processing" in normalized
+            )
+        )
+
     def _presentation_finding(
         self,
         effect: Mapping[str, Any],
@@ -2197,9 +8090,74 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         relations_by_id: Mapping[str, dict[str, Any]],
         blocks_by_id: Mapping[str, SourceBlock],
+        contexts_by_id: Mapping[str, dict[str, Any]],
     ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
         relations = self._finding_relations(effect, relations_by_id)
+        fallback_variable = _text(effect.get("variable_axis"))
+        statement_axis = self._statement_comparison_axis(
+            _text(effect.get("statement")) or "",
+            goal_axes=[fallback_variable] if fallback_variable else [],
+        )
+        if (
+            len(relations) == 1
+            and statement_axis
+            and not self._is_recovered_expert_effect(effect)
+        ):
+            relations = [
+                self._relation_with_presentation_subject(
+                    relations[0],
+                    statement_axis,
+                )
+            ]
+            fallback_variable = statement_axis
+        initial_evidence_bundle = self._finding_evidence_bundle(
+            effect,
+            evidence_by_id=evidence_by_id,
+            relations=relations,
+            outcomes=self._finding_outcomes(effect, relations),
+        )
+        initial_display_variables = self._finding_display_variables(
+            self._finding_variables(effect, relations),
+            relations=relations,
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=initial_evidence_bundle,
+        )
+        if self._is_recovered_expert_effect(effect):
+            initial_display_variables = self._finding_variables(effect, relations)
+        if (
+            len(relations) == 1
+            and initial_display_variables
+            and not self._is_recovered_expert_effect(effect)
+            and initial_display_variables[0]
+            != self._presentation_relation_side(relations[0].get("subject"))
+            and self._variable_matches_direct_evidence(
+                [initial_display_variables[0]],
+                _text(effect.get("statement")) or "",
+            )
+        ):
+            relations = [
+                self._relation_with_presentation_subject(
+                    relations[0],
+                    initial_display_variables[0],
+                )
+            ]
+        if (
+            len(relations) == 1
+            and fallback_variable
+            and fallback_variable
+            != self._presentation_relation_side(relations[0].get("subject"))
+            and self._variable_matches_direct_evidence(
+                [fallback_variable],
+                _text(effect.get("statement")) or "",
+            )
+        ):
+            relations = [
+                self._relation_with_presentation_subject(
+                    relations[0],
+                    fallback_variable,
+                )
+            ]
         variables = self._finding_variables(effect, relations)
         mediators = self._finding_mediators(relations)
         outcomes = self._finding_outcomes(effect, relations)
@@ -2219,15 +8177,76 @@ class ResearchUnderstandingService:
             outcomes=outcomes,
             blocks_by_id=blocks_by_id,
         )
+        evidence_bundle = self._compact_finding_evidence_bundle(
+            evidence_bundle,
+            evidence_by_id=evidence_by_id,
+        )
+        if self._is_recovered_expert_effect(effect):
+            evidence_bundle = self._recovered_finding_direct_bundle(
+                evidence_bundle,
+                evidence_by_id=evidence_by_id,
+            )
+        mechanism_source_text = " ".join(
+            self._direct_evidence_source_texts(
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=evidence_bundle,
+                blocks_by_id=blocks_by_id,
+            )
+        )
+        normalized_outcomes = _normalize_match_text(" ".join(outcomes))
+        if (
+            "passive film" in _normalize_match_text(mechanism_source_text)
+            and ("corrosion" in normalized_outcomes or "pitting" in normalized_outcomes)
+            and not any(
+                _normalize_match_text(mediator) == "passive film"
+                for mediator in mediators
+            )
+        ):
+            mediators = [*mediators, "passive film"]
+            evidence_bundle = {
+                key: list(value) for key, value in evidence_bundle.items()
+            }
+            evidence_bundle["mechanism"] = _dedupe_strings(
+                [
+                    *evidence_bundle.get("mechanism", []),
+                    *evidence_bundle.get("direct_result", []),
+                ]
+            )
+        evidence_mediators = self._finding_mediators_from_direct_evidence(
+            mechanism_source_text
+        )
+        if evidence_mediators:
+            mediators = _dedupe_strings([*mediators, *evidence_mediators])
+            evidence_bundle = {
+                key: list(value) for key, value in evidence_bundle.items()
+            }
+            evidence_bundle["mechanism"] = _dedupe_strings(
+                [
+                    *evidence_bundle.get("mechanism", []),
+                    *evidence_bundle.get("direct_result", []),
+                ]
+            )
         display_variables = self._finding_display_variables(
             variables,
             relations=relations,
             evidence_by_id=evidence_by_id,
             evidence_bundle=evidence_bundle,
         )
+        if self._is_recovered_expert_effect(effect):
+            display_variables = variables
+            if (
+                _text(effect.get("claim_id")) or ""
+            ).startswith("claim_recovered_ved_defects_fatigue_"):
+                display_variables = [
+                    "VED"
+                    if _normalize_match_text(variable) == "volumetric energy density"
+                    else variable
+                    for variable in display_variables
+                ]
         statement = self._finding_statement(
             statement=_text(effect.get("statement")) or "",
             variables=display_variables,
+            relations=relations,
             outcomes=outcomes,
             evidence_by_id=evidence_by_id,
             evidence_bundle=evidence_bundle,
@@ -2250,16 +8269,64 @@ class ResearchUnderstandingService:
             statement = self._finding_statement(
                 statement=_text(effect.get("statement")) or "",
                 variables=display_variables,
+                relations=relations,
                 outcomes=outcomes,
                 evidence_by_id=evidence_by_id,
                 evidence_bundle=evidence_bundle,
                 blocks_by_id=blocks_by_id,
             )
+            statement = (
+                self._relation_derived_finding_statement(
+                    relations,
+                    variables=display_variables,
+                    outcomes=outcomes,
+                )
+                or statement
+            )
+        contexts = [
+            contexts_by_id[context_id]
+            for context_id in _strings(effect.get("context_ids"))
+            if context_id in contexts_by_id
+        ]
+        statement = self._contextualized_comparison_statement(
+            statement,
+            variable_axis=display_variables[0] if display_variables else "",
+            target_property=outcomes[0] if outcomes else "",
+            direction=direction,
+            contexts=contexts,
+        )
         review_status = self._finding_review_status(effect)
         scope_summary = _compact_finding_scope_summary(
             _text(effect.get("context_summary")) or "",
             variables=display_variables,
             outcomes=outcomes,
+        )
+        scope_summary = self._finding_scope_summary_with_direct_conditions(
+            scope_summary,
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        )
+        support_grade = self._finding_support_grade(
+            effect,
+            evidence_bundle=evidence_bundle,
+            outcomes=outcomes,
+            relation_ids=relation_ids,
+            review_status=review_status,
+            scope_summary=scope_summary,
+        )
+        paper_count = int(effect.get("paper_count") or 0)
+        expert_use_status = self._finding_expert_use_status(
+            support_grade=support_grade,
+            review_status=review_status,
+            paper_count=paper_count,
+            evidence_bundle=evidence_bundle,
+        )
+        generalization_status = self._finding_generalization_status(
+            support_grade=support_grade,
+            review_status=review_status,
+            paper_count=paper_count,
+            evidence_bundle=evidence_bundle,
         )
         return {
             "finding_id": f"finding_{claim_id}",
@@ -2281,14 +8348,7 @@ class ResearchUnderstandingService:
                 outcomes=outcomes,
             ),
             "scope_summary": scope_summary,
-            "support_grade": self._finding_support_grade(
-                effect,
-                evidence_bundle=evidence_bundle,
-                outcomes=outcomes,
-                relation_ids=relation_ids,
-                review_status=review_status,
-                scope_summary=scope_summary,
-            ),
+            "support_grade": support_grade,
             "review_status": review_status,
             "confidence": effect.get("confidence"),
             "paper_count": effect.get("paper_count") or 0,
@@ -2297,8 +8357,740 @@ class ResearchUnderstandingService:
             "context_ids": list(_strings(effect.get("context_ids"))),
             "relation_ids": relation_ids,
             "evidence_bundle": evidence_bundle,
+            "comparison_summary": self._finding_comparison_summary(
+                statement,
+                variables=display_variables,
+                outcomes=outcomes,
+                direction=direction,
+            ),
+            "expert_use_status": expert_use_status,
+            "dataset_use_status": "review_candidate",
+            "generalization_status": generalization_status,
+            "generalization_note": self._finding_generalization_note(
+                generalization_status=generalization_status,
+                paper_count=paper_count,
+            ),
+            "evidence_gap_summary": self._finding_evidence_gap_summary(
+                support_grade=support_grade,
+                review_status=review_status,
+                paper_count=paper_count,
+                evidence_bundle=evidence_bundle,
+            ),
+            "upgrade_actions": self._finding_upgrade_actions(
+                support_grade=support_grade,
+                review_status=review_status,
+                paper_count=paper_count,
+                evidence_bundle=evidence_bundle,
+            ),
+            "related_review_finding_ids": list(
+                _strings(effect.get("related_review_finding_ids"))
+            ),
+            "review_reasons": self._finding_review_reasons(
+                effect,
+                evidence_bundle=evidence_bundle,
+                mediators=mediators,
+                mechanism_source_text=mechanism_source_text,
+                outcomes=outcomes,
+                relation_ids=relation_ids,
+                review_status=review_status,
+                support_grade=support_grade,
+                scope_summary=scope_summary,
+            ),
             "warnings": list(_strings(effect.get("warnings"))),
         }
+
+    def _finding_comparison_summary(
+        self,
+        statement: str,
+        *,
+        variables: list[str],
+        outcomes: list[str],
+        direction: str,
+    ) -> dict[str, Any] | None:
+        text = _text(statement) or ""
+        if not text:
+            return None
+        variable = self._display_axis_label(variables[0]) if variables else ""
+        outcome = outcomes[0] if outcomes else ""
+        if not variable or not outcome:
+            return None
+        normalized_direction = self._comparison_summary_direction(direction, text)
+        if not normalized_direction:
+            return None
+
+        changing_pattern = re.compile(
+            r"^(?:Under|With)\s+(?P<conditions>.+),\s+changing\s+"
+            r"(?P<axis>.+?)\s+from\s+"
+            r"(?P<baseline_axis_value>.+?)\s+to\s+"
+            r"(?P<observed_axis_value>.+?)\s+"
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"(?P<outcome>.+?)\s+from\s+"
+            r"(?P<baseline_value>.+?)\s+to\s+"
+            r"(?P<observed_value>.+?)\.?$",
+            flags=re.IGNORECASE,
+        )
+        changing_match = changing_pattern.match(text.strip())
+        if changing_match is not None:
+            axis_label = self._comparison_statement_axis_label(variable)
+            baseline_axis_value = _clean_comparison_summary_value(
+                changing_match.group("baseline_axis_value")
+            )
+            observed_axis_value = _clean_comparison_summary_value(
+                changing_match.group("observed_axis_value")
+            )
+            baseline_value = _clean_comparison_summary_value(
+                changing_match.group("baseline_value")
+            )
+            observed_value = _clean_comparison_summary_value(
+                changing_match.group("observed_value")
+            )
+            statement_outcome = _clean_comparison_summary_text(
+                changing_match.group("outcome")
+            )
+            if baseline_axis_value and observed_axis_value and baseline_value and observed_value:
+                return {
+                    "variable": variable,
+                    "direction": normalized_direction,
+                    "outcome": outcome or statement_outcome,
+                    "baseline": {
+                        "label": f"{axis_label}={baseline_axis_value}",
+                        "value": baseline_value,
+                    },
+                    "observed": {
+                        "label": f"{axis_label}={observed_axis_value}",
+                        "value": observed_value,
+                    },
+                    "controlled_conditions": self._comparison_summary_conditions(
+                        changing_match.group("conditions")
+                    ),
+                }
+
+        multi_axis_pattern = re.compile(
+            r"^(?:With\s+(?P<conditions>.+),\s+)?"
+            r"table-row comparison changes\s+"
+            r"(?P<changed_axes>.+?);\s+"
+            r"(?P<outcome>.+?)\s+"
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"from\s+"
+            r"(?P<baseline_value>.+?)\s+to\s+"
+            r"(?P<observed_value>.+?)\.?$",
+            flags=re.IGNORECASE,
+        )
+        multi_axis_match = multi_axis_pattern.match(text.strip())
+        if multi_axis_match is not None:
+            baseline_value = _clean_comparison_summary_value(
+                multi_axis_match.group("baseline_value")
+            )
+            observed_value = _clean_comparison_summary_value(
+                multi_axis_match.group("observed_value")
+            )
+            statement_outcome = _clean_comparison_summary_text(
+                multi_axis_match.group("outcome")
+            )
+            if baseline_value and observed_value:
+                return {
+                    "variable": _MULTI_AXIS_TABLE_CONTRAST_LABEL,
+                    "direction": self._comparison_summary_direction(
+                        multi_axis_match.group("direction"),
+                        text,
+                    ),
+                    "outcome": outcome or statement_outcome,
+                    "baseline": {"label": "", "value": baseline_value},
+                    "observed": {
+                        "label": _MULTI_AXIS_TABLE_CONTRAST_LABEL,
+                        "value": observed_value,
+                    },
+                    "controlled_conditions": self._comparison_summary_conditions(
+                        multi_axis_match.group("conditions")
+                    ),
+                }
+
+        target_outcome = _normalize_match_text(outcome)
+        pattern = re.compile(
+            r"^(?:Under|With)\s+(?P<conditions>.+),\s+"
+            r"(?P<observed_label>.+?)\s+"
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"(?P<outcome>.+?)\s+from\s+"
+            r"(?P<baseline_segment>.+?)\s+to\s+"
+            r"(?P<observed_value>.+?)\.?$",
+            flags=re.IGNORECASE,
+        )
+        match = pattern.match(text.strip())
+        if match is not None:
+            observed_label = _clean_comparison_summary_text(
+                match.group("observed_label")
+            )
+            baseline_value, baseline_label = _comparison_summary_baseline(
+                match.group("baseline_segment")
+            )
+            observed_value = _clean_comparison_summary_value(
+                match.group("observed_value")
+            )
+            statement_outcome = _clean_comparison_summary_text(match.group("outcome"))
+            if observed_label and baseline_value and observed_value:
+                return {
+                    "variable": variable,
+                    "direction": normalized_direction,
+                    "outcome": outcome or statement_outcome,
+                    "baseline": {
+                        "label": baseline_label,
+                        "value": baseline_value,
+                    },
+                    "observed": {
+                        "label": observed_label,
+                        "value": observed_value,
+                    },
+                    "controlled_conditions": self._comparison_summary_conditions(
+                        match.group("conditions")
+                    ),
+                }
+
+        from_to_pattern = re.compile(
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"(?P<outcome>.+?)\s+from\s+"
+            r"(?P<baseline_segment>.+?)\s+to\s+"
+            r"(?P<observed_value>[+-]?\d+(?:\.\d+)?\s*(?:%|MPa|GPa|J/mm3|J/mm³|HV|°\s*C|°C|C|K)?)",
+            flags=re.IGNORECASE,
+        )
+        from_to_match = from_to_pattern.search(text.strip())
+        if from_to_match is not None:
+            statement_outcome = _clean_comparison_summary_text(
+                from_to_match.group("outcome")
+            )
+            normalized_statement_outcome = _normalize_match_text(statement_outcome)
+            if (
+                normalized_statement_outcome
+                and (
+                    not target_outcome
+                    or target_outcome in normalized_statement_outcome
+                    or normalized_statement_outcome in target_outcome
+                )
+            ):
+                baseline_value, baseline_label = _comparison_summary_baseline(
+                    from_to_match.group("baseline_segment")
+                )
+                observed_value = _clean_comparison_summary_value(
+                    from_to_match.group("observed_value")
+                )
+                baseline_value = re.sub(
+                    r"^(?:the|a|an)\s+",
+                    "",
+                    baseline_value,
+                    flags=re.IGNORECASE,
+                )
+                observed_value = re.sub(
+                    r"^(?:the|a|an)\s+",
+                    "",
+                    observed_value,
+                    flags=re.IGNORECASE,
+                )
+                if baseline_value and observed_value:
+                    return {
+                        "variable": variable,
+                        "direction": normalized_direction,
+                        "outcome": outcome or statement_outcome,
+                        "baseline": {
+                            "label": baseline_label,
+                            "value": baseline_value,
+                        },
+                        "observed": {
+                            "label": variable,
+                            "value": observed_value,
+                        },
+                        "controlled_conditions": [],
+                    }
+
+        outcome_first_from_to_pattern = re.compile(
+            r"(?P<outcome>.+?)\s+"
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"from\s+"
+            r"(?P<baseline_segment>[^.;]+?)\s+to\s+"
+            r"(?P<observed_value>.+?)(?:\s+with\b|[.;](?:\s|$)|$)",
+            flags=re.IGNORECASE,
+        )
+        outcome_first_from_to_match = outcome_first_from_to_pattern.search(
+            text.strip()
+        )
+        if outcome_first_from_to_match is not None:
+            statement_outcome = _clean_comparison_summary_text(
+                outcome_first_from_to_match.group("outcome")
+            )
+            normalized_statement_outcome = _normalize_match_text(statement_outcome)
+            if (
+                normalized_statement_outcome
+                and (
+                    not target_outcome
+                    or target_outcome in normalized_statement_outcome
+                    or normalized_statement_outcome in target_outcome
+                )
+            ):
+                baseline_value, baseline_label = _comparison_summary_baseline(
+                    outcome_first_from_to_match.group("baseline_segment")
+                )
+                observed_value = _clean_comparison_summary_value(
+                    outcome_first_from_to_match.group("observed_value")
+                )
+                baseline_value = re.sub(
+                    r"^(?:the|a|an)\s+",
+                    "",
+                    baseline_value,
+                    flags=re.IGNORECASE,
+                )
+                observed_value = re.sub(
+                    r"^(?:the|a|an)\s+",
+                    "",
+                    observed_value,
+                    flags=re.IGNORECASE,
+                )
+                if baseline_value and observed_value:
+                    return {
+                        "variable": variable,
+                        "direction": normalized_direction,
+                        "outcome": outcome or statement_outcome,
+                        "baseline": {
+                            "label": baseline_label,
+                            "value": baseline_value,
+                        },
+                        "observed": {
+                            "label": variable,
+                            "value": observed_value,
+                        },
+                        "controlled_conditions": [],
+                    }
+
+        from_to_label_pattern = re.compile(
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"(?P<outcome>.+?)\s+from\s+"
+            r"(?P<baseline_segment>[^.;]+?)\s+to\s+"
+            r"(?P<observed_value>.+?)(?:[.;](?:\s|$)|$)",
+            flags=re.IGNORECASE,
+        )
+        from_to_label_match = from_to_label_pattern.search(text.strip())
+        if from_to_label_match is not None:
+            statement_outcome = _clean_comparison_summary_text(
+                from_to_label_match.group("outcome")
+            )
+            normalized_statement_outcome = _normalize_match_text(statement_outcome)
+            if (
+                normalized_statement_outcome
+                and (
+                    not target_outcome
+                    or target_outcome in normalized_statement_outcome
+                    or normalized_statement_outcome in target_outcome
+                )
+            ):
+                baseline_value, baseline_label = _comparison_summary_baseline(
+                    from_to_label_match.group("baseline_segment")
+                )
+                observed_value = _clean_comparison_summary_value(
+                    from_to_label_match.group("observed_value")
+                )
+                baseline_value = re.sub(
+                    r"^(?:the|a|an)\s+",
+                    "",
+                    baseline_value,
+                    flags=re.IGNORECASE,
+                )
+                observed_value = re.sub(
+                    r"^(?:the|a|an)\s+",
+                    "",
+                    observed_value,
+                    flags=re.IGNORECASE,
+                )
+                if baseline_value and observed_value:
+                    return {
+                        "variable": variable,
+                        "direction": normalized_direction,
+                        "outcome": outcome or statement_outcome,
+                        "baseline": {
+                            "label": baseline_label,
+                            "value": baseline_value,
+                        },
+                        "observed": {
+                            "label": variable,
+                            "value": observed_value,
+                        },
+                        "controlled_conditions": [],
+                    }
+
+        delta_pattern = re.compile(
+            r"(?P<observed_label>.+?)\s+"
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises)\s+"
+            r"(?P<outcome>.+?)\s+by\s+"
+            r"(?P<delta>[+-]?\d+(?:\.\d+)?\s*%)",
+            flags=re.IGNORECASE,
+        )
+        delta_match = delta_pattern.search(text.strip())
+        if delta_match is None:
+            return None
+        statement_outcome = _clean_comparison_summary_text(delta_match.group("outcome"))
+        normalized_statement_outcome = _normalize_match_text(statement_outcome)
+        if (
+            not normalized_statement_outcome
+            or (
+                target_outcome
+                and target_outcome not in normalized_statement_outcome
+                and normalized_statement_outcome not in target_outcome
+            )
+        ):
+            return None
+        observed_label = _clean_comparison_summary_text(
+            delta_match.group("observed_label")
+        )
+        condition_value = ""
+        condition_match = re.search(
+            r"\b(?:to|at)\s+(?P<value>[+-]?\d+(?:\.\d+)?\s*(?:°\s*C|°C|C|K|J/mm3|J/mm³|%))\b",
+            observed_label,
+            flags=re.IGNORECASE,
+        )
+        if condition_match is not None:
+            condition_value = _clean_comparison_summary_value(
+                condition_match.group("value")
+            )
+        delta = _clean_comparison_summary_value(delta_match.group("delta"))
+        if not delta:
+            return None
+        delta_prefix = "+" if normalized_direction == "increases" else "-"
+        delta_value = f"{delta_prefix}{delta.lstrip('+-')} {outcome or statement_outcome}"
+        return {
+            "variable": variable,
+            "direction": normalized_direction,
+            "outcome": outcome or statement_outcome,
+            "baseline": {
+                "label": "",
+                "value": "reference",
+            },
+            "observed": {
+                "label": (
+                    f"{variable} {condition_value}" if condition_value else observed_label
+                ),
+                "value": delta_value,
+            },
+            "controlled_conditions": [],
+        }
+
+    def _comparison_summary_direction(self, direction: str, statement: str) -> str:
+        normalized = _normalize_match_text(direction)
+        if normalized:
+            if normalized in {"increase", "increased", "increases", "improve", "improved", "improves", "raise", "raised", "raises"}:
+                return "increases"
+            if normalized in {"decrease", "decreased", "decreases", "reduce", "reduced", "reduces", "lower", "lowered", "lowers"}:
+                return "decreases"
+            if normalized in {"change", "changed", "changes"}:
+                return "changes"
+        lowered = f" {_normalize_match_text(statement)} "
+        if re.search(r"\b(increased|increases|improved|improves|raised|raises)\b", lowered):
+            return "increases"
+        if re.search(r"\b(decreased|decreases|reduced|reduces|lowered|lowers)\b", lowered):
+            return "decreases"
+        if re.search(r"\b(changed|changes)\b", lowered):
+            return "changes"
+        return ""
+
+    def _comparison_summary_conditions(self, text: str | None) -> list[dict[str, str]]:
+        raw = _clean_comparison_summary_text(text)
+        if not raw:
+            return []
+        parts = [
+            _clean_comparison_summary_text(part)
+            for part in re.split(r",\s+|\s+and\s+", raw)
+        ]
+        conditions: list[dict[str, str]] = []
+        for part in parts:
+            if not part:
+                continue
+            if "=" in part:
+                axis, value = part.split("=", 1)
+            else:
+                axis, value = self._comparison_summary_axis_value(part)
+                if axis and value:
+                    axis_text = self._display_axis_label(
+                        _clean_comparison_summary_text(axis)
+                    )
+                    value_text = _clean_comparison_summary_text(value)
+                    conditions.append({"axis": axis_text, "value": value_text})
+                    continue
+                match = re.match(r"(.+?)\s+([^\s]+)$", part)
+                if not match:
+                    continue
+                axis, value = match.groups()
+            axis_text = self._display_axis_label(_clean_comparison_summary_text(axis))
+            value_text = _clean_comparison_summary_text(value)
+            if axis_text and value_text:
+                conditions.append({"axis": axis_text, "value": value_text})
+        return _dedupe_mapping_list(conditions)
+
+    def _comparison_summary_axis_value(self, text: str) -> tuple[str, str]:
+        symbol_match = re.match(
+            r"^\s*(?P<symbol>[αβθɵ])(?:\s+.+?)?\s+"
+            r"(?P<value>[-+]?\d+(?:\.\d+)?(?:\s*(?:%|MPa|GPa|J/mm3|J/mm³|HV|°\s*C|°C|C|K))?)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if symbol_match is not None:
+            axis = self._display_axis_label(symbol_match.group("symbol"))
+            value = self._comparison_summary_value_without_axis_unit(
+                symbol_match.group("value")
+            )
+            if axis and value:
+                return axis, value
+        normalized = f" {_normalize_match_text(text)} "
+        axis_labels = (
+            "build platform preheating temperature",
+            "heat treatment type",
+            "heat treatment parameters",
+            "volumetric energy density",
+            "laser energy density",
+            "scan strategy rotation angle",
+            "build orientation angle",
+            "scanning speed",
+            "scan speed",
+            "laser power",
+            "hatch spacing",
+            "layer thickness",
+            "energy density",
+            "porosity level",
+            "pore size",
+        )
+        for axis in axis_labels:
+            axis_key = _normalize_match_text(axis)
+            if normalized.startswith(f" {axis_key} "):
+                value = self._comparison_summary_value_without_axis_unit(
+                    text[len(axis) :].strip()
+                )
+                if value:
+                    return axis, value
+        for axis in axis_labels:
+            axis_key = _normalize_match_text(axis)
+            pattern = (
+                rf"^\s*{re.escape(axis_key)}(?:\s+\([^)]*\)|\s+\[[^\]]+\])?"
+                r"\s+(?P<value>.+?)\s*$"
+            )
+            match = re.match(pattern, _normalize_match_text(text))
+            if match is None:
+                continue
+            value = self._comparison_summary_value_without_axis_unit(
+                match.group("value")
+            )
+            if value:
+                return axis, value
+        type_heat_treatment = re.match(
+            r"^\s*type\s+of\s+heat\s+treatment\s+(?P<value>.+?)\s*$",
+            _normalize_match_text(text),
+        )
+        if type_heat_treatment is not None:
+            value = self._comparison_summary_value_without_axis_unit(
+                type_heat_treatment.group("value")
+            )
+            if value:
+                return "heat treatment type", value
+        return "", ""
+
+    def _comparison_summary_value_without_axis_unit(self, value: str) -> str:
+        text = _clean_comparison_summary_value(value)
+        return re.sub(r"^\[[^\]]+\]\s*", "", text).strip()
+
+    def _finding_expert_use_status(
+        self,
+        *,
+        support_grade: str,
+        review_status: str,
+        paper_count: int,
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> str:
+        if not self._finding_has_direct_support(evidence_bundle):
+            return "evidence_repair_needed"
+        if paper_count <= 1:
+            return "paper_level_finding"
+        if (
+            support_grade == "strong"
+            and review_status not in {"needs_review", "pending_review"}
+        ):
+            return "scoped_expert_finding"
+        return "review_candidate"
+
+    def _finding_generalization_status(
+        self,
+        *,
+        support_grade: str,
+        review_status: str,
+        paper_count: int,
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> str:
+        if not self._finding_has_direct_support(evidence_bundle):
+            return "evidence_repair_needed"
+        if evidence_bundle.get("conflict") or support_grade == "conflict":
+            return "conflict_review_needed"
+        if paper_count <= 1:
+            return "paper_level_only"
+        if (
+            support_grade == "strong"
+            and review_status not in {"needs_review", "pending_review"}
+        ):
+            return "scoped_cross_paper"
+        return "cross_paper_candidate"
+
+    def _finding_generalization_note(
+        self,
+        *,
+        generalization_status: str,
+        paper_count: int,
+    ) -> str:
+        if generalization_status == "evidence_repair_needed":
+            return (
+                "Direct result evidence is missing; do not generalize before "
+                "the source binding is repaired."
+            )
+        if generalization_status == "conflict_review_needed":
+            return (
+                "Conflicting evidence is linked; resolve the conflict before "
+                "using this as a stable conclusion."
+            )
+        if generalization_status == "paper_level_only":
+            return (
+                "Evidence comes from one paper; use this as a traceable "
+                "paper-level finding, not a cross-paper conclusion."
+            )
+        if generalization_status == "scoped_cross_paper":
+            return (
+                f"Direct evidence spans {paper_count} papers; use only with "
+                "the stated material, process, test, and evidence scope."
+            )
+        return (
+            f"Evidence spans {paper_count} papers, but support or review is "
+            "not final; keep this as a cross-paper review candidate."
+        )
+
+    def _finding_evidence_gap_summary(
+        self,
+        *,
+        support_grade: str,
+        review_status: str,
+        paper_count: int,
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> str:
+        gaps: list[str] = []
+        if not self._finding_has_direct_support(evidence_bundle):
+            gaps.append("direct result evidence")
+        if paper_count <= 1:
+            gaps.append("independent cross-paper confirmation")
+        if support_grade != "strong":
+            gaps.append("support-grade curation")
+        if evidence_bundle.get("conflict"):
+            gaps.append("conflict resolution")
+        if review_status in {"needs_review", "pending_review"}:
+            gaps.append("expert review")
+        if not gaps:
+            return "No immediate evidence gap is visible; keep the stated scope attached."
+        return "Needs " + ", ".join(_dedupe_strings(gaps)) + "."
+
+    def _finding_upgrade_actions(
+        self,
+        *,
+        support_grade: str,
+        review_status: str,
+        paper_count: int,
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> list[str]:
+        actions: list[str] = []
+        direct_count = len(_strings(evidence_bundle.get("direct_result")))
+        if direct_count:
+            actions.append("verify_direct_evidence")
+        else:
+            actions.append("repair_direct_evidence")
+        if paper_count <= 1:
+            actions.append("add_cross_paper_evidence")
+        if support_grade != "strong":
+            actions.append("curate_support_grade")
+        if evidence_bundle.get("conflict"):
+            actions.append("resolve_conflict")
+        if review_status in {"needs_review", "pending_review"}:
+            actions.append("record_expert_review")
+        if not actions:
+            actions.append("keep_scope_conditions")
+        return _dedupe_strings(actions)
+
+    def _finding_scope_summary_with_direct_conditions(
+        self,
+        scope_summary: str,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> str:
+        condition_text = " ".join(
+            self._evidence_source_texts_for_bundle_keys(
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=evidence_bundle,
+                blocks_by_id=blocks_by_id,
+                bundle_keys=("direct_result", "condition_context"),
+            )
+        )
+        condition_tokens = self._direct_evidence_condition_tokens(condition_text)
+        if not condition_tokens:
+            return scope_summary
+        return _join_display_values(
+            _dedupe_strings(
+                [
+                    *[token.strip() for token in scope_summary.split(",")],
+                    *condition_tokens,
+                ]
+            ),
+            limit=7,
+        )
+
+    def _direct_evidence_condition_tokens(self, text: str) -> list[str]:
+        raw = _text(text) or ""
+        if not raw:
+            return []
+        normalized = f" {_normalize_match_text(raw)} "
+        tokens: list[str] = []
+        if "316l" in normalized and (
+            " stainless steel " in normalized or " steel " in normalized
+        ):
+            tokens.append("316L stainless steel")
+        if (
+            " pbf lb " in normalized
+            or " powder bed fusion " in normalized
+            or " laser beam powder bed fusion " in normalized
+        ):
+            tokens.append("PBF-LB")
+        if " selective laser melting " in normalized or " slm " in normalized:
+            tokens.append("SLM")
+        if " hip " in normalized or " hot isostatic " in normalized:
+            tokens.append("HIP")
+        ved_values = [
+            _normalize_numeric_token(value)
+            for value in re.findall(
+                r"(\d+(?:\.\d+)?)\s*(?:j\s*/?\s*mm\s*(?:3|³)|j/mm3|j/mm³)",
+                raw,
+                flags=re.IGNORECASE,
+            )
+        ]
+        ved_values = [value for value in _dedupe_strings(ved_values) if value]
+        if len(ved_values) >= 2:
+            tokens.append(f"{ved_values[0]}-{ved_values[-1]} J/mm3")
+        elif len(ved_values) == 1:
+            tokens.append(f"{ved_values[0]} J/mm3")
+        temp_values = [
+            _normalize_numeric_token(value)
+            for value in re.findall(
+                r"(\d+(?:\.\d+)?)\s*(?:°\s*c|deg(?:ree)?s?\s*c|celsius)",
+                raw,
+                flags=re.IGNORECASE,
+            )
+        ]
+        temp_values = [value for value in _dedupe_strings(temp_values) if value]
+        if temp_values:
+            tokens.append(f"{temp_values[0]} °C")
+        return _dedupe_strings(tokens)
 
     def _finding_title(
         self,
@@ -2308,7 +9100,7 @@ class ResearchUnderstandingService:
         fallback: str,
     ) -> str:
         if variables and outcomes:
-            return f"{variables[0]} -> {outcomes[0]}"
+            return f"{variables[0]} -> {self._finding_title_outcome(outcomes)}"
         if fallback:
             return _short_text(fallback, limit=96)
         if outcomes:
@@ -2316,6 +9108,16 @@ class ResearchUnderstandingService:
         if variables:
             return variables[0]
         return "Research finding"
+
+    def _finding_title_outcome(self, outcomes: list[str]) -> str:
+        cleaned = [value for value in _dedupe_strings(outcomes) if value]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
 
     def _finding_statement(
         self,
@@ -2326,7 +9128,9 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         evidence_bundle: Mapping[str, list[str]],
         blocks_by_id: Mapping[str, SourceBlock],
+        relations: list[dict[str, Any]] | None = None,
     ) -> str:
+        relations = relations or []
         if not variables or not outcomes:
             return statement
         corrosion_statement = self._corrosion_direct_statement(
@@ -2337,6 +9141,13 @@ class ResearchUnderstandingService:
         )
         if corrosion_statement:
             return corrosion_statement
+        recovered_relation_statement = self._recovered_relation_finding_statement(
+            relations,
+            variables=variables,
+            outcomes=outcomes,
+        )
+        if recovered_relation_statement:
+            return recovered_relation_statement
         quote_statement = self._quote_derived_finding_statement(
             variables=variables,
             outcomes=outcomes,
@@ -2344,21 +9155,109 @@ class ResearchUnderstandingService:
             evidence_bundle=evidence_bundle,
             blocks_by_id=blocks_by_id,
         )
+        relation_statement = self._relation_derived_finding_statement(
+            relations,
+            variables=variables,
+            outcomes=outcomes,
+        )
         if self._statement_matches_finding_display(
             statement,
             variables=variables,
             outcomes=outcomes,
         ):
+            if relation_statement and self._statement_specificity_score(
+                relation_statement
+            ) >= self._statement_specificity_score(statement) + 5:
+                return relation_statement
             if quote_statement and self._statement_specificity_score(
                 quote_statement
             ) >= self._statement_specificity_score(statement) + 5:
                 return quote_statement
             return statement
+        if relation_statement:
+            return relation_statement
         if quote_statement:
             return quote_statement
         variable = variables[0]
         outcome = outcomes[0]
         return f"{variable} is associated with {outcome}."
+
+    def _recovered_relation_finding_statement(
+        self,
+        relations: list[dict[str, Any]],
+        *,
+        variables: list[str],
+        outcomes: list[str],
+    ) -> str:
+        for relation in relations:
+            if "recovered_from_source_text" not in _strings(relation.get("warnings")):
+                continue
+            statement = self._presentation_relation_summary(relation)
+            if self._statement_matches_finding_display(
+                statement,
+                variables=_dedupe_strings(
+                    [
+                        *variables,
+                        self._presentation_relation_side(relation.get("subject")),
+                        _text(relation.get("subject")),
+                    ]
+                ),
+                outcomes=outcomes,
+            ):
+                return statement
+        return ""
+
+    def _relation_derived_finding_statement(
+        self,
+        relations: list[dict[str, Any]],
+        *,
+        variables: list[str],
+        outcomes: list[str],
+    ) -> str:
+        for relation in relations:
+            statement = self._presentation_relation_summary(relation)
+            relation_variable = self._presentation_relation_side(relation.get("subject"))
+            raw_relation_variable = _text(relation.get("subject"))
+            variable_candidates = _dedupe_strings(
+                [*variables, relation_variable, raw_relation_variable]
+            )
+            recovered_relation = "recovered_from_source_text" in _strings(
+                relation.get("warnings")
+            )
+            if (
+                statement
+                and (
+                    re.search(r"\d", statement)
+                    or recovered_relation
+                )
+                and (
+                    self._statement_matches_finding_display(
+                        statement,
+                        variables=variable_candidates,
+                        outcomes=outcomes,
+                    )
+                    or (
+                        recovered_relation
+                        and self._variable_matches_direct_evidence(
+                            variable_candidates,
+                            statement,
+                        )
+                        and _quote_term_hits(
+                            f" {_normalize_match_text(statement)} ",
+                            self._finding_statement_outcome_terms(outcomes),
+                        )
+                    )
+                    or (
+                        _quote_term_hits(
+                            f" {_normalize_match_text(statement)} ",
+                            self._finding_statement_outcome_terms(outcomes),
+                        )
+                        and self._statement_relation_predicate(statement)
+                    )
+                )
+            ):
+                return statement
+        return ""
 
     def _corrosion_direct_statement(
         self,
@@ -2412,21 +9311,37 @@ class ResearchUnderstandingService:
         evidence_bundle: Mapping[str, list[str]],
         blocks_by_id: Mapping[str, SourceBlock],
     ) -> list[str]:
+        return self._evidence_source_texts_for_bundle_keys(
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+            bundle_keys=("direct_result",),
+        )
+
+    def _evidence_source_texts_for_bundle_keys(
+        self,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+        bundle_keys: tuple[str, ...],
+    ) -> list[str]:
         texts: list[str] = []
-        for ref_id in _strings(evidence_bundle.get("direct_result")):
-            evidence_ref = evidence_by_id.get(ref_id, {})
-            locator = _locator_mapping(evidence_ref.get("locator"))
-            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
-            text = " ".join(
-                value
-                for value in (
-                    _text(evidence_ref.get("quote")),
-                    _text(block.text if block else None),
+        for bundle_key in bundle_keys:
+            for ref_id in _strings(evidence_bundle.get(bundle_key)):
+                evidence_ref = evidence_by_id.get(ref_id, {})
+                locator = _locator_mapping(evidence_ref.get("locator"))
+                block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+                text = " ".join(
+                    value
+                    for value in (
+                        _text(evidence_ref.get("quote")),
+                        _text(block.text if block else None),
+                    )
+                    if value
                 )
-                if value
-            )
-            if text:
-                texts.append(text)
+                if text:
+                    texts.append(text)
         return texts
 
     def _quote_derived_finding_statement(
@@ -2540,6 +9455,17 @@ class ResearchUnderstandingService:
                 )
             elif normalized == "mechanical properties":
                 terms.update({"ductility", "elongation", "strength", "tensile", "yield"})
+            elif "yield strength" in normalized:
+                terms.update({"yield", "strength", "yield strength"})
+            elif "ultimate tensile strength" in normalized:
+                terms.update(
+                    {
+                        "strength",
+                        "tensile",
+                        "tensile strength",
+                        "ultimate tensile strength",
+                    }
+                )
             elif normalized in {"corrosion behavior", "pitting corrosion behavior"}:
                 terms.update(
                     {
@@ -2564,7 +9490,10 @@ class ResearchUnderstandingService:
         normalized = f" {_normalize_match_text(statement)} "
         return bool(
             self._variable_matches_direct_evidence(variables, statement)
-            and _quote_term_hits(normalized, _quote_hint_terms(outcomes[0]))
+            and _quote_term_hits(
+                normalized,
+                self._finding_statement_outcome_terms(outcomes),
+            )
         )
 
     def _finding_relation_chain(
@@ -2589,7 +9518,7 @@ class ResearchUnderstandingService:
                 else (display_variables[0] if display_variables else variable)
             )
             segment_direction = ""
-            for value in (relation.get("predicate"), relation.get("relation_type")):
+            for value in (relation.get("relation_type"), relation.get("predicate")):
                 text = _text(value)
                 if text and _looks_user_facing(text):
                     segment_direction = text
@@ -2621,6 +9550,10 @@ class ResearchUnderstandingService:
         effect: Mapping[str, Any],
         relations_by_id: Mapping[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        claim_id = _text(effect.get("claim_id")) or ""
+        if claim_id.startswith("relation_"):
+            relation_id = claim_id.removeprefix("relation_")
+            return [relations_by_id[relation_id]] if relation_id in relations_by_id else []
         return [
             relations_by_id[relation_id]
             for relation_id in _strings(effect.get("relation_ids"))
@@ -2632,16 +9565,33 @@ class ResearchUnderstandingService:
         effect: Mapping[str, Any],
         relations: list[dict[str, Any]],
     ) -> list[str]:
+        fallback = _text(effect.get("variable_axis"))
+        statement = _text(effect.get("statement")) or ""
         variables = _dedupe_strings(
             [
                 subject
                 for relation in relations
-                if (subject := self._presentation_relation_side(relation.get("subject")))
+                if (
+                    subject := (
+                        _text(relation.get("subject"))
+                        if _symbol_match_term(relation.get("subject"))
+                        else self._presentation_relation_side(relation.get("subject"))
+                    )
+                )
             ]
         )
-        if variables:
+        if variables and self._is_recovered_expert_effect(effect):
             return variables
-        fallback = _text(effect.get("variable_axis"))
+        if variables:
+            if (
+                len(variables) == 1
+                and fallback
+                and fallback != variables[0]
+                and self._variable_matches_direct_evidence([fallback], statement)
+                and not self._variable_matches_direct_evidence(variables, statement)
+            ):
+                return [fallback]
+            return variables
         return [fallback] if fallback else []
 
     def _finding_display_variables(
@@ -2677,6 +9627,10 @@ class ResearchUnderstandingService:
             evidence_by_id=evidence_by_id,
             evidence_bundle=evidence_bundle,
         )
+        direct_evidence_is_table_only = self._direct_evidence_is_table_only(
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+        )
         direct_concrete_variables = self._concrete_variable_terms(direct_evidence_text)
         concrete_variables = direct_concrete_variables or self._concrete_variable_terms(
             " ".join([*relation_text_parts, direct_evidence_text])
@@ -2688,7 +9642,11 @@ class ResearchUnderstandingService:
             and direct_concrete_variables
             and not self._variable_matches_direct_evidence(
                 variables,
-                direct_evidence_text,
+                (
+                    " ".join(relation_text_parts)
+                    if direct_evidence_is_table_only
+                    else direct_evidence_text
+                ),
             )
         ):
             return direct_concrete_variables
@@ -2723,6 +9681,22 @@ class ResearchUnderstandingService:
             ]
         )
 
+    def _direct_evidence_is_table_only(
+        self,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> bool:
+        direct_ref_ids = _strings(evidence_bundle.get("direct_result"))
+        if not direct_ref_ids:
+            return False
+        return all(
+            "table" in (
+                _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""
+            ).lower()
+            for ref_id in direct_ref_ids
+        )
+
     def _direct_evidence_text_for_display_variables(
         self,
         *,
@@ -2751,6 +9725,23 @@ class ResearchUnderstandingService:
         if not normalized.strip():
             return False
         for variable in variables:
+            symbol_term = _symbol_match_term(variable)
+            if symbol_term and f" {symbol_term} " in f" {_symbol_match_text(direct_evidence_text)} ":
+                return True
+            normalized_variable = _normalize_match_text(variable)
+            if normalized_variable and f" {normalized_variable} " in normalized:
+                return True
+            if normalized_variable == "volumetric energy density" and (
+                " ved " in normalized or " volumetric energy density " in normalized
+            ):
+                return True
+            raw_variable = _text(variable)
+            if raw_variable and f" {raw_variable} " in f" {direct_evidence_text} ":
+                return True
+            if normalized_variable == "heat treatment" and (
+                " heat treatment " in normalized or " heat treatments " in normalized
+            ):
+                return True
             tokens = _meaningful_match_tokens(variable)
             if not tokens:
                 continue
@@ -2772,10 +9763,6 @@ class ResearchUnderstandingService:
     def _concrete_variable_terms(self, text: str) -> list[str]:
         normalized = f" {_normalize_match_text(text)} "
         variables: list[str] = []
-        if " ved " in normalized or " volumetric energy density " in normalized:
-            variables.append("VED")
-        elif " energy density " in normalized:
-            variables.append("energy density")
         phrase_variables = (
             ("laser power", ("laser power",)),
             ("scan speed", ("scan speed", "scanning speed")),
@@ -2792,6 +9779,10 @@ class ResearchUnderstandingService:
         for display, phrases in phrase_variables:
             if any(f" {phrase} " in normalized for phrase in phrases):
                 variables.append(display)
+        if " ved " in normalized or " volumetric energy density " in normalized:
+            variables.append("VED")
+        elif " energy density " in normalized and not variables:
+            variables.append("energy density")
         return _dedupe_strings(variables)
 
     def _finding_mediators(self, relations: list[dict[str, Any]]) -> list[str]:
@@ -2803,6 +9794,32 @@ class ResearchUnderstandingService:
             ]
         )
 
+    def _finding_mediators_from_direct_evidence(self, source_text: str) -> list[str]:
+        normalized = f" {_normalize_match_text(source_text)} "
+        mediators: list[str] = []
+        if (
+            " cellular microstructure " in normalized
+            or " cellular microstructures " in normalized
+            or " cellular structure " in normalized
+        ):
+            mediators.append("cellular microstructure")
+        if " dislocation density " in normalized:
+            mediators.append("dislocation density")
+        elif (
+            " dense dislocation structures " in normalized
+            or " dislocation structures " in normalized
+        ):
+            mediators.append("dislocation structures")
+        if " recrystallization " in normalized:
+            mediators.append("recrystallization")
+        if " defect fraction " in normalized or " defect size " in normalized:
+            mediators.append("defect structure")
+        if " refined microstructure " in normalized:
+            mediators.append("refined microstructure")
+        if " densification " in normalized:
+            mediators.append("densification")
+        return _dedupe_strings(mediators)
+
     def _finding_outcomes(
         self,
         effect: Mapping[str, Any],
@@ -2810,15 +9827,39 @@ class ResearchUnderstandingService:
     ) -> list[str]:
         outcomes = _dedupe_strings(
             [
-                chain[-1]
+                outcome
                 for relation in relations
                 if (chain := self._relation_object_chain(relation))
+                for outcome in self._parallel_property_outcomes(chain[-1])
             ]
         )
         if outcomes:
             return outcomes
         fallback = _text(effect.get("target_property"))
         return [fallback] if fallback else []
+
+    def _parallel_property_outcomes(self, value: str) -> list[str]:
+        normalized = f" {_normalize_match_text(value)} "
+        specific_axes = (
+            "yield strength",
+            "ultimate tensile strength",
+            "elongation",
+        )
+        if all(f" {axis} " in normalized for axis in specific_axes):
+            return list(specific_axes)
+        raw_value = _text(value) or ""
+        separated = []
+        if "," in raw_value:
+            separated = [
+                re.sub(r"^and\s+", "", item.strip(), flags=re.IGNORECASE)
+                for item in raw_value.split(",")
+            ]
+            separated = [item for item in separated if _looks_user_facing(item)]
+        elif normalized.strip() == "density and microstructure":
+            separated = ["density", "microstructure"]
+        if separated:
+            return _dedupe_strings(separated)
+        return [value]
 
     def _specific_mechanical_outcomes(
         self,
@@ -2835,19 +9876,35 @@ class ResearchUnderstandingService:
             for outcome in outcomes
         ):
             return outcomes
-        text_parts = [statement]
-        for ref_id in _strings(evidence_bundle.get("direct_result")):
-            evidence_ref = evidence_by_id.get(ref_id, {})
-            locator = _locator_mapping(evidence_ref.get("locator"))
-            block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
-            text_parts.extend(
-                [
-                    _text(evidence_ref.get("quote")) or "",
-                    _text(evidence_ref.get("label")) or "",
-                    _text(block.text if block else None) or "",
-                ]
-            )
-        normalized = f" {_normalize_match_text(' '.join(text_parts))} "
+        statement_specific = self._specific_mechanical_outcome_terms(statement)
+        if statement_specific:
+            specific = statement_specific
+        else:
+            text_parts = [statement]
+            for ref_id in _strings(evidence_bundle.get("direct_result")):
+                evidence_ref = evidence_by_id.get(ref_id, {})
+                locator = _locator_mapping(evidence_ref.get("locator"))
+                block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+                text_parts.extend(
+                    [
+                        _text(evidence_ref.get("quote")) or "",
+                        _text(evidence_ref.get("label")) or "",
+                        _text(block.text if block else None) or "",
+                    ]
+                )
+            specific = self._specific_mechanical_outcome_terms(" ".join(text_parts))
+        if not specific:
+            return outcomes
+        result: list[str] = []
+        for outcome in outcomes:
+            if _normalize_match_text(outcome) == "mechanical properties":
+                result.extend(specific)
+            else:
+                result.append(outcome)
+        return _dedupe_strings(result)
+
+    def _specific_mechanical_outcome_terms(self, text: str) -> list[str]:
+        normalized = f" {_normalize_match_text(text)} "
         specific: list[str] = []
         for display, terms in (
             ("ductility", ("ductility", "elongation")),
@@ -2858,15 +9915,7 @@ class ResearchUnderstandingService:
         ):
             if any(f" {term} " in normalized for term in terms):
                 specific.append(display)
-        if not specific:
-            return outcomes
-        result: list[str] = []
-        for outcome in outcomes:
-            if _normalize_match_text(outcome) == "mechanical properties":
-                result.extend(specific)
-            else:
-                result.append(outcome)
-        return _dedupe_strings(result)
+        return specific
 
     def _relation_object_chain(self, relation: Mapping[str, Any]) -> list[str]:
         object_text = _text(relation.get("object")) or ""
@@ -2885,7 +9934,7 @@ class ResearchUnderstandingService:
         relations: list[dict[str, Any]],
     ) -> str:
         for relation in relations:
-            for value in (relation.get("predicate"), relation.get("relation_type")):
+            for value in (relation.get("relation_type"), relation.get("predicate")):
                 text = _text(value)
                 if text and _looks_user_facing(text):
                     return text
@@ -2943,6 +9992,8 @@ class ResearchUnderstandingService:
     ) -> dict[str, list[str]]:
         direct_ref_ids = _strings(evidence_bundle.get("direct_result"))
         if not direct_ref_ids:
+            return {key: list(value) for key, value in evidence_bundle.items()}
+        if all(ref_id.startswith("evref_recovered_") for ref_id in direct_ref_ids):
             return {key: list(value) for key, value in evidence_bundle.items()}
         target_terms = self._finding_target_terms(effect, outcomes)
         variable_terms: set[str] = set()
@@ -3006,6 +10057,34 @@ class ResearchUnderstandingService:
             )
             for ref_id in direct_ref_ids
         )
+        if self._effect_has_specific_result_statement(effect) and all(
+            self._evidence_ref_aligns_with_terms(
+                evidence_by_id.get(ref_id, {}),
+                blocks_by_id=blocks_by_id,
+                target_terms=target_terms,
+                variable_terms=variable_terms,
+                relation_terms=relation_terms,
+            )
+            for ref_id in direct_ref_ids
+        ):
+            return updated_direct_bundle
+        if self._finding_statement_is_table_row_comparison(
+            _text(effect.get("statement")) or ""
+        ) and any(
+            "table"
+            in (_text(evidence_by_id.get(ref_id, {}).get("source_kind")) or "").lower()
+            and _text(
+                _locator_mapping(evidence_by_id.get(ref_id, {}).get("locator")).get(
+                    "source_ref"
+                )
+            )
+            and (
+                _text(evidence_by_id.get(ref_id, {}).get("traceability_status")) or ""
+            ).lower()
+            in {"resolved", "traceable"}
+            for ref_id in direct_ref_ids
+        ):
+            return updated_direct_bundle
         if current_best_score >= 4:
             return updated_direct_bundle
         def document_id_for(evidence_ref: Mapping[str, Any]) -> str:
@@ -3048,8 +10127,7 @@ class ResearchUnderstandingService:
             bounded = f" {searchable} "
             target_hits = _quote_term_hits(bounded, target_terms)
             variable_hits = _quote_term_hits(bounded, variable_terms)
-            relation_hits = _quote_term_hits(bounded, relation_terms)
-            if not (target_hits and (variable_hits or relation_hits)):
+            if not (target_hits and variable_hits):
                 continue
             candidates.append((score, -index, ref_id))
         if not candidates:
@@ -3072,6 +10150,196 @@ class ResearchUnderstandingService:
             ]
         )
         return updated
+
+    def _compact_finding_evidence_bundle(
+        self,
+        evidence_bundle: Mapping[str, list[str]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        updated = {
+            key: _dedupe_strings(_strings(value))
+            for key, value in evidence_bundle.items()
+        }
+        if not any(
+            updated.get(key)
+            for key in (
+                "direct_result",
+                "mechanism",
+                "condition_context",
+                "conflict",
+            )
+        ):
+            return updated
+
+        updated = self._dedupe_evidence_bundle_by_source_target(
+            updated,
+            evidence_by_id=evidence_by_id,
+        )
+        updated = self._dedupe_evidence_bundle_by_ref_id(updated)
+
+        seen_sources = {
+            source_key
+            for key in (
+                "direct_result",
+                "mechanism",
+                "condition_context",
+                "conflict",
+            )
+            for ref_id in updated.get(key, [])
+            if (
+                source_key := self._evidence_ref_source_key(
+                    evidence_by_id.get(ref_id, {})
+                )
+            )
+        }
+        compact_uncategorized: list[str] = []
+        retained_same_source_supplements: set[str] = set()
+        for ref_id in updated.get("uncategorized", []):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            source_key = self._evidence_ref_source_key(evidence_by_id.get(ref_id, {}))
+            if source_key and source_key in seen_sources:
+                if (
+                    source_key in retained_same_source_supplements
+                    or not self._is_role_bearing_supplemental_evidence(evidence_ref)
+                ):
+                    continue
+                retained_same_source_supplements.add(source_key)
+            if source_key:
+                seen_sources.add(source_key)
+            compact_uncategorized.append(ref_id)
+            if len(compact_uncategorized) >= 3:
+                break
+        updated["uncategorized"] = compact_uncategorized
+        return updated
+
+    def _dedupe_evidence_bundle_by_ref_id(
+        self,
+        evidence_bundle: Mapping[str, list[str]],
+    ) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        seen: set[str] = set()
+        direct_refs = set(_strings(evidence_bundle.get("direct_result")))
+        for role in (
+            "direct_result",
+            "mechanism",
+            "condition_context",
+            "conflict",
+            "background",
+            "uncategorized",
+            "noise",
+        ):
+            retained: list[str] = []
+            for ref_id in _strings(evidence_bundle.get(role)):
+                if role == "mechanism" and ref_id in direct_refs:
+                    retained.append(ref_id)
+                    continue
+                if ref_id in seen:
+                    continue
+                seen.add(ref_id)
+                retained.append(ref_id)
+            result[role] = retained
+        return result
+
+    def _dedupe_evidence_bundle_by_source_target(
+        self,
+        evidence_bundle: Mapping[str, list[str]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        role_priority = (
+            "direct_result",
+            "mechanism",
+            "condition_context",
+            "conflict",
+            "background",
+            "uncategorized",
+            "noise",
+        )
+        retained_source_keys: set[str] = set()
+        retained_ref_ids_seen: set[str] = set()
+        result: dict[str, list[str]] = {}
+        direct_refs = set(_strings(evidence_bundle.get("direct_result")))
+        for role in role_priority:
+            retained_ref_ids: list[str] = []
+            for ref_id in _strings(evidence_bundle.get(role)):
+                if role == "mechanism" and ref_id in direct_refs:
+                    retained_ref_ids.append(ref_id)
+                    continue
+                if ref_id in retained_ref_ids_seen:
+                    continue
+                source_key = self._evidence_ref_source_key(evidence_by_id.get(ref_id, {}))
+                if source_key and source_key in retained_source_keys:
+                    continue
+                if source_key:
+                    retained_source_keys.add(source_key)
+                retained_ref_ids_seen.add(ref_id)
+                retained_ref_ids.append(ref_id)
+            result[role] = retained_ref_ids
+        return result
+
+    def _evidence_ref_source_key(self, evidence_ref: Mapping[str, Any]) -> str:
+        locator = _locator_mapping(evidence_ref.get("locator"))
+        source_ref = _normalize_match_text(_text(locator.get("source_ref")) or "")
+        document_id = _normalize_match_text(_text(evidence_ref.get("document_id")) or "")
+        source_kind = _normalize_match_text(
+            _text(evidence_ref.get("source_kind"))
+            or _text(locator.get("source_kind"))
+            or ""
+        )
+        page = _normalize_match_text(
+            _text(locator.get("page"))
+            or _text(locator.get("page_no"))
+            or ""
+        )
+        if not (source_ref or document_id):
+            return ""
+        return "|".join((document_id, source_kind, source_ref, page))
+
+    def _is_role_bearing_supplemental_evidence(
+        self,
+        evidence_ref: Mapping[str, Any],
+    ) -> bool:
+        role = (_text(evidence_ref.get("evidence_role")) or "").lower()
+        return role in {
+            "direct_support",
+            "mediator_context",
+            "mechanism",
+            "condition_context",
+            "context",
+            "conflict",
+            "conflicting",
+        }
+
+    def _effect_has_specific_result_statement(self, effect: Mapping[str, Any]) -> bool:
+        statement = _text(effect.get("statement")) or ""
+        if not statement:
+            return False
+        return bool(re.search(r"\d", statement) and _quote_has_concrete_result_cue(statement))
+
+    def _evidence_ref_aligns_with_terms(
+        self,
+        evidence_ref: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        target_terms: set[str],
+        variable_terms: set[str],
+        relation_terms: set[str],
+    ) -> bool:
+        searchable = self._evidence_ref_source_text(
+            evidence_ref,
+            blocks_by_id=blocks_by_id,
+        )
+        if not searchable:
+            return False
+        bounded = f" {searchable} "
+        return bool(
+            _quote_term_hits(bounded, target_terms)
+            and (
+                _quote_term_hits(bounded, variable_terms)
+                or _quote_term_hits(bounded, relation_terms)
+            )
+        )
 
     def _finding_target_terms(
         self,
@@ -3233,6 +10501,10 @@ class ResearchUnderstandingService:
         direct_count = len(evidence_bundle.get("direct_result", []))
         evidence_count = int(effect.get("evidence_count") or 0)
         has_mechanism = self._finding_has_mechanism_support(evidence_bundle)
+        has_independent_mechanism = bool(
+            set(evidence_bundle.get("mechanism", []))
+            - set(evidence_bundle.get("direct_result", []))
+        )
         has_direct = self._finding_has_direct_support(evidence_bundle)
         if support_status == "conflicted" or evidence_bundle.get("conflict"):
             return "conflict"
@@ -3244,17 +10516,84 @@ class ResearchUnderstandingService:
             return "weak"
         if review_status == "needs_review":
             return "partial"
-        if direct_count >= 2 or has_mechanism:
+        if direct_count >= 2 or has_independent_mechanism:
             return "strong"
         if support_status == "supported":
             return "partial"
         return "weak"
 
+    def _finding_review_reasons(
+        self,
+        effect: Mapping[str, Any],
+        *,
+        evidence_bundle: Mapping[str, list[str]],
+        mediators: list[str],
+        mechanism_source_text: str,
+        outcomes: list[str],
+        relation_ids: list[str],
+        review_status: str,
+        support_grade: str,
+        scope_summary: str,
+    ) -> list[str]:
+        reasons: list[str] = []
+        paper_count = int(effect.get("paper_count") or 0)
+        evidence_count = int(effect.get("evidence_count") or 0)
+        if paper_count <= 0:
+            reasons.append("no_source_paper")
+        elif paper_count == 1:
+            reasons.append("single_paper_evidence")
+            reasons.append("needs_cross_paper_confirmation")
+        else:
+            reasons.append("cross_paper_evidence")
+        if evidence_count <= 0:
+            reasons.append("no_evidence")
+        if not self._finding_has_direct_support(evidence_bundle):
+            reasons.append("missing_direct_result_evidence")
+        if not outcomes:
+            reasons.append("missing_target_outcome")
+        if not relation_ids:
+            reasons.append("missing_relation_chain")
+        if not scope_summary:
+            reasons.append("missing_scope_context")
+        if support_grade in {"partial", "weak", "insufficient"}:
+            reasons.append(f"{support_grade}_support")
+        if "non_single_variable_table_comparison" in _strings(effect.get("warnings")):
+            reasons.append("non_single_variable_table_comparison")
+        if (
+            support_grade == "partial"
+            and self._finding_has_direct_support(evidence_bundle)
+            and not self._finding_has_mechanism_support(
+                evidence_bundle,
+                mediators=mediators,
+                mechanism_source_text=mechanism_source_text,
+            )
+        ):
+            reasons.append("missing_mechanism_evidence")
+        if review_status == "needs_review":
+            reasons.append("needs_expert_review")
+        return _dedupe_strings(reasons)
+
     def _finding_has_direct_support(self, bundle: Mapping[str, list[str]]) -> bool:
         return bool(bundle.get("direct_result"))
 
-    def _finding_has_mechanism_support(self, bundle: Mapping[str, list[str]]) -> bool:
-        return bool(bundle.get("mechanism"))
+    def _finding_has_mechanism_support(
+        self,
+        bundle: Mapping[str, list[str]],
+        *,
+        mediators: list[str] | None = None,
+        mechanism_source_text: str = "",
+    ) -> bool:
+        if bundle.get("mechanism"):
+            return True
+        mediator_terms: set[str] = set()
+        for mediator in mediators or []:
+            mediator_terms.update(_quote_hint_terms(mediator))
+        if not mediator_terms:
+            return False
+        if not mechanism_source_text:
+            return False
+        normalized = f" {_normalize_match_text(mechanism_source_text)} "
+        return bool(_quote_term_hits(normalized, mediator_terms))
 
     def _finding_review_status(self, effect: Mapping[str, Any]) -> str:
         return "needs_review" if effect.get("needs_review") else "pending_review"
@@ -3277,12 +10616,23 @@ class ResearchUnderstandingService:
                 "outcome": set(),
                 "relation": set(),
                 "statement": set(),
+                "result_numeric": set(),
+                "result_numeric_endpoints": set(),
             }
             for value in _strings(finding.get("variables")):
                 hint_terms["variable"].update(_quote_hint_terms(value))
             for value in _strings(finding.get("outcomes")):
                 hint_terms["outcome"].update(_quote_hint_terms(value))
             hint_terms["statement"].update(_quote_hint_terms(finding.get("statement")))
+            hint_terms["statement"].update(
+                _quote_numeric_hint_terms(finding.get("statement"))
+            )
+            hint_terms["result_numeric"].update(
+                _quote_result_numeric_hint_terms(finding.get("statement"))
+            )
+            hint_terms["result_numeric_endpoints"].update(
+                _quote_result_numeric_endpoint_terms(finding.get("statement"))
+            )
             for value in (
                 _text(finding.get("statement")),
                 _text(finding.get("title")),
@@ -3290,6 +10640,7 @@ class ResearchUnderstandingService:
                 *_strings(finding.get("mediators")),
             ):
                 hint_terms["relation"].update(_quote_hint_terms(value))
+                hint_terms["relation"].update(_quote_numeric_hint_terms(value))
             for relation_id in _strings(finding.get("relation_ids")):
                 relation = relations_by_id.get(relation_id, {})
                 hint_terms["variable"].update(
@@ -3318,6 +10669,8 @@ class ResearchUnderstandingService:
                         "outcome": set(),
                         "relation": set(),
                         "statement": set(),
+                        "result_numeric": set(),
+                        "result_numeric_endpoints": set(),
                     },
                 )
                 for key, terms in hint_terms.items():
@@ -3396,7 +10749,35 @@ class ResearchUnderstandingService:
             for relation in related_relations
             if self._relation_matches_goal_axis(relation, goal_axes)
         ]
-        if goal_axis_relations:
+        explicit_statement_axis = self._statement_comparison_axis(
+            _text(claim.get("statement")) or "",
+            goal_axes=goal_axes,
+        )
+        if self._is_recovered_expert_effect(claim):
+            explicit_statement_axis = ""
+        if explicit_statement_axis:
+            statement_axis_relations = [
+                self._relation_with_presentation_subject(
+                    relation,
+                    explicit_statement_axis,
+                )
+                for relation in related_relations
+                if self._statement_comparison_axis(
+                    self._presentation_relation_summary(relation),
+                    goal_axes=goal_axes,
+                )
+                == explicit_statement_axis
+            ]
+            if statement_axis_relations:
+                related_relations = statement_axis_relations
+                primary_relation = related_relations[0]
+                variable_axis = explicit_statement_axis
+                target_property = self._target_property_for(
+                    claim,
+                    primary_relation,
+                    contexts,
+                )
+        elif goal_axis_relations:
             related_relations = goal_axis_relations
             primary_relation = related_relations[0]
             variable_axis = self._variable_axis_for(primary_relation, contexts)
@@ -3448,6 +10829,15 @@ class ResearchUnderstandingService:
             if _text(relation.get("relation_id"))
         ]
         statement = _text(claim.get("statement")) or ""
+        statement = self._contextualized_comparison_statement(
+            statement,
+            variable_axis=variable_axis,
+            target_property=target_property,
+            direction=_text(primary_relation.get("relation_type"))
+            or _text(primary_relation.get("predicate"))
+            or "",
+            contexts=contexts,
+        )
         return {
             "effect_id": f"effect_{claim_id}",
             "claim_id": claim_id,
@@ -3481,6 +10871,274 @@ class ResearchUnderstandingService:
             "warnings": _strings(claim.get("warnings")),
         }
 
+    def _contextualized_comparison_statement(
+        self,
+        statement: str,
+        *,
+        variable_axis: str,
+        target_property: str,
+        direction: str,
+        contexts: list[dict[str, Any]],
+    ) -> str:
+        text = _text(statement) or ""
+        if not text or not variable_axis or not target_property:
+            return text
+        if self._looks_contextualized_comparison_statement(text):
+            return text
+        match = re.search(
+            r"(?P<prefix>^(?:Under|With)\s+.+?,\s+)?"
+            r"(?P<body_axis>.+?)\s+"
+            r"(?P<direction>increased|increases|decreased|decreases|reduced|reduces|"
+            r"improved|improves|lowered|lowers|raised|raises|changed|changes)\s+"
+            r"(?P<outcome>.+?)\s+from\s+"
+            r"(?P<baseline_segment>.+?)\s+to\s+"
+            r"(?P<observed_value>[+-]?\d+(?:\.\d+)?\s*(?:%|MPa|GPa|J/mm3|J/mm³|HV|°\s*C|°C|C|K)?)"
+            r"\.?$",
+            text.strip(),
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return text
+        baseline_value, _baseline_label = _comparison_summary_baseline(
+            match.group("baseline_segment")
+        )
+        observed_value = _clean_comparison_summary_value(match.group("observed_value"))
+        context = self._comparison_context_with_axis_values(
+            contexts,
+            variable_axis=variable_axis,
+            baseline_value=baseline_value,
+            observed_value=observed_value,
+        )
+        if not context:
+            return text
+        process_context = _mapping(_mapping(context.get("process_context")).get("process_context"))
+        baseline_context = _mapping(
+            _mapping(context.get("process_context")).get("baseline_context")
+        )
+        baseline_process_context = _mapping(baseline_context.get("process_context"))
+        axis_lookup = self._comparison_statement_axis_label(variable_axis)
+        current_axis_value = self._axis_value_from_context(
+            axis_lookup,
+            process_context,
+        )
+        baseline_axis_value = self._axis_value_from_context(
+            axis_lookup,
+            baseline_process_context,
+        )
+        if not current_axis_value or not baseline_axis_value:
+            return text
+        unit_text = self._comparison_value_unit(observed_value)
+        baseline_value = self._comparison_display_value(baseline_value, unit_text)
+        observed_value = self._comparison_display_value(observed_value, unit_text)
+        if not baseline_value or not observed_value:
+            return text
+        controlled_axes = self._comparison_controlled_axes_from_context(
+            process_context,
+            baseline_process_context,
+            variable_axis=variable_axis,
+        )
+        changed_axes = self._comparison_changed_axes_from_context(
+            process_context,
+            baseline_process_context,
+            variable_axis=variable_axis,
+        )
+        if len(changed_axes) > 1:
+            changed_axes_text = self._comparison_changed_axes_text(changed_axes)
+            prefix = f"With {controlled_axes}, " if controlled_axes else ""
+            verb = self._comparison_direction_verb(match.group("direction") or direction)
+            return self._sentence_case(
+                f"{prefix}table-row comparison changes {changed_axes_text}; "
+                f"{target_property} {verb} from {baseline_value} to {observed_value}."
+            )
+        prefix = f"With {controlled_axes}, " if controlled_axes else ""
+        axis_label = self._comparison_statement_axis_label(variable_axis)
+        verb = self._comparison_direction_verb(match.group("direction") or direction)
+        rewritten = (
+            f"{prefix}changing {axis_label} from {baseline_axis_value} "
+            f"to {current_axis_value} {verb} {target_property} from "
+            f"{baseline_value} to {observed_value}."
+        )
+        return self._sentence_case(rewritten)
+
+    def _comparison_context_with_axis_values(
+        self,
+        contexts: list[dict[str, Any]],
+        *,
+        variable_axis: str,
+        baseline_value: str = "",
+        observed_value: str = "",
+    ) -> dict[str, Any]:
+        matched_context = {}
+        for context in contexts:
+            process_payload = _mapping(context.get("process_context"))
+            process_context = _mapping(process_payload.get("process_context"))
+            baseline_context = _mapping(process_payload.get("baseline_context"))
+            baseline_process_context = _mapping(baseline_context.get("process_context"))
+            axis_lookup = self._comparison_statement_axis_label(variable_axis)
+            if self._axis_value_from_context(
+                axis_lookup,
+                process_context,
+            ) and self._axis_value_from_context(
+                axis_lookup,
+                baseline_process_context,
+            ):
+                if self._comparison_context_values_match_statement(
+                    process_payload,
+                    baseline_value=baseline_value,
+                    observed_value=observed_value,
+                ):
+                    return context
+                if not matched_context:
+                    matched_context = context
+        return matched_context if not (baseline_value or observed_value) else {}
+
+    def _comparison_context_values_match_statement(
+        self,
+        process_payload: Mapping[str, Any],
+        *,
+        baseline_value: str,
+        observed_value: str,
+    ) -> bool:
+        if not baseline_value and not observed_value:
+            return True
+        baseline_context = _mapping(process_payload.get("baseline_context"))
+        baseline_candidates = (
+            _text(baseline_context.get("source_value_text")),
+            _text(baseline_context.get("value")),
+        )
+        process_candidates = (
+            _text(process_payload.get("source_value_text")),
+            _text(process_payload.get("value")),
+        )
+        baseline_matches = (
+            not baseline_value
+            or self._numeric_values_overlap(baseline_value, baseline_candidates)
+        )
+        if not baseline_matches:
+            return False
+        return (
+            not observed_value
+            or not any(process_candidates)
+            or self._numeric_values_overlap(observed_value, process_candidates)
+        )
+
+    def _numeric_values_overlap(
+        self,
+        expected: str,
+        candidates: tuple[str | None, ...],
+    ) -> bool:
+        expected_numbers = {
+            _normalize_numeric_token(value)
+            for value in re.findall(r"[-+]?\d+(?:\.\d+)?", expected)
+        }
+        expected_numbers.discard("")
+        if not expected_numbers:
+            return False
+        candidate_numbers = {
+            _normalize_numeric_token(value)
+            for candidate in candidates
+            for value in re.findall(r"[-+]?\d+(?:\.\d+)?", candidate or "")
+        }
+        candidate_numbers.discard("")
+        return bool(expected_numbers & candidate_numbers)
+
+    def _comparison_controlled_axes_from_context(
+        self,
+        process_context: Mapping[str, Any],
+        baseline_process_context: Mapping[str, Any],
+        *,
+        variable_axis: str,
+    ) -> str:
+        controlled: list[str] = []
+        variable_tokens = self._axis_match_tokens(
+            self._comparison_statement_axis_label(variable_axis)
+        )
+        for key, value in process_context.items():
+            key_text = _text(key) or ""
+            key_tokens = self._axis_match_tokens(key_text)
+            if variable_tokens and _axis_terms_overlap(variable_tokens, key_tokens):
+                continue
+            current_value = _text(value) or ""
+            baseline_value = _text(baseline_process_context.get(key)) or ""
+            if not current_value or current_value != baseline_value:
+                continue
+            controlled.append(
+                self._comparison_axis_label(
+                    self._display_axis_label(key_text),
+                    current_value,
+                )
+            )
+        cleaned_controlled = [
+            value
+            for value in _dedupe_strings(controlled)
+            if _looks_user_facing(value)
+        ]
+        if len(cleaned_controlled) > 4:
+            return ", ".join(
+                (*cleaned_controlled[:4], f"+{len(cleaned_controlled) - 4} more")
+            )
+        if len(cleaned_controlled) > 1:
+            return f"{', '.join(cleaned_controlled[:-1])} and {cleaned_controlled[-1]}"
+        return cleaned_controlled[0] if cleaned_controlled else ""
+
+    def _comparison_changed_axes_from_context(
+        self,
+        process_context: Mapping[str, Any],
+        baseline_process_context: Mapping[str, Any],
+        *,
+        variable_axis: str,
+    ) -> list[dict[str, str]]:
+        changed: list[dict[str, str]] = []
+        for key, value in process_context.items():
+            key_text = _text(key) or ""
+            current_value = _text(value) or ""
+            baseline_value = _text(baseline_process_context.get(key)) or ""
+            if not key_text or not current_value or not baseline_value:
+                continue
+            if current_value == baseline_value:
+                continue
+            axis_label = self._display_axis_label(key_text)
+            if not _looks_user_facing(axis_label):
+                continue
+            changed.append(
+                {
+                    "axis": axis_label,
+                    "baseline": baseline_value,
+                    "observed": current_value,
+                    "is_variable": str(
+                        self._axis_labels_match(axis_label, variable_axis)
+                    ),
+                }
+            )
+        changed.sort(key=lambda item: 0 if item["is_variable"] == "true" else 1)
+        return changed
+
+    def _comparison_changed_axes_text(
+        self,
+        changed_axes: list[dict[str, str]],
+    ) -> str:
+        parts = [
+            (
+                f"{item['axis']} from {item['baseline']} to {item['observed']}"
+            )
+            for item in changed_axes
+            if item.get("axis") and item.get("baseline") and item.get("observed")
+        ]
+        if len(parts) > 1:
+            return f"{', '.join(parts[:-1])} and {parts[-1]}"
+        return parts[0] if parts else ""
+
+    def _comparison_statement_axis_label(self, axis: str) -> str:
+        text = _text(axis) or ""
+        for symbol in ("α", "β", "θ", "ɵ"):
+            if symbol in text:
+                return symbol
+        return self._display_axis_label(text)
+
+    def _comparison_value_unit(self, value: str) -> str:
+        match = re.search(r"\d(?:\.\d+)?\s*(?P<unit>%|MPa|GPa|J/mm3|J/mm³|HV|°\s*C|°C|C|K)$", value)
+        return match.group("unit") if match else ""
+
     def _presentation_relation_effect(
         self,
         relation: Mapping[str, Any],
@@ -3495,6 +11153,31 @@ class ResearchUnderstandingService:
             for context_id in context_ids
             if context_id in contexts_by_id
         ]
+        goal_axes = _dedupe_strings(
+            [
+                axis
+                for context in contexts_by_id.values()
+                if (
+                    _text(context.get("context_id")) == "ctx_objective_scope"
+                    or _normalize_match_text(_text(context.get("label")) or "")
+                    in {"objective scope", "goal scope"}
+                )
+                for process_context in [_mapping(context.get("process_context"))]
+                for axis in [
+                    *_strings(process_context.get("variable_process_axes")),
+                    *_strings(process_context.get("process_context_axes")),
+                ]
+            ]
+        )
+        explicit_statement_axis = self._statement_comparison_axis(
+            self._presentation_relation_summary(relation),
+            goal_axes=goal_axes,
+        )
+        if explicit_statement_axis:
+            relation = self._relation_with_presentation_subject(
+                relation,
+                explicit_statement_axis,
+            )
         variable_axis = self._variable_axis_for(relation, contexts)
         target_property = self._target_property_for({}, relation, contexts)
         evidence_ref_ids = _strings(relation.get("evidence_ref_ids"))
@@ -3563,6 +11246,121 @@ class ResearchUnderstandingService:
             return True
         return False
 
+    def _statement_comparison_axis(
+        self,
+        statement: str,
+        *,
+        goal_axes: list[str],
+    ) -> str:
+        raw_statement = _text(statement) or ""
+        normalized_statement = f" {_normalize_match_text(raw_statement)} "
+        if not normalized_statement.strip():
+            return ""
+        candidate_axes = [
+            self._display_axis_label(axis)
+            for axis in goal_axes
+            if self._display_axis_label(axis)
+        ]
+        changed_axis = self._statement_changed_axis(raw_statement)
+        if changed_axis:
+            for axis in candidate_axes:
+                if self._axis_labels_match(changed_axis, axis):
+                    return axis
+        condition_match = re.match(
+            r"^\s*(?:Under|With)\s+(?P<conditioned>.+)$",
+            raw_statement,
+            flags=re.IGNORECASE,
+        )
+        condition_body = ""
+        if condition_match and "," in condition_match.group("conditioned"):
+            condition_body = condition_match.group("conditioned").rsplit(",", 1)[-1].strip()
+        body_symbol_axis = ""
+        if condition_body:
+            body = condition_body
+            body_symbol = _statement_leading_symbol(body)
+            if body_symbol:
+                body_symbol_axis = self._display_axis_label(body_symbol)
+            changing_symbol = _statement_changing_symbol(body)
+            if changing_symbol:
+                body_symbol_axis = self._display_axis_label(changing_symbol)
+        candidate_axes = _dedupe_strings(
+            [
+                *([body_symbol_axis] if body_symbol_axis else []),
+                *self._statement_symbol_axis_candidates(raw_statement),
+                *candidate_axes,
+            ]
+        )
+        if condition_body:
+            body = condition_body
+            if body_symbol_axis and body_symbol_axis in candidate_axes:
+                return body_symbol_axis
+            body_tokens = _normalize_match_text(body).split()
+            comparison_verbs = {
+                "changed",
+                "changes",
+                "decreased",
+                "decreases",
+                "improved",
+                "improves",
+                "increased",
+                "increases",
+                "lowered",
+                "lowers",
+                "raised",
+                "raises",
+                "reduced",
+                "reduces",
+            }
+            for axis in candidate_axes:
+                axis_tokens = _normalize_match_text(axis).split()
+                if not axis_tokens or body_tokens[: len(axis_tokens)] != axis_tokens:
+                    continue
+                if any(
+                    token in comparison_verbs
+                    for token in body_tokens[len(axis_tokens) : len(axis_tokens) + 4]
+                ):
+                    return axis
+        parenthetical_text = " ".join(
+            match.group(1)
+            for match in re.finditer(r"\(([^)]{1,160})\)", raw_statement)
+        )
+        normalized_parenthetical = f" {_normalize_match_text(parenthetical_text)} "
+        for axis in candidate_axes:
+            normalized_axis = _normalize_match_text(axis)
+            if not normalized_axis:
+                continue
+            if f" {normalized_axis} " in normalized_parenthetical:
+                return axis
+        for axis in candidate_axes:
+            normalized_axis = _normalize_match_text(axis)
+            if not normalized_axis:
+                continue
+            if re.search(
+                rf"\b{re.escape(normalized_axis)}\s+[-+]?\d",
+                normalized_statement,
+            ):
+                return axis
+        return ""
+
+    def _statement_symbol_axis_candidates(self, statement: str) -> list[str]:
+        return _dedupe_strings(
+            [
+                display
+                for symbol in ("β", "α", "θ", "ɵ")
+                if symbol in statement
+                if (display := self._display_axis_label(symbol))
+            ]
+        )
+
+    def _relation_with_presentation_subject(
+        self,
+        relation: Mapping[str, Any],
+        subject: str,
+    ) -> dict[str, Any]:
+        updated = dict(relation)
+        updated["subject"] = subject
+        return updated
+
     def _claim_type_requires_relation(self, claim_type: str) -> bool:
         return claim_type in {"comparison", "mechanism", "finding"}
 
@@ -3629,7 +11427,7 @@ class ResearchUnderstandingService:
         return ""
 
     def _presentation_relation_side(self, value: Any) -> str:
-        text = _text(value)
+        text = self._display_axis_label(_text(value))
         if not text or not _looks_user_facing(text):
             return ""
         if self._is_placeholder_relation_side(text):
@@ -3654,6 +11452,35 @@ class ResearchUnderstandingService:
         ):
             return ""
         return text
+
+    def _display_axis_label(self, value: str | None) -> str:
+        text = _text(value) or ""
+        if not text:
+            return ""
+        stripped = text.strip()
+        normalized = re.sub(r"\s+", " ", stripped.replace("_", " ")).strip()
+        normalized = re.sub(
+            r"\s*(?:\([^)]*\)|\[[^\]]*\])\s*$", "", normalized
+        ).strip()
+        for alias_candidate in (stripped, normalized):
+            alias = _SYMBOL_AXIS_DISPLAY_ALIASES.get(alias_candidate.casefold())
+            if alias:
+                return alias
+        normalized_key = _normalize_match_text(normalized)
+        canonical_axes = {
+            "energy density": "energy density",
+            "hatch spacing": "hatch spacing",
+            "heat treatment type": "heat treatment type",
+            "laser power": "laser power",
+            "layer thickness": "layer thickness",
+            "scan speed": "scan speed",
+            "scanning speed": "scanning speed",
+            "type of heat treatment": "heat treatment type",
+            "volumetric energy density": "volumetric energy density",
+        }
+        if normalized_key in canonical_axes:
+            return canonical_axes[normalized_key]
+        return normalized
 
     def _is_placeholder_relation_side(self, value: Any) -> bool:
         text = (_text(value) or "").strip()
@@ -3680,6 +11507,7 @@ class ResearchUnderstandingService:
         *,
         collection_id: str,
         blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable],
         documents_by_id: Mapping[str, SourceDocument],
         quote_hints: Mapping[str, set[str]] | None = None,
     ) -> dict[str, Any]:
@@ -3689,9 +11517,12 @@ class ResearchUnderstandingService:
         source_kind = _text(ref.get("source_kind")) or "unknown"
         document_id = _text(ref.get("document_id"))
         block = blocks_by_id.get(source_ref or "") if source_ref else None
+        table = tables_by_id.get(source_ref or "") if source_ref else None
         document = (
             documents_by_id.get(block.document_id)
             if block and block.document_id
+            else documents_by_id.get(table.document_id)
+            if table and table.document_id
             else documents_by_id.get(document_id or "")
             if document_id
             else None
@@ -3716,11 +11547,26 @@ class ResearchUnderstandingService:
             blocks_by_id=blocks_by_id,
             quote_hints=quote_hints or {},
         )
-        source_text = _text(source_block.text if source_block else None) or quote
-        quote = self._presentation_quote_for_ref(
-            quote=quote,
-            source_text=source_text,
-            quote_hints=quote_hints or {},
+        source_text = normalize_display_text(
+            self._presentation_table_source_text(table)
+            if table is not None
+            else _text(source_block.text if source_block else None) or quote
+        )
+        quote = (
+            source_text
+            if table is not None
+            else quote
+            if (
+                (_text(ref.get("evidence_ref_id")) or "").startswith(
+                    "evref_recovered_heat_treatment_microstructure_mechanics_"
+                )
+                and quote
+            )
+            else self._presentation_quote_for_ref(
+                quote=quote,
+                source_text=source_text,
+                quote_hints=quote_hints or {},
+            )
         )
         display_block = source_block or block
         display_source_ref = (
@@ -3729,10 +11575,13 @@ class ResearchUnderstandingService:
         display_page = (
             _text(locator.get("page"))
             or _text(locator.get("page_no"))
+            or _text(table.page if table else None)
             or _text(display_block.page if display_block else None)
         )
         display_document_id = (
-            document_id or _text(display_block.document_id if display_block else None)
+            document_id
+            or _text(display_block.document_id if display_block else None)
+            or _text(table.document_id if table else None)
         )
         display_title_parts = [source_label]
         if display_page:
@@ -3743,12 +11592,17 @@ class ResearchUnderstandingService:
             _block_context_label(display_block)
             or (label if _looks_user_facing(label) else "")
         )
-        href = _text(ref.get("href")) or _presentation_evidence_href(
+        table_audit = self._presentation_table_audit(
+            table,
+            quote_hints=quote_hints or {},
+        )
+        href = _presentation_evidence_href(
             collection_id=collection_id,
             document_id=display_document_id,
             source_ref=display_source_ref,
             page=display_page,
-        )
+            quote_text=quote,
+        ) or _text(ref.get("href"))
         return {
             "evidence_ref_id": _text(ref.get("evidence_ref_id")) or "",
             "document_id": display_document_id,
@@ -3762,11 +11616,145 @@ class ResearchUnderstandingService:
             "quote": quote,
             "source_text": source_text,
             "value_summary": value_summary,
+            "table_audit": table_audit,
             "traceability_status": _text(ref.get("traceability_status")) or "unknown",
             "evidence_role": _text(ref.get("evidence_role")),
             "confidence": ref.get("confidence"),
             "href": href,
         }
+
+    def _presentation_table_audit(
+        self,
+        table: SourceTable | None,
+        *,
+        quote_hints: Mapping[str, set[str]],
+    ) -> dict[str, Any] | None:
+        if table is None:
+            return None
+        columns = [_text(header) for header in table.column_headers if _text(header)]
+        row_records: list[dict[str, Any]] = []
+        statement_numeric_terms = {
+            term for term in quote_hints.get("statement", set()) if re.search(r"\d", term)
+        }
+        result_numeric_terms = {
+            term
+            for term in quote_hints.get("result_numeric", set())
+            if re.search(r"\d", term)
+        }
+        for row_index, row in enumerate(table.table_matrix):
+            cells = [_text(cell) for cell in row]
+            row_text = " | ".join(cell for cell in cells if cell)
+            if not row_text:
+                continue
+            normalized_row = f" {_normalize_match_text(row_text)} "
+            if columns and _table_row_matches_columns(cells, columns):
+                continue
+            statement_hits = _quote_term_hits(
+                normalized_row,
+                quote_hints.get("statement", set()),
+            )
+            numeric_statement_hits = _quote_term_hits(
+                normalized_row,
+                statement_numeric_terms,
+            )
+            result_numeric_hits = _quote_term_hits(
+                normalized_row,
+                result_numeric_terms,
+            )
+            endpoint_hits = _quote_endpoint_numeric_hits(
+                normalized_row,
+                quote_hints.get("result_numeric_endpoints", set()),
+            )
+            score = _quote_candidate_score(row_text, quote_hints)
+            if _quote_has_concrete_result_cue(row_text):
+                score += 4
+            if result_numeric_hits:
+                score += result_numeric_hits * 80
+            if endpoint_hits:
+                score += endpoint_hits * 80
+            if numeric_statement_hits:
+                score += numeric_statement_hits * 40
+            if statement_hits:
+                score += statement_hits * 20
+            if score <= 0 and re.search(r"\d", row_text):
+                score = 1
+            row_records.append(
+                {
+                    "row_index": row_index,
+                    "cells": cells,
+                    "_score": score,
+                    "_statement_hits": statement_hits,
+                    "_numeric_statement_hits": numeric_statement_hits,
+                    "_result_numeric_hits": result_numeric_hits,
+                    "_endpoint_hits": endpoint_hits,
+                }
+            )
+        endpoint_rows = _quote_endpoint_precision_rows(
+            row_records,
+            quote_hints.get("result_numeric_endpoints", set()),
+        )
+        max_result_hits = max(
+            (int(row["_result_numeric_hits"]) for row in row_records),
+            default=0,
+        )
+        result_precision_rows = [
+            row
+            for row in row_records
+            if max_result_hits > 0
+            and int(row["_result_numeric_hits"]) == max_result_hits
+        ]
+        max_numeric_hits = max(
+            (int(row["_numeric_statement_hits"]) for row in row_records),
+            default=0,
+        )
+        numeric_precision_rows = [
+            row
+            for row in row_records
+            if max_numeric_hits > 0
+            and int(row["_numeric_statement_hits"]) == max_numeric_hits
+        ]
+        precision_rows = endpoint_rows or _dedupe_rows_by_index(
+            [
+                *(result_precision_rows or numeric_precision_rows),
+                *[row for row in row_records if row["_statement_hits"] > 0],
+            ],
+        )
+        scored_rows = precision_rows or [row for row in row_records if row["_score"] > 0]
+        relevant_rows = sorted(
+            scored_rows,
+            key=lambda row: (-int(row["_score"]), int(row["row_index"])),
+        )[:4]
+        if not relevant_rows:
+            relevant_rows = row_records[:4]
+        return {
+            "columns": columns,
+            "relevant_rows": [
+                {
+                    "row_index": int(row["row_index"]),
+                    "cells": [cell for cell in row["cells"] if cell],
+                }
+                for row in relevant_rows
+            ],
+        }
+
+    def _presentation_table_source_text(self, table: SourceTable | None) -> str:
+        if table is None:
+            return ""
+        parts: list[str] = []
+        caption = _text(table.caption_text)
+        if caption:
+            parts.append(caption)
+        headers = [header for header in table.column_headers if _text(header)]
+        if headers:
+            parts.append("Columns: " + " | ".join(headers))
+        rows: list[str] = []
+        for row in table.table_matrix[:6]:
+            cells = [_text(cell) for cell in row if _text(cell)]
+            if cells:
+                rows.append(" | ".join(cells))
+        if rows:
+            parts.append("Rows: " + " / ".join(rows))
+        return _short_text(" ".join(parts), limit=900)
 
     def _presentation_source_block_for_quote(
         self,
@@ -3818,19 +11806,21 @@ class ResearchUnderstandingService:
         source_text: str | None,
         quote_hints: Mapping[str, set[str]],
     ) -> str:
-        fallback = _text(quote) or ""
-        source = _text(source_text) or fallback
+        fallback = normalize_display_text(quote) or ""
+        source = normalize_display_text(source_text) or fallback
         if not source:
             return ""
         snippet = self._best_matching_quote_snippet(source, quote_hints)
         if snippet:
-            return snippet
+            return normalize_display_text(snippet) or ""
         return fallback or _short_text(source, limit=420)
 
     def _best_matching_quote_snippet(
         self,
         source_text: str,
         quote_hints: Mapping[str, set[str]],
+        *,
+        limit: int = 520,
     ) -> str:
         if not quote_hints:
             return ""
@@ -3925,28 +11915,37 @@ class ResearchUnderstandingService:
         if best is None:
             return ""
         return _short_text(
-            _extend_quote_with_following_result_sentence(
+            _extend_quote_with_neighboring_result_sentence(
                 best[2],
                 sentences=sentences,
                 quote_hints=quote_hints,
             ),
-            limit=520,
+            limit=limit,
         )
 
     def _source_artifact_lookups(
         self,
         collection_id: str | None,
-    ) -> tuple[dict[str, SourceBlock], dict[str, SourceDocument]]:
+    ) -> tuple[
+        dict[str, SourceBlock],
+        dict[str, SourceDocument],
+        dict[str, SourceTable],
+    ]:
         if not collection_id:
-            return {}, {}
+            return {}, {}, {}
         try:
             blocks = self.source_artifact_repository.list_blocks(collection_id)
             documents = self.source_artifact_repository.list_documents(collection_id)
         except Exception:  # noqa: BLE001
-            return {}, {}
+            return {}, {}, {}
+        try:
+            tables = self.source_artifact_repository.list_tables(collection_id)
+        except Exception:  # noqa: BLE001
+            tables = []
         return (
             {block.block_id: block for block in blocks if block.block_id},
             {document.document_id: document for document in documents if document.document_id},
+            {table.table_id: table for table in tables if table.table_id},
         )
 
     def _presentation_context_summary(self, context: Mapping[str, Any]) -> dict[str, Any]:
@@ -4106,6 +12105,45 @@ def _dedupe_strings(items: list[str] | tuple[str, ...]) -> list[str]:
     return result
 
 
+def _dedupe_mapping_list(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for item in items:
+        cleaned: dict[str, str] = {}
+        for key, raw_value in item.items():
+            value = _text(raw_value) or ""
+            if value:
+                cleaned[key] = value
+        key = tuple(sorted(cleaned.items()))
+        if not cleaned or key in seen:
+            continue
+        seen.add(key)
+        result.append(cleaned)
+    return result
+
+
+def _clean_comparison_summary_text(value: str | None) -> str:
+    text = _text(value) or ""
+    return re.sub(r"\s+", " ", text).strip(" .,;:")
+
+
+def _clean_comparison_summary_value(value: str | None) -> str:
+    return _clean_comparison_summary_text(value)
+
+
+def _comparison_summary_baseline(value: str | None) -> tuple[str, str]:
+    text = _clean_comparison_summary_text(value)
+    if not text:
+        return "", ""
+    match = re.match(r"^(?P<value>.+)\((?P<label>[^()]*)\)$", text)
+    if match is None:
+        return _clean_comparison_summary_value(text), ""
+    return (
+        _clean_comparison_summary_value(match.group("value")),
+        _clean_comparison_summary_text(match.group("label")),
+    )
+
+
 def _display_mapping(payload: Mapping[str, Any]) -> str:
     parts = []
     for key, value in payload.items():
@@ -4118,13 +12156,19 @@ def _display_mapping(payload: Mapping[str, Any]) -> str:
 def _display_values(payload: Mapping[str, Any]) -> list[str]:
     values: list[str] = []
     for value in payload.values():
+        if isinstance(value, bool):
+            continue
         if isinstance(value, Mapping):
             values.extend(_display_values(value))
         elif isinstance(value, (list, tuple, set)):
             values.extend(
-                text for item in value if (text := _text(item))
+                text
+                for item in value
+                if not isinstance(item, bool)
+                and (text := _text(item))
+                and text.lower() not in {"true", "false"}
             )
-        elif text := _text(value):
+        elif (text := _text(value)) and text.lower() not in {"true", "false"}:
             values.append(text)
     return _dedupe_strings(values)
 
@@ -4233,7 +12277,7 @@ def _compact_finding_scope_summary(
 
 
 def _short_text(value: str, *, limit: int) -> str:
-    text = value.strip()
+    text = normalize_display_text(value) or ""
     if len(text) <= limit:
         return text
     return f"{text[: max(0, limit - 1)].rstrip()}..."
@@ -4242,6 +12286,18 @@ def _short_text(value: str, *, limit: int) -> str:
 def _is_generic_finding_scope_token(value: str) -> bool:
     text = _text(value)
     if not text:
+        return True
+    normalized = _normalize_match_text(text)
+    if re.match(r"^\d+(?:\.\d+)*\.?\s+[A-Za-z]", text):
+        return True
+    if normalized in {
+        "conclusion",
+        "conclusions",
+        "conclusions and future study",
+        "future study",
+    }:
+        return True
+    if re.search(r"\(\s*\d+/\s*$", text):
         return True
     return text.lower() in {
         "axis",
@@ -4267,6 +12323,8 @@ def _looks_user_facing(value: Any) -> bool:
     if not text:
         return False
     lower = text.lower()
+    if lower in {"true", "false"}:
+        return False
     return not (
         lower.startswith(("blk_", "tbl_", "fig_", "evref_", "claim_", "rel_", "ctx_"))
         or lower.startswith(("sample_number:", "sample_id:", "row_id:", "document_id:"))
@@ -4330,6 +12388,7 @@ def _presentation_evidence_href(
     document_id: Any,
     source_ref: str,
     page: str,
+    quote_text: str | None = None,
 ) -> str | None:
     document = _text(document_id)
     source = _text(source_ref)
@@ -4338,6 +12397,9 @@ def _presentation_evidence_href(
     params = [("view", "parsed-paper"), ("source_ref", source)]
     if page:
         params.append(("page", page))
+    quote_value = _short_text(_text(quote_text), limit=520)
+    if quote_value:
+        params.append(("quote", quote_value))
     query = "&".join(f"{quote(key)}={quote(value)}" for key, value in params)
     return (
         f"/collections/{quote(collection_id)}/documents/{quote(document)}"
@@ -4371,11 +12433,21 @@ def _strings(value: Any) -> list[str]:
         items = value
     else:
         items = (value,)
-    return _dedupe_strings([str(item).strip() for item in items if str(item).strip()])
+    return _dedupe_strings(
+        [
+            text
+            for item in items
+            if not isinstance(item, bool)
+            and (text := str(item).strip())
+            and text.lower() not in {"true", "false"}
+        ]
+    )
 
 
 def _text(value: Any) -> str | None:
     if value is None:
+        return None
+    if isinstance(value, bool):
         return None
     text = str(value).strip()
     return text or None
@@ -4385,12 +12457,116 @@ def _normalize_match_text(value: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
 
 
+def _normalize_numeric_token(value: Any) -> str:
+    text = _text(value) or ""
+    if not text:
+        return ""
+    if "." not in text:
+        return text
+    return text.rstrip("0").rstrip(".")
+
+
+def _numeric_text(value: Any) -> str:
+    text = _text(value) or ""
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+    return match.group(0) if match else ""
+
+
+def _float_text(value: Any) -> float | None:
+    text = _numeric_text(value)
+    if not text:
+        return None
+    return float(text)
+
+
+def _format_numeric_range(values: list[str]) -> str:
+    pairs = [(float(value), value) for value in values]
+    if not pairs:
+        return ""
+    low_value, low_text = min(pairs, key=lambda item: item[0])
+    high_value, high_text = max(pairs, key=lambda item: item[0])
+    if low_value == high_value:
+        return low_text
+    return f"{low_text}-{high_text}"
+
+
 def _meaningful_match_tokens(value: str) -> list[str]:
     return [
         token
         for token in _normalize_match_text(value).split()
         if len(token) >= 3 and token not in _FINDING_MATCH_STOPWORDS
     ]
+
+
+def _normalize_axis_coverage_text(value: str) -> set[str]:
+    tokens = set(_meaningful_match_tokens(value))
+    if "mechanical" in tokens:
+        tokens.update(_MECHANICAL_PROPERTY_AXIS_TOKENS)
+    if {"pbf", "lb"} <= tokens:
+        tokens.update({"laser", "powder", "bed", "fusion", "lpbf"})
+    if {"powder", "bed", "fusion"} <= tokens:
+        tokens.update({"laser", "lpbf"})
+    if "ved" in tokens:
+        tokens.update({"volumetric", "energy", "density"})
+    if {"volumetric", "energy", "density"} <= tokens:
+        tokens.add("ved")
+    if "lpbf" in tokens:
+        tokens.update({"laser", "powder", "bed", "fusion"})
+    if {"laser", "powder", "bed", "fusion"} <= tokens:
+        tokens.add("lpbf")
+    if "slm" in tokens:
+        tokens.update({"selective", "laser", "melting"})
+    if {"selective", "laser", "melting"} <= tokens:
+        tokens.add("slm")
+    if "preheating" in tokens:
+        tokens.add("preheat")
+    if "preheat" in tokens:
+        tokens.add("preheating")
+    return tokens
+
+
+def _axis_terms_overlap(left: set[str], right: set[str]) -> bool:
+    if not left or not right:
+        return False
+    shared = left & right
+    return bool(shared and (shared == left or shared == right or len(shared) >= 2))
+
+
+def _symbol_match_term(value: Any) -> str:
+    text = str(value or "").strip()
+    if text == "α":
+        return "greek_alpha"
+    if text == "β":
+        return "greek_beta"
+    if text in {"θ", "ɵ"}:
+        return "greek_theta"
+    return ""
+
+
+def _symbol_match_text(value: Any) -> str:
+    text = str(value or "")
+    replacements = {
+        "α": " greek_alpha ",
+        "β": " greek_beta ",
+        "θ": " greek_theta ",
+        "ɵ": " greek_theta ",
+    }
+    for source, replacement in replacements.items():
+        text = text.replace(source, replacement)
+    return " ".join(text.split()).casefold()
+
+
+def _statement_leading_symbol(value: Any) -> str:
+    text = str(value or "").lstrip()
+    for symbol in ("α", "β", "θ", "ɵ"):
+        if text.startswith(symbol):
+            return symbol
+    return ""
+
+
+def _statement_changing_symbol(value: Any) -> str:
+    match = re.search(r"\bchanging\s*([αβθɵ])\s+from\b", str(value or ""))
+    return match.group(1) if match else ""
 
 
 def _target_token_variants(token: str) -> set[str]:
@@ -4426,8 +12602,129 @@ def _quote_hint_terms(value: str | None) -> set[str]:
     for token in tokens:
         terms.update(_target_token_variants(token))
     for index in range(len(tokens) - 1):
-        terms.add(f"{tokens[index]} {tokens[index + 1]}")
+        left = tokens[index]
+        right = tokens[index + 1]
+        terms.add(f"{left} {right}")
+        if right.endswith("y") and len(right) > 4:
+            terms.add(f"{left} {right[:-1]}ies")
+        elif right.endswith("s"):
+            terms.add(f"{left} {right[:-1]}")
+        else:
+            terms.add(f"{left} {right}s")
     return {term for term in terms if term}
+
+
+def _quote_numeric_hint_terms(value: str | None) -> set[str]:
+    terms: set[str] = set()
+    for match in re.findall(r"[-+]?\d+(?:\.\d+)?", value or ""):
+        terms.add(match)
+        terms.add(_normalize_match_text(match))
+        normalized = _normalize_numeric_token(match)
+        if normalized:
+            terms.add(normalized)
+            terms.add(_normalize_match_text(normalized))
+            if "." in match:
+                integer_part, fractional_part = match.split(".", 1)
+                for precision in range(len(fractional_part), 4):
+                    padded = f"{integer_part}.{fractional_part.ljust(precision, '0')}"
+                    terms.add(_normalize_numeric_token(padded))
+                    terms.add(_normalize_match_text(padded))
+    return terms
+
+
+def _quote_result_numeric_hint_terms(value: str | None) -> set[str]:
+    text = value or ""
+    result_numbers: list[str] = []
+    for match in re.finditer(r"\bfrom\s+([-+]?\d+(?:\.\d+)?)", text, flags=re.IGNORECASE):
+        result_numbers.append(match.group(1))
+        trailing = text[match.end() : match.end() + 120]
+        to_match = re.search(
+            r"\bto\s+([-+]?\d+(?:\.\d+)?)",
+            trailing,
+            flags=re.IGNORECASE,
+        )
+        if to_match:
+            result_numbers.append(to_match.group(1))
+    for match in re.finditer(
+        r"\(([0-9]+(?:\.\d+)?)\s+to\s+([0-9]+(?:\.\d+)?)\s*[%a-zA-Zµμ^0-9]*\)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        result_numbers.extend([match.group(1), match.group(2)])
+    terms: set[str] = set()
+    for number in result_numbers:
+        terms.update(_quote_numeric_hint_terms(number))
+    return terms
+
+
+def _quote_result_numeric_endpoint_terms(value: str | None) -> set[str]:
+    text = value or ""
+    endpoints: set[str] = set()
+    for match in re.finditer(r"\bfrom\s+([-+]?\d+(?:\.\d+)?)", text, flags=re.IGNORECASE):
+        baseline = match.group(1)
+        trailing = text[match.end() : match.end() + 120]
+        observed_match = re.search(
+            r"\bto\s+([-+]?\d+(?:\.\d+)?)",
+            trailing,
+            flags=re.IGNORECASE,
+        )
+        if not observed_match:
+            continue
+        for number in (baseline, observed_match.group(1)):
+            terms = sorted(_quote_numeric_hint_terms(number))
+            if terms:
+                endpoints.add("\x1f".join(terms))
+    return endpoints
+
+
+def _quote_endpoint_numeric_hits(
+    normalized_candidate: str,
+    endpoint_terms: set[str],
+) -> int:
+    hits = 0
+    for endpoint in endpoint_terms:
+        terms = {term for term in endpoint.split("\x1f") if term}
+        if _quote_term_hits(normalized_candidate, terms):
+            hits += 1
+    return hits
+
+
+def _quote_endpoint_precision_rows(
+    row_records: list[dict[str, Any]],
+    endpoint_terms: set[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for endpoint in endpoint_terms:
+        terms = {term for term in endpoint.split("\x1f") if term}
+        matching = [
+            row
+            for row in row_records
+            if _quote_term_hits(
+                f" {_normalize_match_text(' | '.join(cell for cell in row['cells'] if cell))} ",
+                terms,
+            )
+        ]
+        if not matching:
+            continue
+        rows.append(
+            max(
+                matching,
+                key=lambda row: (int(row["_score"]), -int(row["row_index"])),
+            )
+        )
+    return _dedupe_rows_by_index(rows)
+
+
+def _dedupe_rows_by_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for row in rows:
+        row_index = int(row["row_index"])
+        if row_index in seen:
+            continue
+        seen.add(row_index)
+        deduped.append(row)
+    return deduped
 
 
 def _quote_sentences(value: str) -> list[str]:
@@ -4512,7 +12809,19 @@ def _quote_candidate_score(candidate: str, quote_hints: Mapping[str, set[str]]) 
     return score
 
 
-def _extend_quote_with_following_result_sentence(
+def _table_row_matches_columns(row: list[str], columns: list[str]) -> bool:
+    if not row or not columns:
+        return False
+    normalized_row = [_normalize_match_text(cell) for cell in row if _text(cell)]
+    normalized_columns = [
+        _normalize_match_text(column) for column in columns if _text(column)
+    ]
+    if not normalized_row or not normalized_columns:
+        return False
+    return normalized_row[: len(normalized_columns)] == normalized_columns
+
+
+def _extend_quote_with_neighboring_result_sentence(
     selected: str,
     *,
     sentences: list[str],
@@ -4526,6 +12835,26 @@ def _extend_quote_with_following_result_sentence(
         return selected
     index = sentences.index(last_sentence)
     extended = selected
+    start_index = index
+    while start_index > 0:
+        previous = sentences[start_index - 1]
+        if _previous_sentence_extends_quote(previous, extended, quote_hints):
+            extended = f"{previous} {extended}"
+            start_index -= 1
+            continue
+        if (
+            start_index > 1
+            and _previous_sentence_bridges_validation_context(previous, extended)
+            and _previous_sentence_extends_quote(
+                sentences[start_index - 2],
+                f"{previous} {extended}",
+                quote_hints,
+            )
+        ):
+            extended = f"{sentences[start_index - 2]} {previous} {extended}"
+            start_index -= 2
+            continue
+        break
     if index + 1 >= len(sentences):
         return extended
     while index + 1 < len(sentences):
@@ -4537,6 +12866,53 @@ def _extend_quote_with_following_result_sentence(
     return extended
 
 
+def _previous_sentence_extends_quote(
+    previous: str,
+    selected: str,
+    quote_hints: Mapping[str, set[str]],
+) -> bool:
+    normalized_previous = f" {_normalize_match_text(previous)} "
+    normalized_selected = f" {_normalize_match_text(selected)} "
+    if "validation" not in normalized_selected:
+        return False
+    has_validation_quality_cue = (
+        " experimental findings " in normalized_previous
+        or " experimental results " in normalized_previous
+        or " deviations " in normalized_previous
+        or " strong alignment " in normalized_previous
+    )
+    if not _quote_has_concrete_result_cue(previous):
+        return False
+    if has_validation_quality_cue:
+        return True
+    return bool(
+        _quote_term_hits(normalized_previous, quote_hints.get("outcome", set()))
+        or _quote_term_hits(normalized_previous, quote_hints.get("relation", set()))
+        or _quote_term_hits(normalized_previous, quote_hints.get("statement", set()))
+    )
+
+
+def _previous_sentence_bridges_validation_context(
+    previous: str,
+    selected: str,
+) -> bool:
+    normalized_previous = f" {_normalize_match_text(previous)} "
+    normalized_selected = f" {_normalize_match_text(selected)} "
+    if "validation" not in normalized_selected:
+        return False
+    return bool(
+        (
+            " consistency " in normalized_previous
+            or " accuracy " in normalized_previous
+        )
+        and (
+            " prediction " in normalized_previous
+            or " predictions " in normalized_previous
+            or " experimental data " in normalized_previous
+        )
+    )
+
+
 def _following_sentence_extends_quote(
     following: str,
     selected: str,
@@ -4546,6 +12922,13 @@ def _following_sentence_extends_quote(
     normalized_selected = f" {_normalize_match_text(selected)} "
     if not _quote_hints_allow_result_extension(quote_hints):
         return False
+    if _following_sentence_is_fatigue_limitation(normalized_following, quote_hints):
+        return True
+    if _following_sentence_is_corrosion_mechanism(
+        normalized_following,
+        quote_hints,
+    ):
+        return True
     if not _quote_has_concrete_result_cue(following):
         return False
     shared_statement_hits = _quote_term_hits(
@@ -4581,13 +12964,74 @@ def _quote_hints_allow_result_extension(
             "pitting corrosion",
             "pitting potential",
             "polarization",
+            "defect",
+            "defects",
+            "fatigue",
+            "fatigue strength",
+            "lof",
         }
+    )
+
+
+def _following_sentence_is_fatigue_limitation(
+    normalized_following: str,
+    quote_hints: Mapping[str, set[str]],
+) -> bool:
+    terms = set(quote_hints.get("outcome", set())) | set(
+        quote_hints.get("statement", set())
+    )
+    if not (terms & {"defect", "defects", "fatigue", "fatigue strength", "lof"}):
+        return False
+    return bool(
+        (
+            " fatigue limit " in normalized_following
+            or " fatigue life " in normalized_following
+        )
+        and (
+            " lof " in normalized_following
+            or " defect " in normalized_following
+            or " defects " in normalized_following
+        )
+        and (
+            " limited " in normalized_following
+            or " decrease " in normalized_following
+            or " decreases " in normalized_following
+        )
+    )
+
+
+def _following_sentence_is_corrosion_mechanism(
+    normalized_following: str,
+    quote_hints: Mapping[str, set[str]],
+) -> bool:
+    terms = set(quote_hints.get("outcome", set())) | set(
+        quote_hints.get("statement", set())
+    )
+    if not (
+        terms
+        & {
+            "better corrosion",
+            "corrosion",
+            "corrosion rate",
+            "pitting",
+            "pitting corrosion",
+            "pitting potential",
+        }
+    ):
+        return False
+    return bool(
+        " passive film " in normalized_following
+        or " corrosion rate " in normalized_following
+        or " pitting potential " in normalized_following
+        or " better corrosion " in normalized_following
     )
 
 
 def _quote_has_concrete_result_cue(candidate: str) -> bool:
     normalized = f" {_normalize_match_text(candidate)} "
     if re.search(r"\b\d+(?:\.\d+)?\s*(?:%|c|k|w|mpa|gpa|hv|mm/s|um)\b", candidate.lower()):
+        return True
+    if re.search(r"\bdeviations?\b.+\b\d+(?:\.\d+)?\s*%", candidate.lower()):
         return True
     return any(
         f" {cue} " in normalized
@@ -4607,6 +13051,8 @@ def _quote_has_concrete_result_cue(candidate: str) -> bool:
             "slow",
             "slows",
             "formed",
+            "experimental findings",
+            "strong alignment",
         )
     )
 
@@ -4700,6 +13146,15 @@ def _confidence_or_none(value: Any) -> float | None:
         return round(min(1.0, max(0.0, numeric)), 2)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _trace_id(

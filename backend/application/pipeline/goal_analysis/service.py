@@ -7,6 +7,7 @@ from application.core.confirmed_goal_service import (
     ConfirmedGoalNotFoundError,
     ConfirmedGoalService,
 )
+from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
@@ -26,6 +27,10 @@ from application.pipeline.goal_analysis.runner import GoalAnalysisPipelineRunner
 logger = logging.getLogger(__name__)
 
 _GOAL_PROGRESS_UPDATE_INTERVAL = 3
+_NO_RESEARCH_FINDINGS_ERROR = "goal analysis produced no research findings"
+_REVIEW_ONLY_WARNING = (
+    "goal analysis produced review candidates but no primary research findings"
+)
 
 
 class GoalAnalysisPipelineService:
@@ -35,10 +40,14 @@ class GoalAnalysisPipelineService:
         self,
         confirmed_goal_service: ConfirmedGoalService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
+        research_understanding_service: ResearchUnderstandingService | None = None,
     ) -> None:
         self.confirmed_goal_service = confirmed_goal_service or ConfirmedGoalService()
         self.research_objective_service = (
             research_objective_service or ResearchObjectiveService()
+        )
+        self.research_understanding_service = (
+            research_understanding_service or ResearchUnderstandingService()
         )
 
     async def run_goal_analysis(self, collection_id: str, goal_id: str) -> dict:
@@ -63,6 +72,7 @@ class GoalAnalysisPipelineService:
                 {
                     "confirmed_goal_service": self.confirmed_goal_service,
                     "research_objective_service": self.research_objective_service,
+                    "research_understanding_service": self.research_understanding_service,
                     "goal_progress_callback": self._build_goal_progress_callback(
                         collection_id,
                         goal_id,
@@ -134,12 +144,28 @@ class GoalAnalysisPipelineService:
             collection_id,
             goal_id,
         )
+        understanding = self._with_presentation(understanding)
+        errors = [goal.analysis_error] if goal.analysis_error else []
+        warnings = []
+        if (
+            goal.status == "ready"
+            and understanding is not None
+            and not self._has_research_findings(understanding)
+        ):
+            errors.append(_NO_RESEARCH_FINDINGS_ERROR)
+        elif (
+            goal.status == "ready"
+            and understanding is not None
+            and not self._has_primary_findings(understanding)
+            and self._has_review_queue_findings(understanding)
+        ):
+            warnings.append(_REVIEW_ONLY_WARNING)
         return {
             "goal": goal,
             "understanding": understanding,
             "pipeline_nodes": {},
-            "errors": [goal.analysis_error] if goal.analysis_error else [],
-            "warnings": [],
+            "errors": errors,
+            "warnings": warnings,
         }
 
     def start_goal_analysis(self, collection_id: str, goal_id: str) -> dict:
@@ -216,3 +242,39 @@ class GoalAnalysisPipelineService:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _has_primary_findings(understanding: Any) -> bool:
+        return bool(
+            GoalAnalysisPipelineService._presentation(understanding).get(
+                "primary_findings"
+            )
+        )
+
+    @staticmethod
+    def _has_review_queue_findings(understanding: Any) -> bool:
+        return bool(
+            GoalAnalysisPipelineService._presentation(understanding).get(
+                "review_queue_findings"
+            )
+        )
+
+    @staticmethod
+    def _has_research_findings(understanding: Any) -> bool:
+        presentation = GoalAnalysisPipelineService._presentation(understanding)
+        return bool(
+            presentation.get("primary_findings")
+            or presentation.get("review_queue_findings")
+        )
+
+    @staticmethod
+    def _presentation(understanding: Any) -> dict:
+        if isinstance(understanding, dict):
+            return understanding.get("presentation") or {}
+        else:
+            return getattr(understanding, "presentation", {}) or {}
+
+    def _with_presentation(self, understanding: Any) -> Any:
+        if understanding is None:
+            return None
+        return self.research_understanding_service.with_presentation(understanding)

@@ -366,6 +366,59 @@ def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
     assert "blk-garbled-header" not in source_map
 
 
+def test_document_markdown_service_keeps_readable_block_with_replacement_glyph(tmp_path):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Readable Glyph Collection")
+    collection_id = collection["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Readable Paper",
+                    "text": "ignored when block structure is available",
+                }
+            ],
+            blocks=[
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-conclusion-heading",
+                    "block_type": "heading",
+                    "block_order": 1,
+                    "heading_level": 1,
+                    "text": "4. Conclusion",
+                    "page": 12,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-readable-conclusion",
+                    "block_type": "list_item",
+                    "block_order": 2,
+                    "heading_path": "4. Conclusion",
+                    "text": (
+                        "\ufffd The  SLM  samples  processed  at  higher  scanning  "
+                        "speed exhibited better densification, refined microstructure, "
+                        "and excellent mechanical properties."
+                    ),
+                    "page": 12,
+                },
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert "\ufffd" not in payload["markdown"]
+    assert (
+        "- The SLM samples processed at higher scanning speed exhibited better "
+        "densification, refined microstructure, and excellent mechanical properties."
+    ) in payload["markdown"]
+    assert payload["warnings"] == []
+    source_map = {item["artifact_id"]: item for item in payload["source_map"]}
+    assert "blk-readable-conclusion" in source_map
+
+
 def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Stored Filename Collection")

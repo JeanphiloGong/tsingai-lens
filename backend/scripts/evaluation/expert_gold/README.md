@@ -219,6 +219,45 @@ python3 scripts/evaluation/expert_gold/evaluate_research_objective_target.py \
   --quality-gate
 ```
 
+## Check Runtime Goal Readiness
+
+For the local six-goal 316L validation collection, run the two read-only
+runtime checks against a running frontend/API origin:
+
+```bash
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+python3 scripts/evaluation/expert_gold/check_goal_findings_projection.py \
+  --api-base-url http://localhost:5173
+
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --api-base-url http://localhost:5173
+```
+
+`check_goal_findings_projection.py` verifies the expert-facing finding rows,
+evidence roles, boundaries, and source traceback. `check_goal_dataset_quality.py`
+verifies the dataset preparation side: each confirmed goal has at least one
+active sample for review or training, no failed or unavailable trace warnings,
+text input blocks, and traceable training evidence. `training_ready` is reserved
+for curated or accepted samples with an explicit non-AI reviewer id. AI-authored
+or anonymous feedback/curation remains `silver` and `review_candidate` until a
+human expert confirms it.
+
+By default `check_goal_dataset_quality.py` is a reviewability gate: a goal may
+pass with only `review_candidate` samples. To require samples that can be used
+for training export, add:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --require-training-ready
+```
+
+That stricter mode fails until every checked goal has at least one
+`training_ready` sample. Both scripts are read-only and do not rebuild
+collections or mutate feedback.
+
 The evaluator is offline and read-only. It does not call LLMs, rebuild PDFs, or
 change collection state. Natural language is scored through required claims,
 numbers, paper ids, mechanism-chain phrases, limitations, and forbidden

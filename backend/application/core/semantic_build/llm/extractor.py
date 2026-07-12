@@ -70,6 +70,7 @@ class CoreLLMStructuredExtractor:
         self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
         self.last_trace: dict[str, Any] | None = None
+        self._provider_parse_unavailable = False
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
@@ -253,17 +254,42 @@ class CoreLLMStructuredExtractor:
         )
         self.last_trace = None
         started_at = perf_counter()
+        trace_extraction_mode = self.extraction_mode
         try:
-            if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
-                parsed, raw_content = self._parse_provider_structured_response(
-                    messages=messages,
-                    response_model=response_model,
-                )
+            if (
+                self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
+                and not self._provider_parse_unavailable
+            ):
+                try:
+                    parsed, raw_content = self._parse_provider_structured_response(
+                        messages=messages,
+                        response_model=response_model,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Core LLM provider parse failed; retrying with json_text "
+                        "model=%s response_model=%s",
+                        self.model,
+                        response_model.__name__,
+                        exc_info=True,
+                    )
+                    self._provider_parse_unavailable = True
+                    parsed, raw_content = self._parse_json_text_response(
+                        messages=messages,
+                        response_model=response_model,
+                    )
+                    trace_extraction_mode = (
+                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
+                    )
             else:
                 parsed, raw_content = self._parse_json_text_response(
                     messages=messages,
                     response_model=response_model,
                 )
+                if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+                    trace_extraction_mode = (
+                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
+                    )
         except Exception:
             elapsed_s = perf_counter() - started_at
             self.last_trace = self._build_trace(
@@ -271,6 +297,7 @@ class CoreLLMStructuredExtractor:
                 prompt_version=prompt_version,
                 response_model=response_model,
                 messages=messages,
+                extraction_mode=trace_extraction_mode,
                 trace_status="failed",
                 elapsed_s=elapsed_s,
                 error="structured extraction failed",
@@ -290,6 +317,7 @@ class CoreLLMStructuredExtractor:
             prompt_version=prompt_version,
             response_model=response_model,
             messages=messages,
+            extraction_mode=trace_extraction_mode,
             trace_status="available",
             elapsed_s=elapsed_s,
             raw_content=raw_content,
@@ -407,6 +435,7 @@ class CoreLLMStructuredExtractor:
         prompt_version: str | None,
         response_model: type[BaseModel],
         messages: list[dict[str, str]],
+        extraction_mode: str,
         trace_status: str,
         elapsed_s: float,
         raw_content: str | None = None,
@@ -417,7 +446,7 @@ class CoreLLMStructuredExtractor:
             "task_type": task_type or response_model.__name__,
             "prompt_version": prompt_version,
             "model": self.model,
-            "extraction_mode": self.extraction_mode,
+            "extraction_mode": extraction_mode,
             "response_model": response_model.__name__,
             "trace_status": trace_status,
             "elapsed_s": round(elapsed_s, 6),

@@ -628,6 +628,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert dataset["quality_summary"] == {
         "total_samples": 4,
         "usable_sample_count": 2,
+        "training_ready_sample_count": 1,
+        "review_candidate_sample_count": 2,
         "needs_review_count": 2,
         "rejected_count": 1,
         "labeled_sample_count": 3,
@@ -640,6 +642,11 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "candidate": 1,
             "silver": 1,
             "gold": 1,
+            "rejected": 1,
+        },
+        "by_dataset_use_status": {
+            "training_ready": 1,
+            "review_candidate": 2,
             "rejected": 1,
         },
         "by_review_status": {
@@ -658,8 +665,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "weak": 2,
         },
         "by_trace_status": {
-            "available": 1,
-            "unavailable": 3,
+            "evidence_derived": 4,
         },
         "by_evidence_role": {
             "direct_result": 3,
@@ -689,7 +695,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "missing_evidence": 0,
             "missing_source_text": 0,
             "missing_context": 0,
-            "unavailable_trace": 3,
+            "unavailable_trace": 0,
             "failed_trace": 0,
             "rejected_feedback": 1,
             "resolved_feedback": 0,
@@ -697,6 +703,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     }
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     assert by_finding["finding-1"]["label_status"] == "gold"
+    assert by_finding["finding-1"]["dataset_use_status"] == "training_ready"
     assert by_finding["finding-1"]["presentation_bucket"] == "unbucketed"
     assert by_finding["finding-1"]["system_prediction"]["presentation_bucket"] == (
         "unbucketed"
@@ -708,18 +715,30 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["evidence_refs"][0]["source_text"] == (
         "Preheating increased ductility by 14% in LPBF 316L."
     )
+    assert by_finding["finding-1"]["evidence_refs"][0]["training_source_text"] == (
+        by_finding["finding-1"]["evidence_refs"][0]["quote"]
+    )
     assert by_finding["finding-1"]["evidence_refs"][0]["heading_path"] == (
         "Results / Mechanical properties"
     )
+    assert by_finding["finding-1"]["training_evidence_refs"] == [
+        by_finding["finding-1"]["evidence_refs"][0]
+    ]
     assert by_finding["finding-1"]["context_refs"][0]["process_summary"] == "LPBF"
-    assert by_finding["finding-1"]["trace_status"] == "available"
+    assert by_finding["finding-1"]["trace_status"] == "evidence_derived"
     assert by_finding["finding-1"]["prompt_version"] == (
         "research_understanding_relation.v1"
     )
     assert by_finding["finding-1"]["input_blocks"] == [
         {
-            "source_object_id": "oeu-preheat",
-            "source_kind": "objective_evidence_unit",
+            "source_object_id": "ev-1",
+            "source_kind": "text",
+            "document_id": "doc-1",
+            "source_ref": "blk-preheat",
+            "page": "3",
+            "role": "direct_result",
+            "text": "Preheating increased ductility by 14%.",
+            "href": "/documents/doc-1#blk-preheat",
         }
     ]
     assert by_finding["finding-1"]["model_output"]["trace_id"] == "rut-1"
@@ -727,9 +746,119 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "relations": []
     }
     assert by_finding["finding-2"]["label_status"] == "silver"
+    assert by_finding["finding-2"]["dataset_use_status"] == "review_candidate"
+    assert by_finding["finding-2"]["expert_target"]["source"] == "reviewer_feedback"
+    assert by_finding["finding-2"]["expert_target"]["review_status"] == "partial"
+    assert by_finding["finding-2"]["expert_target"]["feedback_id"] == "ruf-partial"
+    assert by_finding["finding-2"]["expert_target"]["statement"] == (
+        by_finding["finding-2"]["system_prediction"]["statement"]
+    )
+    assert by_finding["finding-2"]["evidence_refs"][0]["training_source_text"] == (
+        by_finding["finding-2"]["evidence_refs"][0]["quote"]
+    )
+    assert by_finding["finding-2"]["training_evidence_refs"] == [
+        by_finding["finding-2"]["evidence_refs"][0]
+    ]
     assert by_finding["finding-3"]["label_status"] == "rejected"
+    assert by_finding["finding-3"]["dataset_use_status"] == "rejected"
     assert by_finding["finding-4"]["label_status"] == "candidate"
-    assert by_finding["finding-4"]["trace_status"] == "unavailable"
+    assert by_finding["finding-4"]["dataset_use_status"] == "review_candidate"
+    assert by_finding["finding-4"]["trace_status"] == "evidence_derived"
+
+
+def test_research_understanding_feedback_service_derives_dataset_input_blocks_from_traceable_evidence():
+    record = _sample_understanding().to_record()
+    record["model_traces"] = []
+    record["presentation"]["findings"] = [record["presentation"]["findings"][0]]
+    understanding = ResearchUnderstanding.from_mapping(record)
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(understanding),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(record),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    sample = dataset["items"][0]
+    assert sample["trace_status"] == "evidence_derived"
+    assert sample["input_blocks"] == [
+        {
+            "source_object_id": "ev-1",
+            "source_kind": "text",
+            "document_id": "doc-1",
+            "source_ref": "blk-preheat",
+            "page": "3",
+            "role": "direct_result",
+            "text": "Preheating increased ductility by 14%.",
+            "href": "/documents/doc-1#blk-preheat",
+        }
+    ]
+    assert dataset["quality_summary"]["by_trace_status"] == {"evidence_derived": 1}
+    assert dataset["quality_summary"]["warning_counts"]["unavailable_trace"] == 0
+
+
+def test_research_understanding_feedback_service_derives_dataset_input_blocks_when_matched_trace_failed():
+    record = _sample_understanding().to_record()
+    record["model_traces"] = [
+        {
+            "trace_id": "rut-failed",
+            "task_type": "research_understanding_relation",
+            "prompt_version": "research_understanding_relation.v1",
+            "model": "fake-model",
+            "extraction_mode": "provider_parse",
+            "response_model": "StructuredResearchUnderstandingRelations",
+            "trace_status": "failed",
+            "source_object_ids": ["oeu-preheat"],
+            "input_blocks": [
+                {
+                    "source_object_id": "oeu-preheat",
+                    "source_kind": "objective_evidence_unit",
+                }
+            ],
+            "raw_output": "",
+            "parsed_output": None,
+            "error": "structured extraction failed",
+        }
+    ]
+    record["presentation"]["findings"] = [record["presentation"]["findings"][0]]
+    understanding = ResearchUnderstanding.from_mapping(record)
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(understanding),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(record),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    sample = dataset["items"][0]
+    assert sample["trace_status"] == "evidence_derived"
+    assert sample["input_blocks"] == [
+        {
+            "source_object_id": "ev-1",
+            "source_kind": "text",
+            "document_id": "doc-1",
+            "source_ref": "blk-preheat",
+            "page": "3",
+            "role": "direct_result",
+            "text": "Preheating increased ductility by 14%.",
+            "href": "/documents/doc-1#blk-preheat",
+        }
+    ]
+    assert sample["model_output"]["trace_id"] == "rut-failed"
+    assert sample["model_output"]["error"] == "structured extraction failed"
+    assert sample["metadata"]["trace_note"] == (
+        "dataset input reconstructed from resolved evidence source text"
+    )
+    assert dataset["quality_summary"]["by_trace_status"] == {"evidence_derived": 1}
+    assert dataset["quality_summary"]["warning_counts"]["failed_trace"] == 0
 
 
 def test_research_understanding_feedback_service_exports_current_presentation_findings():
@@ -880,6 +1009,12 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
     assert sample["evidence_refs"][0]["source_text"] == (
         "Density increased from 91.9% to 99.6% from L-VED to H-VED."
     )
+    assert sample["evidence_refs"][0]["training_source_text"] == (
+        "Density increased from 91.9% to 99.6% from L-VED to H-VED."
+    )
+    assert [ref["evidence_ref_id"] for ref in sample["training_evidence_refs"]] == [
+        "ev-current"
+    ]
     assert dataset["quality_summary"]["by_support_grade"] == {"partial": 1}
 
 
@@ -907,23 +1042,31 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     assert by_finding["finding-1"]["presentation_bucket"] == "primary"
+    assert by_finding["finding-1"]["dataset_use_status"] == "review_candidate"
     assert by_finding["finding-1"]["metadata"]["presentation_bucket"] == "primary"
     assert by_finding["finding-2"]["presentation_bucket"] == "review_queue"
+    assert by_finding["finding-2"]["dataset_use_status"] == "review_candidate"
     assert by_finding["finding-3"]["presentation_bucket"] == "primary"
-    assert by_finding["finding-4"]["presentation_bucket"] == "unbucketed"
+    assert by_finding["finding-3"]["dataset_use_status"] == "review_candidate"
+    assert "finding-4" not in by_finding
     assert by_finding["finding-2"]["system_prediction"]["presentation_bucket"] == (
         "review_queue"
     )
     assert dataset["quality_summary"]["by_presentation_bucket"] == {
         "primary": 2,
         "review_queue": 1,
-        "unbucketed": 1,
     }
     assert dataset["quality_summary"]["by_bucket_quality_decision"] == {
         "primary": {"candidate": 2},
         "review_queue": {"candidate": 1},
-        "unbucketed": {"candidate": 1},
     }
+    assert dataset["quality_summary"]["by_dataset_use_status"] == {
+        "training_ready": 0,
+        "review_candidate": 3,
+        "rejected": 0,
+    }
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 0
+    assert dataset["quality_summary"]["review_candidate_sample_count"] == 3
 
 
 def test_research_understanding_feedback_service_curation_evidence_priority():
@@ -1027,6 +1170,7 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
                 "curated_review_status": "accepted",
                 "curated_evidence_ref_ids": ["ev-corrosion"],
                 "curated_context_ids": [],
+                "reviewer": "materials-expert",
                 "updated_at": "2026-06-18T11:00:00+00:00",
             }
         ),
@@ -1198,6 +1342,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
                 "curated_scope_summary": "SLM 316L",
                 "curated_evidence_ref_ids": ["ev-broad", "ev-corrosion"],
                 "curated_context_ids": [],
+                "reviewer": "materials-expert",
                 "updated_at": "2026-06-18T11:00:00+00:00",
             }
         ),
@@ -1581,6 +1726,343 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     assert dataset["quality_summary"]["system_error_count"] == 1
     assert dataset["quality_summary"]["by_issue_type"] == {"wrong_relation": 1}
     assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 1
+
+
+def test_research_understanding_feedback_service_filters_dataset_by_use_status():
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-partial",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "review_status": "partial",
+                "issue_type": "none",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-wrong",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-3",
+                "claim_id": "claim-3",
+                "review_status": "incorrect",
+                "issue_type": "wrong_relation",
+                "created_at": "2026-06-18T10:30:00+00:00",
+            }
+        ),
+    )
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    training_ready = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        dataset_use_status="training_ready",
+    )
+    review_candidate = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        dataset_use_status="review_candidate",
+    )
+
+    assert training_ready["dataset_use_status_filter"] == "training_ready"
+    assert training_ready["item_count"] == 1
+    assert {item["finding_id"] for item in training_ready["items"]} == {
+        "finding-1",
+    }
+    assert training_ready["quality_summary"]["by_dataset_use_status"] == {
+        "training_ready": 1,
+        "review_candidate": 0,
+        "rejected": 0,
+    }
+    assert review_candidate["dataset_use_status_filter"] == "review_candidate"
+    assert review_candidate["item_count"] == 2
+    by_review_finding = {item["finding_id"]: item for item in review_candidate["items"]}
+    assert set(by_review_finding) == {"finding-2", "finding-4"}
+    assert by_review_finding["finding-2"]["expert_target"]["source"] == (
+        "reviewer_feedback"
+    )
+    assert by_review_finding["finding-2"]["expert_target"]["review_status"] == "partial"
+    with pytest.raises(ValueError, match="unsupported dataset_use_status"):
+        service.export_dataset(
+            collection_id="col-gold",
+            scope_type="goal",
+            scope_id="goal-1",
+            dataset_use_status="ready",
+        )
+
+
+def test_research_understanding_feedback_service_keeps_anonymous_correct_feedback_silver():
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-anonymous-correct",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "review_status": "correct",
+                "issue_type": "none",
+                "note": "Correct, but reviewer identity is missing.",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    reviewed = by_finding["finding-1"]
+    assert reviewed["label_status"] == "silver"
+    assert reviewed["dataset_use_status"] == "review_candidate"
+    assert reviewed["expert_target"]["source"] == "reviewer_feedback"
+    assert reviewed["expert_target"]["review_status"] == "correct"
+    assert reviewed["expert_target"]["reviewer"] is None
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 0
+    assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "partial_review": 1,
+        "candidate": 3,
+    }
+
+
+def test_research_understanding_feedback_service_keeps_ai_partial_feedback_reviewable():
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-ai-partial",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "review_status": "partial",
+                "issue_type": "none",
+                "note": "Keep as a single-paper silver finding pending expert review.",
+                "reviewer": "ai-reviewer-codex-primary-findings",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    reviewed = by_finding["finding-2"]
+    assert reviewed["label_status"] == "silver"
+    assert reviewed["dataset_use_status"] == "review_candidate"
+    assert reviewed["expert_target"]["source"] == "reviewer_feedback"
+    assert reviewed["expert_target"]["reviewer"] == "ai-reviewer-codex-primary-findings"
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 0
+    assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+
+
+def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silver():
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-ai-correct",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "review_status": "correct",
+                "issue_type": "none",
+                "note": "AI reviewer confirms source support; keep pending human expert confirmation.",
+                "reviewer": "ai-reviewer-codex-primary-findings",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    reviewed = by_finding["finding-1"]
+    assert reviewed["label_status"] == "silver"
+    assert reviewed["dataset_use_status"] == "review_candidate"
+    assert reviewed["expert_target"]["source"] == "ai_review_feedback"
+    assert reviewed["expert_target"]["review_status"] == "correct"
+    assert reviewed["expert_target"]["reviewer"] == "ai-reviewer-codex-primary-findings"
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 0
+    assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "partial_review": 1,
+        "candidate": 3,
+    }
+
+
+def test_research_understanding_feedback_service_keeps_ai_curation_silver():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-ai-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["preheating"],
+                "curated_mediators": ["porosity"],
+                "curated_outcomes": ["ductility"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "LPBF 316L",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "note": "AI reviewer-authored curation should remain silver until human expert confirmation.",
+                "reviewer": "ai-reviewer-codex-primary-findings",
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    reviewed = by_finding["finding-1"]
+    assert reviewed["label_status"] == "silver"
+    assert reviewed["dataset_use_status"] == "review_candidate"
+    assert reviewed["expert_target"]["source"] == "ai_curation"
+    assert reviewed["expert_target"]["reviewer"] == "ai-reviewer-codex-primary-findings"
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 0
+    assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "ai_curated_suggestion": 1,
+        "candidate": 3,
+    }
+
+
+def test_research_understanding_feedback_service_keeps_anonymous_curation_silver():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-anonymous-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_support_grade": "partial",
+                "curated_review_status": "accepted",
+                "curated_variables": ["preheating"],
+                "curated_mediators": ["porosity"],
+                "curated_outcomes": ["ductility"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "LPBF 316L",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "note": "Curated statement is usable for review, but reviewer identity is missing.",
+                "updated_at": "2026-06-18T11:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    reviewed = by_finding["finding-1"]
+    assert reviewed["label_status"] == "silver"
+    assert reviewed["dataset_use_status"] == "review_candidate"
+    assert reviewed["expert_target"]["source"] == "unverified_curation"
+    assert reviewed["expert_target"]["reviewer"] is None
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 0
+    assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["by_quality_decision"] == {
+        "unverified_curation": 1,
+        "candidate": 3,
+    }
 
 
 def test_research_understanding_feedback_service_reports_missing_dataset_scope():

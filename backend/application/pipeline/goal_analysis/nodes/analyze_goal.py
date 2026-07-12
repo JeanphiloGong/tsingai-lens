@@ -10,6 +10,7 @@ def run(context: GoalAnalysisContext) -> dict:
     ].analyze_confirmed_goal(
         goal,
         progress_callback=context.services.get("goal_progress_callback"),
+        force_rebuild=True,
     )
     context.state["understanding"] = understanding
     return {

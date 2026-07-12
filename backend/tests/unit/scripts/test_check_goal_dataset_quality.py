@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+
+def _load_goal_dataset_check_module():
+    backend_root = Path(__file__).resolve().parents[3]
+    script_path = (
+        backend_root
+        / "scripts"
+        / "evaluation"
+        / "expert_gold"
+        / "check_goal_dataset_quality.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "check_goal_dataset_quality",
+        script_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _dataset_payload(**overrides):
+    item = {
+        "sample_id": "sample-1",
+        "finding_id": "finding-1",
+        "dataset_use_status": "training_ready",
+        "trace_status": "evidence_derived",
+        "input_blocks": [
+            {
+                "source_object_id": "ev-1",
+                "source_kind": "text",
+                "source_ref": "blk-1",
+                "text": "Preheating increased ductility by 14%.",
+                "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
+            }
+        ],
+        "training_evidence_refs": [
+            {
+                "evidence_ref_id": "ev-1",
+                "source_ref": "blk-1",
+                "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
+                "quote": "Preheating increased ductility by 14%.",
+            }
+        ],
+        "expert_target": {
+            "source": "curation",
+            "statement": "Preheating increased ductility by 14%.",
+        },
+    }
+    item.update(overrides.pop("item_overrides", {}))
+    quality_summary = {
+        "by_trace_status": {"evidence_derived": 1},
+        "warning_counts": {
+            "unavailable_trace": 0,
+            "failed_trace": 0,
+        },
+    }
+    quality_summary.update(overrides.pop("quality_overrides", {}))
+    return {
+        "scope_id": "goal-1",
+        "item_count": 1,
+        "quality_summary": quality_summary,
+        "items": [item],
+        **overrides,
+    }
+
+
+def _failed_check_names(summary):
+    return {item["name"] for item in summary["checks"] if item["status"] == "fail"}
+
+
+def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(_dataset_payload())
+
+    assert summary["item_count"] == 1
+    assert summary["training_ready_count"] == 1
+    assert all(item["status"] == "pass" for item in summary["checks"])
+
+
+def test_evaluate_goal_dataset_payload_accepts_review_candidate_sample():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "dataset_use_status": "review_candidate",
+                "expert_target": None,
+            }
+        )
+    )
+
+    assert summary["review_candidate_count"] == 1
+    assert "dataset has at least one active sample" not in _failed_check_names(summary)
+    check_names = {item["name"] for item in summary["checks"]}
+    assert "dataset has at least one training-ready sample" not in check_names
+
+
+def test_evaluate_goal_dataset_payload_requires_training_ready_when_requested():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "dataset_use_status": "review_candidate",
+                "expert_target": None,
+            }
+        ),
+        require_training_ready=True,
+    )
+
+    assert "dataset has at least one training-ready sample" in _failed_check_names(
+        summary
+    )
+
+
+def test_evaluate_goal_dataset_payload_fails_without_active_sample():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "dataset_use_status": "rejected",
+                "expert_target": None,
+            }
+        )
+    )
+
+    assert "dataset has at least one active sample" in _failed_check_names(summary)
+
+
+def test_evaluate_goal_dataset_payload_fails_failed_or_unavailable_trace_warning():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            quality_overrides={
+                "warning_counts": {
+                    "unavailable_trace": 1,
+                    "failed_trace": 1,
+                }
+            }
+        )
+    )
+
+    assert "dataset has no unavailable or failed traces" in _failed_check_names(summary)
+
+
+def test_evaluate_goal_dataset_payload_fails_missing_text_input_blocks():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "input_blocks": [
+                    {
+                        "source_object_id": "oeu-1",
+                        "source_kind": "objective_evidence_unit",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert "active samples include text input blocks" in _failed_check_names(summary)
+
+
+def test_evaluate_goal_dataset_payload_fails_missing_traceable_training_evidence():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "training_evidence_refs": [
+                    {
+                        "evidence_ref_id": "ev-1",
+                        "source_ref": "blk-1",
+                        "quote": "Preheating increased ductility by 14%.",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert (
+        "active samples include traceable training evidence"
+        in _failed_check_names(summary)
+    )

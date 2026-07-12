@@ -28,6 +28,11 @@ RelationType = Literal[
 ]
 ResearchUnderstandingFeedbackStatus = Literal["correct", "incorrect", "partial", "unclear"]
 ResearchUnderstandingDatasetLabelStatus = Literal["candidate", "silver", "gold", "rejected"]
+ResearchUnderstandingDatasetUseStatus = Literal[
+    "training_ready",
+    "review_candidate",
+    "rejected",
+]
 ResearchUnderstandingDatasetExportFormat = Literal["json", "jsonl"]
 ResearchUnderstandingFeedbackIssueType = Literal[
     "none",
@@ -144,6 +149,8 @@ class ResearchUnderstandingPresentationSummaryResponse(BaseModel):
     review_queue_count: int = Field(default=0)
     primary_finding_count: int = Field(default=0)
     review_queue_finding_count: int = Field(default=0)
+    collection_document_count: int = Field(default=0)
+    axis_coverage: dict[str, list[dict[str, str]]] = Field(default_factory=dict)
 
 
 class ResearchUnderstandingPresentationEffectResponse(BaseModel):
@@ -181,6 +188,37 @@ class ResearchUnderstandingPresentationEvidenceBundleResponse(BaseModel):
     uncategorized: list[str] = Field(default_factory=list)
 
 
+class ResearchUnderstandingPresentationComparisonValueResponse(BaseModel):
+    """One side of a traceable table or numeric comparison."""
+
+    label: str = Field(default="")
+    value: str = Field(default="")
+
+
+class ResearchUnderstandingPresentationControlledConditionResponse(BaseModel):
+    """Condition held fixed while comparing a variable axis."""
+
+    axis: str = Field(default="")
+    value: str = Field(default="")
+
+
+class ResearchUnderstandingPresentationComparisonSummaryResponse(BaseModel):
+    """Structured comparison summary for materials-expert review."""
+
+    variable: str = Field(default="")
+    direction: str = Field(default="")
+    outcome: str = Field(default="")
+    baseline: ResearchUnderstandingPresentationComparisonValueResponse = Field(
+        default_factory=ResearchUnderstandingPresentationComparisonValueResponse
+    )
+    observed: ResearchUnderstandingPresentationComparisonValueResponse = Field(
+        default_factory=ResearchUnderstandingPresentationComparisonValueResponse
+    )
+    controlled_conditions: list[
+        ResearchUnderstandingPresentationControlledConditionResponse
+    ] = Field(default_factory=list)
+
+
 class ResearchUnderstandingPresentationFindingResponse(BaseModel):
     """Expert-facing research finding row for materials review."""
 
@@ -204,6 +242,17 @@ class ResearchUnderstandingPresentationFindingResponse(BaseModel):
     evidence_bundle: ResearchUnderstandingPresentationEvidenceBundleResponse = Field(
         default_factory=ResearchUnderstandingPresentationEvidenceBundleResponse
     )
+    comparison_summary: ResearchUnderstandingPresentationComparisonSummaryResponse | None = (
+        Field(default=None)
+    )
+    expert_use_status: str = Field(default="review_candidate")
+    dataset_use_status: str = Field(default="review_candidate")
+    generalization_status: str = Field(default="cross_paper_candidate")
+    generalization_note: str = Field(default="")
+    evidence_gap_summary: str = Field(default="")
+    upgrade_actions: list[str] = Field(default_factory=list)
+    related_review_finding_ids: list[str] = Field(default_factory=list)
+    review_reasons: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -215,9 +264,14 @@ class ResearchUnderstandingPresentationEvidenceResponse(BaseModel):
     title: str
     source_label: str
     source_kind: str = Field(default="unknown")
+    source_ref: str | None = Field(default=None)
+    block_type: str | None = Field(default=None)
+    heading_path: str | None = Field(default=None)
     page: str | None = Field(default=None)
     quote: str | None = Field(default=None)
+    source_text: str | None = Field(default=None)
     value_summary: str = Field(default="")
+    table_audit: dict[str, Any] | None = Field(default=None)
     traceability_status: str = Field(default="unknown")
     evidence_role: str | None = Field(default=None)
     confidence: float | None = Field(default=None)
@@ -408,6 +462,8 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
 
     total_samples: int = Field(default=0)
     usable_sample_count: int = Field(default=0)
+    training_ready_sample_count: int = Field(default=0)
+    review_candidate_sample_count: int = Field(default=0)
     needs_review_count: int = Field(default=0)
     rejected_count: int = Field(default=0)
     labeled_sample_count: int = Field(default=0)
@@ -417,6 +473,7 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     system_error_count: int = Field(default=0)
     resolved_feedback_count: int = Field(default=0)
     by_label_status: dict[str, int] = Field(default_factory=dict)
+    by_dataset_use_status: dict[str, int] = Field(default_factory=dict)
     by_review_status: dict[str, int] = Field(default_factory=dict)
     by_issue_type: dict[str, int] = Field(default_factory=dict)
     by_support_grade: dict[str, int] = Field(default_factory=dict)
@@ -440,6 +497,9 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     finding_id: str
     claim_id: str | None = None
     label_status: ResearchUnderstandingDatasetLabelStatus
+    dataset_use_status: ResearchUnderstandingDatasetUseStatus = Field(
+        default="review_candidate"
+    )
     presentation_bucket: str = Field(default="unbucketed")
     trace_status: str = Field(default="unavailable")
     input_blocks: list[dict[str, Any]] = Field(default_factory=list)
@@ -448,6 +508,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     system_prediction: dict[str, Any] = Field(default_factory=dict)
     expert_target: dict[str, Any] | None = None
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    training_evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     context_refs: list[dict[str, Any]] = Field(default_factory=list)
     feedback_refs: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -464,6 +525,7 @@ class ResearchUnderstandingDatasetResponse(BaseModel):
     task_type: str
     metric_profile: str
     label_status_filter: ResearchUnderstandingDatasetLabelStatus | None = None
+    dataset_use_status_filter: ResearchUnderstandingDatasetUseStatus | None = None
     item_count: int
     label_counts: dict[str, int] = Field(default_factory=dict)
     quality_summary: ResearchUnderstandingDatasetQualitySummaryResponse = Field(

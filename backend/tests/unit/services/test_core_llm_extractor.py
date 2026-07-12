@@ -46,12 +46,15 @@ class _FakeChat:
 
 
 class _FakeBetaCompletions:
-    def __init__(self, parsed: object) -> None:
+    def __init__(self, parsed: object, *, error: Exception | None = None) -> None:
         self._parsed = parsed
+        self._error = error
         self.calls: list[dict[str, object]] = []
 
     def parse(self, **kwargs):  # noqa: ANN003, ARG002
         self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -62,19 +65,25 @@ class _FakeBetaCompletions:
 
 
 class _FakeBetaChat:
-    def __init__(self, parsed: object) -> None:
-        self.completions = _FakeBetaCompletions(parsed)
+    def __init__(self, parsed: object, *, error: Exception | None = None) -> None:
+        self.completions = _FakeBetaCompletions(parsed, error=error)
 
 
 class _FakeBeta:
-    def __init__(self, parsed: object) -> None:
-        self.chat = _FakeBetaChat(parsed)
+    def __init__(self, parsed: object, *, error: Exception | None = None) -> None:
+        self.chat = _FakeBetaChat(parsed, error=error)
 
 
 class _FakeOpenAIClient:
-    def __init__(self, content: str, *, parsed: object | None = None) -> None:
+    def __init__(
+        self,
+        content: str,
+        *,
+        parsed: object | None = None,
+        parse_error: Exception | None = None,
+    ) -> None:
         self.chat = _FakeChat(content)
-        self.beta = _FakeBeta(parsed)
+        self.beta = _FakeBeta(parsed, error=parse_error)
 
 
 def _json_text_extractor(client: _FakeOpenAIClient) -> CoreLLMStructuredExtractor:
@@ -193,6 +202,33 @@ def test_core_llm_extractor_captures_provider_parse_trace_for_relations():
     assert trace["raw_output"] is None
     assert "api_key" not in str(trace).lower()
     assert "authorization" not in str(trace).lower()
+
+
+def test_core_llm_extractor_falls_back_to_json_text_when_provider_parse_fails(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient(
+        '{"relations": []}',
+        parse_error=RuntimeError("provider parse failed"),
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    result = extractor.extract_research_understanding_relations(
+        {
+            "objective": {"question": "How does preheating affect porosity?"},
+            "evidence_units": [],
+        }
+    )
+
+    assert result == StructuredResearchUnderstandingRelations(relations=[])
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["trace_status"] == "available"
+    assert trace["extraction_mode"] == "provider_parse->json_text"
+    assert trace["parsed_output"] == {"relations": []}
 
 
 def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):

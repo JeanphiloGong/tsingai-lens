@@ -8,14 +8,12 @@ from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from application.core.confirmed_goal_service import ConfirmedGoalNotFoundError
-from application.core.research_understanding_service import ResearchUnderstandingService
 from application.pipeline.goal_analysis.service import GoalAnalysisPipelineService
 from controllers.schemas.core.goal_analysis import GoalAnalysisResponse
 from domain.core import ConfirmedGoal, ResearchUnderstanding
 
 router = APIRouter(prefix="/collections", tags=["goal-analysis"])
 goal_analysis_service = GoalAnalysisPipelineService()
-research_understanding_service = ResearchUnderstandingService()
 logger = logging.getLogger(__name__)
 _goal_analysis_executor = ThreadPoolExecutor(
     max_workers=1,
@@ -114,9 +112,9 @@ def _analysis_response(collection_id: str, payload: dict) -> GoalAnalysisRespons
         collection_id=collection_id,
         goal=goal.to_record() if isinstance(goal, ConfirmedGoal) else goal,
         understanding=(
-            research_understanding_service.with_presentation(understanding)
+            understanding.to_record()
             if isinstance(understanding, ResearchUnderstanding)
-            else research_understanding_service.with_presentation(understanding)
+            else understanding
         ),
         pipeline_nodes=payload.get("pipeline_nodes") or {},
         errors=payload.get("errors") or [],

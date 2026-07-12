@@ -20,6 +20,7 @@ from infra.persistence.factory import (
 DATASET_SCHEMA_VERSION = "research_understanding_dataset.v1"
 DATASET_TASK_TYPE = "research_understanding_finding"
 DATASET_LABEL_STATUSES = ("candidate", "silver", "gold", "rejected")
+DATASET_USE_STATUSES = ("training_ready", "review_candidate", "rejected")
 _REJECTING_ISSUE_TYPES = frozenset(
     {
         "evidence_not_grounded",
@@ -251,9 +252,12 @@ class ResearchUnderstandingFeedbackService:
         scope_type: str,
         scope_id: str,
         label_status: str | None = None,
+        dataset_use_status: str | None = None,
     ) -> dict[str, object]:
         if label_status and label_status not in DATASET_LABEL_STATUSES:
             raise ValueError(f"unsupported label_status: {label_status}")
+        if dataset_use_status and dataset_use_status not in DATASET_USE_STATUSES:
+            raise ValueError(f"unsupported dataset_use_status: {dataset_use_status}")
 
         understanding = self.core_fact_repository.read_research_understanding(
             collection_id,
@@ -266,6 +270,7 @@ class ResearchUnderstandingFeedbackService:
                 scope_type=scope_type,
                 scope_id=scope_id,
                 label_status_filter=label_status,
+                dataset_use_status_filter=dataset_use_status,
                 items=[],
                 warnings=["research understanding artifact is not available"],
             )
@@ -332,6 +337,11 @@ class ResearchUnderstandingFeedbackService:
             )
             if label_status and sample["label_status"] != label_status:
                 continue
+            if (
+                dataset_use_status
+                and sample["dataset_use_status"] != dataset_use_status
+            ):
+                continue
             items.append(sample)
 
         return self._dataset_payload(
@@ -339,6 +349,7 @@ class ResearchUnderstandingFeedbackService:
             scope_type=scope_type,
             scope_id=scope_id,
             label_status_filter=label_status,
+            dataset_use_status_filter=dataset_use_status,
             items=items,
             warnings=[],
         )
@@ -350,6 +361,7 @@ class ResearchUnderstandingFeedbackService:
         scope_type: str,
         scope_id: str,
         label_status_filter: str | None,
+        dataset_use_status_filter: str | None,
         items: list[dict[str, object]],
         warnings: list[str],
     ) -> dict[str, object]:
@@ -367,6 +379,7 @@ class ResearchUnderstandingFeedbackService:
             "task_type": DATASET_TASK_TYPE,
             "metric_profile": "research_understanding_v1",
             "label_status_filter": label_status_filter,
+            "dataset_use_status_filter": dataset_use_status_filter,
             "item_count": len(items),
             "label_counts": label_counts,
             "quality_summary": _dataset_quality_summary(items),
@@ -380,6 +393,25 @@ class ResearchUnderstandingFeedbackService:
     ) -> tuple[dict[str, Any], ...]:
         presentation = _mapping(understanding.get("presentation"))
         findings = _mapping_list(presentation.get("findings"))
+        findings_by_id = _by_id(findings, "finding_id")
+        visible_findings = [
+            *_mapping_list(presentation.get("primary_findings")),
+            *_mapping_list(presentation.get("review_queue_findings")),
+        ]
+        if visible_findings:
+            records: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for visible_finding in visible_findings:
+                finding_id = _text(visible_finding.get("finding_id"))
+                full_finding = (
+                    findings_by_id.get(finding_id, {}) if finding_id else {}
+                )
+                if finding_id and finding_id in seen:
+                    continue
+                if finding_id:
+                    seen.add(finding_id)
+                records.append({**visible_finding, **full_finding})
+            return tuple(records)
         if findings:
             return findings
         records: list[dict[str, Any]] = []
@@ -442,6 +474,10 @@ class ResearchUnderstandingFeedbackService:
         )
         curation = curations[0] if curations else None
         label_status = _label_status(feedback, curation)
+        dataset_use_status = _dataset_use_status(
+            label_status=label_status,
+            presentation_bucket=presentation_bucket,
+        )
         system_prediction = _system_prediction(finding)
         system_prediction["presentation_bucket"] = presentation_bucket
         base_evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
@@ -493,6 +529,19 @@ class ResearchUnderstandingFeedbackService:
             else:
                 evidence_ref_ids_list = curation_first_ref_ids
         evidence_ref_ids = tuple(evidence_ref_ids_list)
+        evidence_records = [
+            _evidence_record(evidence_ref_id, evidence_refs, evidence_items)
+            for evidence_ref_id in evidence_ref_ids
+        ]
+        training_evidence_ref_ids = _training_evidence_ref_ids(
+            finding,
+            evidence_ref_ids=evidence_ref_ids,
+        )
+        training_evidence_records = [
+            record
+            for record in evidence_records
+            if record["evidence_ref_id"] in training_evidence_ref_ids
+        ] or evidence_records
         context_ids = _strings(finding.get("context_ids"))
         matched_trace = _matched_trace_for_finding(
             finding,
@@ -500,6 +549,14 @@ class ResearchUnderstandingFeedbackService:
             evidence_refs=evidence_refs,
             relations=relations,
             model_traces=model_traces,
+        )
+        trace_status = _trace_status(
+            matched_trace,
+            evidence_records=evidence_records,
+        )
+        input_blocks = _trace_input_blocks(
+            matched_trace,
+            evidence_records=evidence_records,
         )
         return {
             "sample_id": _sample_id(
@@ -517,19 +574,18 @@ class ResearchUnderstandingFeedbackService:
             "finding_id": finding_id,
             "claim_id": claim_id,
             "label_status": label_status,
+            "dataset_use_status": dataset_use_status,
             "presentation_bucket": presentation_bucket,
-            "trace_status": _trace_status(matched_trace),
-            "input_blocks": _trace_input_blocks(matched_trace),
+            "trace_status": trace_status,
+            "input_blocks": input_blocks,
             "prompt_version": (
                 _text(matched_trace.get("prompt_version")) if matched_trace else None
             ),
             "model_output": _trace_model_output(matched_trace),
             "system_prediction": system_prediction,
             "expert_target": expert_target,
-            "evidence_refs": [
-                _evidence_record(evidence_ref_id, evidence_refs, evidence_items)
-                for evidence_ref_id in evidence_ref_ids
-            ],
+            "evidence_refs": evidence_records,
+            "training_evidence_refs": training_evidence_records,
             "context_refs": [
                 _context_record(context_id, contexts, context_summaries)
                 for context_id in context_ids
@@ -549,11 +605,7 @@ class ResearchUnderstandingFeedbackService:
                     if item not in curations
                 ],
                 "trace_id": _text(matched_trace.get("trace_id")) if matched_trace else None,
-                "trace_note": (
-                    "matched research-understanding model trace"
-                    if matched_trace
-                    else "prompt/model trace is not captured for historical samples"
-                ),
+                "trace_note": _trace_note(matched_trace, trace_status),
                 "presentation_bucket": presentation_bucket,
             },
         }
@@ -660,17 +712,45 @@ def _label_status(
     curation: ResearchUnderstandingCuration | None,
 ) -> str:
     if curation is not None:
-        return "gold"
+        return "gold" if _is_human_reviewer(curation.reviewer) else "silver"
     if any(
         item.review_status == "incorrect" or item.issue_type in _REJECTING_ISSUE_TYPES
         for item in feedback
     ):
         return "rejected"
-    if any(item.review_status == "correct" for item in feedback):
+    if any(
+        item.review_status == "correct" and _is_human_reviewer(item.reviewer)
+        for item in feedback
+    ):
         return "gold"
-    if any(item.review_status == "partial" for item in feedback):
+    if any(item.review_status in {"correct", "partial"} for item in feedback):
         return "silver"
     return "candidate"
+
+
+def _dataset_use_status(*, label_status: str, presentation_bucket: str) -> str:
+    if label_status == "rejected":
+        return "rejected"
+    if label_status == "gold":
+        return "training_ready"
+    return "review_candidate"
+
+
+def _training_evidence_ref_ids(
+    finding: Mapping[str, Any],
+    *,
+    evidence_ref_ids: tuple[str, ...],
+) -> set[str]:
+    bundle = _mapping(finding.get("evidence_bundle"))
+    result_ids = {
+        ref_id
+        for role in ("direct_result", "mechanism")
+        for ref_id in _strings(bundle.get(role))
+        if ref_id in evidence_ref_ids
+    }
+    if result_ids:
+        return result_ids
+    return set(evidence_ref_ids)
 
 
 def _finding_bucket_index(presentation: Mapping[str, Any]) -> dict[str, str]:
@@ -860,7 +940,10 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "rejected_feedback": 0,
         "resolved_feedback": 0,
     }
+    by_dataset_use_status = {status: 0 for status in DATASET_USE_STATUSES}
     usable_sample_count = 0
+    training_ready_sample_count = 0
+    review_candidate_sample_count = 0
     needs_review_count = 0
     rejected_count = 0
     labeled_sample_count = 0
@@ -872,11 +955,23 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
 
     for item in items:
         label_status = _text(item.get("label_status")) or "candidate"
+        dataset_use_status = (
+            _text(item.get("dataset_use_status"))
+            or _dataset_use_status(
+                label_status=label_status,
+                presentation_bucket=_text(item.get("presentation_bucket")) or "unbucketed",
+            )
+        )
         presentation_bucket = _text(item.get("presentation_bucket")) or "unbucketed"
         _increment_count(by_label_status, label_status)
+        _increment_count(by_dataset_use_status, dataset_use_status)
         _increment_count(by_presentation_bucket, presentation_bucket)
         if label_status in {"gold", "silver"}:
             usable_sample_count += 1
+        if dataset_use_status == "training_ready":
+            training_ready_sample_count += 1
+        elif dataset_use_status == "review_candidate":
+            review_candidate_sample_count += 1
         if label_status != "candidate":
             labeled_sample_count += 1
         if label_status == "rejected":
@@ -929,7 +1024,11 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         )
 
         target_source = _text(target.get("source"))
-        if target_source == "curation" and _curation_matches_system_prediction(
+        if target_source == "ai_curation":
+            quality_decision = "ai_curated_suggestion"
+        elif target_source == "unverified_curation":
+            quality_decision = "unverified_curation"
+        elif target_source == "curation" and _curation_matches_system_prediction(
             item,
             system_prediction=system_prediction,
             target=target,
@@ -996,6 +1095,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     return {
         "total_samples": len(items),
         "usable_sample_count": usable_sample_count,
+        "training_ready_sample_count": training_ready_sample_count,
+        "review_candidate_sample_count": review_candidate_sample_count,
         "needs_review_count": needs_review_count,
         "rejected_count": rejected_count,
         "labeled_sample_count": labeled_sample_count,
@@ -1005,6 +1106,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "system_error_count": system_error_count,
         "resolved_feedback_count": resolved_feedback_count,
         "by_label_status": by_label_status,
+        "by_dataset_use_status": by_dataset_use_status,
         "by_review_status": by_review_status,
         "by_issue_type": by_issue_type,
         "by_support_grade": by_support_grade,
@@ -1125,8 +1227,15 @@ def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:
 def _expert_target_from_curation(
     curation: ResearchUnderstandingCuration,
 ) -> dict[str, Any]:
+    source = (
+        "curation"
+        if _is_human_reviewer(curation.reviewer)
+        else "ai_curation"
+        if _is_ai_reviewer(curation.reviewer)
+        else "unverified_curation"
+    )
     return {
-        "source": "curation",
+        "source": source,
         "curation_id": curation.curation_id,
         "claim_id": curation.claim_id,
         "claim_type": curation.curated_claim_type,
@@ -1151,13 +1260,45 @@ def _expert_target_from_feedback(
     system_prediction: Mapping[str, Any],
     feedback: tuple[ResearchUnderstandingFeedback, ...],
 ) -> dict[str, Any] | None:
-    if not any(item.review_status == "correct" for item in feedback):
+    accepted = next(
+        (item for item in feedback if item.review_status == "correct"),
+        None,
+    )
+    partial = next(
+        (item for item in feedback if item.review_status == "partial"),
+        None,
+    )
+    item = accepted or partial
+    if item is None:
         return None
+    source = (
+        "accepted_system_prediction"
+        if item.review_status == "correct" and _is_human_reviewer(item.reviewer)
+        else "ai_review_feedback"
+        if item.review_status == "correct" and _is_ai_reviewer(item.reviewer)
+        else "reviewer_feedback"
+    )
     return {
-        "source": "accepted_system_prediction",
+        "source": source,
         "statement": system_prediction.get("statement"),
+        "review_status": item.review_status,
+        "issue_type": item.issue_type,
+        "feedback_id": item.feedback_id,
+        "note": item.note,
+        "reviewer": item.reviewer,
+        "created_at": item.created_at,
         "system_prediction": dict(system_prediction),
     }
+
+
+def _is_ai_reviewer(reviewer: str | None) -> bool:
+    normalized = (_text(reviewer) or "").lower()
+    return normalized.startswith("ai-reviewer") or normalized.startswith("agent-")
+
+
+def _is_human_reviewer(reviewer: str | None) -> bool:
+    normalized = _text(reviewer)
+    return bool(normalized) and not _is_ai_reviewer(normalized)
 
 
 def _matched_trace_for_finding(
@@ -1183,16 +1324,74 @@ def _matched_trace_for_finding(
     return None
 
 
-def _trace_status(trace: Mapping[str, Any] | None) -> str:
-    if not trace:
+def _trace_status(
+    trace: Mapping[str, Any] | None,
+    *,
+    evidence_records: list[dict[str, Any]] | None = None,
+) -> str:
+    if not _trace_has_text_input_blocks(trace):
+        if any(
+            _text(record.get("source_ref"))
+            and (_text(record.get("quote")) or _text(record.get("source_text")))
+            for record in evidence_records or []
+        ):
+            return "evidence_derived"
         return "unavailable"
     return _text(trace.get("trace_status")) or "available"
 
 
-def _trace_input_blocks(trace: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    if not trace:
-        return []
+def _trace_input_blocks(
+    trace: Mapping[str, Any] | None,
+    *,
+    evidence_records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    if not _trace_has_text_input_blocks(trace):
+        return _evidence_input_blocks(evidence_records or [])
     return list(_mapping_list(trace.get("input_blocks")))
+
+
+def _trace_has_text_input_blocks(trace: Mapping[str, Any] | None) -> bool:
+    if not trace:
+        return False
+    return any(_text(block.get("text")) for block in _mapping_list(trace.get("input_blocks")))
+
+
+def _evidence_input_blocks(
+    evidence_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for record in evidence_records:
+        source_ref = _text(record.get("source_ref"))
+        text = _text(record.get("quote")) or _text(record.get("source_text"))
+        if not source_ref or not text:
+            continue
+        evidence_ref_id = _text(record.get("evidence_ref_id"))
+        key = (evidence_ref_id, source_ref)
+        if key in seen:
+            continue
+        seen.add(key)
+        blocks.append(
+            {
+                "source_object_id": evidence_ref_id,
+                "source_kind": _text(record.get("source_kind")) or "unknown",
+                "document_id": _text(record.get("document_id")),
+                "source_ref": source_ref,
+                "page": _text(record.get("page")),
+                "role": _text(record.get("evidence_role")) or "uncategorized",
+                "text": text,
+                "href": _text(record.get("href")),
+            }
+        )
+    return blocks
+
+
+def _trace_note(trace: Mapping[str, Any] | None, trace_status: str) -> str:
+    if trace_status == "evidence_derived":
+        return "dataset input reconstructed from resolved evidence source text"
+    if trace:
+        return "matched research-understanding model trace"
+    return "prompt/model trace is not captured for historical samples"
 
 
 def _trace_model_output(trace: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -1218,6 +1417,8 @@ def _evidence_record(
     ref = _mapping(evidence_refs.get(evidence_ref_id))
     item = _mapping(evidence_items.get(evidence_ref_id))
     locator = _mapping(ref.get("locator"))
+    quote = _text(item.get("quote")) or _text(ref.get("quote"))
+    source_text = _text(item.get("source_text"))
     return {
         "evidence_ref_id": evidence_ref_id,
         "document_id": _text(item.get("document_id")) or _text(ref.get("document_id")),
@@ -1232,8 +1433,9 @@ def _evidence_record(
         "block_type": _text(item.get("block_type")),
         "heading_path": _text(item.get("heading_path")),
         "page": _text(item.get("page")),
-        "quote": _text(item.get("quote")) or _text(ref.get("quote")),
-        "source_text": _text(item.get("source_text")),
+        "quote": quote,
+        "source_text": source_text,
+        "training_source_text": quote or source_text,
         "value_summary": _text(item.get("value_summary")),
         "locator": locator,
         "fact_ids": list(_strings(ref.get("fact_ids"))),

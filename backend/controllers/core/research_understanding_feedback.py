@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from application.evaluation import ResearchUnderstandingFeedbackService
+from controllers.dependencies.auth import require_current_user
 from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingCurationCreateRequest,
     ResearchUnderstandingCurationListResponse,
@@ -17,6 +19,7 @@ from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingDatasetExportFormat,
     ResearchUnderstandingDatasetLabelStatus,
     ResearchUnderstandingDatasetResponse,
+    ResearchUnderstandingDatasetUseStatus,
     ResearchUnderstandingGoldDraftResponse,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
@@ -33,6 +36,7 @@ feedback_service = ResearchUnderstandingFeedbackService()
 async def create_research_understanding_feedback(
     collection_id: str,
     payload: ResearchUnderstandingFeedbackCreateRequest,
+    request: Request,
 ) -> ResearchUnderstandingFeedbackResponse:
     feedback = await run_in_threadpool(
         feedback_service.record_feedback,
@@ -44,7 +48,7 @@ async def create_research_understanding_feedback(
         review_status=payload.review_status,
         issue_type=payload.issue_type,
         note=payload.note,
-        reviewer=payload.reviewer,
+        reviewer=_reviewer_for_write(request, payload.reviewer),
     )
     return ResearchUnderstandingFeedbackResponse(**feedback.to_record())
 
@@ -89,6 +93,7 @@ def _feedback_response(
 async def create_research_understanding_curation(
     collection_id: str,
     payload: ResearchUnderstandingCurationCreateRequest,
+    request: Request,
 ) -> ResearchUnderstandingCurationResponse:
     curation = await run_in_threadpool(
         feedback_service.record_curation,
@@ -110,7 +115,7 @@ async def create_research_understanding_curation(
         curated_evidence_ref_ids=payload.curated_evidence_ref_ids,
         curated_context_ids=payload.curated_context_ids,
         note=payload.note,
-        reviewer=payload.reviewer,
+        reviewer=_reviewer_for_write(request, payload.reviewer),
     )
     return _curation_response(curation)
 
@@ -147,6 +152,29 @@ def _curation_response(
     return ResearchUnderstandingCurationResponse(**curation.to_record())
 
 
+def _reviewer_for_write(request: Request, requested_reviewer: str | None) -> str:
+    """Use session identity for human review, while preserving agent reviewers."""
+
+    normalized_requested = (requested_reviewer or "").strip()
+    if _is_agent_reviewer(normalized_requested):
+        return normalized_requested
+    user = require_current_user(request)
+    return _current_user_reviewer(user)
+
+
+def _is_agent_reviewer(reviewer: str) -> bool:
+    normalized = reviewer.lower()
+    return normalized.startswith("ai-reviewer") or normalized.startswith("agent-")
+
+
+def _current_user_reviewer(user: dict[str, Any]) -> str:
+    for key in ("email", "display_name", "user_id"):
+        value = str(user.get(key) or "").strip()
+        if value:
+            return value
+    raise ValueError("authenticated user has no reviewer identity")
+
+
 @router.get(
     "/{collection_id}/research-understanding/gold-draft",
     response_model=ResearchUnderstandingGoldDraftResponse,
@@ -176,6 +204,7 @@ async def export_research_understanding_dataset(
     scope_type: str = Query(..., max_length=32),
     scope_id: str = Query(..., min_length=1, max_length=160),
     label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
+    dataset_use_status: ResearchUnderstandingDatasetUseStatus | None = Query(default=None),
     format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
 ) -> ResearchUnderstandingDatasetResponse | Response:
     dataset = await run_in_threadpool(
@@ -184,6 +213,7 @@ async def export_research_understanding_dataset(
         scope_type=scope_type,
         scope_id=scope_id,
         label_status=label_status,
+        dataset_use_status=dataset_use_status,
     )
     response = ResearchUnderstandingDatasetResponse(**dataset)
     if format == "jsonl":

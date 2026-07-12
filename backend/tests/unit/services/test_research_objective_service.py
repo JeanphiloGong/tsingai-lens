@@ -16,6 +16,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredObjectiveMergePlan,
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
+    StructuredResearchUnderstandingRelations,
     StructuredResearchObjective,
     StructuredResearchObjectives,
     StructuredTableMatrixRepair,
@@ -399,6 +400,12 @@ class _ObjectiveExtractor:
             )
         return StructuredObjectiveEvidenceUnits()
 
+    def extract_research_understanding_relations(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchUnderstandingRelations:
+        return StructuredResearchUnderstandingRelations(relations=[])
+
 
 class _FailingRouteExtractor(_ObjectiveExtractor):
     def route_objective_evidence(
@@ -407,6 +414,15 @@ class _FailingRouteExtractor(_ObjectiveExtractor):
     ) -> StructuredObjectiveEvidenceRoutes:
         self.route_payloads.append(payload)
         raise RuntimeError("route model failed")
+
+
+class _FailingFrameExtractor(_ObjectiveExtractor):
+    def frame_objective_paper(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectivePaperFrame:
+        self.frame_payloads.append(payload)
+        raise RuntimeError("frame model failed")
 
 
 class _BroadObjectiveExtractor(_ObjectiveExtractor):
@@ -1427,6 +1443,303 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
         "heading_path": "Methods",
         "text": "The 316L samples used heat treatment at 650 C for 4 h.",
     }
+
+
+def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-texture-yield",
+            "question": (
+                "How do scan strategy rotation angle and build orientation angle "
+                "affect crystallographic texture and yield strength of LPBF 316L?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan strategy rotation angle", "build orientation angle"],
+            "property_axes": ["crystallographic texture", "yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "process_context_axes": ["Laser Powder Bed Fusion"],
+            "target_property_axes": ["crystallographic texture", "yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    child_ids = [f"section-{index}" for index in range(30)]
+    child_ids.extend(("texture-section", "yield-section"))
+    nodes: dict[str, SourceDocumentNode] = {
+        "root": SourceDocumentNode(
+            node_id="root",
+            document_id="paper-p006",
+            parent_id=None,
+            child_ids=tuple(child_ids),
+            node_type="document",
+            order=0,
+        )
+    }
+    for index in range(30):
+        section_id = f"section-{index}"
+        paragraph_id = f"paragraph-{index}"
+        nodes[section_id] = SourceDocumentNode(
+            node_id=section_id,
+            document_id="paper-p006",
+            parent_id="root",
+            child_ids=(paragraph_id,),
+            node_type="section",
+            order=100 + index,
+            title=f"Background {index}",
+            heading_path=(f"Background {index}",),
+        )
+        nodes[paragraph_id] = SourceDocumentNode(
+            node_id=paragraph_id,
+            document_id="paper-p006",
+            parent_id=section_id,
+            child_ids=(),
+            node_type="paragraph",
+            order=101 + index,
+            text=(
+                "General additive-manufacturing background and introduction text "
+                "without the active variables."
+            ),
+            heading_path=(f"Background {index}",),
+        )
+    nodes["texture-section"] = SourceDocumentNode(
+        node_id="texture-section",
+        document_id="paper-p006",
+        parent_id="root",
+        child_ids=("texture-paragraph",),
+        node_type="section",
+        order=1000,
+        title="Texture results",
+        heading_path=("Results", "Texture results"),
+    )
+    nodes["texture-paragraph"] = SourceDocumentNode(
+        node_id="texture-paragraph",
+        document_id="paper-p006",
+        parent_id="texture-section",
+        child_ids=(),
+        node_type="paragraph",
+        order=1001,
+        text=(
+            "Scan strategy rotation angle and build orientation changed "
+            "crystallographic texture intensity in LPBF 316L."
+        ),
+        heading_path=("Results", "Texture results"),
+    )
+    nodes["yield-section"] = SourceDocumentNode(
+        node_id="yield-section",
+        document_id="paper-p006",
+        parent_id="root",
+        child_ids=("yield-paragraph",),
+        node_type="section",
+        order=1100,
+        title="Tensile properties",
+        heading_path=("Results", "Tensile properties"),
+    )
+    nodes["yield-paragraph"] = SourceDocumentNode(
+        node_id="yield-paragraph",
+        document_id="paper-p006",
+        parent_id="yield-section",
+        child_ids=(),
+        node_type="paragraph",
+        order=1101,
+        text=(
+            "Build orientation angle changed yield strength and tensile response "
+            "for 316L stainless steel."
+        ),
+        heading_path=("Results", "Tensile properties"),
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-p006",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes=nodes,
+    )
+
+    payload = service._build_objective_paper_frame_payload(
+        collection_id="col-test",
+        objective=objective,
+        objective_context=objective_context,
+        paper_skim=None,
+        document=SimpleNamespace(
+            document_id="paper-p006",
+            title="Mapping the roles of scan strategy and build orientation",
+        ),
+        profile=None,
+        blocks=[],
+        tables=[],
+        document_tree=document_tree,
+    )
+
+    labels = [item["section_label"] for item in payload["section_snippets"]]
+    assert "Results > Texture results" in labels
+    assert "Results > Tensile properties" in labels
+    assert len(labels) <= 24
+
+
+def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-texture-yield",
+            "question": (
+                "How do scan strategy rotation angle and build orientation angle "
+                "affect crystallographic texture and yield strength?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan strategy rotation angle", "build orientation angle"],
+            "property_axes": ["crystallographic texture", "yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "target_property_axes": ["crystallographic texture", "yield strength"],
+            "confidence": 0.9,
+        }
+    )
+
+    payload = service._build_objective_paper_frame_payload(
+        collection_id="col-test",
+        objective=objective,
+        objective_context=objective_context,
+        paper_skim=None,
+        document=SimpleNamespace(
+            document_id="paper-p006",
+            title="Mapping the roles of scan strategy and build orientation",
+        ),
+        profile=None,
+        blocks=[],
+        tables=[
+            SimpleNamespace(
+                table_id="tbl-density",
+                table_order=1,
+                caption_text="VED settings and density.",
+                heading_path="Methods",
+                column_headers=("VED", "Density"),
+                row_count=2,
+                col_count=2,
+                table_matrix=(("VED", "Density"), ("50", "91.9")),
+            ),
+            SimpleNamespace(
+                table_id="tbl-yield-texture",
+                table_order=2,
+                caption_text="Build orientation angle, scan strategy rotation angle, texture and yield strength.",
+                heading_path="Results",
+                column_headers=(
+                    "build orientation angle",
+                    "scan strategy rotation angle",
+                    "texture",
+                    "yield strength",
+                ),
+                row_count=2,
+                col_count=4,
+                table_matrix=(
+                    (
+                        "build orientation angle",
+                        "scan strategy rotation angle",
+                        "texture",
+                        "yield strength",
+                    ),
+                    ("0", "67", "strong", "460"),
+                ),
+            ),
+        ],
+        document_tree=None,
+    )
+
+    table_ids = [item["table_id"] for item in payload["table_summaries"]]
+    assert "tbl-yield-texture" in table_ids
+    assert "tbl-density" not in table_ids
+
+
+def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-texture-yield",
+            "question": (
+                "How do scan strategy rotation angle and build orientation angle "
+                "affect crystallographic texture and yield strength?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan strategy rotation angle", "build orientation angle"],
+            "property_axes": ["crystallographic texture", "yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "target_property_axes": ["crystallographic texture", "yield strength"],
+            "confidence": 0.9,
+        }
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-ved",
+            "collection_id": "col-test",
+            "doc_role": "experimental",
+            "candidate_processes": ["LPBF", "VED"],
+            "candidate_properties": ["density"],
+            "changed_variables": ["laser power", "scan speed"],
+            "evidence_density": "low",
+        }
+    )
+
+    record = service._build_deterministic_objective_paper_frame_record(
+        objective=objective,
+        objective_context=objective_context,
+        paper_skim=paper_skim,
+        payload={
+            "document": {
+                "document_id": "paper-ved",
+                "title": "VED density study",
+            },
+            "section_snippets": [
+                {
+                    "section_label": "Results",
+                    "text": "Laser power and scan speed changed density.",
+                }
+            ],
+            "table_summaries": [
+                {
+                    "table_id": "tbl-density",
+                    "caption_text": "VED and density.",
+                    "column_headers": ["VED", "density"],
+                }
+            ],
+        },
+    )
+
+    assert record["relevance"] == "irrelevant"
+    assert record["relevant_tables"] == []
 
 
 def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_path):
@@ -2758,6 +3071,144 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
         "β ( ◦ )": "22.5",
         "θ ( ◦ )": "45",
     }
+
+
+def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Yield Strength Experiment (MPa)": "target_property",
+                "Yield Strength Prediction (MPa)": "target_property",
+            },
+            "confidence": 0.84,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 9,
+            "column_headers": [
+                "Case",
+                "Yield Strength Experiment (MPa)",
+                "Yield Strength Prediction (MPa)",
+            ],
+            "table_matrix": [
+                [
+                    "Case",
+                    "Yield Strength Experiment (MPa)",
+                    "Yield Strength Prediction (MPa)",
+                ],
+                ["4", "351.9", "345.64"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    assert len(records) == 2
+    assert {record["property_normalized"] for record in records} == {
+        "yield strength experiment",
+        "yield strength prediction",
+    }
+    assert all(record["sample_context"] == {"Case": "4"} for record in records)
+    assert all(record["join_keys"] == {"case": "4"} for record in records)
+
+
+def test_research_objective_service_expands_fatigue_and_defect_result_columns(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-5",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Printed 316L": "sample_id",
+                "FAT50 % [MPa]": "target_property",
+                "FAT at 10 4 cycles [MPa]": "target_property",
+                "Max. Defect length (LCSM) [ μ m]": "target_property",
+            },
+            "confidence": 0.84,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "variable_process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            ],
+            "target_property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=route,
+        source={
+            "page": 10,
+            "column_headers": [
+                "Printed 316L",
+                "UTS [MPa]",
+                "FAT50 % [MPa]",
+                "FAT/ UTS -",
+                "FAT at 10 4 cycles [MPa]",
+                "Max. Defect length (LCSM) [ μ m]",
+            ],
+            "table_matrix": [
+                [
+                    "Printed 316L",
+                    "UTS [MPa]",
+                    "FAT50 % [MPa]",
+                    "FAT/ UTS -",
+                    "FAT at 10 4 cycles [MPa]",
+                    "Max. Defect length (LCSM) [ μ m]",
+                ],
+                ["L-VED", "610 ± 6", "93", "0.15", "340", "394"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    values_by_property = {
+        record["property_normalized"]: record["value_payload"]["value"]
+        for record in records
+    }
+    assert values_by_property == {
+        "fatigue strength": 340.0,
+        "fatigue limit": 93.0,
+        "max defect length": 394.0,
+    }
+    assert all(record["sample_context"] == {"Printed 316L": "L-VED"} for record in records)
 
 
 def test_research_objective_service_uses_role_aliases_for_result_process_context(
@@ -4651,6 +5102,112 @@ def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
     assert any("Mediator axes" in rule for rule in lens["direct_support_rules"])
 
 
+def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_results(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-corrosion",
+            "question": (
+                "How do laser power and energy density affect pitting corrosion "
+                "behavior of SLM 316L?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "energy density"],
+            "property_axes": ["pitting corrosion behavior"],
+        }
+    )
+
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(
+            SimpleNamespace(
+                table_id="tbl-electrochemical",
+                document_id="paper-1",
+                caption_text=(
+                    "Table 3 Electrochemical parameters results obtained from "
+                    "the polarization test"
+                ),
+                column_headers=(
+                    "Sample",
+                    "E corr (mV)",
+                    "E d (mV)",
+                    "E p (mV)",
+                    "E p - E d (mV)",
+                ),
+                table_matrix=(
+                    ("Sample", "E corr (mV)", "E p (mV)"),
+                    ("375 W-2100 mm·s -1", "-312.9", "124.7"),
+                ),
+            ),
+            SimpleNamespace(
+                table_id="tbl-eis",
+                document_id="paper-1",
+                caption_text="Table 4 Fitted parameters obtained from the EIS plots",
+                column_headers=("Sample", "R s (Ω cm 2 )", "R film (Ω cm 2 )"),
+                table_matrix=(
+                    ("Sample", "R s (Ω cm 2 )", "R film (Ω cm 2 )"),
+                    ("135 W-750 mm·s -1", "5.21", "1.90×10 5"),
+                ),
+            ),
+        ),
+        target_property_axes=["pitting corrosion behavior"],
+        variable_process_axes=["laser power", "energy density"],
+    )
+
+    assert {
+        (hint["table_id"], hint["role"], tuple(hint["matched_property_axes"]))
+        for hint in hints
+    } == {
+        ("tbl-electrochemical", "result_table", ("pitting corrosion behavior",)),
+        ("tbl-eis", "result_table", ("pitting corrosion behavior",)),
+    }
+
+
+def test_research_objective_service_keeps_density_out_of_defect_structure_results(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "question": (
+                "How does volumetric energy density affect defect structure and "
+                "fatigue strength of LPBF 316L?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["volumetric energy density"],
+            "property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(
+            SimpleNamespace(
+                table_id="tbl-density",
+                document_id="paper-1",
+                caption_text="Table 1 SLM processing parameters and relative densities.",
+                column_headers=("VED", "Relative density"),
+                table_matrix=(
+                    ("VED", "Relative density"),
+                    ("50", "91.9"),
+                    ("100", "98.9"),
+                ),
+            ),
+        ),
+        target_property_axes=["defect structure", "fatigue strength"],
+        variable_process_axes=["volumetric energy density"],
+    )
+
+    assert all(hint["role"] != "result_table" for hint in hints)
+
+
 def test_research_objective_service_route_payload_includes_objective_evidence_lens(
     tmp_path,
 ):
@@ -4904,6 +5461,63 @@ def test_research_objective_service_resolves_measurements_from_process_units(
         },
     }
     assert resolved_measurement.resolution_status == "resolved"
+
+
+def test_research_objective_service_resolves_case_measurements_from_sample_number_process_units(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-yield-case-4",
+            "objective_id": "obj-texture",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "yield strength",
+            "sample_context": {"Case": "4"},
+            "value_payload": {
+                "source_value_text": "351.9",
+                "value": 351.9,
+            },
+            "unit": "MPa",
+            "resolution_status": "partial",
+            "confidence": 0.84,
+        }
+    )
+    process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-angle-sample-4",
+            "objective_id": "obj-texture",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {"Sample #": "4"},
+            "process_context": {
+                "α ( ◦ )": "0",
+                "β ( ◦ )": "22.5",
+                "ɵ ( ◦ )": "45",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (measurement, process_context),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.process_context == {
+        "α ( ◦ )": "0",
+        "β ( ◦ )": "22.5",
+        "ɵ ( ◦ )": "45",
+    }
+    assert resolved_measurement.resolution_status == "resolved"
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-angle-sample-4",
+        "matched_sample_context": {"Sample #": "4"},
+    }
 
 
 def test_research_objective_service_resolves_measurements_from_process_label(
@@ -5569,6 +6183,71 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
     assert comparison_units[0].baseline_context["sample_context"]["sample_number"] == "1"
 
 
+def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-texture",
+            "variable_process_axes": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        theta: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-texture",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {
+                    "α ( ◦ )": "0",
+                    "β ( ◦ )": "0",
+                    "ɵ ( ◦ )": theta,
+                },
+                "value_payload": {"source_value_text": str(value), "value": value},
+                "unit": "MPa",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-angles",
+                        "page": 8,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement("oeu-yield-1", sample_number="1", theta="0", value=342.5),
+            measurement("oeu-yield-7", sample_number="7", theta="90", value=410.2),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert len(comparison_units) == 1
+    assert comparison_units[0].value_payload["comparison_axis"] == "ɵ"
+    assert comparison_units[0].sample_context["sample_number"] == "7"
+    assert comparison_units[0].baseline_context["sample_context"]["sample_number"] == "1"
+
+
 def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes(
     tmp_path,
 ):
@@ -5960,6 +6639,131 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
             617.0,
         ),
         ("2", "1", "elongation", "Build platform conditions", 82.0, 72.0),
+    }
+
+
+def test_research_objective_service_generates_pairwise_from_process_condition_axis(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "question": "How does build platform preheating affect tensile properties?",
+            "variable_process_axes": ["build platform preheating"],
+            "target_property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+        }
+    )
+
+    def measurement(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        platform_condition: str,
+        property_name: str,
+        value: float,
+        unit: str,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-preheat",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": property_name,
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {"Build platform conditions": platform_condition},
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": unit,
+                "resolution_status": "resolved",
+                "confidence": 0.82,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            measurement(
+                "oeu-np-yield",
+                sample_number="1",
+                platform_condition="Non-preheated",
+                property_name="yield strength",
+                value=448,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-p-yield",
+                sample_number="2",
+                platform_condition="Preheated",
+                property_name="yield strength",
+                value=465,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-np-uts",
+                sample_number="1",
+                platform_condition="Non-preheated",
+                property_name="ultimate tensile strength",
+                value=617,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-p-uts",
+                sample_number="2",
+                platform_condition="Preheated",
+                property_name="ultimate tensile strength",
+                value=618,
+                unit="MPa",
+            ),
+            measurement(
+                "oeu-np-el",
+                sample_number="1",
+                platform_condition="Non-preheated",
+                property_name="elongation",
+                value=72,
+                unit="%",
+            ),
+            measurement(
+                "oeu-p-el",
+                sample_number="2",
+                platform_condition="Preheated",
+                property_name="elongation",
+                value=82,
+                unit="%",
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert {
+        (
+            unit.sample_context["sample_number"],
+            unit.baseline_context["sample_context"]["sample_number"],
+            unit.property_normalized,
+            unit.value_payload["comparison_axis"],
+            unit.value_payload["current_value"],
+            unit.baseline_context["value"],
+        )
+        for unit in comparison_units
+    } == {
+        ("2", "1", "yield strength", "build platform preheating", 465.0, 448.0),
+        (
+            "2",
+            "1",
+            "ultimate tensile strength",
+            "build platform preheating",
+            618.0,
+            617.0,
+        ),
+        ("2", "1", "elongation", "build platform preheating", 82.0, 72.0),
     }
 
 
@@ -6430,6 +7234,308 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
         (mechanical_objective_id, "14", "16", "yield strength"),
         (mechanical_objective_id, "14", "15", "elongation"),
         (mechanical_objective_id, "14", "16", "elongation"),
+    }
+
+
+def test_research_objective_service_resolves_ved_fatigue_table_from_printed_label(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "question": (
+                "How do volumetric energy density and process parameters affect "
+                "defect structure and fatigue strength?"
+            ),
+            "variable_process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            ],
+            "target_property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+
+    process_units = [
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": f"oeu-process-{sample_label}",
+                "objective_id": "obj-fatigue",
+                "document_id": "paper-ved",
+                "unit_kind": "process_context",
+                "sample_context": {"ID": sample_label},
+                "process_context": {
+                    "VED [J/mm 3 ]": ved,
+                    "Laser power [W]": laser_power,
+                    "Scanning speed [mm/s]": scan_speed,
+                    "Hatch spacing [ μ m]": hatch_spacing,
+                    "Layer thickness [ μ m]": "30",
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-fabrication",
+                        "role": "process_or_treatment",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.84,
+            }
+        )
+        for sample_label, ved, laser_power, scan_speed, hatch_spacing in (
+            ("L-VED", "50.8", "160", "875", "120"),
+            ("M-VED", "79.4", "190", "800", "100"),
+            ("H-VED", "84.3", "220", "725", "120"),
+        )
+    ]
+    measurement_units = [
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": f"oeu-fatigue-{sample_label}",
+                "objective_id": "obj-fatigue",
+                "document_id": "paper-ved",
+                "unit_kind": "measurement",
+                "property_normalized": "fatigue strength",
+                "sample_context": {"Printed 316L": sample_label},
+                "value_payload": {
+                    "source_value_text": str(fatigue_strength),
+                    "value": fatigue_strength,
+                },
+                "unit": "MPa",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-fatigue",
+                        "role": "current_experimental_evidence",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            }
+        )
+        for sample_label, fatigue_strength in (
+            ("L-VED", 340),
+            ("M-VED", 450),
+            ("H-VED", 470),
+        )
+    ]
+    defect_units = [
+        ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": f"oeu-defect-{sample_label}",
+                "objective_id": "obj-fatigue",
+                "document_id": "paper-ved",
+                "unit_kind": "measurement",
+                "property_normalized": "max defect length",
+                "sample_context": {"Printed 316L": sample_label},
+                "value_payload": {
+                    "source_value_text": str(defect_length),
+                    "value": defect_length,
+                },
+                "unit": "μm",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-fatigue",
+                        "role": "current_experimental_evidence",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.88,
+            }
+        )
+        for sample_label, defect_length in (
+            ("L-VED", 394),
+            ("M-VED", 179),
+            ("H-VED", 86),
+        )
+    ]
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (*process_units, *measurement_units, *defect_units)
+    )
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        resolved_units,
+        objective_contexts=(objective_context,),
+    )
+
+    fatigue_units = [
+        unit
+        for unit in resolved_units
+        if unit.unit_kind == "measurement"
+        and unit.property_normalized == "fatigue strength"
+        and unit.sample_context.get("Printed 316L") in {"L-VED", "M-VED", "H-VED"}
+    ]
+    assert all("VED [J/mm 3 ]" in unit.process_context for unit in fatigue_units)
+    assert {
+        unit.sample_context["Printed 316L"]: unit.process_context["VED [J/mm 3 ]"]
+        for unit in fatigue_units
+    } == {"L-VED": "50.8", "M-VED": "79.4", "H-VED": "84.3"}
+    assert {
+        (
+            unit.value_payload["comparison_axis"],
+            unit.property_normalized,
+        )
+        for unit in comparison_units
+    } >= {
+        ("volumetric energy density", "fatigue strength"),
+        ("volumetric energy density", "max defect length"),
+    }
+
+
+def test_research_objective_service_inferrs_sample_and_defect_columns_without_model_roles(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "question": (
+                "How do volumetric energy density and process parameters affect "
+                "defect structure and fatigue strength?"
+            ),
+            "variable_process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            ],
+            "target_property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+    process_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "route_id": "route-process",
+            "objective_id": "obj-fatigue",
+            "document_id": "paper-ved",
+            "source_kind": "table",
+            "source_ref": "table-fabrication",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "VED [J/mm 3]": "process_variable",
+                "Laser power [W]": "process_variable",
+                "Scanning speed [mm/s]": "process_variable",
+                "Hatch spacing [ μ m]": "process_variable",
+                "Layer thickness [ μ m]": "process_variable",
+            },
+            "confidence": 0.84,
+        }
+    )
+    result_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "route_id": "route-fatigue",
+            "objective_id": "obj-fatigue",
+            "document_id": "paper-ved",
+            "source_kind": "table",
+            "source_ref": "table-fatigue",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "FAT at 10 4 cycles [MPa]": "target_property",
+            },
+            "confidence": 0.88,
+        }
+    )
+
+    process_records = service._objective_table_matrix_evidence_unit_records(
+        route=process_route,
+        source={
+            "page": 4,
+            "column_headers": [
+                "ID",
+                "VED [J/mm 3]",
+                "Laser power [W]",
+                "Scanning speed [mm/s]",
+                "Hatch spacing [ μ m]",
+                "Layer thickness [ μ m]",
+            ],
+            "table_matrix": [
+                [
+                    "ID",
+                    "VED [J/mm 3]",
+                    "Laser power [W]",
+                    "Scanning speed [mm/s]",
+                    "Hatch spacing [ μ m]",
+                    "Layer thickness [ μ m]",
+                ],
+                ["L-VED", "50.8", "160", "875", "120", "30"],
+                ["M-VED", "79.4", "190", "800", "100", "30"],
+                ["H-VED", "84.3", "220", "725", "120", "30"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+    result_records = service._objective_table_matrix_evidence_unit_records(
+        route=result_route,
+        source={
+            "page": 10,
+            "column_headers": [
+                "Printed 316L",
+                "UTS [MPa]",
+                "FAT50 % [MPa]",
+                "FAT/ UTS -",
+                "FAT at 10 4 cycles [MPa]",
+                "Max. Defect length (LCSM) [ μ m]",
+            ],
+            "table_matrix": [
+                [
+                    "Printed 316L",
+                    "UTS [MPa]",
+                    "FAT50 % [MPa]",
+                    "FAT/ UTS -",
+                    "FAT at 10 4 cycles [MPa]",
+                    "Max. Defect length (LCSM) [ μ m]",
+                ],
+                ["L-VED", "610 ± 6", "93", "0.15", "340", "394"],
+                ["M-VED", "595 ± 13", "82", "0.14", "450", "179"],
+                ["H-VED", "560 ± 4", "97", "0.17", "470", "86"],
+                ["Wrought", "624 ± 2", "256", "0.41", "390", "-"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+    units = tuple(
+        ObjectiveEvidenceUnit.from_mapping(record)
+        for record in (*process_records, *result_records)
+    )
+    resolved_units = service._resolve_objective_evidence_unit_contexts(units)
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        resolved_units,
+        objective_contexts=(objective_context,),
+    )
+
+    result_by_property = {
+        record["property_normalized"]
+        for record in result_records
+    }
+    assert {"fatigue strength", "fatigue limit", "max defect length"} <= result_by_property
+    assert all(
+        record["sample_context"].get("Printed 316L")
+        for record in result_records
+        if record["property_normalized"] in {"fatigue strength", "max defect length"}
+    )
+    assert {
+        unit.sample_context.get("Printed 316L"): unit.process_context.get("VED [J/mm 3]")
+        for unit in resolved_units
+        if unit.unit_kind == "measurement"
+        and unit.property_normalized == "fatigue strength"
+        and unit.sample_context.get("Printed 316L") in {"L-VED", "M-VED", "H-VED"}
+    } == {"L-VED": "50.8", "M-VED": "79.4", "H-VED": "84.3"}
+    assert {
+        (unit.value_payload["comparison_axis"], unit.property_normalized)
+        for unit in comparison_units
+    } >= {
+        ("volumetric energy density", "fatigue strength"),
+        ("volumetric energy density", "max defect length"),
     }
 
 
@@ -7538,6 +8644,7 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
         collection_service=collection_service,
         structured_extractor=extractor,
     )
+    service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -8407,7 +9514,118 @@ def test_confirmed_goal_analysis_builds_objective_id_for_user_input_goal():
     assert objective.property_axes == ("corrosion resistance",)
 
 
-def test_confirmed_goal_analysis_persists_frames_before_routing_failure(tmp_path):
+def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails(
+    tmp_path,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Goal frame fallback")
+    collection_id = collection["collection_id"]
+    extractor = _FailingFrameExtractor()
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+    )
+    service.research_understanding_service.structured_extractor = extractor
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "LPBF 316L Texture and Yield Study",
+                    "text": "Scan strategy changed texture and yield strength.",
+                    "metadata": {"source_filename": "paper-1.pdf"},
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "b1",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": (
+                        "Scan strategy rotation angle changed crystallographic "
+                        "texture and yield strength of LPBF 316L."
+                    ),
+                    "block_order": 1,
+                    "heading_path": "Results",
+                }
+            ],
+            tables=[],
+        ),
+    )
+    _seed_document_profiles(service, collection_id)
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj_texture_yield",
+            "question": "How does scan strategy affect texture and yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan strategy rotation angle"],
+            "property_axes": ["crystallographic texture", "yield strength"],
+            "comparison_intent": "Compare texture and yield strength across scan strategy.",
+            "seed_document_ids": ["paper-1"],
+            "confidence": 0.9,
+        }
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "collection_id": collection_id,
+            "source_filename": "paper-1.pdf",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["LPBF"],
+            "candidate_properties": ["crystallographic texture", "yield strength"],
+            "changed_variables": ["scan strategy rotation angle"],
+            "possible_objectives": [objective.question],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "material_scope": ["316L stainless steel"],
+            "process_context_axes": ["LPBF"],
+            "variable_process_axes": ["scan strategy rotation angle"],
+            "target_property_axes": ["crystallographic texture", "yield strength"],
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        (paper_skim,),
+        (objective,),
+        (objective_context,),
+        (),
+        (),
+        (),
+        (),
+    )
+    goal = ConfirmedGoal.from_mapping(
+        {
+            "collection_id": collection_id,
+            "goal_id": "goal_texture_yield",
+            "question": objective.question,
+            "source_type": "objective_candidate",
+            "source_objective_id": objective.objective_id,
+        }
+    )
+
+    understanding = service.analyze_confirmed_goal(goal)
+
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    assert extractor.frame_payloads
+    assert len(facts.objective_paper_frames) == 1
+    frame = facts.objective_paper_frames[0]
+    assert frame.relevance == "medium"
+    assert frame.paper_role == "primary_experiment"
+    assert frame.relevant_sections
+    assert facts.objective_evidence_units
+    assert understanding.scope.scope_type == "goal"
+
+
+def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails(
+    tmp_path,
+):
     collection_service = CollectionService(tmp_path / "collections")
     collection = collection_service.create_collection("Goal stage retry")
     collection_id = collection["collection_id"]
@@ -8415,6 +9633,7 @@ def test_confirmed_goal_analysis_persists_frames_before_routing_failure(tmp_path
         collection_service=collection_service,
         structured_extractor=_ObjectiveExtractor(),
     )
+    service.research_understanding_service.structured_extractor = service._structured_extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -8506,30 +9725,183 @@ def test_confirmed_goal_analysis_persists_frames_before_routing_failure(tmp_path
         }
     )
 
-    service._structured_extractor = _FailingRouteExtractor()
-    try:
-        service.analyze_confirmed_goal(goal)
-    except RuntimeError as exc:
-        assert str(exc) == "route model failed"
-    else:  # pragma: no cover - defensive test guard
-        raise AssertionError("expected route failure")
-
-    facts_after_failure = service.core_fact_repository.read_collection_facts(collection_id)
-    assert len(facts_after_failure.objective_paper_frames) == 1
-    assert facts_after_failure.objective_evidence_routes == ()
-
-    retry_extractor = _ObjectiveExtractor()
-    service._structured_extractor = retry_extractor
+    failing_extractor = _FailingRouteExtractor()
+    service._structured_extractor = failing_extractor
+    service.research_understanding_service.structured_extractor = failing_extractor
     understanding = service.analyze_confirmed_goal(goal)
 
     assert understanding.scope.scope_type == "goal"
-    assert len(retry_extractor.frame_payloads) == 0
-    assert retry_extractor.route_payloads
-    facts_after_retry = service.core_fact_repository.read_collection_facts(collection_id)
-    assert facts_after_retry.objective_paper_frames == facts_after_failure.objective_paper_frames
-    assert facts_after_retry.objective_evidence_routes
-    assert facts_after_retry.objective_evidence_units
-    assert facts_after_retry.objective_logic_chains
+    assert failing_extractor.route_payloads
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    assert len(facts.objective_paper_frames) == 1
+    assert facts.objective_evidence_routes
+    assert facts.objective_evidence_units
+    assert facts.objective_logic_chains
+
+
+def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
+    tmp_path,
+):
+    collection_service = CollectionService(tmp_path / "collections")
+    collection = collection_service.create_collection("Goal force rebuild")
+    collection_id = collection["collection_id"]
+    extractor = _ObjectiveExtractor()
+    service = ResearchObjectiveService(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+    )
+    service.research_understanding_service.structured_extractor = extractor
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "LPBF 316L Heat Treatment Corrosion Study",
+                    "text": "LPBF 316L was heat treated and corrosion current was measured.",
+                    "metadata": {"source_filename": "paper-1.pdf"},
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "b1",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "LPBF 316L was heat treated.",
+                    "block_order": 1,
+                }
+            ],
+            tables=[
+                {
+                    "table_id": "table-1",
+                    "document_id": "paper-1",
+                    "caption_text": "Corrosion current results",
+                    "column_headers": ["sample", "corrosion current"],
+                    "table_matrix": [
+                        ["sample", "corrosion current"],
+                        ["as-built", "1.2 uA/cm2"],
+                        ["heat-treated", "0.4 uA/cm2"],
+                    ],
+                }
+            ],
+        ),
+    )
+    _seed_document_profiles(service, collection_id)
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj_corrosion",
+            "question": "How does heat treatment affect corrosion current?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["LPBF", "heat treatment"],
+            "property_axes": ["corrosion current"],
+            "comparison_intent": "Compare corrosion current before and after heat treatment.",
+            "seed_document_ids": ["paper-1"],
+            "confidence": 0.9,
+        }
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "collection_id": collection_id,
+            "source_filename": "paper-1.pdf",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["LPBF", "heat treatment"],
+            "candidate_properties": ["corrosion current"],
+            "changed_variables": ["heat treatment"],
+            "possible_objectives": [objective.question],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "material_scope": ["316L stainless steel"],
+            "process_context_axes": ["LPBF"],
+            "variable_process_axes": ["heat treatment"],
+            "target_property_axes": ["corrosion current"],
+        }
+    )
+    stale_frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "low",
+            "paper_role": "uncertain",
+            "relevant_sections": [],
+            "relevant_tables": [],
+        }
+    )
+    stale_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "stale-block",
+            "role": "low_value_or_irrelevant",
+            "extractable": False,
+        }
+    )
+    stale_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu_stale",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "stale property",
+            "value_payload": {"source_value_text": "stale"},
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "stale-block",
+                }
+            ],
+            "resolution_status": "resolved",
+        }
+    )
+    stale_chain = ObjectiveLogicChain.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "chain_scope": "objective",
+            "evidence_unit_ids": ["oeu_stale"],
+            "summary": "stale chain",
+        }
+    )
+    service.core_fact_repository.replace_collection_research_objectives(
+        collection_id,
+        (paper_skim,),
+        (objective,),
+        (objective_context,),
+        (stale_frame,),
+        (stale_route,),
+        (stale_unit,),
+        (stale_chain,),
+    )
+    goal = ConfirmedGoal.from_mapping(
+        {
+            "collection_id": collection_id,
+            "goal_id": "goal_corrosion",
+            "question": objective.question,
+            "source_type": "objective_candidate",
+            "source_objective_id": objective.objective_id,
+        }
+    )
+
+    understanding = service.analyze_confirmed_goal(goal, force_rebuild=True)
+
+    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    assert extractor.frame_payloads
+    assert extractor.route_payloads
+    assert "oeu_stale" not in {
+        unit.evidence_unit_id for unit in facts.objective_evidence_units
+    }
+    assert "stale-block" not in {
+        route.source_ref for route in facts.objective_evidence_routes
+    }
+    assert facts.objective_evidence_units
+    assert facts.objective_logic_chains
+    assert understanding.scope.scope_type == "goal"
 
 
 def _build_duplicate_paper_objectives(

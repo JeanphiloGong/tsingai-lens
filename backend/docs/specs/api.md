@@ -571,13 +571,23 @@ empty | processing | partial | ready | failed
     `finding_id`、`claim_id`、`statement`、`variables`、`mediators`、
     `outcomes`、`direction`、`scope_summary`、`support_grade`、
     `review_status`、`paper_count`、`evidence_count`、`evidence_ref_ids`、
-    `context_ids`、`relation_ids` 和 `evidence_bundle`；`evidence_bundle`
+    `context_ids`、`relation_ids`、`expert_use_status`、
+    `generalization_status`、`generalization_note`、`evidence_gap_summary` 和
+    `related_review_finding_ids`、`evidence_bundle`；`related_review_finding_ids`
+    指向同一 presentation 中可用于确认、反驳或扩展当前 finding 的 review-queue
+    finding，不复制或升级其 evidence 归属；`generalization_status`
+    用于说明该 finding 当前只能作为单篇文献发现、
+    跨文献候选、限定范围内跨文献发现、需要修复证据或需要处理冲突；
+    `generalization_note` 和 `evidence_gap_summary` 面向专家解释使用边界和剩余证据缺口；
+    `evidence_bundle`
     按 `evidence_role` 分到 `direct_result`、`mechanism`、
     `condition_context`、`background`、`conflict`、`noise`，没有显式角色的证据保留在
     `uncategorized`
   - `presentation.evidence_items` 是用户可读证据卡片，内部 block/table id
     不应作为默认标题；精确 source locator 只能用于跳转参数或审计；每项可带
-    `evidence_role` 用于解释它在研究发现中的作用
+    `evidence_role` 用于解释它在研究发现中的作用；表格证据可带
+    `table_audit.columns` 和 `table_audit.relevant_rows`，用于展示系统认为与 finding
+    相关的列和行预览，但原始表格仍以 source locator 跳转为准
   - `presentation.context_summaries` 是用户可读条件摘要，不直接暴露原始
     `process_context` / `test_condition` 字典 dump
 
@@ -601,7 +611,10 @@ Research understanding 专家反馈资源：
   `none | evidence_not_grounded | missing_evidence | wrong_context |
   wrong_relation | overclaim | unclear_statement | other`
 - `note`：可选专家备注，最多 2000 字符
-- `reviewer`：可选复核人标识，最多 120 字符
+- `reviewer`：可选自动复核人标识，最多 120 字符。浏览器/人工提交时后端
+  使用当前登录用户作为 reviewer，忽略请求体中的普通 reviewer 字符串；只有
+  以 `ai-reviewer` / `agent-` 开头的自动复核标识会按请求体保留，并且只能进入
+  silver/review-candidate，不能升级为 gold/training-ready
 
 `GET` 支持可选 query filter：`scope_type`、`scope_id`、`finding_id`、
 `claim_id`。
@@ -621,7 +634,11 @@ Research understanding 专家反馈资源：
 - `curated_evidence_ref_ids`：专家认可绑定的 evidence ref id 列表
 - `curated_context_ids`：专家认可绑定的 context id 列表
 - `note`：可选校正备注，最多 2000 字符
-- `reviewer`：可选校正人标识，最多 120 字符
+- `reviewer`：可选自动校正人标识，最多 120 字符。浏览器/人工提交时后端
+  使用当前登录用户作为 reviewer，忽略请求体中的普通 reviewer 字符串；只有
+  以 `ai-reviewer` / `agent-` 开头的自动校正标识会按请求体保留，并且只能作为
+  unverified/AI curation 进入 silver/review-candidate，不能升级为
+  gold/training-ready
 
 `GET /curations` 支持可选 query filter：`scope_type`、`scope_id`、
 `finding_id`、`claim_id`。返回 `collection_id` 和 `items`，每条 item 包含
@@ -644,8 +661,10 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 
 `GET /dataset` 需要 query：`scope_type` 和 `scope_id`；可选
 `label_status=candidate | silver | gold | rejected` 过滤标签状态；可选
-`format=json | jsonl`，默认 `json`。`json` 返回完整数据集 envelope，`jsonl`
-返回 newline-delimited sample，便于离线评价或训练数据准备。
+`dataset_use_status=training_ready | review_candidate | rejected` 过滤用途状态；
+可选 `format=json | jsonl`，默认 `json`。`json` 返回完整数据集 envelope，
+`jsonl` 返回 newline-delimited sample，便于离线评价或训练数据准备。前端下载训练集
+时应使用 `dataset_use_status=training_ready`，避免把未复核候选样本混入训练输入。
 
 返回 envelope 包含：
 
@@ -655,6 +674,7 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 - `task_type`，当前为 `research_understanding_finding`
 - `metric_profile`，当前为 `research_understanding_v1`
 - `label_status_filter`
+- `dataset_use_status_filter`
 - `item_count`
 - `label_counts`
 - `quality_summary`
@@ -663,10 +683,11 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 
 `quality_summary` 从本次返回的 sample 列表直接派生，用于真实 goal 质量验证和
 优化排查。它包含 `total_samples`、`usable_sample_count`、
+`training_ready_sample_count`、`review_candidate_sample_count`、
 `needs_review_count`、`rejected_count`、`labeled_sample_count`、
 `accepted_system_sample_count`、`accepted_after_curation_match_count`、
 `curated_correction_count`、`system_error_count` 和 `resolved_feedback_count`，
-以及以下分布：`by_label_status`、`by_review_status`、
+以及以下分布：`by_label_status`、`by_dataset_use_status`、`by_review_status`、
 `by_issue_type`、`by_support_grade`、`by_trace_status`、`by_evidence_role`、
 `by_evidence_traceability_status`、`by_quality_decision`、
 `by_presentation_bucket` 和 `by_bucket_quality_decision`。
@@ -676,7 +697,8 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `by_bucket_quality_decision` 用于判断系统主结论质量和待复核候选质量，避免把
 review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 用于区分 `accepted_system`、`accepted_after_curation_match`、
-`curated_correction`、`rejected_system`、`partial_review` 和 `candidate`。
+`curated_correction`、`ai_curated_suggestion`、`unverified_curation`、
+`rejected_system`、`partial_review` 和 `candidate`。
 `accepted_after_curation_match` 表示该样本仍保留专家 curation 作为 gold target，
 但当前系统 prediction 已与 curation 的 statement/evidence 高度对齐；因此
 `label_status=gold` 仍可能表示专家校正后可用，而不是系统原始 finding 已完全正确。
@@ -689,28 +711,40 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 逐行 sample，不输出 envelope summary。
 
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
-`label_status`、`presentation_bucket`、`trace_status`、`input_blocks`、`prompt_version`、`model_output`、
-`system_prediction`、`expert_target`、`evidence_refs`、`context_refs`、
-`feedback_refs` 和 `metadata`。`trace_status` 可以是 `available`、`failed` 或
-`unavailable`；`input_blocks` 当前保存 research-understanding relation trace 关联的
-objective evidence unit 输入引用；`model_output` 包含 bounded `raw_output` 和
-`parsed_output` 摘要，不包含 API key、Authorization header、完整环境变量或 client
-配置。该接口只从已持久化 understanding artifact、feedback 和 curations 派生样本，
-不注册 gold set，也不修改原始 artifact。
+`label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、
+`input_blocks`、`prompt_version`、`model_output`、`system_prediction`、
+`expert_target`、`evidence_refs`、`training_evidence_refs`、`context_refs`、
+`feedback_refs` 和 `metadata`。`evidence_refs` 保留完整审计证据链，包含
+direct、mechanism、condition context、background 等角色；`training_evidence_refs`
+只保留应作为监督输入的 direct/mechanism 证据，若旧样本没有角色分桶则回退到
+`evidence_refs`。每条 evidence record 里的 `source_text` 保留完整原文块供审计；
+`training_source_text` 优先使用精确 `quote`，没有 quote 时才回退到 `source_text`。
+离线训练或微调准备应优先消费
+`training_evidence_refs[*].training_source_text`，不要把 condition/background
+证据当作结论监督文本。`trace_status` 可以是 `available`、`failed`、
+`evidence_derived` 或 `unavailable`。只有带文本输入块的 matched trace 才作为
+`available`/`failed` 输入导出；历史 trace 缺少文本输入块、或 matched trace 失败但
+evidence 已能定位到原文时，导出使用 `trace_status=evidence_derived`，并从
+resolved evidence quote/source text 重建 `input_blocks`。`model_output` 仍保留
+bounded `raw_output` 和 `parsed_output` 摘要用于诊断，不包含 API key、Authorization
+header、完整环境变量或 client 配置。该接口只从已持久化 understanding artifact、
+feedback 和 curations 派生样本，不注册 gold set，也不修改原始 artifact。
 
 标签语义：
 
 - `candidate`：没有决定性专家反馈或 curation 的系统 finding
-- `silver`：专家标记为 `partial`，且没有 hard issue
-- `gold`：存在专家 curation，或专家反馈标记 `correct`
+- `silver`：专家标记为 `partial` 且没有 hard issue，或 AI/匿名 reviewer
+  标记为 `correct`，或 AI/匿名 curation 尚未被人工确认
+- `gold`：存在带明确非 AI reviewer 的专家 curation，或带明确非 AI reviewer
+  的专家反馈标记 `correct`
 - `rejected`：专家反馈标记 `incorrect`，或 issue 是
   `evidence_not_grounded`、`missing_evidence`、`wrong_context`、
   `wrong_relation`、`overclaim`、`unclear_statement`
 
-历史样本或 deterministic-only finding 没有匹配模型调用时使用
+历史样本或 deterministic-only finding 没有匹配模型调用且没有可定位原文证据时使用
 `trace_status=unavailable`，不能伪造 prompt/model trace。`evidence_refs` 应尽量带
 `quote` 或 `source_text`、文献/页码/block/table provenance 和 source locator，便于
-从导出样本回查原文。
+从导出样本回查原文；这些可追踪证据也是 `evidence_derived` 样本重建训练输入的来源。
 
 前端 workbench 应读取 `feedback` 和 `curations` 并叠加到 finding 视图：
 curation 可作为当前显示的专家校正副本，feedback 作为复核历史展示；两者都不修改

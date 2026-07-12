@@ -22,7 +22,7 @@
 	};
 	type MarkdownList = MarkdownNodeBase & {
 		type: 'list';
-		items: string[];
+		items: { text: string; sourceMap: DocumentMarkdownSourceMapItem | null }[];
 	};
 	type MarkdownTable = MarkdownNodeBase & {
 		type: 'table';
@@ -39,19 +39,37 @@
 	export let markdown: DocumentMarkdownResponse | null = null;
 	export let sourceFileUrl = '';
 	export let activeSourceRef = '';
+	export let activeSourceQuote = '';
 	export let activeSourceSpan: WorkbenchSourceSpan | null = null;
 	export let onShowPdf: () => void = () => {};
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
 	$: title = markdown?.title || markdown?.source_filename || markdown?.document_id || '';
 	$: metadata = [
-		markdown?.source_filename ? `${$t('workbench.sourceFileLabel')}: ${markdown.source_filename}` : '',
+		markdown?.source_filename ? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}` : '',
 		markdown?.parser ? `${$t('workbench.parserLabel')}: ${markdown.parser}` : '',
 		markdown?.source_map.length ? `${$t('workbench.sourceMapLabel')}: ${markdown.source_map.length}` : ''
 	].filter(Boolean);
-	$: activeNodeKey = activeMarkdownNodeKey(nodes, activeSourceRef, activeSourceSpan);
+	$: selectedEvidenceQuote = cleanSourceText(
+		activeSourceQuote || activeSourceSpan?.quote || activeSourceSpan?.target.quote || ''
+	);
+	$: activeNodeKey = activeMarkdownNodeKey(
+		nodes,
+		activeSourceRef,
+		activeSourceSpan,
+		selectedEvidenceQuote
+	);
+	$: activeFallback = activeSourceFallback(
+		activeNodeKey,
+		activeSourceRef,
+		activeSourceSpan,
+		selectedEvidenceQuote
+	);
 	$: if (activeNodeKey) {
 		void scrollActiveNodeIntoView(activeNodeKey);
+	}
+	$: if (activeFallback) {
+		void scrollActiveElementIntoView('[data-testid="markdown-active-source-fallback"]');
 	}
 
 	function parseMarkdown(value: string): MarkdownNode[] {
@@ -60,15 +78,39 @@
 		const usedSourceMapIndexes = new Set<number>();
 		let paragraph: string[] = [];
 		let listItems: string[] = [];
+		let currentHeading = '';
 
 		function flushParagraph() {
 			const text = paragraph.join(' ').trim();
-			if (text) parsed.push({ type: 'paragraph', text, sourceMap: null });
+			if (text) {
+				parsed.push({
+					type: 'paragraph',
+					text,
+					sourceMap: nextSourceMapForTextNode(
+						['block', 'paragraph', 'text'],
+						usedSourceMapIndexes,
+						currentHeading
+					)
+				});
+			}
 			paragraph = [];
 		}
 
 		function flushList() {
-			if (listItems.length) parsed.push({ type: 'list', items: listItems, sourceMap: null });
+			if (listItems.length) {
+				parsed.push({
+					type: 'list',
+					items: listItems.map((item) => ({
+						text: item,
+						sourceMap: nextSourceMapForTextNode(
+							['block', 'list_item', 'list'],
+							usedSourceMapIndexes,
+							currentHeading
+						)
+					})),
+					sourceMap: null
+				});
+			}
 			listItems = [];
 		}
 
@@ -107,10 +149,11 @@
 			if (heading) {
 				flushParagraph();
 				flushList();
+				currentHeading = stripInlineMarkdown(heading[2]);
 				parsed.push({
 					type: 'heading',
 					level: heading[1].length,
-					text: stripInlineMarkdown(heading[2]),
+					text: currentHeading,
 					sourceMap: null
 				});
 				continue;
@@ -194,40 +237,192 @@
 		return null;
 	}
 
+	function nextSourceMapForTextNode(
+		artifactTypes: string[],
+		usedIndexes: Set<number>,
+		currentHeading: string
+	): DocumentMarkdownSourceMapItem | null {
+		const sourceMap = markdown?.source_map ?? [];
+		const headingKey = normalizeMatchKey(currentHeading);
+		for (const [index, item] of sourceMap.entries()) {
+			if (usedIndexes.has(index)) continue;
+			if (!sourceMapTypeMatches(item, artifactTypes)) continue;
+			if (!headingKey || !sourceMapHeadingMatches(item, headingKey)) continue;
+			usedIndexes.add(index);
+			return item;
+		}
+		return null;
+	}
+
+	function sourceMapTypeMatches(item: DocumentMarkdownSourceMapItem, artifactTypes: string[]) {
+		const artifactType = normalizeMatchKey(item.artifact_type);
+		const blockType = normalizeMatchKey(item.block_type);
+		if (artifactType === 'block' && blockType) return artifactTypes.includes(blockType);
+		return artifactTypes.includes(artifactType) || artifactTypes.includes(blockType);
+	}
+
+	function sourceMapHeadingMatches(item: DocumentMarkdownSourceMapItem, headingKey: string) {
+		const itemHeading = normalizeMatchKey(item.heading_path);
+		if (!itemHeading) return false;
+		if (itemHeading === headingKey) return true;
+		const segments = itemHeading
+			.split('/')
+			.map((segment) => normalizeMatchKey(segment))
+			.filter(Boolean);
+		return segments.includes(headingKey);
+	}
+
 	function activeMarkdownNodeKey(
 		currentNodes: MarkdownNode[],
 		sourceRef: string,
-		sourceSpan: WorkbenchSourceSpan | null
+		sourceSpan: WorkbenchSourceSpan | null,
+		selectedQuote: string
 	) {
-		const targetKeys = [
-			sourceRef,
-			sourceSpan?.block_id,
-			sourceSpan?.anchor_id,
+		const directTargetKeys = [sourceRef, sourceSpan?.block_id, sourceSpan?.anchor_id]
+			.map(normalizeMatchKey)
+			.filter(Boolean);
+		const sectionTargetKeys = [
 			sourceSpan?.target.sectionId,
 			sourceSpan?.target.headingPath,
 			sourceSpan?.target.label
 		]
 			.map(normalizeMatchKey)
 			.filter(Boolean);
-		const sourceQuote = normalizeMatchKey(sourceSpan?.quote || sourceSpan?.target.quote || '');
+		const sourceQuote = normalizeMatchKey(
+			cleanSourceText(selectedQuote || sourceSpan?.quote || sourceSpan?.target.quote || '')
+		);
+		const directKey = activeMarkdownNodeKeyByDirectTarget(currentNodes, directTargetKeys);
+		if (directKey) return directKey;
+		if (!directTargetKeys.length) {
+			const sectionKey = activeMarkdownNodeKeyBySection(currentNodes, sectionTargetKeys);
+			if (sectionKey) return sectionKey;
+		}
+		return activeMarkdownNodeKeyByQuote(currentNodes, sourceQuote);
+	}
+
+	function activeMarkdownNodeKeyByDirectTarget(
+		currentNodes: MarkdownNode[],
+		directTargetKeys: string[]
+	) {
 		for (const [index, node] of currentNodes.entries()) {
-			const nodeMapValues = [
-				node.sourceMap?.markdown_anchor,
-				node.sourceMap?.artifact_id,
-				node.sourceMap?.block_id,
-				node.sourceMap?.table_id,
-				node.sourceMap?.figure_id,
-				node.sourceMap?.heading_path
-			].map(normalizeMatchKey);
-			if (targetKeys.some((target) => nodeMapValues.includes(target))) {
+			const childKey = activeChildNodeKeyByDirectTarget(node, index, directTargetKeys);
+			if (childKey) return childKey;
+			if (node.type === 'list') continue;
+			if (sourceMapMatchesDirectTargets(node.sourceMap, directTargetKeys)) {
 				return markdownNodeKey(node, index);
 			}
-			const text = normalizeMatchKey(nodeText(node));
+		}
+		return '';
+	}
+
+	function activeMarkdownNodeKeyBySection(
+		currentNodes: MarkdownNode[],
+		sectionTargetKeys: string[]
+	) {
+		for (const [index, node] of currentNodes.entries()) {
+			const childKey = activeChildNodeKeyBySection(node, index, sectionTargetKeys);
+			if (childKey) return childKey;
+			if (node.type === 'list') continue;
+			if (sourceMapMatchesSectionTargets(node.sourceMap, sectionTargetKeys)) {
+				return markdownNodeKey(node, index);
+			}
+		}
+		return '';
+	}
+
+	function activeMarkdownNodeKeyByQuote(currentNodes: MarkdownNode[], sourceQuote: string) {
+		for (const [index, node] of currentNodes.entries()) {
+			const childKey = activeChildNodeKeyByQuote(node, index, sourceQuote);
+			if (childKey) return childKey;
+			if (node.type === 'list') continue;
+			const text = normalizeMatchKey(cleanSourceText(nodeText(node)));
 			if (sourceQuote && text.includes(sourceQuote.slice(0, 80))) {
 				return markdownNodeKey(node, index);
 			}
 		}
 		return '';
+	}
+
+	function activeChildNodeKeyByDirectTarget(
+		node: MarkdownNode,
+		index: number,
+		directTargetKeys: string[]
+	) {
+		if (node.type !== 'list') return '';
+		for (const [itemIndex, item] of node.items.entries()) {
+			if (sourceMapMatchesDirectTargets(item.sourceMap, directTargetKeys)) {
+				return markdownListItemKey(node, index, item, itemIndex);
+			}
+		}
+		return '';
+	}
+
+	function activeChildNodeKeyBySection(
+		node: MarkdownNode,
+		index: number,
+		sectionTargetKeys: string[]
+	) {
+		if (node.type !== 'list') return '';
+		for (const [itemIndex, item] of node.items.entries()) {
+			if (sourceMapMatchesSectionTargets(item.sourceMap, sectionTargetKeys)) {
+				return markdownListItemKey(node, index, item, itemIndex);
+			}
+		}
+		return '';
+	}
+
+	function activeChildNodeKeyByQuote(
+		node: MarkdownNode,
+		index: number,
+		sourceQuote: string
+	) {
+		if (node.type !== 'list') return '';
+		for (const [itemIndex, item] of node.items.entries()) {
+			const text = normalizeMatchKey(cleanSourceText(item.text));
+			if (sourceQuote && text.includes(sourceQuote.slice(0, 80))) {
+				return markdownListItemKey(node, index, item, itemIndex);
+			}
+		}
+		return '';
+	}
+
+	function sourceMapMatchesDirectTargets(
+		sourceMap: DocumentMarkdownSourceMapItem | null,
+		directTargetKeys: string[]
+	) {
+		const values = [
+			sourceMap?.markdown_anchor,
+			sourceMap?.artifact_id,
+			sourceMap?.block_id,
+			sourceMap?.table_id,
+			sourceMap?.figure_id
+		].map(normalizeMatchKey);
+		return directTargetKeys.some((target) => values.includes(target));
+	}
+
+	function sourceMapMatchesSectionTargets(
+		sourceMap: DocumentMarkdownSourceMapItem | null,
+		sectionTargetKeys: string[]
+	) {
+		const values = [sourceMap?.heading_path].map(normalizeMatchKey);
+		return sectionTargetKeys.some((target) => values.includes(target));
+	}
+
+	function activeSourceFallback(
+		nodeKey: string,
+		sourceRef: string,
+		sourceSpan: WorkbenchSourceSpan | null,
+		selectedQuote: string
+	) {
+		if (nodeKey || !sourceRef || !sourceSpan) return null;
+		const quote = cleanSourceText(selectedQuote || sourceSpan.quote || sourceSpan.target.quote || '');
+		if (!quote) return null;
+		return {
+			label: sourceSpan.target.label || sourceSpan.section || sourceSpan.target.headingPath || sourceRef,
+			page: sourceSpan.page || sourceSpan.target.page,
+			section: sourceSpan.section || sourceSpan.target.headingPath || '',
+			quote
+		};
 	}
 
 	function markdownNodeKey(node: MarkdownNode, index: number) {
@@ -242,23 +437,57 @@
 			.join(':');
 	}
 
+	function markdownListItemKey(
+		node: MarkdownList,
+		nodeIndex: number,
+		item: MarkdownList['items'][number],
+		itemIndex: number
+	) {
+		return [
+			node.type,
+			item.sourceMap?.markdown_anchor,
+			item.sourceMap?.artifact_id,
+			item.text.slice(0, 64),
+			nodeIndex,
+			itemIndex
+		]
+			.filter(Boolean)
+			.join(':');
+	}
+
 	function nodeText(node: MarkdownNode) {
 		if (node.type === 'heading' || node.type === 'paragraph') return node.text;
 		if (node.type === 'image') return node.alt;
-		if (node.type === 'list') return node.items.join(' ');
+		if (node.type === 'list') return node.items.map((item) => item.text).join(' ');
 		return [...node.headers, ...node.rows.flat()].join(' ');
 	}
 
 	function normalizeMatchKey(value: string | null | undefined) {
-		return (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+		return cleanSourceText(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+	}
+
+	function cleanSourceText(value: string) {
+		return value.replace(/\ufffd/g, ' ').replace(/\s+/g, ' ').trim();
 	}
 
 	async function scrollActiveNodeIntoView(nodeKey: string) {
 		if (!browser) return;
+		await scrollActiveElementIntoView(`[data-markdown-node-key="${CSS.escape(nodeKey)}"]`);
+	}
+
+	async function scrollActiveElementIntoView(selector: string) {
+		if (!browser) return;
 		await tick();
-		document
-			.querySelector<HTMLElement>(`[data-markdown-node-key="${CSS.escape(nodeKey)}"]`)
-			?.scrollIntoView({ block: 'center' });
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			await nextAnimationFrame();
+			const target = document.querySelector<HTMLElement>(selector);
+			if (!target) continue;
+			target.scrollIntoView({ block: 'center', behavior: 'auto' });
+		}
+	}
+
+	function nextAnimationFrame() {
+		return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 	}
 </script>
 
@@ -286,6 +515,34 @@
 	</header>
 
 	<div class="markdown-reader__body" data-testid="markdown-paper-reader">
+		{#if activeFallback}
+			<aside
+				class="markdown-source-fallback"
+				data-testid="markdown-active-source-fallback"
+				aria-label={$t('workbench.selectedSourceBlockLabel')}
+				aria-current="location"
+			>
+				<div class="markdown-source-fallback__header">
+					<div>
+						<h2>{$t('workbench.selectedSourceBlockLabel')}</h2>
+						<div class="markdown-source-fallback__meta">
+							<span>{activeFallback.label}</span>
+							{#if activeFallback.page}
+								<span>{$t('workbench.pageLabel', { page: activeFallback.page })}</span>
+							{/if}
+							{#if activeFallback.section && normalizeMatchKey(activeFallback.section) !== normalizeMatchKey(activeFallback.label)}
+								<span>{activeFallback.section}</span>
+							{/if}
+						</div>
+					</div>
+					<button type="button" on:click={onShowPdf}>{$t('workbench.viewPdf')}</button>
+				</div>
+				<div class="markdown-source-fallback__body">
+					<strong>{$t('workbench.parsedSourceView')}</strong>
+					<p>{activeFallback.quote}</p>
+				</div>
+			</aside>
+		{/if}
 		{#if nodes.length}
 			{#each nodes as node, index (markdownNodeKey(node, index))}
 				{@const nodeKey = markdownNodeKey(node, index)}
@@ -293,6 +550,7 @@
 					{#if node.level <= 1}
 						<h1
 							class:markdown-node--active={activeNodeKey === nodeKey}
+							aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 							data-markdown-node-key={nodeKey}
 						>
@@ -301,6 +559,7 @@
 					{:else if node.level === 2}
 						<h2
 							class:markdown-node--active={activeNodeKey === nodeKey}
+							aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 							data-markdown-node-key={nodeKey}
 						>
@@ -309,6 +568,7 @@
 					{:else if node.level === 3}
 						<h3
 							class:markdown-node--active={activeNodeKey === nodeKey}
+							aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 							data-markdown-node-key={nodeKey}
 						>
@@ -317,6 +577,7 @@
 					{:else}
 						<h4
 							class:markdown-node--active={activeNodeKey === nodeKey}
+							aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 							data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 							data-markdown-node-key={nodeKey}
 						>
@@ -326,15 +587,26 @@
 				{:else if node.type === 'paragraph'}
 					<p
 						class:markdown-node--active={activeNodeKey === nodeKey}
+						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
+						{#if activeNodeKey === nodeKey && selectedEvidenceQuote}
+							<span
+								class="markdown-selected-quote"
+								data-testid="markdown-selected-evidence-quote"
+							>
+								<strong>{$t('workbench.selectedEvidenceQuoteLabel')}</strong>
+								<span>{selectedEvidenceQuote}</span>
+							</span>
+						{/if}
 						{node.text}
 					</p>
 				{:else if node.type === 'image'}
 					<figure
 						class="markdown-figure"
 						class:markdown-node--active={activeNodeKey === nodeKey}
+						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
@@ -342,21 +614,46 @@
 					</figure>
 				{:else if node.type === 'list'}
 					<ul
-						class:markdown-node--active={activeNodeKey === nodeKey}
-						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
-						{#each node.items as item}
-							<li>{item}</li>
+						{#each node.items as item, itemIndex (markdownListItemKey(node, index, item, itemIndex))}
+							{@const itemKey = markdownListItemKey(node, index, item, itemIndex)}
+							<li
+								class:markdown-node--active={activeNodeKey === itemKey}
+								aria-current={activeNodeKey === itemKey ? 'location' : undefined}
+								data-testid={activeNodeKey === itemKey ? 'markdown-active-source' : undefined}
+								data-markdown-node-key={itemKey}
+							>
+								{#if activeNodeKey === itemKey && selectedEvidenceQuote}
+									<span
+										class="markdown-selected-quote"
+										data-testid="markdown-selected-evidence-quote"
+									>
+										<strong>{$t('workbench.selectedEvidenceQuoteLabel')}</strong>
+										<span>{selectedEvidenceQuote}</span>
+									</span>
+								{/if}
+								{item.text}
+							</li>
 						{/each}
 					</ul>
 				{:else if node.type === 'table'}
 					<div
 						class="markdown-table-wrapper"
 						class:markdown-node--active={activeNodeKey === nodeKey}
+						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
+						{#if activeNodeKey === nodeKey && selectedEvidenceQuote}
+							<div
+								class="markdown-selected-quote"
+								data-testid="markdown-selected-evidence-quote"
+							>
+								<strong>{$t('workbench.selectedEvidenceQuoteLabel')}</strong>
+								<span>{selectedEvidenceQuote}</span>
+							</div>
+						{/if}
 						<table>
 							<thead>
 								<tr>
@@ -512,6 +809,114 @@
 		outline: 2px solid #2563eb;
 		outline-offset: 4px;
 		background: #eff6ff;
+	}
+
+	.markdown-selected-quote {
+		display: block;
+		margin: 0 0 10px;
+		padding: 10px 12px;
+		border: 1px solid #bfdbfe;
+		border-left: 4px solid #2563eb;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 14px;
+		line-height: 1.6;
+	}
+
+	.markdown-selected-quote strong {
+		display: block;
+		margin-bottom: 4px;
+		color: #1d4ed8;
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.markdown-selected-quote span {
+		display: block;
+	}
+
+	.markdown-source-fallback {
+		max-width: 820px;
+		margin: 0 auto 28px;
+		padding: 16px 18px 18px;
+		border: 1px solid #bfdbfe;
+		border-left: 4px solid #2563eb;
+		border-radius: 8px;
+		background: #eff6ff;
+		box-shadow: 0 10px 28px rgba(37, 99, 235, 0.12);
+	}
+
+	.markdown-source-fallback__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+	}
+
+	.markdown-source-fallback__header h2 {
+		margin: 0 0 8px;
+		color: #0f172a;
+		font-size: 15px;
+		line-height: 22px;
+	}
+
+	.markdown-source-fallback__header button {
+		display: inline-flex;
+		min-height: 32px;
+		flex: 0 0 auto;
+		align-items: center;
+		padding: 0 12px;
+		border: 1px solid #2563eb;
+		border-radius: 8px;
+		background: #2563eb;
+		color: #ffffff;
+		font-size: 13px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.markdown-source-fallback__meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		color: #1d4ed8;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.markdown-source-fallback__meta span {
+		display: inline-flex;
+		align-items: center;
+		min-height: 22px;
+		padding: 0 8px;
+		border: 1px solid #bfdbfe;
+		border-radius: 6px;
+		background: #ffffff;
+	}
+
+	.markdown-source-fallback__body {
+		margin-top: 14px;
+		padding-top: 14px;
+		border-top: 1px solid #bfdbfe;
+	}
+
+	.markdown-source-fallback__body strong {
+		display: block;
+		margin-bottom: 6px;
+		color: #1d4ed8;
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.markdown-source-fallback p {
+		margin: 0;
+		color: #0f172a;
+		font-size: 15px;
+		line-height: 1.72;
 	}
 
 	.markdown-figure {

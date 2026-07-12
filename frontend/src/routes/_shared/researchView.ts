@@ -100,6 +100,17 @@ export type ResearchUnderstandingPresentationSummary = {
 	review_queue_count: number;
 	primary_finding_count: number;
 	review_queue_finding_count: number;
+	collection_document_count: number;
+	axis_coverage: ResearchUnderstandingAxisCoverage;
+};
+export type ResearchUnderstandingAxisCoverageItem = {
+	axis: string;
+	status: 'primary' | 'review_queue' | 'mechanism' | 'context' | 'missing';
+	finding_id: string;
+};
+export type ResearchUnderstandingAxisCoverage = {
+	variables: ResearchUnderstandingAxisCoverageItem[];
+	properties: ResearchUnderstandingAxisCoverageItem[];
 };
 export type ResearchUnderstandingPresentationEffect = {
 	effect_id: string;
@@ -149,7 +160,32 @@ export type ResearchUnderstandingPresentationFinding = {
 	context_ids: string[];
 	relation_ids: string[];
 	evidence_bundle: ResearchUnderstandingPresentationEvidenceBundle;
+	comparison_summary: ResearchUnderstandingPresentationComparisonSummary | null;
+	expert_use_status: string;
+	dataset_use_status: string;
+	generalization_status: string;
+	generalization_note: string;
+	evidence_gap_summary: string;
+	upgrade_actions: string[];
+	related_review_finding_ids: string[];
+	review_reasons: string[];
 	warnings: string[];
+};
+export type ResearchUnderstandingPresentationComparisonValue = {
+	label: string;
+	value: string;
+};
+export type ResearchUnderstandingPresentationControlledCondition = {
+	axis: string;
+	value: string;
+};
+export type ResearchUnderstandingPresentationComparisonSummary = {
+	variable: string;
+	direction: string;
+	outcome: string;
+	baseline: ResearchUnderstandingPresentationComparisonValue;
+	observed: ResearchUnderstandingPresentationComparisonValue;
+	controlled_conditions: ResearchUnderstandingPresentationControlledCondition[];
 };
 export type ResearchUnderstandingPresentationEvidence = {
 	evidence_ref_id: string;
@@ -164,10 +200,19 @@ export type ResearchUnderstandingPresentationEvidence = {
 	quote: string | null;
 	source_text: string | null;
 	value_summary: string;
+	table_audit: ResearchUnderstandingPresentationTableAudit | null;
 	traceability_status: string;
 	evidence_role: string | null;
 	confidence: number | null;
 	href: string | null;
+};
+export type ResearchUnderstandingPresentationTableAudit = {
+	columns: string[];
+	relevant_rows: ResearchUnderstandingPresentationTableRow[];
+};
+export type ResearchUnderstandingPresentationTableRow = {
+	row_index: number;
+	cells: string[];
 };
 export type ResearchUnderstandingPresentationContext = {
 	context_id: string;
@@ -290,11 +335,16 @@ export type ResearchUnderstandingGoldDraftFilters = {
 	scope_id: string;
 };
 export type ResearchUnderstandingDatasetLabelStatus = 'candidate' | 'silver' | 'gold' | 'rejected';
+export type ResearchUnderstandingDatasetUseStatus =
+	| 'training_ready'
+	| 'review_candidate'
+	| 'rejected';
 export type ResearchUnderstandingDatasetExportFormat = 'json' | 'jsonl';
 export type ResearchUnderstandingDatasetFilters = {
 	scope_type: string;
 	scope_id: string;
 	label_status?: ResearchUnderstandingDatasetLabelStatus;
+	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
 };
 export type ResearchUnderstandingDataset = {
 	schema_version: string;
@@ -305,8 +355,14 @@ export type ResearchUnderstandingDataset = {
 	task_type: string;
 	metric_profile: string;
 	label_status_filter: ResearchUnderstandingDatasetLabelStatus | null;
+	dataset_use_status_filter: ResearchUnderstandingDatasetUseStatus | null;
 	item_count: number;
 	label_counts: Record<ResearchUnderstandingDatasetLabelStatus, number>;
+	quality_summary: {
+		training_ready_sample_count: number;
+		review_candidate_sample_count: number;
+		by_dataset_use_status: Record<ResearchUnderstandingDatasetUseStatus, number>;
+	};
 	warnings: string[];
 };
 
@@ -947,6 +1003,8 @@ function normalizeWarnings(value: unknown): ResearchViewWarning[] {
 function normalizeResearchUnderstandingDataset(value: unknown): ResearchUnderstandingDataset {
 	const record = asRecord(value);
 	const rawLabelCounts = asRecord(record?.label_counts) ?? {};
+	const qualitySummary = asRecord(record?.quality_summary) ?? {};
+	const rawUseCounts = asRecord(qualitySummary.by_dataset_use_status) ?? {};
 	return {
 		schema_version: toText(record?.schema_version, 'research_understanding_dataset.v1'),
 		dataset_id: toText(record?.dataset_id),
@@ -957,12 +1015,24 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 		metric_profile: toText(record?.metric_profile),
 		label_status_filter:
 			normalizeResearchUnderstandingDatasetLabelStatus(record?.label_status_filter),
+		dataset_use_status_filter: normalizeResearchUnderstandingDatasetUseStatus(
+			record?.dataset_use_status_filter
+		),
 		item_count: toNumber(record?.item_count),
 		label_counts: {
 			candidate: toNumber(rawLabelCounts.candidate),
 			silver: toNumber(rawLabelCounts.silver),
 			gold: toNumber(rawLabelCounts.gold),
 			rejected: toNumber(rawLabelCounts.rejected)
+		},
+		quality_summary: {
+			training_ready_sample_count: toNumber(qualitySummary.training_ready_sample_count),
+			review_candidate_sample_count: toNumber(qualitySummary.review_candidate_sample_count),
+			by_dataset_use_status: {
+				training_ready: toNumber(rawUseCounts.training_ready),
+				review_candidate: toNumber(rawUseCounts.review_candidate),
+				rejected: toNumber(rawUseCounts.rejected)
+			}
 		},
 		warnings: toStringList(record?.warnings)
 	};
@@ -973,6 +1043,13 @@ function normalizeResearchUnderstandingDatasetLabelStatus(
 ): ResearchUnderstandingDatasetLabelStatus | null {
 	const status = toText(value) as ResearchUnderstandingDatasetLabelStatus;
 	return ['candidate', 'silver', 'gold', 'rejected'].includes(status) ? status : null;
+}
+
+function normalizeResearchUnderstandingDatasetUseStatus(
+	value: unknown
+): ResearchUnderstandingDatasetUseStatus | null {
+	const status = toText(value) as ResearchUnderstandingDatasetUseStatus;
+	return ['training_ready', 'review_candidate', 'rejected'].includes(status) ? status : null;
 }
 
 function normalizeEvidenceReference(value: unknown): EvidenceReference | null {
@@ -1198,7 +1275,9 @@ function normalizeResearchUnderstandingPresentation(
 			review_queue_finding_count: toNumber(
 				summaryRecord.review_queue_finding_count,
 				reviewQueueFindings.length
-			)
+			),
+			collection_document_count: toNumber(summaryRecord.collection_document_count, 0),
+			axis_coverage: normalizeResearchUnderstandingAxisCoverage(summaryRecord.axis_coverage)
 		},
 		effects,
 		findings,
@@ -1206,6 +1285,37 @@ function normalizeResearchUnderstandingPresentation(
 		review_queue_findings: reviewQueueFindings,
 		evidence_items: evidenceItems,
 		context_summaries: contextSummaries
+	};
+}
+
+function normalizeResearchUnderstandingAxisCoverage(
+	value: unknown
+): ResearchUnderstandingAxisCoverage {
+	const record = asRecord(value);
+	return {
+		variables: asArray(record?.variables)
+			.map((item) => normalizeResearchUnderstandingAxisCoverageItem(item))
+			.filter((item): item is ResearchUnderstandingAxisCoverageItem => item !== null),
+		properties: asArray(record?.properties)
+			.map((item) => normalizeResearchUnderstandingAxisCoverageItem(item))
+			.filter((item): item is ResearchUnderstandingAxisCoverageItem => item !== null)
+	};
+}
+
+function normalizeResearchUnderstandingAxisCoverageItem(
+	value: unknown
+): ResearchUnderstandingAxisCoverageItem | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const axis = toText(record.axis);
+	if (!axis) return null;
+	const status = toText(record.status);
+	return {
+		axis,
+		status: ['primary', 'review_queue', 'mechanism', 'context', 'missing'].includes(status)
+			? (status as ResearchUnderstandingAxisCoverageItem['status'])
+			: 'missing',
+		finding_id: toText(record.finding_id)
 	};
 }
 
@@ -1296,8 +1406,66 @@ function normalizeResearchUnderstandingPresentationFinding(
 		evidence_bundle: normalizeResearchUnderstandingPresentationEvidenceBundle(
 			record.evidence_bundle
 		),
+		comparison_summary: normalizeResearchUnderstandingPresentationComparisonSummary(
+			record.comparison_summary
+		),
+		expert_use_status: toText(record.expert_use_status, 'review_candidate'),
+		dataset_use_status: toText(record.dataset_use_status, 'review_candidate'),
+		generalization_status: toText(record.generalization_status, 'cross_paper_candidate'),
+		generalization_note: toText(record.generalization_note),
+		evidence_gap_summary: toText(record.evidence_gap_summary),
+		upgrade_actions: toStringList(record.upgrade_actions),
+		related_review_finding_ids: toStringList(record.related_review_finding_ids),
+		review_reasons: toStringList(record.review_reasons),
 		warnings: toStringList(record.warnings)
 	};
+}
+
+function normalizeResearchUnderstandingPresentationComparisonSummary(
+	value: unknown
+): ResearchUnderstandingPresentationComparisonSummary | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const baseline = normalizeResearchUnderstandingPresentationComparisonValue(record.baseline);
+	const observed = normalizeResearchUnderstandingPresentationComparisonValue(record.observed);
+	const variable = toText(record.variable);
+	const outcome = toText(record.outcome);
+	if (!baseline.value && !observed.value && !variable && !outcome) return null;
+	return {
+		variable,
+		direction: toText(record.direction),
+		outcome,
+		baseline,
+		observed,
+		controlled_conditions: asArray(record.controlled_conditions)
+			.map((item) => normalizeResearchUnderstandingPresentationControlledCondition(item))
+			.filter(
+				(
+					item
+				): item is ResearchUnderstandingPresentationControlledCondition => item !== null
+			)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationComparisonValue(
+	value: unknown
+): ResearchUnderstandingPresentationComparisonValue {
+	const record = asRecord(value);
+	return {
+		label: toText(record?.label),
+		value: toText(record?.value)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationControlledCondition(
+	value: unknown
+): ResearchUnderstandingPresentationControlledCondition | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const axis = toText(record.axis);
+	const conditionValue = toText(record.value);
+	if (!axis && !conditionValue) return null;
+	return { axis, value: conditionValue };
 }
 
 function normalizeResearchUnderstandingPresentationEvidence(
@@ -1320,10 +1488,40 @@ function normalizeResearchUnderstandingPresentationEvidence(
 		quote: nonEmptyText(record.quote),
 		source_text: nonEmptyText(record.source_text ?? record.quote),
 		value_summary: toText(record.value_summary),
+		table_audit: normalizeResearchUnderstandingPresentationTableAudit(record.table_audit),
 		traceability_status: toText(record.traceability_status, 'unknown'),
 		evidence_role: nonEmptyText(record.evidence_role),
 		confidence: toOptionalNumber(record.confidence),
 		href: nonEmptyText(record.href)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationTableAudit(
+	value: unknown
+): ResearchUnderstandingPresentationTableAudit | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const columns = asArray(record.columns)
+		.map((column) => toText(column))
+		.filter(Boolean);
+	const relevantRows = asArray(record.relevant_rows)
+		.map((row) => {
+			const rowRecord = asRecord(row);
+			if (!rowRecord) return null;
+			const cells = asArray(rowRecord.cells)
+				.map((cell) => toText(cell))
+				.filter(Boolean);
+			if (!cells.length) return null;
+			return {
+				row_index: toOptionalNumber(rowRecord.row_index) ?? 0,
+				cells
+			};
+		})
+		.filter((row): row is ResearchUnderstandingPresentationTableRow => Boolean(row));
+	if (!columns.length && !relevantRows.length) return null;
+	return {
+		columns,
+		relevant_rows: relevantRows
 	};
 }
 
@@ -1361,7 +1559,9 @@ function emptyResearchUnderstandingPresentation(fallback: {
 			context_count: fallback.summary.context_count,
 			review_queue_count: 0,
 			primary_finding_count: 0,
-			review_queue_finding_count: 0
+			review_queue_finding_count: 0,
+			collection_document_count: 0,
+			axis_coverage: { variables: [], properties: [] }
 		},
 		effects: [],
 		findings: [],
@@ -2445,6 +2645,7 @@ function researchUnderstandingDatasetParams(
 	params.set('scope_type', filters.scope_type);
 	params.set('scope_id', filters.scope_id);
 	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
 	if (format) params.set('format', format);
 	return params;
 }

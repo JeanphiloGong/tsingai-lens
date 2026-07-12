@@ -41,8 +41,9 @@ This node owns the collection workspace route family in the frontend.
 - render research understanding as an expert review workspace by default:
   users scan Findings first, then inspect linked relations, evidence, context,
   support grade, review status, paper count, and evidence count; finding
-  evidence displays the parsed source block text with paper/page/heading/block
-  provenance and remains clickable back to the document reader; internal
+  evidence displays the selected source quote first, keeps the full parsed
+  source block in an expandable audit section with paper/page/heading/block
+  provenance, and remains clickable back to the document reader; internal
   finding/claim/evidence ids remain hidden binding data for feedback, curation,
   source navigation, and audit details
 - keep source traceback on the document page user-facing: parsed Markdown is

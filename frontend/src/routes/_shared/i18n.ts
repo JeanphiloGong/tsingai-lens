@@ -277,21 +277,25 @@ const translations: Record<Language, Translations> = {
 			understanding: {
 				title: 'Research understanding',
 				objectiveBody:
-					'Claims, relations, evidence, contexts, and expert review controls projected from the objective evidence workspace.',
+					'Reviewable research findings with source evidence, applicability context, and expert feedback controls.',
 				materialBody:
-					'Claims, relations, evidence, contexts, and expert review controls projected from the material research view.',
+					'Reviewable material findings with source evidence, applicability context, and expert feedback controls.',
 				summary: 'Research understanding summary',
 				claims: 'Claims',
 				relationsLabel: 'Relations',
 				evidenceRefs: 'Evidence',
+				primaryFindings: 'Primary findings',
+				findingPapers: 'Papers covered',
+				directEvidence: 'Direct evidence',
 				contexts: 'Contexts',
 				contextPrefix: 'Context: ',
 				claimFilters: 'Claim filters',
 				filterByType: 'Type',
 				filterByStatus: 'Support status',
 				filterByEvidenceGrade: 'Evidence grade',
+				candidateQueue: 'Candidate queue',
 				reviewQueue: 'Review queue',
-				reviewQueueCount: 'Needs review {count}',
+				reviewQueueCount: 'Review candidates {count}',
 				datasetExportTitle: 'Dataset export',
 				datasetLoading: 'Checking reviewed sample readiness...',
 				datasetReady:
@@ -300,11 +304,88 @@ const translations: Record<Language, Translations> = {
 				datasetError: 'Dataset export is unavailable: {message}',
 				datasetDownloadJson: 'Download JSON',
 				datasetDownloadJsonl: 'Download JSONL',
+				datasetDownloadTrainingJson: 'Training JSON',
+				datasetDownloadTrainingJsonl: 'Training JSONL',
+				datasetDownloadReviewJson: 'Review candidates JSON',
+				datasetNoTrainingReady: 'No training-ready samples',
+				datasetSummary: 'Dataset',
+				datasetTrainingReady: 'Training ready',
+				datasetReviewCandidate: 'Needs review',
+				expertSummary: 'Expert readiness summary',
+				expertSummaryReady: 'Ready for expert use',
+				expertSummaryMixed: 'Mixed review and training set',
+				expertSummaryPaperLevel: 'Paper-level evidence',
+				expertSummaryReviewOnly: 'Review before use',
+				expertSummaryEmpty: 'No expert findings yet',
+				expertSummaryReadyBody:
+					'{count} finding(s) have enough support for scoped expert use.',
+				expertSummaryMixedBody:
+					'{training} sample(s) are training-ready; {review} review candidate finding(s) still need expert curation before use.',
+				expertSummaryPaperLevelBody:
+					'{count} paper-level finding(s) can be used for source-grounded review, but need another paper or expert curation before becoming cross-paper conclusions.',
+				expertSummaryReviewOnlyBody:
+					'{count} review candidate finding(s) need expert curation before they are used as conclusions, training data, or downstream answer evidence.',
+				expertMetricStrong: 'Strong',
+				expertMetricPartial: 'Partial',
+				expertMetricSinglePaper: 'Single paper',
+				expertMetricTrainingReady: 'Training ready',
+				expertGapSinglePaper:
+					'{count} finding(s) are backed by one paper only; compare against another paper before upgrading.',
+				expertGapPartial:
+					'{count} finding(s) have partial support; curate the support grade before using them as strong findings.',
+				expertGapWeakOrConflict:
+					'{count} finding(s) are weak, conflicted, or insufficient and should not be used directly.',
+				expertGapMissingDirect:
+					'{count} finding(s) lack direct result evidence and need source repair.',
+				expertGapReviewQueue:
+					'{count} candidate finding(s) remain in the review queue; do not treat them as usable conclusions until curated.',
+				expertGapNone: 'No major evidence gap is visible in the primary findings.',
+				coverageGaps: 'Coverage gaps',
+				coverageGapsBody:
+					'Requested axes not backed by primary findings yet. Treat these as missing evidence or review work before using the goal result.',
+				coverageMissing: 'Missing',
+				coverageReviewCandidates: 'Review candidates',
+				coverageContextOnly: 'Context or mechanism only',
+				goalCoverage: 'Goal coverage',
+				goalCoverageBody:
+					'Shows which requested variables and outcomes are backed by primary findings, which are only review candidates, and which still need evidence.',
+				answerBoundary: 'Answer boundary',
+				answerBoundaryComplete: 'The goal is covered by primary findings',
+				answerBoundaryExpertReady: 'The goal has expert-ready findings',
+				answerBoundaryDraft: 'The goal has a source-grounded draft answer',
+				answerBoundaryLimited: 'The goal is only partially answered',
+				answerBoundaryBody:
+					'Primary findings cover {variablePrimary}/{variableTotal} requested variable axis(es) and {propertyPrimary}/{propertyTotal} requested outcome axis(es).',
+				answerBoundaryDraftCuration: 'Needs expert curation before conclusion: {findings}',
+				answerBoundaryBlocked: 'Not yet conclusion-ready: {terms}',
+				answerBoundaryContextOnly: 'Scope or mechanism only: {terms}',
+				goalCoverageVariables: 'Variables',
+				goalCoverageProperties: 'Outcomes',
+				axisCoveragePrimary: 'Primary finding',
+				axisCoverageReviewQueue: 'Candidate',
+				axisCoverageMechanism: 'Mechanism',
+				axisCoverageContext: 'Context only',
+				axisCoverageMissing: 'Missing',
+				axisCoverageSummary:
+					'{primary} primary · {review} candidate · {mechanism} mechanism · {context} context · {missing} missing',
 				datasetLabelStatuses: {
 					candidate: 'Candidate',
 					silver: 'Silver',
 					gold: 'Gold',
 					rejected: 'Rejected'
+				},
+				datasetUseStatuses: {
+					training_ready: 'Training-ready',
+					review_candidate: 'Review candidate',
+					rejected: 'Rejected'
+				},
+				findingTrustSources: {
+					human_curation: 'Human curation',
+					human_feedback: 'Human confirmed',
+					ai_curation: 'AI curation',
+					ai_feedback: 'AI reviewed',
+					rejected: 'Rejected by review',
+					candidate: 'Unreviewed'
 				},
 				allClaimTypes: 'All types',
 				allStatuses: 'All statuses',
@@ -312,6 +393,8 @@ const translations: Record<Language, Translations> = {
 				filteredClaimCount: '{shown} of {total}',
 				relatedToSelectedClaim: 'For selected claim',
 				claimWorkspace: 'Claims',
+				claimsTable: 'Candidate claims table',
+				claimColumn: 'Claim',
 				findingsWorkspace: 'Findings',
 				findingsTable: 'Research findings table',
 				findingColumn: 'Finding',
@@ -319,9 +402,15 @@ const translations: Record<Language, Translations> = {
 				mechanismColumn: 'Mechanism',
 				resultColumn: 'Result',
 				scopeColumn: 'Scope',
+				moreScopeTerms: 'more',
 				evidenceGradeColumn: 'Evidence grade',
 				paperCountColumn: 'Papers',
+				evidenceBasisColumn: 'Current use',
+				datasetTrustColumn: 'Label / use',
 				reviewStatusColumn: 'Review',
+				actionsColumn: 'Actions',
+				openFindingDetail: 'Review evidence',
+				openFindingFeedback: 'Give feedback',
 				findingDetail: 'Finding detail',
 				backToFindings: 'Back to findings',
 				findingVariables: 'Variables',
@@ -352,7 +441,106 @@ const translations: Record<Language, Translations> = {
 					'{count} secondary evidence record(s) available for audit and curation.',
 				paperCount: '{count} papers',
 				evidenceCount: '{count} evidence',
+				paperCoverage: '{count} / {total} papers covered',
+				primaryFindingPaperCoverage: '{count} / {total} papers covered by primary findings',
+				evidenceBasis: 'Evidence basis',
+				conclusionUseBoundary: 'Conclusion use boundary',
+				findingDecision: 'Expert decision',
+				findingDecisionReady: 'Use as scoped finding',
+				findingDecisionReadyBody:
+					'This finding has multi-paper direct support and can be used with its stated scope and conditions.',
+				findingDecisionPaperLevel: 'Use as paper-level finding',
+				findingDecisionSinglePaperBody:
+					'This finding has direct source support, but only from one paper. Use it for review or silver data, not as a settled cross-paper conclusion.',
+				findingDecisionNeedsReview: 'Review before use',
+				findingDecisionNeedsReviewBody:
+					'This finding needs expert curation before it is used for model evaluation, training data, or downstream answers.',
+				findingDecisionDoNotUse: 'Do not use yet',
+				findingDecisionMissingDirectBody:
+					'This finding has no direct result evidence. Repair or reject the evidence binding before use.',
+				findingUsagePath: 'Expert use path',
+				findingUsageCurrent: 'Current use',
+				findingUsageDataset: 'Dataset status',
+				findingUsageUpgrade: 'Upgrade checklist',
+				findingUsageStatus: {
+					ready: 'Scoped expert finding',
+					paper: 'Paper-level finding',
+					review: 'Review candidate',
+					repair: 'Evidence repair needed'
+				},
+				findingGeneralizationStatus: {
+					scoped_cross_paper: 'Scoped cross-paper finding',
+					cross_paper_candidate: 'Cross-paper review candidate',
+					paper_level_only: 'Paper-level only',
+					evidence_repair_needed: 'Evidence repair needed',
+					conflict_review_needed: 'Conflict review needed'
+				},
+				findingUsageBody: {
+					ready:
+						'Use this finding with its stated material, process, test, and evidence scope attached.',
+					paper:
+						'Use this as a traceable finding from one paper. Do not generalize it across the collection yet.',
+					review:
+						'Use this for expert review. It should not drive downstream answers until support and context are curated.',
+					repair:
+						'Do not use this finding yet. The source binding needs direct result evidence before review.'
+				},
+				findingUsageDatasetReady:
+					'Accepted expert review or curation can make this usable as a labeled training/evaluation sample.',
+				findingUsageDatasetSilver:
+					'AI review keeps this as a silver review candidate; human confirmation is still required before training-ready use.',
+				findingUsageDatasetReview:
+					'Keep this as a review candidate until expert feedback or curation records the final label.',
+				findingUsageVerifyEvidence:
+					'Verify {count} direct evidence link(s) against the parsed source text.',
+				findingUsageRepairEvidence: 'Attach or reject direct result evidence.',
+				findingUsageAddPaper: 'Find a second paper that confirms, contradicts, or extends it.',
+				findingUsageResolveSupport: 'Curate the support grade before treating it as strong.',
+				findingUsageResolveConflict: 'Resolve conflicting evidence before use.',
+				findingUsageRecordReview: 'Record expert feedback or curation for the final label.',
+				findingUsageKeepScope: 'Keep the stated scope and conditions attached when using it.',
+				findingEvidenceRoleCoverage: 'Evidence role coverage',
+				findingEvidenceRoleLabels: {
+					direct_result: 'Direct',
+					mechanism: 'Mechanism',
+					condition_context: 'Context',
+					conflict: 'Conflict',
+					background: 'Background',
+					noise: 'Noise',
+					uncategorized: 'Uncategorized'
+				},
+				findingGapDirectResult: 'Missing direct result evidence.',
+				findingGapMechanism: 'Mechanism is stated, but mechanism evidence is not linked.',
+				findingGapContext: 'Applicability context needs source-backed conditions.',
+				findingGapCrossPaper:
+					'Needs another paper before it can be treated as a cross-paper finding.',
+				findingGapConflictCheck: 'No conflict-check evidence is linked yet.',
+				findingGapNone: 'No immediate role gap is visible; verify source links before use.',
+				singlePaperFinding: 'Single-paper finding',
+				crossPaperFinding: '{count}-paper finding',
+				directEvidenceCount: '{count} direct evidence',
+				provisionalFinding: 'provisional',
+				singlePaperLimitation:
+					'Treat this as paper-level evidence until another paper confirms, contradicts, or extends it.',
+				noDirectResultEvidence: 'No direct result evidence is linked to this finding.',
+				findingNeedsExpertReview: 'Expert review is still required before using this as a settled conclusion.',
+				useBoundaryPaperLevel:
+					'Use this as a paper-level finding, not a settled cross-paper conclusion.',
+				useBoundaryCrossPaper:
+					'Use this as a {count}-paper finding; keep the stated scope and conditions attached.',
+				useBoundaryNeedsConfirmation:
+					'Additional independent evidence or expert curation is needed before upgrading the support grade.',
+				useBoundaryBeforeModelUse:
+					'Review this finding before using it for model evaluation, training data, or downstream answers.',
+				relatedReviewFindings: 'Review candidates to check',
+				relatedReviewFindingsBody:
+					'Use these candidates to confirm, contradict, or extend this paper-level finding before upgrading it.',
 				keyEvidence: 'Key evidence',
+				selectedEvidenceQuote: 'Selected quote',
+				relevantTableRows: 'Relevant table rows',
+				tableRowLabel: 'Row {row}',
+				parsedSourceBlock: 'Parsed source block',
+				openEvidenceSource: 'Open source',
 				auditBinding: 'Audit binding',
 				curationTitle: 'Expert curation',
 				curationClaimType: 'Curated type',
@@ -379,6 +567,7 @@ const translations: Record<Language, Translations> = {
 				feedbackIssue: 'Issue type',
 				feedbackNote: 'Feedback note',
 				feedbackReviewer: 'Reviewer',
+				reviewerUnavailable: 'Sign in required',
 				feedbackSubmit: 'Save feedback',
 				feedbackSaving: 'Saving...',
 				feedbackSaved: 'Feedback saved: {id}',
@@ -404,6 +593,8 @@ const translations: Record<Language, Translations> = {
 				noClaims: 'No claims are available yet.',
 				noEffects: 'No claim rows are available yet.',
 				noFindings: 'No findings match the current filters.',
+				noExpertFindings:
+					'Only low-level candidate effects are available. Review or curate them before treating them as expert findings.',
 				noRelations: 'No related relations are available for this claim.',
 				noEvidence: 'No evidence references are available yet.',
 				noFindingEvidence: 'No source evidence is linked to this finding yet.',
@@ -431,6 +622,30 @@ const translations: Record<Language, Translations> = {
 					weak: 'Weak',
 					conflict: 'Conflict',
 					insufficient: 'Insufficient'
+				},
+				reviewReasons: {
+					no_source_paper: 'No source paper is linked.',
+					single_paper_evidence: 'Evidence comes from one paper.',
+					needs_cross_paper_confirmation:
+						'Needs another paper to confirm, contradict, or extend it.',
+					cross_paper_evidence: 'Evidence spans multiple papers.',
+					no_evidence: 'No evidence is linked.',
+					missing_direct_result_evidence: 'Missing direct result evidence.',
+					missing_target_outcome: 'Missing target outcome.',
+					missing_relation_chain: 'Relation chain is incomplete.',
+					missing_scope_context: 'Scope context is incomplete.',
+					conflicting_direction: 'Evidence contains conflicting directions.',
+					partial_support: 'Support is partial.',
+					weak_support: 'Support is weak.',
+					insufficient_support: 'Support is insufficient.',
+					missing_mechanism_evidence: 'Mechanism evidence is not yet linked.',
+					confounded_table_row_comparison:
+						'Multiple table-row variables changed; review before treating this as a single-axis effect.',
+					model_validation_finding:
+						'Model prediction or validation evidence needs expert review.',
+					has_unreviewed_comparable_candidates:
+						'Comparable candidate findings are waiting in the review queue.',
+					needs_expert_review: 'Needs expert review before use as a settled conclusion.'
 				},
 				findingReviewStatuses: {
 					pending_review: 'Pending review',
@@ -538,8 +753,9 @@ const translations: Record<Language, Translations> = {
 				confirmAndAnalyze: 'Confirm and analyze',
 				analyzing: 'Analyzing...',
 				noAnalysisCoverage:
-					'No routed evidence is available for this objective yet. Open the workspace to inspect coverage.',
-				analysisErrorTitle: 'Goal analysis failed'
+					'No routed evidence has been built yet. Confirming this objective will run goal analysis and build coverage.',
+				analysisErrorTitle: 'Goal analysis failed',
+				analysisWarningTitle: 'Goal analysis needs review'
 			},
 			objectiveWorkspace: {
 				title: 'Objective workspace',
@@ -2136,6 +2352,8 @@ const translations: Record<Language, Translations> = {
 			markdownUnavailableTitle: 'Parsed paper is unavailable',
 			markdownUnavailableBody: 'The parsed Markdown projection is not available yet.',
 			parsedSourceFallback: 'Parsed source fallback',
+			selectedSourceBlockLabel: 'Selected source block',
+			selectedEvidenceQuoteLabel: 'Selected evidence quote',
 			parsedSourceView: 'Parsed source text',
 			parsedSourceViewBody: 'Source-layer text extracted from the document.',
 			parsedPaperView: 'Parsed Paper',
@@ -2921,20 +3139,24 @@ const translations: Record<Language, Translations> = {
 			warningOccurrenceCount: '{message}（{count} 次）',
 			understanding: {
 				title: '研究理解',
-				objectiveBody: '从该研究目标的证据工作区投影出的 Claim、关系、证据、上下文和专家复核控件。',
-				materialBody: '从该材料 research-view 投影出的 Claim、关系、证据、上下文和专家复核控件。',
+				objectiveBody: '围绕该研究目标展示可复核的研究发现、原文证据、适用条件和专家反馈入口。',
+				materialBody: '围绕该材料展示可复核的研究发现、原文证据、适用条件和专家反馈入口。',
 				summary: '研究理解摘要',
 				claims: 'Claim',
 				relationsLabel: '关系',
 				evidenceRefs: '证据',
+				primaryFindings: '主研究发现',
+				findingPapers: '覆盖文献',
+				directEvidence: '直接证据',
 				contexts: '上下文',
 				contextPrefix: '上下文：',
 				claimFilters: 'Claim 筛选',
 				filterByType: '类型',
 				filterByStatus: '证据状态',
 				filterByEvidenceGrade: '证据等级',
+				candidateQueue: '候选队列',
 				reviewQueue: '复核队列',
-				reviewQueueCount: '待复核 {count}',
+				reviewQueueCount: '候选待复核 {count}',
 				datasetExportTitle: '数据集导出',
 				datasetLoading: '正在检查可导出的复核样本...',
 				datasetReady:
@@ -2943,11 +3165,85 @@ const translations: Record<Language, Translations> = {
 				datasetError: '数据集导出不可用：{message}',
 				datasetDownloadJson: '下载 JSON',
 				datasetDownloadJsonl: '下载 JSONL',
+				datasetDownloadTrainingJson: '训练 JSON',
+				datasetDownloadTrainingJsonl: '训练 JSONL',
+				datasetDownloadReviewJson: '待复核 JSON',
+				datasetNoTrainingReady: '暂无可训练样本',
+				datasetSummary: '数据集',
+				datasetTrainingReady: '可用于训练',
+				datasetReviewCandidate: '待复核',
+				expertSummary: '专家可用性摘要',
+				expertSummaryReady: '可供专家使用',
+				expertSummaryMixed: '复核和训练样本混合状态',
+				expertSummaryPaperLevel: '单篇文献级证据',
+				expertSummaryReviewOnly: '使用前需要复核',
+				expertSummaryEmpty: '暂无专家研究发现',
+				expertSummaryReadyBody: '{count} 条研究发现具备带条件使用的证据基础。',
+				expertSummaryMixedBody:
+					'{training} 条样本可用于训练；{review} 条候选研究发现仍需专家校正后再使用。',
+				expertSummaryPaperLevelBody:
+					'{count} 条单篇文献级发现可用于原文溯源复核，但需要第二篇文献或专家校正后才能作为跨文献结论。',
+				expertSummaryReviewOnlyBody:
+					'{count} 条候选研究发现需要专家校正后，才能作为结论、训练数据或下游回答证据使用。',
+				expertMetricStrong: '强证据',
+				expertMetricPartial: '部分支持',
+				expertMetricSinglePaper: '单篇文献',
+				expertMetricTrainingReady: '可训练',
+				expertGapSinglePaper:
+					'{count} 条研究发现只来自单篇文献，升级前需要其他文献确认、反驳或扩展。',
+				expertGapPartial: '{count} 条研究发现只是部分支持，作为强结论使用前需要先校正证据等级。',
+				expertGapWeakOrConflict:
+					'{count} 条研究发现为弱证据、冲突或证据不足，不能直接使用。',
+				expertGapMissingDirect: '{count} 条研究发现缺少直接结果证据，需要修复来源绑定。',
+				expertGapReviewQueue:
+					'{count} 条候选研究发现仍在复核队列中，专家校正前不要当作可用结论。',
+				expertGapNone: '主研究发现没有明显证据缺口。',
+				coverageGaps: '覆盖缺口',
+				coverageGapsBody:
+					'这些研究目标轴尚未被主发现支撑，使用该目标结果前需要补证据或完成复核。',
+				coverageMissing: '缺失',
+				coverageReviewCandidates: '候选待复核',
+				coverageContextOnly: '仅上下文或机制',
+				goalCoverage: '目标覆盖',
+				goalCoverageBody:
+					'展示研究目标中的变量和结果哪些已有主发现支撑、哪些只是候选、哪些仍缺证据。',
+				answerBoundary: '回答边界',
+				answerBoundaryComplete: '该目标已被主发现覆盖',
+				answerBoundaryExpertReady: '该目标已有专家可用研究发现',
+				answerBoundaryDraft: '该目标已有可溯源草稿答案',
+				answerBoundaryLimited: '该目标仅被部分回答',
+				answerBoundaryBody:
+					'主发现覆盖 {variablePrimary}/{variableTotal} 个请求变量轴、{propertyPrimary}/{propertyTotal} 个请求结果轴。',
+				answerBoundaryDraftCuration: '作为结论使用前需要专家校正：{findings}',
+				answerBoundaryBlocked: '尚不能作为结论直接使用：{terms}',
+				answerBoundaryContextOnly: '仅作为适用范围或机制背景：{terms}',
+				goalCoverageVariables: '变量轴',
+				goalCoverageProperties: '结果轴',
+				axisCoveragePrimary: '主发现',
+				axisCoverageReviewQueue: '候选',
+				axisCoverageMechanism: '机制',
+				axisCoverageContext: '仅上下文',
+				axisCoverageMissing: '缺失',
+				axisCoverageSummary:
+					'{primary} 主发现 · {review} 候选 · {mechanism} 机制 · {context} 上下文 · {missing} 缺失',
 				datasetLabelStatuses: {
-					candidate: 'Candidate',
-					silver: 'Silver',
-					gold: 'Gold',
-					rejected: 'Rejected'
+					candidate: '候选',
+					silver: '银标',
+					gold: '金标',
+					rejected: '已拒绝'
+				},
+				datasetUseStatuses: {
+					training_ready: '可用于训练/评价',
+					review_candidate: '待复核样本',
+					rejected: '不使用'
+				},
+				findingTrustSources: {
+					human_curation: '人工校正',
+					human_feedback: '人工确认',
+					ai_curation: 'AI 校正建议',
+					ai_feedback: 'AI 复核',
+					rejected: '复核拒绝',
+					candidate: '未复核'
 				},
 				allClaimTypes: '全部类型',
 				allStatuses: '全部状态',
@@ -2955,6 +3251,8 @@ const translations: Record<Language, Translations> = {
 				filteredClaimCount: '{shown} / {total}',
 				relatedToSelectedClaim: '关联当前 Claim',
 				claimWorkspace: 'Claim',
+				claimsTable: '候选 Claim 表格',
+				claimColumn: 'Claim',
 				findingsWorkspace: '研究发现',
 				findingsTable: '研究发现表格',
 				findingColumn: '研究发现',
@@ -2962,9 +3260,15 @@ const translations: Record<Language, Translations> = {
 				mechanismColumn: '中间机制',
 				resultColumn: '结果',
 				scopeColumn: '条件',
+				moreScopeTerms: '项更多',
 				evidenceGradeColumn: '证据等级',
 				paperCountColumn: '文献数',
+				evidenceBasisColumn: '当前用途',
+				datasetTrustColumn: '标签/用途',
 				reviewStatusColumn: '复核',
+				actionsColumn: '操作',
+				openFindingDetail: '查看证据',
+				openFindingFeedback: '提交反馈',
 				findingDetail: '研究发现详情',
 				backToFindings: '返回研究发现',
 				findingVariables: '变量',
@@ -2994,7 +3298,95 @@ const translations: Record<Language, Translations> = {
 				secondaryFindingEvidenceCount: '还有 {count} 条次级证据可用于审计和专家校正。',
 				paperCount: '{count} 篇文献',
 				evidenceCount: '{count} 条证据',
+				paperCoverage: '覆盖 {count} / {total} 篇文献',
+				primaryFindingPaperCoverage: '主研究发现覆盖 {count} / {total} 篇文献',
+				evidenceBasis: '证据基础',
+				conclusionUseBoundary: '结论使用边界',
+				findingDecision: '专家决策',
+				findingDecisionReady: '可按限定范围使用',
+				findingDecisionReadyBody: '该研究发现具备多篇文献直接支持，可以在保留条件和范围的前提下使用。',
+				findingDecisionPaperLevel: '只能作为单篇文献发现使用',
+				findingDecisionSinglePaperBody:
+					'该研究发现有直接原文证据，但只来自单篇文献。可以用于复核或 Silver 数据，不能作为跨文献稳定结论。',
+				findingDecisionNeedsReview: '使用前需要复核',
+				findingDecisionNeedsReviewBody:
+					'用于模型评价、训练数据或下游回答前，需要专家先完成校正。',
+				findingDecisionDoNotUse: '暂不可使用',
+				findingDecisionMissingDirectBody:
+					'该研究发现没有直接结果证据。使用前需要修复或拒绝当前证据绑定。',
+				findingUsagePath: '专家使用路径',
+				findingUsageCurrent: '当前用途',
+				findingUsageDataset: '数据集状态',
+				findingUsageUpgrade: '升级检查项',
+				findingUsageStatus: {
+					ready: '限定范围内可用',
+					paper: '单篇文献级发现',
+					review: '待复核候选',
+					repair: '需要修复证据'
+				},
+				findingGeneralizationStatus: {
+					scoped_cross_paper: '限定范围内的跨文献发现',
+					cross_paper_candidate: '跨文献待复核候选',
+					paper_level_only: '只能作为单篇文献发现',
+					evidence_repair_needed: '需要修复证据',
+					conflict_review_needed: '需要处理冲突证据'
+				},
+				findingUsageBody: {
+					ready: '使用时必须同时保留材料、工艺、测试条件和证据范围。',
+					paper: '这只能作为单篇文献中的可追溯发现，暂不能推广到整个 collection。',
+					review: '这适合进入专家复核，完成证据和上下文校正前不能驱动下游回答。',
+					repair: '暂不可使用。需要先绑定直接结果证据，再进入复核。'
+				},
+				findingUsageDatasetReady:
+					'已有专家反馈或校正后，可以作为带标签的训练/评价样本使用。',
+				findingUsageDatasetSilver:
+					'AI 复核只能让它保持为 Silver 待复核候选；进入可训练样本前仍需要人工确认。',
+				findingUsageDatasetReview: '在专家反馈或校正给出最终标签前，只能保留为待复核候选。',
+				findingUsageVerifyEvidence: '核对 {count} 条直接证据链接与解析原文是否一致。',
+				findingUsageRepairEvidence: '补充或拒绝直接结果证据绑定。',
+				findingUsageAddPaper: '找到第二篇文献来确认、反驳或扩展这个发现。',
+				findingUsageResolveSupport: '先校正证据等级，再作为强结论使用。',
+				findingUsageResolveConflict: '使用前需要处理冲突证据。',
+				findingUsageRecordReview: '记录专家反馈或校正，形成最终标签。',
+				findingUsageKeepScope: '使用时保留原始范围和条件。',
+				findingEvidenceRoleCoverage: '证据角色覆盖',
+				findingEvidenceRoleLabels: {
+					direct_result: '直接',
+					mechanism: '机制',
+					condition_context: '条件',
+					conflict: '冲突',
+					background: '背景',
+					noise: '噪声',
+					uncategorized: '未分类'
+				},
+				findingGapDirectResult: '缺少直接结果证据。',
+				findingGapMechanism: '已经声明机制，但尚未绑定机制证据。',
+				findingGapContext: '适用条件还需要原文证据支撑。',
+				findingGapCrossPaper: '需要第二篇文献后，才能作为跨文献发现使用。',
+				findingGapConflictCheck: '尚未绑定冲突检查证据。',
+				findingGapNone: '暂未发现明显证据角色缺口；使用前仍需核对原文链接。',
+				singlePaperFinding: '单篇文献发现',
+				crossPaperFinding: '{count} 篇文献发现',
+				directEvidenceCount: '{count} 条直接证据',
+				provisionalFinding: '暂定',
+				singlePaperLimitation: '在其他文献确认、反驳或扩展之前，只能按单篇文献证据使用。',
+				noDirectResultEvidence: '当前研究发现没有绑定直接结果证据。',
+				findingNeedsExpertReview: '作为稳定结论使用前仍需要专家复核。',
+				useBoundaryPaperLevel: '这只能作为单篇文献级发现使用，不能当作跨文献稳定结论。',
+				useBoundaryCrossPaper: '这可以按 {count} 篇文献发现使用，但必须保留原始适用范围和条件。',
+				useBoundaryNeedsConfirmation:
+					'升级证据等级前，还需要独立证据补强或专家校正。',
+				useBoundaryBeforeModelUse:
+					'用于模型评价、训练数据或下游回答之前，需要先完成复核。',
+				relatedReviewFindings: '需要一起复核的候选发现',
+				relatedReviewFindingsBody:
+					'升级这条单篇文献发现前，先用这些候选来确认、反驳或扩展它。',
 				keyEvidence: '关键证据',
+				selectedEvidenceQuote: '引用原文',
+				relevantTableRows: '相关表格行',
+				tableRowLabel: '第 {row} 行',
+				parsedSourceBlock: '完整解析原文块',
+				openEvidenceSource: '打开原文',
 				auditBinding: '审计绑定',
 				curationTitle: '专家校正',
 				curationClaimType: '校正类型',
@@ -3021,6 +3413,7 @@ const translations: Record<Language, Translations> = {
 				feedbackIssue: '问题类型',
 				feedbackNote: '反馈备注',
 				feedbackReviewer: '复核人',
+				reviewerUnavailable: '需要登录',
 				feedbackSubmit: '保存反馈',
 				feedbackSaving: '保存中...',
 				feedbackSaved: '反馈已保存：{id}',
@@ -3046,6 +3439,8 @@ const translations: Record<Language, Translations> = {
 				noClaims: '暂未得到 Claim。',
 				noEffects: '暂未得到 Claim 行。',
 				noFindings: '当前筛选下暂无研究发现。',
+				noExpertFindings:
+					'当前只有低层候选 effect，请先复核或校正后再作为专家研究发现使用。',
 				noRelations: '当前 Claim 暂未关联关系。',
 				noEvidence: '暂未得到证据引用。',
 				noFindingEvidence: '当前研究发现暂未关联原文证据。',
@@ -3073,6 +3468,26 @@ const translations: Record<Language, Translations> = {
 					weak: '弱',
 					conflict: '冲突',
 					insufficient: '不足'
+				},
+				reviewReasons: {
+					no_source_paper: '没有绑定来源文献。',
+					single_paper_evidence: '证据来自单篇文献。',
+					needs_cross_paper_confirmation: '需要其他文献确认、反驳或扩展。',
+					cross_paper_evidence: '证据覆盖多篇文献。',
+					no_evidence: '没有绑定证据。',
+					missing_direct_result_evidence: '缺少直接结果证据。',
+					missing_target_outcome: '缺少目标结果。',
+					missing_relation_chain: '逻辑关系链不完整。',
+					missing_scope_context: '适用条件不完整。',
+					conflicting_direction: '证据方向存在冲突。',
+					partial_support: '当前只是部分支持。',
+					weak_support: '当前支持较弱。',
+					insufficient_support: '当前证据不足。',
+					missing_mechanism_evidence: '尚未绑定机制证据。',
+					confounded_table_row_comparison: '表格行中多项变量同时变化，不能直接当作单变量效应。',
+					model_validation_finding: '模型预测或验证证据需要专家复核。',
+					has_unreviewed_comparable_candidates: '复核队列中还有可比较候选发现待确认。',
+					needs_expert_review: '作为稳定结论使用前需要专家复核。'
 				},
 				findingReviewStatuses: {
 					pending_review: '待复核',
@@ -3177,8 +3592,9 @@ const translations: Record<Language, Translations> = {
 				openWorkspace: '打开目标工作区',
 				confirmAndAnalyze: '确认并分析',
 				analyzing: '分析中...',
-				noAnalysisCoverage: '该目标暂时没有可路由证据。可打开目标工作区检查覆盖情况。',
-				analysisErrorTitle: '目标分析失败'
+				noAnalysisCoverage: '该目标尚未构建证据覆盖。确认后会运行目标分析并构建覆盖。',
+				analysisErrorTitle: '目标分析失败',
+				analysisWarningTitle: '目标分析需要复核'
 			},
 			objectiveWorkspace: {
 				title: '目标工作区',
@@ -4696,6 +5112,8 @@ const translations: Record<Language, Translations> = {
 			markdownUnavailableTitle: '解析论文暂不可用',
 			markdownUnavailableBody: '当前还没有可用的 Markdown 解析投影。',
 			parsedSourceFallback: '解析文本回退',
+			selectedSourceBlockLabel: '选中的原文块',
+			selectedEvidenceQuoteLabel: '选中的证据原文',
 			parsedSourceView: '解析原文文本',
 			parsedSourceViewBody: '这里展示 source 层从文档中拆分出的文本。',
 			parsedPaperView: '解析论文',

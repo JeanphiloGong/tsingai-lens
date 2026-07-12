@@ -222,6 +222,316 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('obj_1')).not.toBeInTheDocument();
 	});
 
+	it('shows analysis errors instead of an empty research understanding workspace', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request) => {
+			const path = requestPath(input);
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal: {
+							goal_id: 'goal_1',
+							collection_id: 'col_123',
+							question: 'How does heat treatment affect strength?',
+							source_type: 'objective_candidate',
+							material_hints: [],
+							process_hints: [],
+							property_hints: [],
+							source_objective_id: null,
+							status: 'failed',
+							analysis_error: 'finalize_goal: goal analysis produced no research findings',
+							analysis_progress: {
+								phase: 'failed',
+								unit: 'steps',
+								message: 'Goal analysis failed.'
+							},
+							created_at: null,
+							updated_at: null
+						},
+						understanding: {
+							schema_version: 'research_understanding.v1',
+							state: 'ready',
+							scope: {
+								scope_type: 'goal',
+								collection_id: 'col_123',
+								goal_id: 'goal_1',
+								material_id: null,
+								objective_id: null,
+								document_id: null,
+								title: 'How does heat treatment affect strength?'
+							},
+							claims: [],
+							relations: [],
+							evidence_refs: [],
+							contexts: [],
+							warnings: [],
+							summary: {
+								claim_count: 0,
+								relation_count: 0,
+								evidence_ref_count: 0,
+								context_count: 0
+							},
+							presentation: {
+								summary: {
+									title: 'How does heat treatment affect strength?',
+									material_scope: [],
+									variable_axes: [],
+									property_scope: [],
+									claim_count: 0,
+									relation_count: 0,
+									evidence_count: 0,
+									context_count: 0,
+									review_queue_count: 0,
+									primary_finding_count: 0,
+									review_queue_finding_count: 0,
+									collection_document_count: 0
+								},
+								effects: [],
+								findings: [],
+								primary_findings: [],
+								review_queue_findings: [],
+								evidence_items: [],
+								context_summaries: []
+							}
+						},
+						pipeline_nodes: {
+							finalize_goal: {
+								status: 'failed',
+								errors: ['goal analysis produced no research findings']
+							}
+						},
+						errors: ['finalize_goal: goal analysis produced no research findings'],
+						warnings: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('finalize_goal: goal analysis produced no research findings'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).not.toBeInTheDocument();
+	});
+
+	it('shows review-only understanding when goal analysis has no primary findings', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request) => {
+			const path = requestPath(input);
+			if (path.endsWith('/research-understanding/curations')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal: {
+							goal_id: 'goal_1',
+							collection_id: 'col_123',
+							question: 'How does scan strategy affect yield strength?',
+							source_type: 'objective_candidate',
+							material_hints: ['316L stainless steel'],
+							process_hints: ['scan strategy'],
+							property_hints: ['yield strength'],
+							source_objective_id: null,
+							status: 'ready',
+							analysis_error: null,
+							analysis_progress: null,
+							created_at: null,
+							updated_at: null
+						},
+						understanding: {
+							schema_version: 'research_understanding.v1',
+							state: 'ready',
+							scope: {
+								scope_type: 'goal',
+								collection_id: 'col_123',
+								goal_id: 'goal_1',
+								material_id: null,
+								objective_id: null,
+								document_id: null,
+								title: 'How does scan strategy affect yield strength?'
+							},
+							claims: [],
+							relations: [],
+							evidence_refs: [],
+							contexts: [],
+							warnings: [],
+							summary: {
+								claim_count: 0,
+								relation_count: 0,
+								evidence_ref_count: 0,
+								context_count: 0
+							},
+							presentation: {
+								summary: {
+									title: 'How does scan strategy affect yield strength?',
+									material_scope: ['316L stainless steel'],
+									variable_axes: ['scan strategy'],
+									property_scope: ['yield strength'],
+									claim_count: 0,
+									relation_count: 0,
+									evidence_count: 1,
+									context_count: 0,
+									review_queue_count: 1,
+									primary_finding_count: 0,
+									review_queue_finding_count: 1,
+									collection_document_count: 6
+								},
+								effects: [],
+								findings: [
+									{
+										finding_id: 'finding_review_only',
+										claim_id: 'claim_review_only',
+										title: 'scan strategy rotation angle and build orientation -> yield strength',
+										statement:
+											'Scan strategy rotation angles and build orientations can be used to predict crystallographic texture changes and Bishop-Hill yield strength in LPBF 316L.',
+										variables: ['scan strategy rotation angle', 'build orientation'],
+										mediators: ['crystallographic texture'],
+										outcomes: ['yield strength'],
+										direction: 'explains',
+										scope_summary: '316L stainless steel, LPBF',
+										support_grade: 'weak',
+										review_status: 'needs_review',
+										confidence: 0.72,
+										paper_count: 1,
+										evidence_count: 1,
+										evidence_ref_ids: ['ev_review'],
+										context_ids: [],
+										relation_ids: [],
+										evidence_bundle: {
+											direct_result: ['ev_review'],
+											mechanism: [],
+											condition_context: [],
+											background: [],
+											conflict: [],
+											noise: [],
+											uncategorized: []
+										},
+										expert_use_status: 'review_candidate',
+										dataset_use_status: 'review_candidate',
+										generalization_status: 'paper_level_only',
+										generalization_note:
+											'Evidence comes from one paper; use this as a traceable paper-level finding, not a cross-paper conclusion.',
+										evidence_gap_summary: 'Needs expert review.',
+										upgrade_actions: ['record_expert_review'],
+										review_reasons: ['model_validation_finding'],
+										warnings: ['model_validation_finding']
+									}
+								],
+								primary_findings: [],
+								review_queue_findings: [
+									{
+										finding_id: 'finding_review_only',
+										claim_id: 'claim_review_only',
+										title: 'scan strategy rotation angle and build orientation -> yield strength',
+										statement:
+											'Scan strategy rotation angles and build orientations can be used to predict crystallographic texture changes and Bishop-Hill yield strength in LPBF 316L.',
+										variables: ['scan strategy rotation angle', 'build orientation'],
+										mediators: ['crystallographic texture'],
+										outcomes: ['yield strength'],
+										direction: 'explains',
+										scope_summary: '316L stainless steel, LPBF',
+										support_grade: 'weak',
+										review_status: 'needs_review',
+										confidence: 0.72,
+										paper_count: 1,
+										evidence_count: 1,
+										evidence_ref_ids: ['ev_review'],
+										context_ids: [],
+										relation_ids: [],
+										evidence_bundle: {
+											direct_result: ['ev_review'],
+											mechanism: [],
+											condition_context: [],
+											background: [],
+											conflict: [],
+											noise: [],
+											uncategorized: []
+										},
+										expert_use_status: 'review_candidate',
+										dataset_use_status: 'review_candidate',
+										generalization_status: 'paper_level_only',
+										generalization_note:
+											'Evidence comes from one paper; use this as a traceable paper-level finding, not a cross-paper conclusion.',
+										evidence_gap_summary: 'Needs expert review.',
+										upgrade_actions: ['record_expert_review'],
+										review_reasons: ['model_validation_finding'],
+										warnings: ['model_validation_finding']
+									}
+								],
+								evidence_items: [],
+								context_summaries: []
+							}
+						},
+						pipeline_nodes: {
+							finalize_goal: {
+								status: 'succeeded',
+								warnings: [
+									'goal analysis produced review candidates but no primary research findings'
+								]
+							}
+						},
+						errors: [],
+						warnings: [
+							'goal analysis produced review candidates but no primary research findings'
+						]
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Goal analysis needs review'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'goal analysis produced review candidates but no primary research findings'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Goal analysis failed'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Review before use').first()).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 review candidate finding(s) need expert curation before they are used as conclusions, training data, or downstream answer evidence.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('No expert findings yet')).not.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage
+					.getByText(
+						'Scan strategy rotation angles and build orientations can be used to predict crystallographic texture changes and Bishop-Hill yield strength in LPBF 316L.'
+					)
+					.first()
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Model prediction or validation evidence needs expert review.')
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Review candidates 1' }))
+			.toHaveAttribute('aria-pressed', 'true');
+	});
+
 	it('shows running goal analysis progress with the active paper', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request) => {
 			const path = requestPath(input);

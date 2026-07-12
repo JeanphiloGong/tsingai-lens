@@ -233,9 +233,21 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 	});
 
-	it('does not allow analysis for objectives without routed evidence', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+	it('confirms an objective without existing routed evidence and lets analysis build coverage', async () => {
+		const requests: Array<{ path: string; method: string; body: unknown }> = [];
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			requests.push({
+				path,
+				method,
+				body: init?.body ? JSON.parse(String(init.body)) : null
+			});
 
 			if (path === '/api/v1/collections/col_4c54ffe568ec/objectives') {
 				return jsonResponse({
@@ -262,22 +274,90 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				});
 			}
 
+			if (path === '/api/v1/collections/col_4c54ffe568ec/goals' && method === 'POST') {
+				return jsonResponse({
+					goal_id: 'goal_empty',
+					collection_id: 'col_4c54ffe568ec',
+					question: 'How does scan strategy affect fatigue strength?',
+					source_type: 'objective_candidate',
+					material_hints: ['316L stainless steel'],
+					process_hints: ['scan strategy'],
+					property_hints: ['fatigue strength'],
+					source_objective_id: 'obj_empty',
+					status: 'pending',
+					analysis_error: null,
+					analysis_progress: null,
+					created_at: null,
+					updated_at: null
+				});
+			}
+
+			if (
+				path === '/api/v1/collections/col_4c54ffe568ec/goals/goal_empty/analysis' &&
+				method === 'POST'
+			) {
+				return jsonResponse({
+					collection_id: 'col_4c54ffe568ec',
+					goal: {
+						goal_id: 'goal_empty',
+						collection_id: 'col_4c54ffe568ec',
+						question: 'How does scan strategy affect fatigue strength?',
+						source_type: 'objective_candidate',
+						material_hints: ['316L stainless steel'],
+						process_hints: ['scan strategy'],
+						property_hints: ['fatigue strength'],
+						source_objective_id: 'obj_empty',
+						status: 'running',
+						analysis_error: null,
+						analysis_progress: {
+							phase: 'queued',
+							unit: 'steps',
+							message: 'Goal analysis is queued.'
+						},
+						created_at: null,
+						updated_at: null
+					},
+					understanding: null,
+					pipeline_nodes: {
+						prepare_goal: { status: 'succeeded' },
+						analyze_goal: { status: 'succeeded' },
+						finalize_goal: { status: 'succeeded' }
+					},
+					errors: [],
+					warnings: []
+				});
+			}
+
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
 		});
 
 		render(Page);
 
-		const button = browserPage.getByRole('button', { name: 'Confirm and analyze' });
-		await expect.element(button).toBeDisabled();
+		await browserPage.getByRole('button', { name: 'Confirm and analyze' }).click();
 		await expect
 			.element(
 				browserPage.getByText(
-					'No routed evidence is available for this objective yet. Open the workspace to inspect coverage.'
+					'No routed evidence has been built yet. Confirming this objective will run goal analysis and build coverage.'
 				)
 			)
 			.toBeInTheDocument();
 		expect(
-			fetchMock.mock.calls.some((call) => requestPath(call[0] as string | URL | Request).endsWith('/goals'))
-		).toBe(false);
+			requests.some(
+				(request) =>
+					request.path === '/api/v1/collections/col_4c54ffe568ec/goals' &&
+					request.method === 'POST' &&
+					(request.body as Record<string, unknown>).source_objective_id === 'obj_empty'
+			)
+		).toBe(true);
+		expect(
+			requests.some(
+				(request) =>
+					request.path === '/api/v1/collections/col_4c54ffe568ec/goals/goal_empty/analysis' &&
+					request.method === 'POST'
+			)
+		).toBe(true);
+		await vi.waitFor(() => {
+			expect(goto).toHaveBeenCalledWith('/collections/col_4c54ffe568ec/goals/goal_empty');
+		});
 	});
 });

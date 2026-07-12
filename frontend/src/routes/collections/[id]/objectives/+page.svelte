@@ -70,11 +70,14 @@
 	}
 
 	function canAnalyzeObjective(objective: ObjectiveListItem) {
+		return Boolean(objective.objective_id && objective.question);
+	}
+
+	function needsAnalysisCoverage(objective: ObjectiveListItem) {
 		return (
-			objective.state !== 'empty' &&
-			objective.paper_frame_count > 0 &&
-			objective.evidence_route_count > 0 &&
-			objective.evidence_unit_count > 0
+			objective.paper_frame_count === 0 ||
+			objective.evidence_route_count === 0 ||
+			objective.evidence_unit_count === 0
 		);
 	}
 
@@ -243,7 +246,7 @@
 							{$t('research.objectives.openWorkspace')}
 						</a>
 					</div>
-					{#if !canAnalyzeObjective(objective)}
+					{#if needsAnalysisCoverage(objective)}
 						<p class="objective-card__analysis-note">
 							{$t('research.objectives.noAnalysisCoverage')}
 						</p>

@@ -29,6 +29,13 @@
 	$: understanding = analysis?.understanding ?? null;
 	$: progress = goal?.analysis_progress ?? null;
 	$: isAnalysisRunning = goal?.status === 'running';
+	$: analysisErrors = analysis?.errors ?? [];
+	$: analysisWarnings = analysis?.warnings ?? [];
+	$: hasAnalysisErrors = analysisErrors.length > 0;
+	$: hasAnalysisWarnings = analysisWarnings.length > 0;
+	$: hasReviewableUnderstanding =
+		((understanding?.presentation?.primary_findings?.length ?? 0) > 0 ||
+			(understanding?.presentation?.review_queue_findings?.length ?? 0) > 0);
 	$: progressPercent = progressPercentLabel(progress);
 	$: currentDocumentLabel = progressDocumentLabel(progress);
 	$: if (browser && collectionId && goalId && loadKey !== loadedKey) {
@@ -169,6 +176,22 @@
 			<p>{$t('research.objectiveWorkspace.emptyBody')}</p>
 		</section>
 	{:else}
+		{#if hasAnalysisErrors}
+			<section class="goal-state goal-state--error" role="alert">
+				<h3>{$t('research.objectives.analysisErrorTitle')}</h3>
+				{#each analysisErrors as item}
+					<p>{item}</p>
+				{/each}
+			</section>
+		{/if}
+		{#if !hasAnalysisErrors && hasAnalysisWarnings}
+			<section class="goal-state goal-state--warning" role="status">
+				<h3>{$t('research.objectives.analysisWarningTitle')}</h3>
+				{#each analysisWarnings as item}
+					<p>{item}</p>
+				{/each}
+			</section>
+		{/if}
 		{#if isAnalysisRunning}
 			<section class="goal-progress" aria-live="polite" aria-busy="true">
 				<div>
@@ -194,16 +217,18 @@
 				</div>
 			</section>
 		{/if}
-		<ResearchUnderstandingWorkbench
-			{understanding}
-			{collectionId}
-			returnTo={resolve('/collections/[id]/goals/[goal_id]', {
-				id: collectionId,
-				goal_id: goalId
-			})}
-			bodyKey="research.understanding.objectiveBody"
-			titleId="goal-understanding-title"
-		/>
+		{#if !hasAnalysisErrors || hasReviewableUnderstanding}
+			<ResearchUnderstandingWorkbench
+				{understanding}
+				{collectionId}
+				returnTo={resolve('/collections/[id]/goals/[goal_id]', {
+					id: collectionId,
+					goal_id: goalId
+				})}
+				bodyKey="research.understanding.objectiveBody"
+				titleId="goal-understanding-title"
+			/>
+		{/if}
 	{/if}
 </section>
 
@@ -353,6 +378,11 @@
 	.goal-state--error {
 		border-color: rgba(185, 28, 28, 0.28);
 		background: rgba(254, 242, 242, 0.72);
+	}
+
+	.goal-state--warning {
+		border-color: rgba(217, 119, 6, 0.32);
+		background: rgba(255, 251, 235, 0.86);
 	}
 
 	@media (max-width: 760px) {

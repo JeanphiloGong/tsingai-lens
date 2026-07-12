@@ -72,11 +72,12 @@
 	$: requestedEvidenceId = $page.url.searchParams.get('evidence_id')?.trim() ?? '';
 	$: requestedAnchorId = $page.url.searchParams.get('anchor_id')?.trim() ?? '';
 	$: requestedSourceRef = $page.url.searchParams.get('source_ref')?.trim() ?? '';
+	$: requestedSourceQuote = $page.url.searchParams.get('quote')?.trim() ?? '';
 	$: requestedPageNumber = positivePageParam($page.url.searchParams.get('page'));
 	$: requestedReaderMode = readerModeParam($page.url.searchParams.get('view'));
 	$: requestedReturnTo = safeReturnTo($page.url.searchParams.get('return_to'));
 	$: documentLoadKey = `${collectionId}:${routeDocumentId}`;
-	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedSourceRef}:${requestedPageNumber ?? ''}:${requestedReaderMode ?? ''}`;
+	$: requestKey = `${documentLoadKey}:${requestedResultId}:${requestedEvidenceId}:${requestedAnchorId}:${requestedSourceRef}:${requestedSourceQuote}:${requestedPageNumber ?? ''}:${requestedReaderMode ?? ''}`;
 	$: sourceReviewOnly = requestedReaderMode === 'parsed-paper' && Boolean(requestedSourceRef);
 	$: hasMarkdownSource = Boolean(markdownForReader?.markdown);
 	$: hasDocumentSource = Boolean(contentForModel || markdownForReader?.markdown);
@@ -630,6 +631,7 @@
 							markdown={markdownForReader}
 							sourceFileUrl={model.sourceFileUrl}
 							activeSourceRef={requestedSourceRef}
+							activeSourceQuote={requestedSourceQuote}
 							activeSourceSpan={selectedSourceSpan}
 							onShowPdf={showPdfPreview}
 						/>

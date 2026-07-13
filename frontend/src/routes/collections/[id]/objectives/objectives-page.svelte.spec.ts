@@ -72,7 +72,8 @@ function researchUnderstandingDatasetResponse({
 	trainingMessages = 0,
 	reviewCandidate = 0,
 	scopeId = 'goal_1',
-	errorCategories = {}
+	errorCategories = {},
+	nextReviewFindingId = ''
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -93,6 +94,7 @@ function researchUnderstandingDatasetResponse({
 			training_ready_sample_count: trainingReady,
 			training_message_sample_count: trainingMessages,
 			review_candidate_sample_count: reviewCandidate,
+			next_review_finding_id: nextReviewFindingId,
 			by_dataset_use_status: {
 				training_ready: trainingReady,
 				review_candidate: reviewCandidate,
@@ -179,7 +181,8 @@ function goalReviewResponse(input: string | URL | Request) {
 				errorCategories:
 					scopeId === 'goal_heat_strength'
 						? { variable_error: 2, direction_error: 1, none: 1 }
-						: {}
+						: {},
+				nextReviewFindingId: scopeId === 'goal_heat_strength' ? 'finding_heat_strength' : ''
 			})
 		);
 	}
@@ -423,7 +426,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Review next goal' }))
-			.toHaveAttribute('href', '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue');
+			.toHaveAttribute(
+				'href',
+				'/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue&finding_id=finding_heat_strength'
+			);
 		const correctionTypes = browserPage.getByLabelText('Common expert correction types');
 		await expect.element(correctionTypes.getByText('Variable error')).toBeInTheDocument();
 		await expect.element(correctionTypes.getByText('2')).toBeInTheDocument();
@@ -440,7 +446,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			(link) => link.href?.includes('/goals/') && link.text.includes('?')
 		);
 		expect(reviewRows[0]).toMatchObject({
-			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue'
+			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue&finding_id=finding_heat_strength'
 		});
 		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
 		expect(reviewRows[0].text).toContain('Review 2 finding(s)');

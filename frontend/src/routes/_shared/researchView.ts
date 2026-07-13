@@ -371,6 +371,7 @@ export type ResearchUnderstandingDataset = {
 		training_ready_sample_count: number;
 		training_message_sample_count: number;
 		review_candidate_sample_count: number;
+		next_review_finding_id: string;
 		by_dataset_use_status: Record<ResearchUnderstandingDatasetUseStatus, number>;
 		by_presentation_bucket: Record<string, number>;
 		by_error_category: Record<string, number>;
@@ -1055,6 +1056,7 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 			training_ready_sample_count: toNumber(qualitySummary.training_ready_sample_count),
 			training_message_sample_count: toNumber(qualitySummary.training_message_sample_count),
 			review_candidate_sample_count: toNumber(qualitySummary.review_candidate_sample_count),
+			next_review_finding_id: toText(qualitySummary.next_review_finding_id),
 			by_dataset_use_status: {
 				training_ready: toNumber(rawUseCounts.training_ready),
 				review_candidate: toNumber(rawUseCounts.review_candidate),

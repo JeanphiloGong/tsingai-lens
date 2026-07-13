@@ -1060,6 +1060,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     curated_correction_count = 0
     system_error_count = 0
     resolved_feedback_count = 0
+    next_review_finding_id = ""
 
     for item in items:
         label_status = _text(item.get("label_status")) or "candidate"
@@ -1082,6 +1083,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
                 training_message_sample_count += 1
         elif dataset_use_status == "review_candidate":
             review_candidate_sample_count += 1
+            if not next_review_finding_id:
+                next_review_finding_id = _text(item.get("finding_id"))
         if label_status != "candidate":
             labeled_sample_count += 1
         if label_status == "rejected":
@@ -1209,6 +1212,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "training_ready_sample_count": training_ready_sample_count,
         "training_message_sample_count": training_message_sample_count,
         "review_candidate_sample_count": review_candidate_sample_count,
+        "next_review_finding_id": next_review_finding_id,
         "needs_review_count": needs_review_count,
         "rejected_count": rejected_count,
         "labeled_sample_count": labeled_sample_count,

@@ -287,9 +287,18 @@
 		});
 	}
 
-	function goalReviewActionHref(row: { goal: ConfirmedGoal; status: string }) {
+	function goalReviewActionHref(row: {
+		goal: ConfirmedGoal;
+		dataset: ResearchUnderstandingDataset | null;
+		status: string;
+	}) {
 		const href = goalReviewHref(row.goal);
-		if (row.status === 'needs_review') return `${href}?review=queue`;
+		if (row.status === 'needs_review') {
+			const params = new URLSearchParams({ review: 'queue' });
+			const findingId = row.dataset?.quality_summary.next_review_finding_id ?? '';
+			if (findingId) params.set('finding_id', findingId);
+			return `${href}?${params.toString()}`;
+		}
 		if (row.status === 'messages_pending') return `${href}?review=training_ready`;
 		return href;
 	}

@@ -653,6 +653,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "training_ready_sample_count": 1,
         "training_message_sample_count": 1,
         "review_candidate_sample_count": 2,
+        "next_review_finding_id": "finding-2",
         "needs_review_count": 2,
         "rejected_count": 1,
         "labeled_sample_count": 3,
@@ -2141,6 +2142,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
     assert reviewed["expert_target"]["reviewer"] is None
     assert dataset["quality_summary"]["training_ready_sample_count"] == 0
     assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["next_review_finding_id"] == "finding-1"
     assert dataset["quality_summary"]["by_quality_decision"] == {
         "partial_review": 1,
         "candidate": 3,
@@ -2186,6 +2188,7 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
     assert reviewed["expert_target"]["reviewer"] == "ai-reviewer-codex-primary-findings"
     assert dataset["quality_summary"]["training_ready_sample_count"] == 0
     assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["next_review_finding_id"] == "finding-1"
 
 
 def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silver():
@@ -2228,6 +2231,7 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
     assert reviewed["expert_target"]["reviewer"] == "ai-reviewer-codex-primary-findings"
     assert dataset["quality_summary"]["training_ready_sample_count"] == 0
     assert dataset["quality_summary"]["review_candidate_sample_count"] == 4
+    assert dataset["quality_summary"]["next_review_finding_id"] == "finding-1"
     assert dataset["quality_summary"]["by_quality_decision"] == {
         "partial_review": 1,
         "candidate": 3,

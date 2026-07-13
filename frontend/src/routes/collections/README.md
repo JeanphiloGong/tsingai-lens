@@ -40,7 +40,8 @@ This node owns the collection workspace route family in the frontend.
   to the user
 - surface confirmed-goal review progress on the objectives page so experts can
   see training-ready, message-exportable, and still-unreviewed finding counts
-  before opening individual goal workspaces
+  before opening individual goal workspaces, with pending review actions linking
+  directly to the next candidate finding when the dataset summary provides one
 - render research understanding as an expert review workspace by default:
   users scan Findings first, then inspect linked relations, evidence, context,
   support grade, review status, paper count, and evidence count; finding

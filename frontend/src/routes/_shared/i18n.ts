@@ -287,6 +287,8 @@ const translations: Record<Language, Translations> = {
 				noGoal: 'Select a confirmed goal before saving protocol drafts.',
 				ready:
 					'{training} training-ready finding(s) and {messages} message-ready sample(s) are available for traceable protocol drafts.',
+				messagesPending:
+					'{training} training-ready finding(s) exist, but only {messages} training message sample(s) are exportable. Check dataset export quality before drafting a protocol.',
 				needsReview:
 					'{review} finding(s) still need expert review before protocol drafts can be saved.',
 				empty: 'No training-ready findings are available for this goal yet.',
@@ -395,6 +397,7 @@ const translations: Record<Language, Translations> = {
 					needs_reviewer: 'Reviewer sign-in required',
 					needs_review: 'Review needed before use',
 					continue_review: 'Continue expert review',
+					messages_pending: 'Training messages pending',
 					export_ready: 'Training export ready'
 				},
 				reviewLoopBodies: {
@@ -410,6 +413,8 @@ const translations: Record<Language, Translations> = {
 						'{review} review candidate finding(s) need accept, reject, or correction before the goal can produce training-ready data.',
 					continue_review:
 						'{training} sample(s) are training-ready; {review} candidate finding(s) still need a final expert decision.',
+					messages_pending:
+						'{training} training-ready sample(s) exist, but only {messages} training message sample(s) are exportable. Inspect dataset export quality before using this goal downstream.',
 					export_ready:
 						'{messages} training message sample(s) are ready for evaluation or fine-tuning preparation.'
 				},
@@ -430,6 +435,7 @@ const translations: Record<Language, Translations> = {
 				reviewLoopOpenDataset: 'Open dataset export',
 				reviewLoopDraftProtocol: 'Draft protocol with Copilot',
 				reviewLoopDraftProtocolBlocked: 'Protocol needs reviewed findings',
+				reviewLoopDraftProtocolMessagesBlocked: 'Protocol needs training messages',
 				batchAcceptVisible: 'Accept visible ({count})',
 				batchAcceptSaving: 'Accepting visible...',
 				batchAcceptSaved: 'Accepted {count} visible finding(s).',
@@ -3328,6 +3334,8 @@ const translations: Record<Language, Translations> = {
 				noGoal: '请选择一个已确认研究目标后，再保存实验方案草稿。',
 				ready:
 					'当前有 {training} 条可训练 Finding，{messages} 条可导出 messages，可用于带证据的实验方案草稿。',
+				messagesPending:
+					'当前有 {training} 条可训练 Finding，但只有 {messages} 条训练 messages 可导出。生成实验方案前需要检查数据集导出质量。',
 				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
 				empty: '该目标还没有可用于实验方案的 training-ready Findings。',
 				error: '就绪度不可用：{message}',
@@ -3430,6 +3438,7 @@ const translations: Record<Language, Translations> = {
 					needs_reviewer: '需要专家账号登录',
 					needs_review: '使用前需要复核',
 					continue_review: '继续专家复核',
+					messages_pending: '训练 messages 待生成',
 					export_ready: '训练导出已就绪'
 				},
 				reviewLoopBodies: {
@@ -3442,6 +3451,8 @@ const translations: Record<Language, Translations> = {
 						'{review} 条待复核研究发现需要 accept、reject 或 correct 后，才能为该目标产出可训练数据。',
 					continue_review:
 						'{training} 条样本已经可训练；还有 {review} 条候选研究发现需要专家给出最终判断。',
+					messages_pending:
+						'已有 {training} 条可训练样本，但只有 {messages} 条训练 messages 可导出。下游使用前需要检查数据集导出质量。',
 					export_ready: '{messages} 条训练 messages 已可用于评价或微调准备。'
 				},
 				reviewLoopStepLogin: '使用专家账号登录，让标注成为人工 training-ready 数据。',
@@ -3459,6 +3470,7 @@ const translations: Record<Language, Translations> = {
 				reviewLoopOpenDataset: '打开数据集导出',
 				reviewLoopDraftProtocol: '用助手生成实验方案',
 				reviewLoopDraftProtocolBlocked: '实验方案需要已复核发现',
+				reviewLoopDraftProtocolMessagesBlocked: '实验方案需要训练 messages',
 				batchAcceptVisible: '接受当前可见（{count}）',
 				batchAcceptSaving: '正在接受当前可见...',
 				batchAcceptSaved: '已接受 {count} 条当前可见研究发现。',

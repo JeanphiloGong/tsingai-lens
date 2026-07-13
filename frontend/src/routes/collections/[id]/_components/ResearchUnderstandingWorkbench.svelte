@@ -2103,6 +2103,7 @@
 		if (reviewCandidates > 0 && trainingReady === 0) return 'needs_review';
 		if (reviewCandidates > 0) return 'continue_review';
 		if (trainingReady > 0 && trainingMessages > 0) return 'export_ready';
+		if (trainingReady > 0) return 'messages_pending';
 		return 'needs_review';
 	}
 
@@ -2753,7 +2754,11 @@
 								</a>
 							{:else}
 								<span class="research-understanding-workbench__review-loop-link research-understanding-workbench__review-loop-link--disabled">
-									{$t('research.understanding.reviewLoopDraftProtocolBlocked')}
+									{$t(
+										datasetTrainingReadySampleCount > 0
+											? 'research.understanding.reviewLoopDraftProtocolMessagesBlocked'
+											: 'research.understanding.reviewLoopDraftProtocolBlocked'
+									)}
 								</span>
 							{/if}
 						{/if}

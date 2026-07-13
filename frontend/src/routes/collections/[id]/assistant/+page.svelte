@@ -79,6 +79,8 @@
 	$: goalProtocolReady = goalTrainingReadyCount > 0 && goalTrainingMessageCount > 0;
 	$: readinessStatus = goalProtocolReady
 		? 'ready'
+		: goalTrainingReadyCount > 0
+			? 'messages_pending'
 		: goalReviewCandidateCount > 0
 			? 'needs_review'
 			: goalDatasetSummary
@@ -95,6 +97,11 @@
 			readinessText = $t('goalCopilot.experimentReadiness.error', { message: readinessError });
 		} else if (goalProtocolReady) {
 			readinessText = $t('goalCopilot.experimentReadiness.ready', {
+				training: goalTrainingReadyCount,
+				messages: goalTrainingMessageCount
+			});
+		} else if (goalTrainingReadyCount > 0) {
+			readinessText = $t('goalCopilot.experimentReadiness.messagesPending', {
 				training: goalTrainingReadyCount,
 				messages: goalTrainingMessageCount
 			});

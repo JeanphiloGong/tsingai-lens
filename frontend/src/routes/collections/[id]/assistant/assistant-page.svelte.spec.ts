@@ -271,6 +271,59 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				browserPage.getByText(
 					'3 finding(s) still need expert review before protocol drafts can be saved.'
 				)
+				)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
+	});
+
+	it('shows pending training messages before protocol drafts are ready', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/collections/col_123/research-understanding/dataset' && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							trainingMessages: 0,
+							reviewCandidate: 0
+						})
+					)
+				);
+			}
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 training-ready finding(s) exist, but only 0 training message sample(s) are exportable. Check dataset export quality before drafting a protocol.'
+				)
 			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();

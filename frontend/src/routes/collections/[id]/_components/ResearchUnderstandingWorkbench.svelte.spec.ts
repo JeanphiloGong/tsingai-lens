@@ -2428,6 +2428,49 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(browserPage.getByText('Protocol needs reviewed findings')).toBeInTheDocument();
 	});
 
+	it('flags training-ready goals whose training messages are not exportable yet', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							trainingMessages: 0,
+							reviewCandidate: 0,
+							rejected: 0
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await expect.element(browserPage.getByText('Training messages pending')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 training-ready sample(s) exist, but only 0 training message sample(s) are exportable. Inspect dataset export quality before using this goal downstream.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Draft protocol with Copilot' }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Protocol needs training messages')).toBeInTheDocument();
+	});
+
 	it('describes mixed readiness review items as candidates, not primary findings', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

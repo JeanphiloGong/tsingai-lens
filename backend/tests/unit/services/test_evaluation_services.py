@@ -1238,6 +1238,15 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
         "ev-corrosion",
         "ev-off-target",
     ]
+    assert [ref["evidence_ref_id"] for ref in sample["training_evidence_refs"]] == [
+        "ev-corrosion",
+    ]
+    assert "Higher porosity made the passive film less stable." in (
+        sample["training_messages"][0]["content"]
+    )
+    assert "Table reports density values." not in sample["training_messages"][0][
+        "content"
+    ]
 
 
 def test_research_understanding_feedback_service_curation_match_evidence_order_keeps_current_direct_evidence_first():

@@ -622,6 +622,7 @@ class ResearchUnderstandingFeedbackService:
         training_evidence_ref_ids = _training_evidence_ref_ids(
             finding,
             evidence_ref_ids=evidence_ref_ids,
+            expert_target=_mapping(expert_target),
         )
         training_evidence_records = [
             record
@@ -837,7 +838,15 @@ def _training_evidence_ref_ids(
     finding: Mapping[str, Any],
     *,
     evidence_ref_ids: tuple[str, ...],
+    expert_target: Mapping[str, Any] | None = None,
 ) -> set[str]:
+    expert_ref_ids = {
+        ref_id
+        for ref_id in _strings(_mapping(expert_target).get("evidence_ref_ids"))
+        if ref_id in evidence_ref_ids
+    }
+    if expert_ref_ids:
+        return expert_ref_ids
     bundle = _mapping(finding.get("evidence_bundle"))
     result_ids = {
         ref_id

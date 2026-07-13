@@ -45,6 +45,7 @@ export type GoalSessionMessage = {
 	warnings?: string[];
 	links?: Record<string, string>;
 	source_links?: GoalSourceLink[];
+	review_gate?: string | null;
 	created_at: string;
 };
 
@@ -59,6 +60,7 @@ export type GoalSessionMessageResponse = {
 	warnings: string[];
 	links: Record<string, string>;
 	source_links: GoalSourceLink[];
+	review_gate: string | null;
 	created_at: string;
 };
 

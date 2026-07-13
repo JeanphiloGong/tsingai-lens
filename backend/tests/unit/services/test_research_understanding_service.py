@@ -787,6 +787,14 @@ def test_objective_understanding_table_evidence_quote_includes_relevant_rows():
 
     understanding = service.build_objective_understanding(payload)
 
+    evidence_ref = understanding["evidence_refs"][0]
+    assert evidence_ref["locator"]["page"] == 8
+    assert evidence_ref["href"].startswith(
+        "/collections/col-preheat/documents/paper-preheat?"
+    )
+    assert "source_ref=table-preheat" in evidence_ref["href"]
+    assert "Non-preheated | 448 | 617 | 72" in evidence_ref["quote"]
+    assert "Preheated | 465 | 618 | 82" in evidence_ref["quote"]
     evidence_item = understanding["presentation"]["evidence_items"][0]
     assert "Non-preheated | 448 | 617 | 72" in evidence_item["quote"]
     assert "Preheated | 465 | 618 | 82" in evidence_item["quote"]
@@ -4427,6 +4435,81 @@ def test_objective_understanding_preserves_existing_evidence_ref_quote():
     evidence_ref = understanding["evidence_refs"][0]
     assert evidence_ref["quote"] == "Explicit quote from extraction."
     assert evidence_ref["locator"]["page"] == 5
+
+
+def test_with_presentation_backfills_persisted_table_evidence_traceability():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            tables=[
+                SourceTable(
+                    table_id="table-density",
+                    document_id="paper-1",
+                    table_order=1,
+                    page=6,
+                    caption_text="Table 1 Density results.",
+                    caption_block_id=None,
+                    bbox=None,
+                    heading_path="Results",
+                    column_headers=["Scan speed", "Density"],
+                    table_matrix=[
+                        ["Scan speed", "Density"],
+                        ["0.175", "93.9"],
+                        ["0.239", "96.8"],
+                    ],
+                )
+            ],
+        ),
+    )
+    record = {
+        "schema_version": "research_understanding.v1",
+        "state": "ready",
+        "scope": {
+            "scope_type": "goal",
+            "collection_id": "col-1",
+            "goal_id": "goal-density",
+            "title": "How does scan speed affect density?",
+        },
+        "claims": [
+            {
+                "claim_id": "claim-density",
+                "claim_type": "comparison",
+                "statement": "Scan speed 0.239 increased density from 93.9 to 96.8.",
+                "status": "limited",
+                "confidence": 0.75,
+                "evidence_ref_ids": ["evref-density-table"],
+            }
+        ],
+        "relations": [],
+        "evidence_refs": [
+            {
+                "evidence_ref_id": "evref-density-table",
+                "source_kind": "table",
+                "document_id": "paper-1",
+                "label": "P001 Table 1",
+                "locator": {
+                    "source_ref": "table-density",
+                    "source_kind": "table",
+                },
+                "fact_ids": ["oeu-density"],
+                "traceability_status": "resolved",
+                "evidence_role": "direct_support",
+            }
+        ],
+        "contexts": [],
+        "warnings": [],
+    }
+
+    refreshed = service.with_presentation(record)
+
+    evidence_ref = refreshed["evidence_refs"][0]
+    assert evidence_ref["locator"]["page"] == 6
+    assert evidence_ref["quote"] == (
+        "Table 1 Density results. Columns: Scan speed | Density "
+        "Rows: Scan speed | Density / 0.175 | 93.9 / 0.239 | 96.8"
+    )
+    assert evidence_ref["href"].startswith("/collections/col-1/documents/paper-1?")
+    assert "source_ref=table-density" in evidence_ref["href"]
 
 
 def test_material_understanding_projects_findings_measurements_and_relations():

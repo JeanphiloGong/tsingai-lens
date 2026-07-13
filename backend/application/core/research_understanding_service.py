@@ -99,6 +99,7 @@ class ResearchUnderstandingService:
             if isinstance(understanding, ResearchUnderstanding)
             else dict(understanding)
         )
+        record = self._record_with_traceable_evidence_refs(record)
         record = self._record_without_off_axis_recovered_objects(record)
         record = self._record_with_recovered_presentation_objects(record)
         record["presentation"] = self._presentation_for(record)
@@ -138,9 +139,14 @@ class ResearchUnderstandingService:
         goal_id = _text(payload.get("goal_id"))
         question = _text(objective.get("question")) or _text(context.get("question"))
         evidence_units = _mapping_list(payload.get("evidence_units"))
-        evidence_refs = self._evidence_refs_from_evidence_units(evidence_units)
         blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
             collection_id
+        )
+        evidence_refs = self._evidence_refs_from_evidence_units(
+            evidence_units,
+            collection_id=collection_id,
+            blocks_by_id=blocks_by_id,
+            tables_by_id=tables_by_id,
         )
         evidence_refs = self._enrich_evidence_refs_from_source_blocks(
             evidence_refs,
@@ -3730,18 +3736,46 @@ class ResearchUnderstandingService:
     def _evidence_refs_from_evidence_units(
         self,
         evidence_units: list[dict[str, Any]],
+        *,
+        collection_id: str | None = None,
+        blocks_by_id: Mapping[str, SourceBlock] | None = None,
+        tables_by_id: Mapping[str, SourceTable] | None = None,
     ) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = []
         for unit in evidence_units:
             unit_id = _text(unit.get("evidence_unit_id"))
             source_refs = _mapping_list(unit.get("source_refs"))
             if not source_refs:
-                refs.append(self._evidence_ref_from_unit(unit, source_ref=None))
+                refs.append(
+                    self._evidence_ref_from_unit(
+                        unit,
+                        source_ref=None,
+                        collection_id=collection_id,
+                        blocks_by_id=blocks_by_id or {},
+                        tables_by_id=tables_by_id or {},
+                    )
+                )
                 continue
             for source_ref in source_refs:
-                refs.append(self._evidence_ref_from_unit(unit, source_ref=source_ref))
+                refs.append(
+                    self._evidence_ref_from_unit(
+                        unit,
+                        source_ref=source_ref,
+                        collection_id=collection_id,
+                        blocks_by_id=blocks_by_id or {},
+                        tables_by_id=tables_by_id or {},
+                    )
+                )
             if unit_id and _strings(unit.get("evidence_anchor_ids")):
-                refs.append(self._evidence_ref_from_unit(unit, source_ref=None))
+                refs.append(
+                    self._evidence_ref_from_unit(
+                        unit,
+                        source_ref=None,
+                        collection_id=collection_id,
+                        blocks_by_id=blocks_by_id or {},
+                        tables_by_id=tables_by_id or {},
+                    )
+                )
         return self._sort_evidence_refs_for_review(refs)
 
     def _sort_evidence_refs_for_review(
@@ -3796,18 +3830,54 @@ class ResearchUnderstandingService:
         unit: Mapping[str, Any],
         *,
         source_ref: Mapping[str, Any] | None,
+        collection_id: str | None,
+        blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable],
     ) -> dict[str, Any]:
         source = _mapping(source_ref)
         unit_id = _text(unit.get("evidence_unit_id"))
         source_kind = _text(source.get("source_kind")) or "unknown"
+        source_ref_id = _text(source.get("source_ref"))
+        block = blocks_by_id.get(source_ref_id) if source_ref_id else None
+        table = tables_by_id.get(source_ref_id) if source_ref_id else None
         source_ref_label = (
             _text(source.get("display_label"))
             or _text(source.get("source_ref"))
             or _text(source.get("route_id"))
         )
+        document_id = (
+            _text(source.get("document_id"))
+            or _text(unit.get("document_id"))
+            or _text(block.document_id if block else None)
+            or _text(table.document_id if table else None)
+        )
+        page = (
+            source.get("page")
+            if _text(source.get("page"))
+            else (block.page if block and block.page is not None else None)
+        )
+        if page is None and table is not None and table.page is not None:
+            page = table.page
+        quote_text = _text(source.get("quote"))
+        if not quote_text and block is not None:
+            quote_text = _short_text(block.text, limit=420)
+        if not quote_text and table is not None:
+            quote_text = self._presentation_table_source_text(table)
+        href = _text(source.get("href"))
+        if not href and collection_id and source_ref_id and document_id:
+            href = (
+                _presentation_evidence_href(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    source_ref=source_ref_id,
+                    page=_text(page),
+                    quote_text=quote_text,
+                )
+                or ""
+            )
         evidence_ref_id = _stable_ref_id(
             source_kind,
-            _text(unit.get("document_id")),
+            document_id,
             [unit_id] if unit_id else [],
             _strings(unit.get("evidence_anchor_ids")),
             source,
@@ -3815,14 +3885,15 @@ class ResearchUnderstandingService:
         return {
             "evidence_ref_id": evidence_ref_id,
             "source_kind": source_kind,
-            "document_id": _text(source.get("document_id")) or _text(unit.get("document_id")),
+            "document_id": document_id,
             "label": source_ref_label or unit_id or evidence_ref_id,
             "locator": {
                 key: value
                 for key, value in {
-                    "source_ref": _text(source.get("source_ref")),
+                    "source_ref": source_ref_id,
                     "route_id": _text(source.get("route_id")),
                     "source_kind": source_kind,
+                    "page": page,
                 }.items()
                 if value
             },
@@ -3834,8 +3905,8 @@ class ResearchUnderstandingService:
                 or ("traceable" if source or unit.get("evidence_anchor_ids") else "missing")
             ),
             "evidence_role": self._evidence_role_for_unit_source(unit, source),
-            "quote": _text(source.get("quote")),
-            "href": _text(source.get("href")),
+            "quote": quote_text,
+            "href": href,
         }
 
     def _evidence_role_for_unit_source(
@@ -3894,6 +3965,76 @@ class ResearchUnderstandingService:
             enriched["document_id"] = block.document_id
         if not _text(enriched.get("quote")) and _text(block.text):
             enriched["quote"] = _short_text(block.text, limit=420)
+        return enriched
+
+    def _record_with_traceable_evidence_refs(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        collection_id = _text(_mapping(record.get("scope")).get("collection_id"))
+        refs = _mapping_list(record.get("evidence_refs"))
+        if not collection_id or not refs:
+            return dict(record)
+        blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
+            collection_id
+        )
+        if not blocks_by_id and not tables_by_id:
+            return dict(record)
+        updated = dict(record)
+        updated["evidence_refs"] = [
+            self._traceable_evidence_ref(
+                ref,
+                collection_id=collection_id,
+                blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
+            )
+            for ref in refs
+        ]
+        return updated
+
+    def _traceable_evidence_ref(
+        self,
+        ref: Mapping[str, Any],
+        *,
+        collection_id: str,
+        blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, Any]:
+        locator = _locator_mapping(ref.get("locator"))
+        source_ref = _text(locator.get("source_ref"))
+        if not source_ref:
+            return dict(ref)
+        block = blocks_by_id.get(source_ref)
+        table = tables_by_id.get(source_ref)
+        if block is None and table is None:
+            return dict(ref)
+        enriched = dict(ref)
+        enriched_locator = dict(locator)
+        if block is not None:
+            if block.page is not None and not _text(enriched_locator.get("page")):
+                enriched_locator["page"] = block.page
+            if not _text(enriched.get("document_id")):
+                enriched["document_id"] = block.document_id
+            if not _text(enriched.get("quote")) and _text(block.text):
+                enriched["quote"] = _short_text(block.text, limit=420)
+        if table is not None:
+            if table.page is not None and not _text(enriched_locator.get("page")):
+                enriched_locator["page"] = table.page
+            if not _text(enriched.get("document_id")):
+                enriched["document_id"] = table.document_id
+            if not _text(enriched.get("quote")):
+                enriched["quote"] = self._presentation_table_source_text(table)
+        enriched["locator"] = enriched_locator
+        if not _text(enriched.get("href")):
+            href = _presentation_evidence_href(
+                collection_id=collection_id,
+                document_id=_text(enriched.get("document_id")),
+                source_ref=source_ref,
+                page=_text(enriched_locator.get("page")),
+                quote_text=_text(enriched.get("quote")),
+            )
+            if href:
+                enriched["href"] = href
         return enriched
 
     def _statement_from_evidence_unit(self, unit: Mapping[str, Any]) -> str | None:

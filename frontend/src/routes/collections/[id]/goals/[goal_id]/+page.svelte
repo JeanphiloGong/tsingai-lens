@@ -173,6 +173,22 @@
 		return status.replace(/_/g, ' ');
 	}
 
+	function metadataText(plan: ExperimentPlan | null, key: string) {
+		const value = plan?.metadata?.[key];
+		return typeof value === 'string' ? value : '';
+	}
+
+	function metadataList(plan: ExperimentPlan | null, key: string) {
+		const value = plan?.metadata?.[key];
+		return Array.isArray(value)
+			? value.map((item) => String(item).trim()).filter(Boolean)
+			: [];
+	}
+
+	function isCopilotPlan(plan: ExperimentPlan | null) {
+		return metadataText(plan, 'source') === 'goal_copilot';
+	}
+
 	function progressDocumentLabel(value: GoalAnalysisProgress | null) {
 		return (
 			value?.active_document_title ||
@@ -360,6 +376,43 @@
 								bind:value={planContent}
 							></textarea>
 						</label>
+						{#if selectedPlan}
+							<div
+								class="experiment-plans__provenance"
+								aria-label={$t('research.goalWorkspace.experimentPlanProvenance')}
+							>
+								<div>
+									<strong>
+										{isCopilotPlan(selectedPlan)
+											? $t('research.goalWorkspace.experimentPlanCopilotSource')
+											: $t('research.goalWorkspace.experimentPlanManualSource')}
+									</strong>
+									<span>
+										{metadataText(selectedPlan, 'review_gate') ||
+											$t('research.goalWorkspace.experimentPlanNoReviewGate')}
+									</span>
+								</div>
+								<div class="experiment-plans__provenance-meta">
+									{#if metadataText(selectedPlan, 'source_mode')}
+										<span>{statusLabel(metadataText(selectedPlan, 'source_mode'))}</span>
+									{/if}
+									{#if metadataList(selectedPlan, 'used_evidence_ids').length}
+										<span>
+											{$t('research.goalWorkspace.experimentPlanEvidenceCount', {
+												count: metadataList(selectedPlan, 'used_evidence_ids').length
+											})}
+										</span>
+									{/if}
+									{#if metadataText(selectedPlan, 'source_session_id')}
+										<span>
+											{$t('research.goalWorkspace.experimentPlanSourceSession', {
+												id: metadataText(selectedPlan, 'source_session_id')
+											})}
+										</span>
+									{/if}
+								</div>
+							</div>
+						{/if}
 						<div class="experiment-plans__footer">
 							<div>
 								{#if selectedPlan?.source_links.length}
@@ -623,6 +676,46 @@
 	.experiment-plans__editor textarea {
 		min-height: 220px;
 		resize: vertical;
+	}
+
+	.experiment-plans__provenance {
+		display: grid;
+		gap: 10px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--bg-subtle);
+		padding: 12px;
+	}
+
+	.experiment-plans__provenance div {
+		display: grid;
+		gap: 4px;
+	}
+
+	.experiment-plans__provenance strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.experiment-plans__provenance span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		overflow-wrap: anywhere;
+	}
+
+	.experiment-plans__provenance .experiment-plans__provenance-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.experiment-plans__provenance-meta span {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-sm);
+		background: var(--surface-card);
+		padding: 4px 7px;
 	}
 
 	.experiment-plans__footer a {

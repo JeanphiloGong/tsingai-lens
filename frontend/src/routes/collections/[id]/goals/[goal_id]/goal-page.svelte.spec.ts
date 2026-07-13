@@ -438,7 +438,13 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 										href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
 									}
 								],
-								metadata: {},
+								metadata: {
+									source: 'goal_copilot',
+									source_session_id: 'session_2',
+									source_mode: 'collection_grounded',
+									used_evidence_ids: ['ev_1'],
+									review_gate: 'training_ready_findings'
+								},
 								created_by: 'expert-a',
 								created_at: '2026-07-13T00:01:00+00:00',
 								updated_at: '2026-07-13T00:01:00+00:00'
@@ -485,6 +491,12 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
+		await expect
+			.element(browserPage.getByText('Generated from reviewed Goal Copilot evidence'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('training_ready_findings')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 evidence link(s)')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Session session_2')).toBeInTheDocument();
 	});
 
 	it('shows analysis errors instead of an empty research understanding workspace', async () => {
@@ -771,11 +783,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Review before use').first()).toBeInTheDocument();
 		await expect
-			.element(
-				browserPage.getByText(
-					'1 review candidate finding(s) need expert curation before they are used as conclusions, training data, or downstream answer evidence.'
-				)
-			)
+			.element(browserPage.getByRole('button', { name: 'Review candidates 1' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('No expert findings yet')).not.toBeInTheDocument();
 		await expect

@@ -331,8 +331,8 @@ const translations: Record<Language, Translations> = {
 				filterByEvidenceGrade: 'Evidence grade',
 				filterByDatasetUse: 'Use status',
 				candidateQueue: 'Candidate queue',
-				reviewQueue: 'Review queue',
-				reviewQueueCount: 'Review candidates {count}',
+				reviewQueue: 'Evidence repair',
+				reviewQueueCount: 'Repair candidates {count}',
 				datasetExportTitle: 'Dataset export',
 				datasetLoading: 'Checking reviewed sample readiness...',
 				datasetReady:
@@ -3438,8 +3438,8 @@ const translations: Record<Language, Translations> = {
 				filterByEvidenceGrade: '证据等级',
 				filterByDatasetUse: '用途状态',
 				candidateQueue: '候选队列',
-				reviewQueue: '复核队列',
-				reviewQueueCount: '候选待复核 {count}',
+				reviewQueue: '证据修复',
+				reviewQueueCount: '需修复候选 {count}',
 				datasetExportTitle: '数据集导出',
 				datasetLoading: '正在检查可导出的复核样本...',
 				datasetReady:

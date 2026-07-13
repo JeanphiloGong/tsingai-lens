@@ -1057,14 +1057,14 @@ function findingWithDuplicateEvidenceTargetsFixture(): ResearchUnderstanding {
 async function openMechanismClaimDetail(
 	findingName: RegExp = /Annealing may reduce cellular substructure\./
 ) {
-	await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+	await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 	await browserPage.getByRole('button', { name: 'Weak 1' }).click();
 	await browserPage.getByRole('button', { name: findingName }).click();
 	return browserPage.getByLabelText('Finding detail');
 }
 
 async function openConflictedClaimDetail() {
-	await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+	await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 	await browserPage.getByRole('button', { name: 'Conflict 1' }).click();
 	await browserPage
 		.getByRole('button', { name: /Strength trends conflict across reported heat treatments\./ })
@@ -1477,7 +1477,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(findingsTable.getByText('Training-ready · Human confirmed', { exact: true }))
 			.toBeInTheDocument();
 
-		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Review candidate 2' }))
 			.toBeInTheDocument();
@@ -2160,7 +2160,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(relatedDetail.getByText('Evidence contains conflicting directions.'))
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
-		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 		await browserPage.getByRole('button', { name: /Heat treatment -> yield strength/ }).click();
 		await expect.element(primaryDetail.getByText('Direct result evidence')).toBeInTheDocument();
 		const tableAudit = primaryDetail
@@ -2825,7 +2825,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain('Training ready 2');
-		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 
 		const expertSummary = browserPage.getByLabelText('Expert readiness summary');
 		await expect
@@ -3922,7 +3922,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 		await expect
 			.element(
 				browserPage.getByRole('button', {
@@ -4022,7 +4022,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
 
 		await expect.element(browserPage.getByText('2 of 2')).toBeInTheDocument();
 		await expect
@@ -4048,10 +4048,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(summary.getByText('Candidate queue')).toBeInTheDocument();
 		await expect.element(summary.getByText('0')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Review candidates 0' }))
+			.element(browserPage.getByRole('button', { name: 'Repair candidates 0' }))
 			.toBeInTheDocument();
 
-		await browserPage.getByRole('button', { name: 'Review candidates 0' }).click();
+		await browserPage.getByRole('button', { name: 'Repair candidates 0' }).click();
 
 		await expect
 			.element(browserPage.getByText('No findings match the current filters.'))
@@ -4079,7 +4079,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(summary.getByText('0 / 6 papers covered by primary findings'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Review candidates 1' }))
+			.element(browserPage.getByRole('button', { name: 'Repair candidates 1' }))
 			.toHaveAttribute('aria-pressed', 'true');
 		await expect.element(browserPage.getByText('1 of 1')).toBeInTheDocument();
 		await expect

@@ -53,6 +53,16 @@ def _dataset_payload(**overrides):
             "source": "curation",
             "statement": "Preheating increased ductility by 14%.",
         },
+        "training_messages": [
+            {
+                "role": "user",
+                "content": "Extract one evidence-grounded materials finding.",
+            },
+            {
+                "role": "assistant",
+                "content": '{"statement": "Preheating increased ductility by 14%."}',
+            },
+        ],
     }
     item.update(overrides.pop("item_overrides", {}))
     quality_summary = {
@@ -87,6 +97,7 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
 
     assert summary["item_count"] == 1
     assert summary["training_ready_count"] == 1
+    assert summary["training_message_ready_count"] == 1
     assert summary["by_error_category"] == {
         "variable_error": 1,
         "evidence_error": 1,
@@ -201,4 +212,41 @@ def test_evaluate_goal_dataset_payload_fails_missing_traceable_training_evidence
     assert (
         "active samples include traceable training evidence"
         in _failed_check_names(summary)
+    )
+
+
+def test_evaluate_goal_dataset_payload_fails_missing_training_messages():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(item_overrides={"training_messages": []})
+    )
+
+    assert "training-ready samples include fine-tuning messages" in _failed_check_names(
+        summary
+    )
+
+
+def test_evaluate_goal_dataset_payload_fails_mismatched_training_message_target():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "training_messages": [
+                    {
+                        "role": "user",
+                        "content": "Extract one evidence-grounded materials finding.",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": '{"statement": "System prediction, not expert target."}',
+                    },
+                ]
+            }
+        )
+    )
+
+    assert "training-ready samples include fine-tuning messages" in _failed_check_names(
+        summary
     )

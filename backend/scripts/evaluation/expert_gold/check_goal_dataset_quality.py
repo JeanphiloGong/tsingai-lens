@@ -214,6 +214,9 @@ def evaluate_goal_dataset_payload(
     training_ready_items = [
         item for item in items if _text(item.get("dataset_use_status")) == "training_ready"
     ]
+    training_message_ready_items = [
+        item for item in training_ready_items if _has_fine_tuning_messages(item)
+    ]
     active_items = [
         item
         for item in items
@@ -273,6 +276,16 @@ def evaluate_goal_dataset_payload(
                 if not _mapping(item.get("expert_target"))
             ),
         ),
+        _check(
+            goal_id,
+            "training-ready samples include fine-tuning messages",
+            all(_has_fine_tuning_messages(item) for item in training_ready_items),
+            _sample_failure_detail(
+                item
+                for item in training_ready_items
+                if not _has_fine_tuning_messages(item)
+            ),
+        ),
     ]
     if require_training_ready:
         checks.insert(
@@ -288,6 +301,7 @@ def evaluate_goal_dataset_payload(
         "goal_id": goal_id,
         "item_count": len(items),
         "training_ready_count": len(training_ready_items),
+        "training_message_ready_count": len(training_message_ready_items),
         "review_candidate_count": len(
             [
                 item
@@ -316,6 +330,34 @@ def _has_traceable_training_evidence(item: dict[str, Any]) -> bool:
     )
 
 
+def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
+    expert_target = _mapping(item.get("expert_target"))
+    target_statement = _text(expert_target.get("statement"))
+    if not target_statement:
+        return False
+    messages = _mapping_list(item.get("training_messages"))
+    if len(messages) < 2:
+        return False
+    if _text(messages[0].get("role")) != "user" or not _text(
+        messages[0].get("content")
+    ):
+        return False
+    if _text(messages[-1].get("role")) != "assistant":
+        return False
+    assistant_content = _text(messages[-1].get("content"))
+    if not assistant_content:
+        return False
+    try:
+        assistant_payload = json.loads(assistant_content)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(assistant_payload, dict):
+        return False
+    return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
+        target_statement
+    )
+
+
 def _sample_failure_detail(items: Any) -> str:
     failures = [
         _text(item.get("sample_id")) or _text(item.get("finding_id")) or "unknown"
@@ -336,6 +378,10 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _normalized_text(value: Any) -> str:
+    return " ".join(_text(value).casefold().split())
 
 
 def _check(goal_id: str, name: str, passed: bool, detail: str) -> dict[str, str]:

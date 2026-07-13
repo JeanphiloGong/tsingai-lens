@@ -3078,6 +3078,9 @@
 										</span>
 									{/each}
 								</div>
+								<p class="research-understanding-workbench__dataset-note">
+									{$t('research.understanding.datasetLabelBoundaryNote')}
+								</p>
 								<div class="research-understanding-workbench__dataset-actions">
 									{#if datasetTrainingReadySampleCount > 0}
 										<a href={datasetDownloadUrl('json', 'training_ready')} download>

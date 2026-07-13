@@ -352,6 +352,8 @@ const translations: Record<Language, Translations> = {
 				datasetNoTrainingReady: 'No training-ready samples',
 				datasetTrainingMessagesNote:
 					'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.',
+				datasetLabelBoundaryNote:
+					'Gold is human-confirmed and can become training-ready; Silver is AI or non-human review and still needs expert confirmation.',
 				datasetSummary: 'Dataset',
 				collectionDatasetSummary: 'Collection dataset',
 				collectionDatasetReady:
@@ -3396,6 +3398,8 @@ const translations: Record<Language, Translations> = {
 				datasetNoTrainingReady: '暂无可训练样本',
 				datasetTrainingMessagesNote:
 					'训练导出包含基于证据的 user/assistant messages，可用于评价或微调准备。',
+				datasetLabelBoundaryNote:
+					'金标代表人工确认，可进入 training-ready；银标代表 AI 或非人工复核，仍需专家确认。',
 				datasetSummary: '数据集',
 				collectionDatasetSummary: '全集合数据集',
 				collectionDatasetReady:

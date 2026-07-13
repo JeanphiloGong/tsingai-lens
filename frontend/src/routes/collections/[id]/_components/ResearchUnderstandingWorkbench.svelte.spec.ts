@@ -2091,6 +2091,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Silver 1');
 		expect(datasetText).toContain('Gold 1');
 		expect(datasetText).toContain('Rejected 1');
+		expect(datasetText).toContain(
+			'Gold is human-confirmed and can become training-ready; Silver is AI or non-human review and still needs expert confirmation.'
+		);
 		expect(datasetText).toContain('Common error categories');
 		expect(datasetText).toContain('Variable error 2');
 		expect(datasetText).toContain('Direction error 1');

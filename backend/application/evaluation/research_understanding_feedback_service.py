@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from hashlib import sha1
@@ -628,6 +629,10 @@ class ResearchUnderstandingFeedbackService:
             if record["evidence_ref_id"] in training_evidence_ref_ids
         ] or evidence_records
         context_ids = _strings(finding.get("context_ids"))
+        context_records = [
+            _context_record(context_id, contexts, context_summaries)
+            for context_id in context_ids
+        ]
         matched_trace = _matched_trace_for_finding(
             finding,
             evidence_ref_ids=evidence_ref_ids,
@@ -671,10 +676,13 @@ class ResearchUnderstandingFeedbackService:
             "expert_target": expert_target,
             "evidence_refs": evidence_records,
             "training_evidence_refs": training_evidence_records,
-            "context_refs": [
-                _context_record(context_id, contexts, context_summaries)
-                for context_id in context_ids
-            ],
+            "training_messages": _training_messages(
+                system_prediction=system_prediction,
+                expert_target=_mapping(expert_target),
+                evidence_records=training_evidence_records,
+                context_records=context_records,
+            ),
+            "context_refs": context_records,
             "feedback_refs": [item.to_record() for item in feedback],
             "metadata": {
                 "curation_id": curation.curation_id if curation else None,
@@ -1381,6 +1389,97 @@ def _expert_target_from_feedback(
         "created_at": item.created_at,
         "system_prediction": dict(system_prediction),
     }
+
+
+def _training_messages(
+    *,
+    system_prediction: Mapping[str, Any],
+    expert_target: Mapping[str, Any],
+    evidence_records: list[dict[str, Any]],
+    context_records: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    if not expert_target:
+        return []
+    statement = _text(expert_target.get("statement")) or _text(
+        system_prediction.get("statement")
+    )
+    if not statement:
+        return []
+    evidence_lines = []
+    for index, record in enumerate(evidence_records[:8], start=1):
+        text = _text(record.get("training_source_text")) or _text(record.get("quote"))
+        if not text:
+            text = _text(record.get("source_text"))
+        if not text:
+            continue
+        source_label = (
+            _text(record.get("source_label"))
+            or _text(record.get("label"))
+            or _text(record.get("evidence_ref_id"))
+            or f"evidence {index}"
+        )
+        page = _text(record.get("page"))
+        location = f" p. {page}" if page else ""
+        evidence_lines.append(f"[E{index}] {source_label}{location}: {text}")
+    context_lines = []
+    for index, record in enumerate(context_records[:4], start=1):
+        parts = [
+            *_strings(record.get("material_scope")),
+            *_strings(record.get("property_scope")),
+            _text(record.get("process_summary")),
+            _text(record.get("test_summary")),
+        ]
+        context = "; ".join(item for item in parts if item)
+        if context:
+            context_lines.append(f"[C{index}] {context}")
+    target_payload = {
+        "statement": statement,
+        "variables": list(
+            _strings(expert_target.get("variables") or system_prediction.get("variables"))
+        ),
+        "mediators": list(
+            _strings(expert_target.get("mediators") or system_prediction.get("mediators"))
+        ),
+        "outcomes": list(
+            _strings(expert_target.get("outcomes") or system_prediction.get("outcomes"))
+        ),
+        "direction": _text(
+            expert_target.get("direction") or system_prediction.get("direction")
+        ),
+        "scope_summary": _text(
+            expert_target.get("scope_summary")
+            or system_prediction.get("scope_summary")
+        ),
+        "support_grade": _text(
+            expert_target.get("support_grade")
+            or system_prediction.get("support_grade")
+        ),
+        "evidence_ref_ids": list(
+            _strings(
+                expert_target.get("evidence_ref_ids")
+                or [record.get("evidence_ref_id") for record in evidence_records]
+            )
+        ),
+    }
+    user_content = "\n".join(
+        [
+            "Extract one evidence-grounded materials research finding from the source evidence.",
+            "Return only a JSON object with statement, variables, mediators, outcomes, direction, scope_summary, support_grade, and evidence_ref_ids.",
+            "",
+            "Evidence:",
+            *(evidence_lines or ["No source evidence text available."]),
+            "",
+            "Context:",
+            *(context_lines or ["No structured context available."]),
+        ]
+    )
+    return [
+        {"role": "user", "content": user_content},
+        {
+            "role": "assistant",
+            "content": json.dumps(target_payload, ensure_ascii=False, sort_keys=True),
+        },
+    ]
 
 
 def _is_ai_reviewer(reviewer: str | None) -> bool:

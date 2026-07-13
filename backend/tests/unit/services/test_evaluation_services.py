@@ -750,6 +750,20 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["training_evidence_refs"] == [
         by_finding["finding-1"]["evidence_refs"][0]
     ]
+    assert by_finding["finding-1"]["training_messages"][0]["role"] == "user"
+    assert "Preheating increased ductility by 14%" in (
+        by_finding["finding-1"]["training_messages"][0]["content"]
+    )
+    assert by_finding["finding-1"]["training_messages"][1] == {
+        "role": "assistant",
+        "content": (
+            '{"direction": "increase", "evidence_ref_ids": ["ev-1"], '
+            '"mediators": ["porosity"], "outcomes": ["ductility"], '
+            '"scope_summary": "LPBF 316L", '
+            '"statement": "Preheating improves ductility by 14% in LPBF 316L.", '
+            '"support_grade": "partial", "variables": ["preheating"]}'
+        ),
+    }
     assert by_finding["finding-1"]["context_refs"][0]["process_summary"] == "LPBF"
     assert by_finding["finding-1"]["trace_status"] == "evidence_derived"
     assert by_finding["finding-1"]["prompt_version"] == (

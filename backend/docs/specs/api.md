@@ -785,7 +785,8 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
 `label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、
 `input_blocks`、`prompt_version`、`model_output`、`system_prediction`、
-`expert_target`、`evidence_refs`、`training_evidence_refs`、`context_refs`、
+`expert_target`、`evidence_refs`、`training_evidence_refs`、`training_messages`、
+`context_refs`、
 `feedback_refs` 和 `metadata`。`evidence_refs` 保留完整审计证据链，包含
 direct、mechanism、condition context、background 等角色；`training_evidence_refs`
 只保留应作为监督输入的 direct/mechanism 证据，若旧样本没有角色分桶则回退到
@@ -793,7 +794,12 @@ direct、mechanism、condition context、background 等角色；`training_eviden
 `training_source_text` 优先使用精确 `quote`，没有 quote 时才回退到 `source_text`。
 离线训练或微调准备应优先消费
 `training_evidence_refs[*].training_source_text`，不要把 condition/background
-证据当作结论监督文本。`trace_status` 可以是 `available`、`failed`、
+证据当作结论监督文本。`training_messages` 是从
+`training_evidence_refs` 和 `expert_target` 派生的 chat-style
+`[{role, content}]` 样本：user message 包含可审计证据与上下文，assistant message
+是专家确认或校正后的结构化 finding JSON。它用于离线 evaluation/fine-tuning
+准备；审计和 UI 仍应读取 `expert_target`、`training_evidence_refs`、
+`context_refs` 和 `feedback_refs`。`trace_status` 可以是 `available`、`failed`、
 `evidence_derived` 或 `unavailable`。只有带文本输入块的 matched trace 才作为
 `available`/`failed` 输入导出；历史 trace 缺少文本输入块、或 matched trace 失败但
 evidence 已能定位到原文时，导出使用 `trace_status=evidence_derived`，并从

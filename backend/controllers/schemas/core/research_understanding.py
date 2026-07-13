@@ -514,6 +514,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     expert_target: dict[str, Any] | None = None
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     training_evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    training_messages: list[dict[str, Any]] = Field(default_factory=list)
     context_refs: list[dict[str, Any]] = Field(default_factory=list)
     feedback_refs: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

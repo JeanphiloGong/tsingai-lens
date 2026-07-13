@@ -2907,6 +2907,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail
 			.getByLabelText('Curated statement')
 			.fill('Annealing may reduce cellular substructure, but the mechanism evidence is limited.');
+		await claimDetail.getByLabelText('Curated variables').fill('preheating, annealing');
+		await claimDetail.getByLabelText('Curated mechanism').fill('cellular substructure, GND density');
+		await claimDetail.getByLabelText('Curated outcomes').fill('ductility');
+		await claimDetail.getByLabelText('Curated direction').fill('increase');
+		await claimDetail
+			.getByLabelText('Curated conditions')
+			.fill('LPBF 316L, 150 C build platform preheating, tensile test');
 		await claimDetail
 			.getByLabelText('Curation note')
 			.fill('Keep limited until EBSD evidence is added.');
@@ -2934,12 +2941,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 			curated_statement:
 				'Annealing may reduce cellular substructure, but the mechanism evidence is limited.',
 			curated_support_grade: 'weak',
-			curated_review_status: 'needs_review',
-			curated_variables: ['annealing'],
-			curated_mediators: ['cellular substructure'],
-			curated_outcomes: ['yield strength'],
-			curated_direction: 'explains',
-			curated_scope_summary: '316L stainless steel, LPBF, annealing, tensile test',
+			curated_review_status: 'accepted',
+			curated_variables: ['preheating', 'annealing'],
+			curated_mediators: ['cellular substructure', 'GND density'],
+			curated_outcomes: ['ductility'],
+			curated_direction: 'increase',
+			curated_scope_summary: 'LPBF 316L, 150 C build platform preheating, tensile test',
 			curated_evidence_ref_ids: ['ev_section_3'],
 			curated_context_ids: ['ctx_heat_treatment'],
 			note: 'Keep limited until EBSD evidence is added.'

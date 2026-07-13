@@ -144,6 +144,11 @@
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
 	let curationStatement = '';
+	let curationVariables = '';
+	let curationMediators = '';
+	let curationOutcomes = '';
+	let curationDirection = '';
+	let curationScopeSummary = '';
 	let curationEvidenceRefIds: string[] = [];
 	let curationContextIds: string[] = [];
 	let curationNote = '';
@@ -2125,6 +2130,11 @@
 		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'supported';
 		curationStatement =
 			curation?.curated_statement ?? selectedFinding?.statement ?? selectedClaim?.statement ?? '';
+		curationVariables = listEditorValue(curation?.curated_variables ?? selectedFinding?.variables ?? []);
+		curationMediators = listEditorValue(curation?.curated_mediators ?? selectedFinding?.mediators ?? []);
+		curationOutcomes = listEditorValue(curation?.curated_outcomes ?? selectedFinding?.outcomes ?? []);
+		curationDirection = curation?.curated_direction ?? selectedFinding?.direction ?? '';
+		curationScopeSummary = curation?.curated_scope_summary ?? selectedFinding?.scope_summary ?? '';
 		curationEvidenceRefIds = [
 			...(curation?.curated_evidence_ref_ids ??
 				selectedFinding?.evidence_ref_ids ??
@@ -2138,6 +2148,21 @@
 				[])
 		];
 		curationNote = curation?.note ?? '';
+	}
+
+	function listEditorValue(values: string[]) {
+		return values.map((value) => value.trim()).filter(Boolean).join(', ');
+	}
+
+	function listEditorItems(value: string) {
+		return [
+			...new Set(
+				value
+					.split(',')
+					.map((item) => item.trim())
+					.filter(Boolean)
+			)
+		];
 	}
 
 	function toggleCurationEvidence(evidenceId: string) {
@@ -2334,12 +2359,12 @@
 				curated_status: curationStatus,
 				curated_statement: curationStatement.trim(),
 				curated_support_grade: selectedFinding?.support_grade ?? null,
-				curated_review_status: selectedFinding?.review_status ?? null,
-				curated_variables: selectedFinding?.variables ?? [],
-				curated_mediators: selectedFinding?.mediators ?? [],
-				curated_outcomes: selectedFinding?.outcomes ?? [],
-				curated_direction: selectedFinding?.direction || null,
-				curated_scope_summary: selectedFinding?.scope_summary || null,
+				curated_review_status: 'accepted',
+				curated_variables: listEditorItems(curationVariables),
+				curated_mediators: listEditorItems(curationMediators),
+				curated_outcomes: listEditorItems(curationOutcomes),
+				curated_direction: curationDirection.trim() || null,
+				curated_scope_summary: curationScopeSummary.trim() || null,
 				curated_evidence_ref_ids: curationEvidenceRefIds,
 				curated_context_ids: curationContextIds,
 				note: curationNote.trim() || null
@@ -3403,6 +3428,53 @@
 											maxlength="4000"
 											rows="4"
 											required
+										></textarea>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationVariables')}</span>
+										<input
+											id={`${titleId}-curation-variables`}
+											name="curation_variables"
+											bind:value={curationVariables}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationMediators')}</span>
+										<input
+											id={`${titleId}-curation-mediators`}
+											name="curation_mediators"
+											bind:value={curationMediators}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationOutcomes')}</span>
+										<input
+											id={`${titleId}-curation-outcomes`}
+											name="curation_outcomes"
+											bind:value={curationOutcomes}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationDirection')}</span>
+										<input
+											id={`${titleId}-curation-direction`}
+											name="curation_direction"
+											bind:value={curationDirection}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationScope')}</span>
+										<textarea
+											id={`${titleId}-curation-scope`}
+											name="curation_scope"
+											bind:value={curationScopeSummary}
+											disabled={curationSubmitting}
+											maxlength="1000"
+											rows="2"
 										></textarea>
 									</label>
 									<fieldset class="research-understanding-workbench__curation-picker">

@@ -28,7 +28,8 @@ own database connections, SQL, schema initialization, or row encoding.
 - `session_service.py`
   Primary current conversation service. It persists session context, retrieves
   collection artifacts before grounded answers, prioritizes curated Findings
-  for goal-focused experiment or protocol questions, and labels general
+  for goal-focused experiment or protocol questions, limits cited protocol
+  sources to those curated Findings when they are available, and labels general
   fallback separately from collection evidence.
 - `experiment_plan_service.py`
   Persists goal-scoped experiment plan drafts generated from chat answers. These

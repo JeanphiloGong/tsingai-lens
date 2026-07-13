@@ -59,6 +59,22 @@ class _EmptyPaperFactsService:
         return {"collection_id": collection_id, "items": [], "total": 0, "limit": limit}
 
 
+class _EvidencePaperFactsService:
+    def list_evidence_cards(self, collection_id: str, limit: int = 10) -> dict:
+        return {
+            "collection_id": collection_id,
+            "items": [
+                {
+                    "evidence_id": "ev_unreviewed_fact",
+                    "document_id": "paper-unreviewed",
+                    "claim": "Unreviewed fact should not drive protocol design.",
+                }
+            ],
+            "total": 1,
+            "limit": limit,
+        }
+
+
 class _MaterialResearchViewService:
     def get_collection_research_view(self, collection_id: str) -> dict:
         return {"collection_id": collection_id, "state": "ready", "materials": []}
@@ -362,6 +378,7 @@ def _service(
     content: str = "draft answer",
     research_objective_service=None,
     research_understanding_feedback_service=None,
+    paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
     collection_service = CollectionService(tmp_path / "collections")
     service = GoalSessionService(
@@ -369,7 +386,7 @@ def _service(
         research_view_service=_MaterialResearchViewService(),
         workspace_service=_FakeWorkspaceService(),
         comparison_service=_EmptyComparisonService(),
-        paper_facts_service=_EmptyPaperFactsService(),
+        paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
         research_objective_service=research_objective_service
         or _EmptyResearchObjectiveService(),
         research_understanding_feedback_service=research_understanding_feedback_service,
@@ -566,8 +583,12 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     feedback_service = _TrainingReadyResearchUnderstandingFeedbackService()
     service, collection_service = _service(
         tmp_path,
-        content="Use the accepted preheating finding for the next protocol [Source 1].",
+        content=(
+            "<think>Use hidden reasoning and unreviewed facts.</think>\n"
+            "Use the accepted preheating finding for the next protocol [Source 1]."
+        ),
         research_understanding_feedback_service=feedback_service,
+        paper_facts_service=_EvidencePaperFactsService(),
     )
     collection = collection_service.create_collection("Goal Finding Collection")
     session = service.create_session(
@@ -584,6 +605,7 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     loaded = service.get_session(session["session_id"])
 
     assert response["source_mode"] == "collection_grounded"
+    assert "<think>" not in response["answer"]
     assert response["used_evidence_ids"] == ["ev_preheat_ductility"]
     assert response["source_links"] == [
         {
@@ -610,5 +632,7 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     assert "curated_research_findings" in prompt
     assert "150 C preheating improves LPBF 316L ductility" in prompt
     assert "The sample preheated at 150 C shows a 14% improvement" in prompt
+    assert "ev_unreviewed_fact" not in prompt
+    assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt
     assert "finding_review_candidate" not in prompt

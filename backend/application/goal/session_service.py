@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -53,6 +54,7 @@ _GENERAL_FALLBACK_PREFIX = (
 _MAX_CONTEXT_CHARS = 18000
 _MAX_ROLLING_SUMMARY_CHARS = 1600
 _MAX_SOURCE_LINKS = 12
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
 _UNSET = object()
 
 
@@ -568,12 +570,23 @@ class GoalSessionService:
             "evidence_cards": evidence_cards,
             "curated_research_findings": curated_research_findings,
         }
-        evidence_ids = self._collect_evidence_ids(context_payload)
-        material_ids = self._collect_material_ids(context_payload)
-        paper_ids = self._collect_paper_ids(context_payload)
+        if curated_research_findings:
+            source_context_payload = {
+                "collection": collection,
+                "focused_material_id": focused_material_id,
+                "focused_paper_id": session.focused_paper_id,
+                "focused_objective_id": focused_objective_id,
+                "focused_goal_id": focused_goal_id,
+                "curated_research_findings": curated_research_findings,
+            }
+        else:
+            source_context_payload = context_payload
+        evidence_ids = self._collect_evidence_ids(source_context_payload)
+        material_ids = self._collect_material_ids(source_context_payload)
+        paper_ids = self._collect_paper_ids(source_context_payload)
         source_refs = self._build_source_refs(
             collection_id,
-            evidence_sources=self._collect_evidence_sources(context_payload),
+            evidence_sources=self._collect_evidence_sources(source_context_payload),
             paper_ids=paper_ids,
         )
         has_collection_context = bool(
@@ -599,9 +612,9 @@ class GoalSessionService:
             "links": self._session_links(session),
             "source_links": self._public_source_links(source_refs),
             "source_refs": source_refs,
-            "payload": self._compact_value(context_payload),
+            "payload": self._compact_value(source_context_payload),
             "prompt_source_links": self._prompt_source_links(source_refs),
-            "prompt_payload": self._prompt_payload(context_payload, source_refs),
+            "prompt_payload": self._prompt_payload(source_context_payload, source_refs),
         }
 
     def _safe_workspace(
@@ -820,7 +833,7 @@ class GoalSessionService:
             ],
         )
         content = completion.choices[0].message.content if completion.choices else None
-        answer = self._coerce_message_content(content)
+        answer = self._strip_thinking_blocks(self._coerce_message_content(content))
         if not answer:
             raise RuntimeError("goal copilot returned empty answer")
         return answer
@@ -1269,6 +1282,9 @@ class GoalSessionService:
             if isinstance(text, str) and text.strip():
                 parts.append(text.strip())
         return "\n".join(parts).strip()
+
+    def _strip_thinking_blocks(self, answer: str) -> str:
+        return _THINK_BLOCK_RE.sub("", answer).strip()
 
     def _ensure_general_fallback_boundary(self, answer: str) -> str:
         if "not a collection-supported conclusion" in answer.lower():

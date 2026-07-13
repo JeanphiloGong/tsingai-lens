@@ -386,6 +386,107 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Edited validation matrix').first()).toBeInTheDocument();
 	});
 
+	it('opens the experiment plan requested by the copilot deep link', async () => {
+		setPage({
+			params: { id: 'col_123', goal_id: 'goal_1' },
+			url: new URL('http://localhost/collections/col_123/goals/goal_1?plan_id=exp_2#experiment-plans-title')
+		});
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path.endsWith('/research-understanding/curations')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (
+				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
+				method === 'GET'
+			) {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal_id: 'goal_1',
+						items: [
+							{
+								plan_id: 'exp_1',
+								collection_id: 'col_123',
+								goal_id: 'goal_1',
+								title: 'Older validation matrix',
+								content: 'Earlier draft.',
+								status: 'draft',
+								source_message_id: 'msg_1',
+								source_links: [],
+								metadata: {},
+								created_by: 'expert-a',
+								created_at: '2026-07-13T00:00:00+00:00',
+								updated_at: '2026-07-13T00:00:00+00:00'
+							},
+							{
+								plan_id: 'exp_2',
+								collection_id: 'col_123',
+								goal_id: 'goal_1',
+								title: 'Copied copilot validation plan',
+								content: 'Use accepted VED evidence to validate fatigue response.',
+								status: 'draft',
+								source_message_id: 'msg_2',
+								source_links: [
+									{
+										kind: 'evidence',
+										label: 'Source 1',
+										href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
+									}
+								],
+								metadata: {},
+								created_by: 'expert-a',
+								created_at: '2026-07-13T00:01:00+00:00',
+								updated_at: '2026-07-13T00:01:00+00:00'
+							}
+						]
+					})
+				);
+			}
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal: {
+							goal_id: 'goal_1',
+							collection_id: 'col_123',
+							question: 'How does VED affect fatigue?',
+							source_type: 'objective_candidate',
+							material_hints: [],
+							process_hints: [],
+							property_hints: [],
+							source_objective_id: null,
+							status: 'ready',
+							analysis_error: null,
+							analysis_progress: null,
+							created_at: null,
+							updated_at: null
+						},
+						understanding: null,
+						pipeline_nodes: {},
+						errors: [],
+						warnings: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByLabelText('Title')).toHaveValue('Copied copilot validation plan');
+		await expect
+			.element(browserPage.getByLabelText('Plan content'))
+			.toHaveValue('Use accepted VED evidence to validate fatigue response.');
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Source 1' }))
+			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
+	});
+
 	it('shows analysis errors instead of an empty research understanding workspace', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request) => {
 			const path = requestPath(input);

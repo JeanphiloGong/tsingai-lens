@@ -38,6 +38,7 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: goalId = $page.params.goal_id ?? '';
+	$: requestedPlanId = $page.url.searchParams.get('plan_id') ?? '';
 	$: loadKey = `${collectionId}:${goalId}`;
 	$: goal = analysis?.goal ?? null;
 	$: understanding = analysis?.understanding ?? null;
@@ -85,7 +86,12 @@
 		try {
 			const response = await fetchExperimentPlans(collectionId, goalId);
 			plans = response.items;
-			if (!selectedPlanId || !plans.some((plan) => plan.plan_id === selectedPlanId)) {
+			const requestedPlan = requestedPlanId
+				? (plans.find((plan) => plan.plan_id === requestedPlanId) ?? null)
+				: null;
+			if (requestedPlan) {
+				selectPlan(requestedPlan);
+			} else if (!selectedPlanId || !plans.some((plan) => plan.plan_id === selectedPlanId)) {
 				selectPlan(plans[0] ?? null);
 			}
 		} catch (err) {

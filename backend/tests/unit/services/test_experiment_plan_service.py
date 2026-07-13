@@ -9,6 +9,16 @@ from infra.persistence.sqlite import (
 )
 
 
+def _structured_protocol(source_label: str = "Source 1") -> str:
+    return (
+        f"Hypothesis: 150 C preheating improves ductility [{source_label}].\n"
+        "Variable matrix: compare 25 C and 150 C builds.\n"
+        "Measurements: elongation and microstructure.\n"
+        "Controls: same LPBF parameters except preheating.\n"
+        "Risks or limits: single-alloy validation."
+    )
+
+
 def _write_goal_message(
     repository: SqliteGoalSessionRepository,
     *,
@@ -76,13 +86,7 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     _write_goal_message(
         goal_session_repository,
         review_gate="training_ready_findings",
-        content=(
-            "Hypothesis: 150 C preheating improves ductility [Source 1].\n"
-            "Variable matrix: compare 25 C and 150 C builds.\n"
-            "Measurements: elongation and microstructure.\n"
-            "Controls: same LPBF parameters except preheating.\n"
-            "Risks or limits: single-alloy validation."
-        ),
+        content=_structured_protocol(),
     )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
@@ -93,13 +97,7 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
         collection_id="col_1",
         goal_id="goal_1",
         title="Preheating validation matrix",
-        content=(
-            "Hypothesis: 150 C preheating improves ductility [Source 1].\n"
-            "Variable matrix: compare 25 C and 150 C builds.\n"
-            "Measurements: elongation and microstructure.\n"
-            "Controls: same LPBF parameters except preheating.\n"
-            "Risks or limits: single-alloy validation."
-        ),
+        content=_structured_protocol(),
         source_message_id="msg_1",
         created_by="expert-a",
         source_links=[
@@ -362,3 +360,116 @@ def test_experiment_plan_service_updates_existing_draft(tmp_path):
     assert updated.content == "Edited plan with controls."
     assert updated.status == "ready_for_review"
     assert updated.updated_at >= draft.updated_at
+
+
+def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        review_gate="training_ready_findings",
+        content=_structured_protocol(),
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+    draft = service.create_plan(
+        collection_id="col_1",
+        goal_id="goal_1",
+        title="Preheating validation matrix",
+        content=_structured_protocol(),
+        source_message_id="msg_1",
+        created_by="expert-a",
+        metadata={"source": "goal_copilot"},
+    )
+
+    updated = service.update_plan(
+        collection_id="col_1",
+        goal_id="goal_1",
+        plan_id=draft.plan_id,
+        title="Edited traceable protocol",
+        content=(
+            "Hypothesis: 150 C preheating improves ductility [Source 1].\n"
+            "Variable matrix: compare 25 C, 100 C, and 150 C builds.\n"
+            "Measurements: elongation and microstructure.\n"
+            "Controls: same LPBF parameters except preheating.\n"
+            "Risks or limits: single-alloy validation."
+        ),
+        status="ready_for_review",
+    )
+
+    assert updated.status == "ready_for_review"
+    assert updated.metadata["review_gate"] == "training_ready_findings"
+    assert updated.source_links[0]["label"] == "Source 1"
+
+
+def test_experiment_plan_service_rejects_copilot_update_without_source_label(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        review_gate="training_ready_findings",
+        content=_structured_protocol(),
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+    draft = service.create_plan(
+        collection_id="col_1",
+        goal_id="goal_1",
+        title="Preheating validation matrix",
+        content=_structured_protocol(),
+        source_message_id="msg_1",
+        created_by="expert-a",
+        metadata={"source": "goal_copilot"},
+    )
+
+    with pytest.raises(ValueError, match="visible source label"):
+        service.update_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            plan_id=draft.plan_id,
+            title="Edited untraceable protocol",
+            content=(
+                "Hypothesis: 150 C preheating improves ductility.\n"
+                "Variable matrix: compare 25 C and 150 C builds.\n"
+                "Measurements: elongation and microstructure.\n"
+                "Controls: same LPBF parameters except preheating.\n"
+                "Risks or limits: single-alloy validation."
+            ),
+            status="ready_for_review",
+        )
+
+
+def test_experiment_plan_service_rejects_copilot_update_without_protocol_structure(
+    tmp_path,
+):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        review_gate="training_ready_findings",
+        content=_structured_protocol(),
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+    draft = service.create_plan(
+        collection_id="col_1",
+        goal_id="goal_1",
+        title="Preheating validation matrix",
+        content=_structured_protocol(),
+        source_message_id="msg_1",
+        created_by="expert-a",
+        metadata={"source": "goal_copilot"},
+    )
+
+    with pytest.raises(ValueError, match="structured protocol draft"):
+        service.update_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            plan_id=draft.plan_id,
+            title="Edited unstructured protocol",
+            content="Run 25 C and 150 C LPBF builds [Source 1].",
+            status="ready_for_review",
+        )

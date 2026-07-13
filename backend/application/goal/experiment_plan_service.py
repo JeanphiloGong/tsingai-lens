@@ -198,6 +198,8 @@ class ExperimentPlanService:
         plan = self.repository.read_plan(collection_id, goal_id, plan_id)
         if plan is None:
             raise ExperimentPlanNotFoundError(collection_id, goal_id, plan_id)
+        if _is_goal_copilot_plan(plan):
+            _validate_goal_copilot_plan_edit(plan, content)
         updated = plan.with_updates(
             title=title,
             content=content,
@@ -220,6 +222,29 @@ def _evidence_id_from_href(href: str) -> str:
     parsed = urlparse(href)
     values = parse_qs(parsed.query).get("evidence_id") or []
     return str(values[0]).strip() if values else ""
+
+
+def _is_goal_copilot_plan(plan: ExperimentPlanRecord) -> bool:
+    return (
+        bool(plan.source_message_id)
+        or plan.metadata.get("source") == "goal_copilot"
+        or plan.metadata.get("review_gate") == "training_ready_findings"
+    )
+
+
+def _validate_goal_copilot_plan_edit(
+    plan: ExperimentPlanRecord,
+    content: str,
+) -> None:
+    if not _has_protocol_draft_structure(content):
+        raise ValueError("goal copilot answer is not a structured protocol draft")
+    visible_source_labels = [
+        label
+        for link in plan.source_links
+        if (label := str(link.get("label") or "").strip())
+    ]
+    if visible_source_labels and not any(label in content for label in visible_source_labels):
+        raise ValueError("goal copilot answer does not cite a visible source label")
 
 
 def _has_protocol_draft_structure(content: str) -> bool:

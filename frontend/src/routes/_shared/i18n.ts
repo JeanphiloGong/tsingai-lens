@@ -330,9 +330,9 @@ const translations: Record<Language, Translations> = {
 				expertSummaryMixedBody:
 					'{training} sample(s) are training-ready; {review} review candidate finding(s) still need expert curation before use.',
 				expertSummaryPaperLevelBody:
-					'{count} paper-level finding(s) can be used for source-grounded review, but need another paper or expert curation before becoming cross-paper conclusions.',
+					'{count} paper-level finding(s) can be used for source-grounded review, but need another paper or expert review before becoming cross-paper conclusions.',
 				expertSummaryReviewOnlyBody:
-					'{count} review candidate finding(s) need expert curation before they are used as conclusions, training data, or downstream answer evidence.',
+					'{count} review candidate finding(s) need expert review or curation before they are used as conclusions, training data, or downstream answer evidence.',
 				expertMetricStrong: 'Strong',
 				expertMetricPartial: 'Partial',
 				expertMetricSinglePaper: 'Single paper',
@@ -364,7 +364,7 @@ const translations: Record<Language, Translations> = {
 				answerBoundaryLimited: 'The goal is only partially answered',
 				answerBoundaryBody:
 					'Primary findings cover {variablePrimary}/{variableTotal} requested variable axis(es) and {propertyPrimary}/{propertyTotal} requested outcome axis(es).',
-				answerBoundaryDraftCuration: 'Needs expert curation before conclusion: {findings}',
+				answerBoundaryDraftCuration: 'Needs expert review or curation before conclusion: {findings}',
 				answerBoundaryBlocked: 'Not yet conclusion-ready: {terms}',
 				answerBoundaryContextOnly: 'Scope or mechanism only: {terms}',
 				goalCoverageVariables: 'Variables',
@@ -3233,11 +3233,11 @@ const translations: Record<Language, Translations> = {
 				expertSummaryEmpty: '暂无专家研究发现',
 				expertSummaryReadyBody: '{count} 条研究发现具备带条件使用的证据基础。',
 				expertSummaryMixedBody:
-					'{training} 条样本可用于训练；{review} 条候选研究发现仍需专家校正后再使用。',
+					'{training} 条样本可用于训练；{review} 条候选研究发现仍需专家复核或校正后再使用。',
 				expertSummaryPaperLevelBody:
-					'{count} 条单篇文献级发现可用于原文溯源复核，但需要第二篇文献或专家校正后才能作为跨文献结论。',
+					'{count} 条单篇文献级发现可用于原文溯源复核，但需要第二篇文献或专家复核后才能作为跨文献结论。',
 				expertSummaryReviewOnlyBody:
-					'{count} 条候选研究发现需要专家校正后，才能作为结论、训练数据或下游回答证据使用。',
+					'{count} 条候选研究发现需要专家复核或校正后，才能作为结论、训练数据或下游回答证据使用。',
 				expertMetricStrong: '强证据',
 				expertMetricPartial: '部分支持',
 				expertMetricSinglePaper: '单篇文献',
@@ -3267,7 +3267,7 @@ const translations: Record<Language, Translations> = {
 				answerBoundaryLimited: '该目标仅被部分回答',
 				answerBoundaryBody:
 					'主发现覆盖 {variablePrimary}/{variableTotal} 个请求变量轴、{propertyPrimary}/{propertyTotal} 个请求结果轴。',
-				answerBoundaryDraftCuration: '作为结论使用前需要专家校正：{findings}',
+				answerBoundaryDraftCuration: '作为结论使用前需要专家复核或校正：{findings}',
 				answerBoundaryBlocked: '尚不能作为结论直接使用：{terms}',
 				answerBoundaryContextOnly: '仅作为适用范围或机制背景：{terms}',
 				goalCoverageVariables: '变量轴',

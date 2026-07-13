@@ -1387,12 +1387,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				expertSummary.getByText(
-					'1 paper-level finding(s) can be used for source-grounded review, but need another paper or expert curation before becoming cross-paper conclusions.'
+					'1 paper-level finding(s) can be used for source-grounded review, but need another paper or expert review before becoming cross-paper conclusions.'
 				)
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(expertSummary.getByText(/review candidate finding\(s\) need expert curation/))
+			.element(expertSummary.getByText(/review candidate finding\(s\) need expert review or curation/))
 			.not.toBeInTheDocument();
 		await expect
 			.element(expertSummary.getByText(/1 finding\(s\) are backed by one paper only/))
@@ -1814,7 +1814,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(answerBoundary.getByText('The goal has expert-ready findings'))
 			.not.toBeInTheDocument();
 		await expect
-			.element(answerBoundary.getByText('Needs expert curation before conclusion: VED -> density'))
+			.element(
+				answerBoundary.getByText(
+					'Needs expert review or curation before conclusion: VED -> density'
+				)
+			)
 			.toBeInTheDocument();
 	});
 
@@ -1879,7 +1883,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(answerBoundary.getByText('The goal has expert-ready findings'))
 			.toBeInTheDocument();
 		await expect
-			.element(answerBoundary.getByText(/Needs expert curation before conclusion/))
+			.element(answerBoundary.getByText(/Needs expert review or curation before conclusion/))
 			.not.toBeInTheDocument();
 	});
 

@@ -61,17 +61,24 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function requestUrl(input: string | URL | Request) {
+	const rawUrl =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	return new URL(rawUrl, 'http://localhost');
+}
+
 function researchUnderstandingDatasetResponse({
 	trainingReady = 0,
 	trainingMessages = 0,
-	reviewCandidate = 0
+	reviewCandidate = 0,
+	scopeId = 'goal_1'
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
-		dataset_id: 'rud_goal',
+		dataset_id: `rud_${scopeId}`,
 		collection_id: 'col_4c54ffe568ec',
 		scope_type: 'goal',
-		scope_id: 'goal_1',
+		scope_id: scopeId,
 		task_type: 'research_understanding_finding',
 		metric_profile: 'finding_review',
 		item_count: trainingReady + reviewCandidate,
@@ -102,6 +109,21 @@ function confirmedGoalsResponse() {
 		collection_id: 'col_4c54ffe568ec',
 		goals: [
 			{
+				goal_id: 'goal_protocol_ready',
+				collection_id: 'col_4c54ffe568ec',
+				question: 'Which reviewed finding can support a protocol?',
+				source_type: 'objective_candidate',
+				material_hints: ['316L stainless steel'],
+				process_hints: ['preheating'],
+				property_hints: ['ductility'],
+				source_objective_id: 'obj_protocol_ready',
+				status: 'ready',
+				analysis_error: null,
+				analysis_progress: null,
+				created_at: null,
+				updated_at: null
+			},
+			{
 				goal_id: 'goal_heat_strength',
 				collection_id: 'col_4c54ffe568ec',
 				question: 'How does heat treatment affect strength?',
@@ -120,18 +142,22 @@ function confirmedGoalsResponse() {
 	};
 }
 
-function goalReviewResponse(path: string) {
+function goalReviewResponse(input: string | URL | Request) {
+	const url = requestUrl(input);
+	const path = url.pathname;
 	if (path === '/api/v1/collections/col_4c54ffe568ec/goals') {
 		return jsonResponse(confirmedGoalsResponse());
 	}
 	if (
 		path === '/api/v1/collections/col_4c54ffe568ec/research-understanding/dataset'
 	) {
+		const scopeId = url.searchParams.get('scope_id') ?? '';
 		return jsonResponse(
 			researchUnderstandingDatasetResponse({
-				trainingReady: 1,
-				trainingMessages: 1,
-				reviewCandidate: 2
+				trainingReady: scopeId === 'goal_protocol_ready' ? 1 : 0,
+				trainingMessages: scopeId === 'goal_protocol_ready' ? 1 : 0,
+				reviewCandidate: scopeId === 'goal_protocol_ready' ? 0 : 2,
+				scopeId
 			})
 		);
 	}
@@ -166,7 +192,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			}
 
 			return (
-				goalReviewResponse(path) ??
+				goalReviewResponse(input) ??
 				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
 			);
 		});
@@ -284,7 +310,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			}
 
 			return (
-				goalReviewResponse(path) ??
+				goalReviewResponse(input) ??
 				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
 			);
 		});
@@ -346,7 +372,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			}
 
 			return (
-				goalReviewResponse(path) ??
+				goalReviewResponse(input) ??
 				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
 			);
 		});
@@ -359,16 +385,28 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'1 confirmed goal(s): 1 training-ready sample(s), 1 training message(s), 2 review candidate(s).'
+					'2 confirmed goal(s): 1 training-ready sample(s), 1 training message(s), 2 review candidate(s).'
 				)
 			)
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: /How does heat treatment affect strength?/ }))
-			.toHaveAttribute(
-				'href',
-				'/collections/col_4c54ffe568ec/goals/goal_heat_strength'
-			);
+		const goalLinks = browserPage.getByRole('link').all();
+		const goalReviewLinks = await Promise.all(
+			goalLinks.map(async (link) => ({
+				text: link.element().textContent ?? '',
+				href: link.element().getAttribute('href')
+			}))
+		);
+		const reviewRows = goalReviewLinks.filter((link) => link.href?.includes('/goals/'));
+		expect(reviewRows[0]).toMatchObject({
+			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength'
+		});
+		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
+		expect(reviewRows[0].text).toContain('Review findings');
+		expect(reviewRows[1]).toMatchObject({
+			href: '/collections/col_4c54ffe568ec/goals/goal_protocol_ready'
+		});
+		expect(reviewRows[1].text).toContain('Which reviewed finding can support a protocol?');
+		expect(reviewRows[1].text).toContain('Draft protocol');
 	});
 
 	it('confirms an objective without existing routed evidence and lets analysis build coverage', async () => {
@@ -467,7 +505,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			}
 
 			return (
-				goalReviewResponse(path) ??
+				goalReviewResponse(input) ??
 				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
 			);
 		});

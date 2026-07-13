@@ -881,6 +881,11 @@ const translations: Record<Language, Translations> = {
 				goalReviewDatasetPending: 'Dataset status is not available for this goal yet.',
 				goalReviewDatasetBody:
 					'{training} training-ready · {messages} messages · {review} needs review',
+				goalReviewActionReview: 'Review findings',
+				goalReviewActionProtocol: 'Draft protocol',
+				goalReviewActionRepair: 'Open and repair',
+				goalReviewActionWait: 'View progress',
+				goalReviewActionOpen: 'Open goal',
 				goalReviewStatuses: {
 					pending: 'Pending analysis',
 					running: 'Analyzing',
@@ -3884,6 +3889,11 @@ const translations: Record<Language, Translations> = {
 				goalReviewDatasetPending: '该目标的数据集状态暂不可用。',
 				goalReviewDatasetBody:
 					'{training} 条可训练 · {messages} 条 messages · {review} 条待复核',
+				goalReviewActionReview: '复核发现',
+				goalReviewActionProtocol: '生成实验方案',
+				goalReviewActionRepair: '打开并修复',
+				goalReviewActionWait: '查看进度',
+				goalReviewActionOpen: '打开目标',
 				goalReviewStatuses: {
 					pending: '等待分析',
 					running: '分析中',

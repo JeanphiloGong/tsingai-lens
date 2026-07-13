@@ -169,14 +169,24 @@
 		goals: ConfirmedGoal[],
 		datasets: Map<string, ResearchUnderstandingDataset>
 	) {
-		return goals.map((goal) => {
-			const dataset = datasets.get(goal.goal_id) ?? null;
-			return {
-				goal,
-				dataset,
-				status: goalReviewStatus(goal, dataset)
-			};
-		});
+		return goals
+			.map((goal, index) => {
+				const dataset = datasets.get(goal.goal_id) ?? null;
+				const status = goalReviewStatus(goal, dataset);
+				return {
+					goal,
+					dataset,
+					status,
+					index,
+					priority: goalReviewPriority(status)
+				};
+			})
+			.sort(
+				(left, right) =>
+					left.priority - right.priority ||
+					goalReviewCandidateCount(right.dataset) - goalReviewCandidateCount(left.dataset) ||
+					left.index - right.index
+			);
 	}
 
 	function goalReviewStatus(
@@ -195,6 +205,19 @@
 		return 'needs_review';
 	}
 
+	function goalReviewPriority(status: string) {
+		if (status === 'needs_review') return 0;
+		if (status === 'dataset_pending') return 1;
+		if (status === 'failed') return 2;
+		if (status === 'running' || status === 'pending') return 3;
+		if (status === 'training_ready') return 4;
+		return 5;
+	}
+
+	function goalReviewCandidateCount(dataset: ResearchUnderstandingDataset | null) {
+		return dataset?.quality_summary.review_candidate_sample_count ?? 0;
+	}
+
 	function goalReviewStatusLabel(status: string) {
 		return $t(`research.objectives.goalReviewStatuses.${status}`);
 	}
@@ -206,6 +229,16 @@
 			messages: dataset.quality_summary.training_message_sample_count,
 			review: dataset.quality_summary.review_candidate_sample_count
 		});
+	}
+
+	function goalReviewActionLabel(status: string) {
+		if (status === 'needs_review') return $t('research.objectives.goalReviewActionReview');
+		if (status === 'training_ready') return $t('research.objectives.goalReviewActionProtocol');
+		if (status === 'failed') return $t('research.objectives.goalReviewActionRepair');
+		if (status === 'running' || status === 'pending') {
+			return $t('research.objectives.goalReviewActionWait');
+		}
+		return $t('research.objectives.goalReviewActionOpen');
 	}
 
 	function goalReviewHref(goal: ConfirmedGoal) {
@@ -368,6 +401,7 @@
 							<small class={`goal-review-item__status goal-review-item__status--${row.status}`}>
 								{goalReviewStatusLabel(row.status)}
 							</small>
+							<small class="goal-review-item__action">{goalReviewActionLabel(row.status)}</small>
 						</a>
 					{/each}
 				</div>
@@ -613,7 +647,7 @@
 
 	.goal-review-item {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) auto auto;
 		gap: 12px;
 		align-items: center;
 		border: 1px solid var(--border-default);
@@ -679,6 +713,14 @@
 		border-color: var(--danger-border);
 		background: var(--danger-bg);
 		color: var(--danger-text);
+	}
+
+	.goal-review-item__action {
+		color: var(--color-accent);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		white-space: nowrap;
 	}
 
 	.objectives-summary-grid article {

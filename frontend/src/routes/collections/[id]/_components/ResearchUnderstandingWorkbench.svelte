@@ -20,6 +20,7 @@
 		type ResearchUnderstandingDataset,
 		type ResearchUnderstandingDatasetExportFormat,
 		type ResearchUnderstandingDatasetLabelStatus,
+		type ResearchUnderstandingDatasetSample,
 		type ResearchUnderstandingDatasetUseStatus,
 		type ResearchUnderstandingAxisCoverageItem,
 		type ResearchUnderstandingPresentationEffect,
@@ -536,6 +537,7 @@
 		? findingUsagePath(selectedDisplayFinding, selectedFeedback, selectedCuration)
 		: null;
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
+	$: selectedFindingDatasetSample = selectedFinding ? findingDatasetSampleFor(selectedFinding) : null;
 	$: selectedFindingReviewReasons = selectedDisplayFinding
 		? findingReviewReasonValues(selectedDisplayFinding)
 		: [];
@@ -1103,7 +1105,26 @@
 		return reviewReasons.slice(0, 2).map(findingReviewReasonLabel).join(' · ');
 	}
 
-	function findingReviewReasonActionLabel(finding: ResearchUnderstandingPresentationFinding) {
+	function findingDatasetSampleFor(
+		finding: ResearchUnderstandingPresentationFinding
+	): ResearchUnderstandingDatasetSample | null {
+		return datasetSummary?.items.find((item) => item.finding_id === finding.finding_id) ?? null;
+	}
+
+	function datasetReviewActionLabel(sample: ResearchUnderstandingDatasetSample | null) {
+		const label = sample?.review_action.label.trim() ?? '';
+		if (label) return label;
+		const code = sample?.review_action.code.trim() ?? '';
+		if (!code) return '';
+		return translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', code);
+	}
+
+	function findingReviewReasonActionLabel(
+		finding: ResearchUnderstandingPresentationFinding,
+		datasetSample: ResearchUnderstandingDatasetSample | null = findingDatasetSampleFor(finding)
+	) {
+		const datasetActionLabel = datasetReviewActionLabel(datasetSample);
+		if (datasetActionLabel) return datasetActionLabel;
 		const trust = findingDatasetTrust(finding);
 		const reasons = new Set(findingReviewReasonValues(finding));
 		if (trust.datasetUseStatus === 'training_ready') {
@@ -3970,7 +3991,7 @@
 									>
 										<div>
 											<strong>{$t('research.understanding.findingReviewReasonPanel')}</strong>
-											<span>{findingReviewReasonActionLabel(selectedDisplayFinding ?? selectedFinding)}</span>
+											<span>{findingReviewReasonActionLabel(selectedDisplayFinding ?? selectedFinding, selectedFindingDatasetSample)}</span>
 										</div>
 										<ul>
 											{#each selectedFindingReviewReasons as reason (reason)}

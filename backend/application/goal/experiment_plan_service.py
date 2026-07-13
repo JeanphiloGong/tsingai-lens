@@ -4,9 +4,18 @@ from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Mapping
 
-from domain.goal import ExperimentPlanRecord
-from domain.ports import ExperimentPlanRepository
-from infra.persistence.factory import build_experiment_plan_repository
+from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
+from domain.ports import ExperimentPlanRepository, GoalSessionRepository
+from infra.persistence.factory import (
+    build_experiment_plan_repository,
+    build_goal_session_repository,
+)
+
+
+BLOCKED_GOAL_COPILOT_WARNINGS = {
+    "curated_research_findings_empty",
+    "goal_copilot_model_unavailable",
+}
 
 
 class ExperimentPlanNotFoundError(FileNotFoundError):
@@ -20,8 +29,15 @@ class ExperimentPlanNotFoundError(FileNotFoundError):
 class ExperimentPlanService:
     """Manage human-editable experiment plan drafts produced from goal chat."""
 
-    def __init__(self, repository: ExperimentPlanRepository | None = None) -> None:
+    def __init__(
+        self,
+        repository: ExperimentPlanRepository | None = None,
+        goal_session_repository: GoalSessionRepository | None = None,
+    ) -> None:
         self.repository = repository or build_experiment_plan_repository()
+        self.goal_session_repository = (
+            goal_session_repository or build_goal_session_repository()
+        )
 
     def create_plan(
         self,
@@ -35,6 +51,16 @@ class ExperimentPlanService:
         metadata: Mapping[str, Any] | None = None,
         created_by: str | None = None,
     ) -> ExperimentPlanRecord:
+        validated_source = self._validate_goal_copilot_source(
+            collection_id=collection_id,
+            goal_id=goal_id,
+            source_message_id=source_message_id,
+            source_links=source_links,
+            metadata=metadata,
+            created_by=created_by,
+        )
+        if validated_source is not None:
+            source_links = [link.to_record() for link in validated_source.source_links]
         now = _now_iso()
         plan = ExperimentPlanRecord.from_mapping(
             {
@@ -60,6 +86,52 @@ class ExperimentPlanService:
             }
         )
         return self.repository.upsert_plan(plan)
+
+    def _validate_goal_copilot_source(
+        self,
+        *,
+        collection_id: str,
+        goal_id: str,
+        source_message_id: str | None,
+        source_links: list[Mapping[str, Any]] | None,
+        metadata: Mapping[str, Any] | None,
+        created_by: str | None,
+    ) -> GoalMessageRecord | None:
+        _ = metadata
+        if not source_message_id:
+            return None
+        context = self.goal_session_repository.read_message_context(source_message_id)
+        if context is None:
+            raise ValueError("source_message_id does not reference a saved goal message")
+        session = GoalSessionRecord.from_mapping(context["session"])
+        message = GoalMessageRecord.from_mapping(context["message"])
+        if not created_by:
+            raise ValueError("source_message_id requires an authenticated user")
+        if session.user_id != created_by:
+            raise ValueError("source_message_id belongs to a different user")
+        if session.collection_id != collection_id:
+            raise ValueError("source_message_id belongs to a different collection")
+        if session.focused_goal_id != goal_id:
+            raise ValueError("source_message_id is not focused on this goal")
+        if message.role != "assistant":
+            raise ValueError("source_message_id must reference an assistant message")
+        if message.source_mode != "collection_grounded":
+            raise ValueError("goal copilot experiment plans require collection-grounded answers")
+        if BLOCKED_GOAL_COPILOT_WARNINGS.intersection(message.warnings):
+            raise ValueError("goal copilot answer is not eligible for experiment plan saving")
+        if not message.source_links:
+            raise ValueError("goal copilot answer has no auditable source links")
+        if not message.used_evidence_ids:
+            raise ValueError("goal copilot answer has no evidence citations")
+        requested_hrefs = {
+            str(link.get("href"))
+            for link in source_links or []
+            if isinstance(link, Mapping) and link.get("href")
+        }
+        message_hrefs = {link.href for link in message.source_links}
+        if requested_hrefs and not requested_hrefs.issubset(message_hrefs):
+            raise ValueError("source_links must come from the saved goal message")
+        return message
 
     def list_plans(
         self,

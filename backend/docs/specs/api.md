@@ -201,6 +201,12 @@ message 返回必须包含：
 - `created_at`
 - `updated_at`
 
+带 `source_message_id` 的创建请求必须引用同一用户、同一 collection、同一 goal 下已经保存的
+assistant message。该 message 必须是 `collection_grounded`，包含 evidence citations 和
+前端可跳转 `source_links`，且不能带有
+`curated_research_findings_empty` 或 `goal_copilot_model_unavailable` warning。
+不带 `source_message_id` 的请求视为专家手写草稿，可以直接保存。
+
 `source_mode` 可选值：
 
 - `collection_grounded`

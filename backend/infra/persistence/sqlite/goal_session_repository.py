@@ -51,6 +51,38 @@ class SqliteGoalSessionRepository:
             return None
         return self._session_from_row(row)
 
+    def read_message_context(self, message_id: str) -> dict[str, Any] | None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    message_id,
+                    session_id,
+                    role,
+                    content,
+                    source_mode,
+                    used_evidence_ids,
+                    warnings,
+                    links,
+                    source_links,
+                    created_at
+                FROM goal_messages
+                WHERE message_id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        message = self._message_from_row(row)
+        session = self.read_session(message["session_id"])
+        if session is None:
+            return None
+        return {
+            "message": message,
+            "session": session,
+        }
+
     def write_session(self, payload: Mapping[str, Any]) -> None:
         self._ensure_schema()
         with self._connection() as connection:

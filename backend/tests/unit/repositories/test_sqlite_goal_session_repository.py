@@ -71,6 +71,11 @@ def test_sqlite_goal_session_repository_round_trips_sessions_and_messages(tmp_pa
     assert messages[1]["answer"] == "Hardness is supported by [Source 1]."
     assert messages[1]["used_evidence_ids"] == ["E01"]
     assert messages[1]["source_links"][0]["label"] == "Source 1"
+    context = repository.read_message_context("msg_assistant")
+    assert context is not None
+    assert context["session"]["focused_goal_id"] == "goal_lpbf"
+    assert context["message"]["message_id"] == "msg_assistant"
+    assert context["message"]["source_links"][0]["href"].endswith("evidence_id=E01")
 
 
 def test_sqlite_goal_session_repository_replaces_message_history(tmp_path):

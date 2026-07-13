@@ -32,9 +32,12 @@ own database connections, SQL, schema initialization, or row encoding.
   sources to those curated Findings when they are available, and labels general
   fallback separately from collection evidence.
 - `experiment_plan_service.py`
-  Persists goal-scoped experiment plan drafts generated from chat answers. These
-  drafts are human-editable Goal Consumer outputs, not replacements for the
-  conditional Protocol browsing branch.
+  Persists goal-scoped experiment plan drafts generated from chat answers. When
+  a draft references a chat message, the service verifies that the message is a
+  same-user, same-goal, collection-grounded assistant answer with auditable
+  evidence links and no review-blocking warnings. These drafts are
+  human-editable Goal Consumer outputs, not replacements for the conditional
+  Protocol browsing branch.
 - `brief_service.py`
   Optional goal-first collection-seeding path. It shapes a thin research brief
   and registers a `seed_collection` handoff into Source, but it is not required

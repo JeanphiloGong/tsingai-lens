@@ -737,9 +737,14 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `accepted_system_sample_count`、`accepted_after_curation_match_count`、
 `curated_correction_count`、`system_error_count` 和 `resolved_feedback_count`，
 以及以下分布：`by_label_status`、`by_dataset_use_status`、`by_review_status`、
-`by_issue_type`、`by_support_grade`、`by_trace_status`、`by_evidence_role`、
-`by_evidence_traceability_status`、`by_quality_decision`、
+`by_issue_type`、`by_error_category`、`by_support_grade`、`by_trace_status`、
+`by_evidence_role`、`by_evidence_traceability_status`、`by_quality_decision`、
 `by_presentation_bucket` 和 `by_bucket_quality_decision`。
+`by_issue_type` 保留专家标注的原始错误类型；`by_error_category` 把原始错误聚合为
+`variable_error`、`outcome_error`、`direction_error`、`context_error`、
+`relation_error`、`evidence_error`、`claim_scope_error`、`statement_error`、
+`other_error`、`none` 和 `unreviewed`，用于统计变量误判、方向误判、证据不足等
+高频失败类别，指导后续 evaluation、prompt 和 fine-tuning 数据修复。
 `by_presentation_bucket` 区分 `primary`、`review_queue` 和 `unbucketed`：`primary`
 对应专家界面默认展示的高信号研究发现，`review_queue` 对应仍需标注或复核的候选发现，
 `unbucketed` 对应历史或 fallback artifact 中没有 presentation 分桶的样本。

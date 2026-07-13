@@ -660,6 +660,11 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "evidence_not_grounded": 1,
             "unreviewed": 1,
         },
+        "by_error_category": {
+            "none": 2,
+            "evidence_error": 1,
+            "unreviewed": 1,
+        },
         "by_support_grade": {
             "partial": 2,
             "weak": 2,
@@ -1725,6 +1730,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     assert dataset["quality_summary"]["by_quality_decision"] == {"rejected_system": 1}
     assert dataset["quality_summary"]["system_error_count"] == 1
     assert dataset["quality_summary"]["by_issue_type"] == {"wrong_relation": 1}
+    assert dataset["quality_summary"]["by_error_category"] == {"relation_error": 1}
     assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 1
 
 
@@ -1816,6 +1822,12 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
         "wrong_outcome": 1,
         "wrong_direction": 1,
         "insufficient_evidence": 1,
+    }
+    assert dataset["quality_summary"]["by_error_category"] == {
+        "variable_error": 1,
+        "outcome_error": 1,
+        "direction_error": 1,
+        "evidence_error": 1,
     }
     assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 4
 

@@ -193,6 +193,7 @@ class FakeResearchUnderstandingFeedbackService:
                 },
                 "by_review_status": {"accepted": 1},
                 "by_issue_type": {"none": 1},
+                "by_error_category": {"none": 1},
                 "by_support_grade": {"partial": 1},
                 "by_trace_status": {"unavailable": 1},
                 "by_evidence_role": {"direct_result": 1},
@@ -578,6 +579,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.quality_summary.total_samples == 1
     assert response.quality_summary.by_label_status["gold"] == 1
     assert response.quality_summary.by_issue_type == {"none": 1}
+    assert response.quality_summary.by_error_category == {"none": 1}
     assert response.quality_summary.accepted_after_curation_match_count == 1
     assert response.quality_summary.curated_correction_count == 0
     assert response.quality_summary.resolved_feedback_count == 0

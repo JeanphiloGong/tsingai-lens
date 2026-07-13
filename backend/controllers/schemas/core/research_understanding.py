@@ -480,6 +480,7 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     by_dataset_use_status: dict[str, int] = Field(default_factory=dict)
     by_review_status: dict[str, int] = Field(default_factory=dict)
     by_issue_type: dict[str, int] = Field(default_factory=dict)
+    by_error_category: dict[str, int] = Field(default_factory=dict)
     by_support_grade: dict[str, int] = Field(default_factory=dict)
     by_trace_status: dict[str, int] = Field(default_factory=dict)
     by_evidence_role: dict[str, int] = Field(default_factory=dict)

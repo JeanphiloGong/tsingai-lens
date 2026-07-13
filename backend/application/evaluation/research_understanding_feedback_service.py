@@ -35,6 +35,21 @@ _REJECTING_ISSUE_TYPES = frozenset(
         "unclear_statement",
     }
 )
+_ISSUE_ERROR_CATEGORIES = {
+    "none": "none",
+    "unreviewed": "unreviewed",
+    "wrong_variable": "variable_error",
+    "wrong_outcome": "outcome_error",
+    "wrong_direction": "direction_error",
+    "wrong_context": "context_error",
+    "wrong_relation": "relation_error",
+    "evidence_not_grounded": "evidence_error",
+    "missing_evidence": "evidence_error",
+    "insufficient_evidence": "evidence_error",
+    "overclaim": "claim_scope_error",
+    "unclear_statement": "statement_error",
+    "other": "other_error",
+}
 
 
 class ResearchUnderstandingFeedbackService:
@@ -928,6 +943,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     by_label_status = {status: 0 for status in DATASET_LABEL_STATUSES}
     by_review_status: dict[str, int] = {}
     by_issue_type: dict[str, int] = {}
+    by_error_category: dict[str, int] = {}
     by_support_grade: dict[str, int] = {}
     by_trace_status: dict[str, int] = {}
     by_evidence_role: dict[str, int] = {}
@@ -1020,6 +1036,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
                 else "unreviewed"
             )
         _increment_count(by_issue_type, issue_type)
+        _increment_count(by_error_category, _issue_error_category(issue_type))
         _increment_count(
             by_support_grade,
             _text(target.get("support_grade"))
@@ -1113,6 +1130,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "by_dataset_use_status": by_dataset_use_status,
         "by_review_status": by_review_status,
         "by_issue_type": by_issue_type,
+        "by_error_category": by_error_category,
         "by_support_grade": by_support_grade,
         "by_trace_status": by_trace_status,
         "by_evidence_role": by_evidence_role,
@@ -1126,6 +1144,10 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
 
 def _increment_count(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
+
+
+def _issue_error_category(issue_type: str) -> str:
+    return _ISSUE_ERROR_CATEGORIES.get(issue_type, "other_error")
 
 
 def _curation_matches_system_prediction(

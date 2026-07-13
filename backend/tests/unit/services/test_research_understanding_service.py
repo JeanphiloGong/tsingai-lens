@@ -724,6 +724,7 @@ def test_objective_understanding_table_evidence_quote_includes_relevant_rows():
                     ],
                     table_matrix=[
                         ["Build platform conditions", "ı y (MPa)", "ı u (MPa)", "El%"],
+                        ["Aged", "430", "590", "61"],
                         ["Non-preheated", "448", "617", "72"],
                         ["Preheated", "465", "618", "82"],
                     ],
@@ -796,8 +797,17 @@ def test_objective_understanding_table_evidence_quote_includes_relevant_rows():
     assert "Non-preheated | 448 | 617 | 72" in evidence_ref["quote"]
     assert "Preheated | 465 | 618 | 82" in evidence_ref["quote"]
     evidence_item = understanding["presentation"]["evidence_items"][0]
-    assert "Non-preheated | 448 | 617 | 72" in evidence_item["quote"]
-    assert "Preheated | 465 | 618 | 82" in evidence_item["quote"]
+    assert (
+        "Build platform conditions: Non-preheated; ı y (MPa): 448; "
+        "ı u (MPa): 617; El%: 72"
+    ) in evidence_item["quote"]
+    assert (
+        "Build platform conditions: Preheated; ı y (MPa): 465; "
+        "ı u (MPa): 618; El%: 82"
+    ) in evidence_item["quote"]
+    assert "Relevant rows:" in evidence_item["quote"]
+    assert "Build platform conditions: Aged" not in evidence_item["quote"]
+    assert "Aged | 430 | 590 | 61" in evidence_item["source_text"]
     assert evidence_item["table_audit"]["columns"] == [
         "Build platform conditions",
         "ı y (MPa)",
@@ -806,11 +816,11 @@ def test_objective_understanding_table_evidence_quote_includes_relevant_rows():
     ]
     assert evidence_item["table_audit"]["relevant_rows"] == [
         {
-            "row_index": 1,
+            "row_index": 2,
             "cells": ["Non-preheated", "448", "617", "72"],
         },
         {
-            "row_index": 2,
+            "row_index": 3,
             "cells": ["Preheated", "465", "618", "82"],
         },
     ]
@@ -12858,8 +12868,11 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
     ]
     assert review_finding["dataset_use_status"] == "review_candidate"
     evidence_item = understanding["presentation"]["evidence_items"][0]
-    assert "HIP | 98.16" in evidence_item["quote"]
-    assert "Furnace HT | 99.33" in evidence_item["quote"]
+    assert "Heat treatment type: HIP; Density (%): 98.16" in evidence_item["quote"]
+    assert (
+        "Heat treatment type: Furnace HT; Density (%): 99.33"
+        in evidence_item["quote"]
+    )
     assert evidence_item["table_audit"]["relevant_rows"] == [
         {
             "row_index": 1,
@@ -13011,6 +13024,11 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
     understanding = service.with_presentation(stored)
 
     evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert (
+        "Specimens: (100/280) as-SLM(120/; Hardness (HV): ( +/- 9.2) 196.9"
+        in evidence_item["quote"]
+    )
+    assert "Cells:" not in evidence_item["quote"]
     assert evidence_item["table_audit"]["relevant_rows"] == [
         {
             "row_index": 1,
@@ -13033,6 +13051,91 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
             ],
         },
     ]
+
+
+def test_with_presentation_table_quote_does_not_mislabel_short_rows():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-short-row",
+                    human_readable_id=7,
+                    title="Short table row study",
+                    text="",
+                )
+            ],
+            tables=[
+                SourceTable(
+                    table_id="table-short-row",
+                    document_id="paper-short-row",
+                    table_order=1,
+                    page=2,
+                    caption_text="Short rows from parsed table.",
+                    caption_block_id=None,
+                    bbox=None,
+                    heading_path="Results",
+                    column_headers=["A", "B", "C"],
+                    table_matrix=[["A", "B", "C"], ["10", "20"]],
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-short-row",
+                "goal_id": "goal-short-row",
+                "title": "How does A affect C?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_short_row",
+                    "claim_type": "comparison",
+                    "statement": "A changed from 10 to 20.",
+                    "status": "supported",
+                    "confidence": 0.7,
+                    "evidence_ref_ids": ["evref_short_row"],
+                    "context_ids": ["ctx_short_row"],
+                    "source_object_ids": ["oeu_short_row"],
+                    "warnings": [],
+                }
+            ],
+            "relations": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_short_row",
+                    "source_kind": "table",
+                    "document_id": "paper-short-row",
+                    "label": "Table 1",
+                    "locator": {
+                        "source_kind": "table",
+                        "source_ref": "table-short-row",
+                    },
+                    "fact_ids": ["oeu_short_row"],
+                    "traceability_status": "resolved",
+                    "quote": None,
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_short_row",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"variable_process_axes": ["A"]},
+                    "property_scope": ["C"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert "Relevant rows: Cells: 10 | 20" in evidence_item["quote"]
+    assert "A: 10; B: 20" not in evidence_item["quote"]
 
 
 def test_with_presentation_projects_property_axis_relation_as_finding():

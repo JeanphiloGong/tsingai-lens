@@ -2169,8 +2169,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.first()
 			.element()
 			.closest('.research-understanding-workbench__table-audit');
-		expect(tableAudit?.textContent).toContain('Non-preheated | 448 | 72');
-		expect(tableAudit?.textContent).toContain('Preheated | 465 | 82');
+		expect(tableAudit?.textContent).toContain(
+			'Build platform conditions: Non-preheated; Yield strength: 448; Elongation: 72'
+		);
+		expect(tableAudit?.textContent).toContain(
+			'Build platform conditions: Preheated; Yield strength: 465; Elongation: 82'
+		);
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 
 		const claimDetail = await openMechanismClaimDetail();

@@ -11693,8 +11693,12 @@ class ResearchUnderstandingService:
             if table is not None
             else _text(source_block.text if source_block else None) or quote
         )
+        table_audit = self._presentation_table_audit(
+            table,
+            quote_hints=quote_hints or {},
+        )
         quote = (
-            source_text
+            _presentation_table_audit_quote(table_audit) or source_text
             if table is not None
             else quote
             if (
@@ -11732,10 +11736,6 @@ class ResearchUnderstandingService:
         value_summary = (
             _block_context_label(display_block)
             or (label if _looks_user_facing(label) else "")
-        )
-        table_audit = self._presentation_table_audit(
-            table,
-            quote_hints=quote_hints or {},
         )
         href = _presentation_evidence_href(
             collection_id=collection_id,
@@ -11872,7 +11872,7 @@ class ResearchUnderstandingService:
             "relevant_rows": [
                 {
                     "row_index": int(row["row_index"]),
-                    "cells": [cell for cell in row["cells"] if cell],
+                    "cells": [cell if cell else "-" for cell in row["cells"]],
                 }
                 for row in relevant_rows
             ],
@@ -12546,6 +12546,34 @@ def _presentation_evidence_href(
         f"/collections/{quote(collection_id)}/documents/{quote(document)}"
         f"?{query}"
     )
+
+
+def _presentation_table_audit_quote(table_audit: Mapping[str, Any] | None) -> str:
+    if not table_audit:
+        return ""
+    columns = _strings(table_audit.get("columns"))
+    row_texts: list[str] = []
+    for row in _mapping_list(table_audit.get("relevant_rows")):
+        cells = _strings(row.get("cells"))
+        if cells:
+            row_texts.append(_presentation_table_row_quote(cells, columns))
+    parts: list[str] = []
+    if columns:
+        parts.append("Columns: " + " | ".join(columns))
+    if row_texts:
+        parts.append("Relevant rows: " + " / ".join(row_texts))
+    return _short_text(" ".join(parts), limit=900)
+
+
+def _presentation_table_row_quote(cells: list[str], columns: list[str]) -> str:
+    if not columns:
+        return " | ".join(cells)
+    if len(cells) != len(columns):
+        return "Cells: " + " | ".join(cells)
+    pairs: list[str] = []
+    for index, cell in enumerate(cells):
+        pairs.append(f"{columns[index]}: {cell}")
+    return "; ".join(pairs)
 
 
 def _mapping(value: Any) -> dict[str, Any]:

@@ -1541,8 +1541,8 @@ function normalizeResearchUnderstandingPresentationTableAudit(
 			if (!rowRecord) return null;
 			const cells = asArray(rowRecord.cells)
 				.map((cell) => toText(cell))
-				.filter(Boolean);
-			if (!cells.length) return null;
+				.map((cell) => cell || '-');
+			if (!cells.some((cell) => cell && cell !== '-')) return null;
 			return {
 				row_index: toOptionalNumber(rowRecord.row_index) ?? 0,
 				cells

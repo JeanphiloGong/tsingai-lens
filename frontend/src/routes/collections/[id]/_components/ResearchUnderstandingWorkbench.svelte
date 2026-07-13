@@ -1674,8 +1674,13 @@
 		return ref.table_audit?.relevant_rows ?? [];
 	}
 
-	function tableAuditRowText(row: { cells: string[] }) {
-		return row.cells.join(' | ');
+	function tableAuditRowText(ref: ResearchUnderstandingPresentationEvidence, row: { cells: string[] }) {
+		const columns = ref.table_audit?.columns ?? [];
+		if (!columns.length) return row.cells.join(' | ');
+		if (columns.length !== row.cells.length) return `Cells: ${row.cells.join(' | ')}`;
+		return row.cells
+			.map((cell, index) => (columns[index] ? `${columns[index]}: ${cell}` : cell))
+			.join('; ');
 	}
 
 	function evidenceLabelsForIds(evidenceIds: string[], limit = 3) {
@@ -4295,7 +4300,7 @@
 																					row: row.row_index
 																				})}
 																			</small>
-																			<span>{tableAuditRowText(row)}</span>
+																			<span>{tableAuditRowText(ref, row)}</span>
 																		</li>
 																	{/each}
 																</ul>
@@ -4366,7 +4371,7 @@
 																			row: row.row_index
 																		})}
 																	</small>
-																	<span>{tableAuditRowText(row)}</span>
+																	<span>{tableAuditRowText(ref, row)}</span>
 																</li>
 															{/each}
 														</ul>

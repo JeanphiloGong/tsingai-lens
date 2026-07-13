@@ -2069,6 +2069,53 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
 	});
 
+	it('keeps collection review export visible when the current goal has no review candidates', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(datasetResponse({ trainingReady: 1, reviewCandidate: 0, rejected: 0 }))
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = browserPage.getByText('Dataset');
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+		await expect.poll(() => datasetRegion?.textContent ?? '').toContain('Training ready 1');
+
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Review candidates JSON' }))
+			.not.toBeInTheDocument();
+		const collectionReviewUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection review JSON' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionReviewUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionReviewUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionReviewUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
+		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
+	});
+
 	it('describes mixed readiness review items as candidates, not primary findings', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

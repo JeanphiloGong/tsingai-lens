@@ -2602,11 +2602,11 @@
 										<a href={datasetDownloadUrl('json', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadReviewJson')}
 										</a>
-										{#if understanding.scope.scope_type === 'goal'}
-											<a href={collectionDatasetDownloadUrl('json', 'review_candidate')} download>
-												{$t('research.understanding.datasetDownloadCollectionReviewJson')}
-											</a>
-										{/if}
+									{/if}
+									{#if understanding.scope.scope_type === 'goal'}
+										<a href={collectionDatasetDownloadUrl('json', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadCollectionReviewJson')}
+										</a>
 									{/if}
 								</div>
 								{#if datasetErrorCategories.length}

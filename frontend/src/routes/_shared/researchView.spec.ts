@@ -14,6 +14,7 @@ const {
 	exportResearchUnderstandingGoldDraft,
 	fetchResearchUnderstandingFeedback,
 	fetchResearchUnderstandingCurations,
+	fetchResearchUnderstandingDataset,
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
@@ -661,6 +662,69 @@ describe('research view shared helpers', () => {
 		);
 		expect(draft.item_count).toBe(1);
 		expect(draft.items[0].family).toBe('research_understanding_findings');
+	});
+
+	it('normalizes research understanding dataset review risk summaries', async () => {
+		requestJson.mockResolvedValueOnce({
+			schema_version: 'research_understanding_dataset.v1',
+			dataset_id: 'rud_col_123_goal_goal_1',
+			collection_id: 'col_123',
+			scope_type: 'goal',
+			scope_id: 'goal_1',
+			task_type: 'research_understanding_finding',
+			metric_profile: 'research_understanding_finding.v1',
+			label_status_filter: null,
+			dataset_use_status_filter: null,
+			item_count: 2,
+			label_counts: {
+				candidate: 2,
+				silver: 0,
+				gold: 0,
+				rejected: 0
+			},
+			quality_summary: {
+				training_ready_sample_count: 0,
+				training_message_sample_count: 0,
+				review_candidate_sample_count: 2,
+				next_review_finding_id: 'finding_1',
+				by_dataset_use_status: {
+					training_ready: 0,
+					review_candidate: 2,
+					rejected: 0
+				},
+				by_presentation_bucket: {
+					primary: 1,
+					review_queue: 1
+				},
+				by_error_category: {
+					unreviewed: 2
+				},
+				by_review_reason: {
+					single_paper_evidence: 2,
+					partial_support: 1
+				},
+				by_system_warning: {
+					table_row_alignment_uncertain: 1
+				}
+			},
+			warnings: []
+		});
+
+		const dataset = await fetchResearchUnderstandingDataset('col_123', {
+			scope_type: 'goal',
+			scope_id: 'goal_1'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1'
+		);
+		expect(dataset.quality_summary.by_review_reason).toEqual({
+			single_paper_evidence: 2,
+			partial_support: 1
+		});
+		expect(dataset.quality_summary.by_system_warning).toEqual({
+			table_row_alignment_uncertain: 1
+		});
 	});
 
 	it('shortens long internal identifiers for display fallback', () => {

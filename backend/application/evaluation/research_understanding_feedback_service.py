@@ -1038,6 +1038,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     by_quality_decision: dict[str, int] = {}
     by_presentation_bucket: dict[str, int] = {}
     by_bucket_quality_decision: dict[str, dict[str, int]] = {}
+    by_review_reason: dict[str, int] = {}
+    by_system_warning: dict[str, int] = {}
     warning_counts = {
         "missing_evidence": 0,
         "missing_source_text": 0,
@@ -1093,6 +1095,10 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         target = _mapping(item.get("expert_target"))
         feedback_records = _mapping_list(item.get("feedback_refs"))
         system_prediction = _mapping(item.get("system_prediction"))
+        for reason in _strings(system_prediction.get("review_reasons")):
+            _increment_count(by_review_reason, reason)
+        for warning in _strings(system_prediction.get("warnings")):
+            _increment_count(by_system_warning, warning)
 
         review_status = _text(target.get("review_status"))
         if not review_status:
@@ -1233,6 +1239,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "by_quality_decision": by_quality_decision,
         "by_presentation_bucket": by_presentation_bucket,
         "by_bucket_quality_decision": by_bucket_quality_decision,
+        "by_review_reason": by_review_reason,
+        "by_system_warning": by_system_warning,
         "warning_counts": warning_counts,
     }
 
@@ -1341,6 +1349,7 @@ def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:
         "context_ids": list(_strings(finding.get("context_ids"))),
         "relation_ids": list(_strings(finding.get("relation_ids"))),
         "evidence_bundle": _mapping(finding.get("evidence_bundle")),
+        "review_reasons": list(_strings(finding.get("review_reasons"))),
         "warnings": list(_strings(finding.get("warnings"))),
     }
 

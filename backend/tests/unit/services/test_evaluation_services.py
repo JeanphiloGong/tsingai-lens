@@ -720,6 +720,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
                 "candidate": 1,
             },
         },
+        "by_review_reason": {},
+        "by_system_warning": {},
         "warning_counts": {
             "missing_evidence": 0,
             "missing_source_text": 0,
@@ -1113,6 +1115,57 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
     }
     assert dataset["quality_summary"]["training_ready_sample_count"] == 0
     assert dataset["quality_summary"]["review_candidate_sample_count"] == 3
+
+
+def test_research_understanding_feedback_service_summarizes_system_review_risks():
+    stored = _sample_understanding()
+    projected = stored.to_record()
+    projected["presentation"]["findings"] = [
+        projected["presentation"]["findings"][0],
+        projected["presentation"]["findings"][1],
+    ]
+    projected["presentation"]["findings"][0]["review_reasons"] = [
+        "single_paper_evidence",
+        "partial_support",
+    ]
+    projected["presentation"]["findings"][0]["warnings"] = [
+        "table_row_alignment_uncertain",
+    ]
+    projected["presentation"]["findings"][1]["review_reasons"] = [
+        "single_paper_evidence",
+    ]
+    projected["presentation"]["findings"][1]["warnings"] = [
+        "weak_evidence",
+        "table_row_alignment_uncertain",
+    ]
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    by_finding = {item["finding_id"]: item for item in dataset["items"]}
+    assert by_finding["finding-1"]["system_prediction"]["review_reasons"] == [
+        "single_paper_evidence",
+        "partial_support",
+    ]
+    assert by_finding["finding-1"]["system_prediction"]["warnings"] == [
+        "table_row_alignment_uncertain"
+    ]
+    assert dataset["quality_summary"]["by_review_reason"] == {
+        "single_paper_evidence": 2,
+        "partial_support": 1,
+    }
+    assert dataset["quality_summary"]["by_system_warning"] == {
+        "table_row_alignment_uncertain": 2,
+        "weak_evidence": 1,
+    }
 
 
 def test_research_understanding_feedback_service_curation_evidence_priority():

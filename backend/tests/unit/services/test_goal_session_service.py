@@ -842,6 +842,12 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     ]
     prompt_messages = service.llm_client.chat.completions.calls[0]["messages"]
     assert "curated/training-ready findings first" in prompt_messages[0]["content"]
+    assert "Protocol draft requirements" in prompt_messages[0]["content"]
+    assert "hypothesis" in prompt_messages[0]["content"]
+    assert "variable matrix" in prompt_messages[0]["content"]
+    assert "measurements" in prompt_messages[0]["content"]
+    assert "controls" in prompt_messages[0]["content"]
+    assert "risks or limits" in prompt_messages[0]["content"]
     prompt = prompt_messages[1]["content"]
     assert "curated_research_findings" in prompt
     assert "150 C preheating improves LPBF 316L ductility" in prompt

@@ -2357,6 +2357,77 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
 	});
 
+	it('links protocol drafting to Copilot when a goal has training-ready messages', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							trainingMessages: 1,
+							reviewCandidate: 0,
+							rejected: 0
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const draftLink = browserPage.getByRole('link', { name: 'Draft protocol with Copilot' });
+		await expect.element(draftLink).toBeInTheDocument();
+		const draftUrl = new URL(draftLink.element().getAttribute('href') ?? '', 'http://localhost');
+		expect(draftUrl.pathname).toBe('/collections/col_123/assistant');
+		expect(draftUrl.searchParams.get('goal_id')).toBe('goal_1');
+	});
+
+	it('blocks protocol drafting from the review loop until goal findings are training-ready', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							trainingMessages: 0,
+							reviewCandidate: 3,
+							rejected: 0
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Draft protocol with Copilot' }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Protocol needs reviewed findings')).toBeInTheDocument();
+	});
+
 	it('describes mixed readiness review items as candidates, not primary findings', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

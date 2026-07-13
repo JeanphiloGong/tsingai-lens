@@ -496,6 +496,12 @@
 			: '';
 	$: currentCollectionDatasetScopeKey =
 		understanding?.scope.scope_type === 'goal' && collectionId ? `${collectionId}:goal` : '';
+	$: goalCopilotHref =
+		understanding?.scope.scope_type === 'goal' && collectionId && selectedScopeId
+			? `${resolve('/collections/[id]/assistant', {
+					id: collectionId
+				})}?goal_id=${encodeURIComponent(selectedScopeId)}`
+			: '';
 	$: if (currentDatasetScopeKey && currentDatasetScopeKey !== datasetScopeKey) {
 		void loadDatasetSummary(currentDatasetScopeKey);
 	}
@@ -2740,6 +2746,17 @@
 						<button type="button" on:click={openDatasetExport}>
 							{$t('research.understanding.reviewLoopOpenDataset')}
 						</button>
+						{#if goalCopilotHref}
+							{#if datasetTrainingReadySampleCount > 0 && datasetTrainingMessageSampleCount > 0}
+								<a class="research-understanding-workbench__review-loop-link" href={goalCopilotHref}>
+									{$t('research.understanding.reviewLoopDraftProtocol')}
+								</a>
+							{:else}
+								<span class="research-understanding-workbench__review-loop-link research-understanding-workbench__review-loop-link--disabled">
+									{$t('research.understanding.reviewLoopDraftProtocolBlocked')}
+								</span>
+							{/if}
+						{/if}
 					</div>
 					{#if feedbackMessage}
 						<p class="research-understanding-workbench__feedback-state" role="status">
@@ -4513,7 +4530,11 @@
 		white-space: nowrap;
 	}
 
-	.research-understanding-workbench__review-loop-actions button {
+	.research-understanding-workbench__review-loop-actions button,
+	.research-understanding-workbench__review-loop-link {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		min-height: 30px;
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
@@ -4525,18 +4546,26 @@
 		font-weight: 700;
 		line-height: 18px;
 		cursor: pointer;
+		text-decoration: none;
 	}
 
 	.research-understanding-workbench__review-loop-actions button:hover,
-	.research-understanding-workbench__review-loop-actions button:focus-visible {
+	.research-understanding-workbench__review-loop-actions button:focus-visible,
+	.research-understanding-workbench__review-loop-link:hover,
+	.research-understanding-workbench__review-loop-link:focus-visible {
 		border-color: var(--color-accent);
 		color: var(--color-accent);
 	}
 
-	.research-understanding-workbench__review-loop-actions button:disabled {
+	.research-understanding-workbench__review-loop-actions button:disabled,
+	.research-understanding-workbench__review-loop-link--disabled {
 		color: var(--text-secondary);
 		cursor: not-allowed;
 		opacity: 0.62;
+	}
+
+	.research-understanding-workbench__review-loop-link--disabled {
+		pointer-events: none;
 	}
 
 	.research-understanding-workbench__review-loop ul {

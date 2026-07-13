@@ -8,6 +8,7 @@ from application.evaluation.prediction_snapshot_service import (
     CoreArtifactsNotReadyForEvaluationError,
     EvaluationPredictionSnapshotService,
 )
+from application.evaluation import research_understanding_feedback_service as ruf_service
 from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
@@ -1974,6 +1975,59 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
             scope_id="goal-1",
             dataset_use_status="ready",
         )
+
+
+def test_research_understanding_feedback_service_counts_only_valid_training_messages(
+    monkeypatch,
+):
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        ruf_service,
+        "_training_messages",
+        lambda **_: [
+            {"role": "user", "content": "Extract one finding."},
+            {
+                "role": "assistant",
+                "content": '{"statement": "This does not match the expert target."}',
+            },
+        ],
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        dataset_use_status="training_ready",
+    )
+
+    assert dataset["item_count"] == 1
+    assert dataset["items"][0]["training_messages"]
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 1
+    assert dataset["quality_summary"]["training_message_sample_count"] == 0
 
 
 def test_research_understanding_feedback_service_exports_collection_dataset():

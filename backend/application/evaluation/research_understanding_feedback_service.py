@@ -1078,7 +1078,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
             usable_sample_count += 1
         if dataset_use_status == "training_ready":
             training_ready_sample_count += 1
-            if _mapping_list(item.get("training_messages")):
+            if _has_training_messages_for_expert_target(item):
                 training_message_sample_count += 1
         elif dataset_use_status == "review_candidate":
             review_candidate_sample_count += 1
@@ -1497,6 +1497,34 @@ def _training_messages(
             "content": json.dumps(target_payload, ensure_ascii=False, sort_keys=True),
         },
     ]
+
+
+def _has_training_messages_for_expert_target(item: Mapping[str, Any]) -> bool:
+    target_statement = _text(_mapping(item.get("expert_target")).get("statement"))
+    if not target_statement:
+        return False
+    messages = _mapping_list(item.get("training_messages"))
+    if len(messages) < 2:
+        return False
+    if _text(messages[0].get("role")) != "user" or not _text(
+        messages[0].get("content")
+    ):
+        return False
+    if _text(messages[-1].get("role")) != "assistant":
+        return False
+    try:
+        assistant_payload = json.loads(_text(messages[-1].get("content")))
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(assistant_payload, Mapping):
+        return False
+    return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
+        target_statement
+    )
+
+
+def _normalized_text(value: Any) -> str:
+    return " ".join(_text(value).casefold().split())
 
 
 def _is_ai_reviewer(reviewer: str | None) -> bool:

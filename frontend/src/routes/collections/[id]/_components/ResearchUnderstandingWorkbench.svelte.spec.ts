@@ -2053,6 +2053,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(collectionJsonlUrl.searchParams.get('scope_type')).toBe('goal');
 		expect(collectionJsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 		expect(collectionJsonlUrl.searchParams.get('format')).toBe('jsonl');
+
+		const collectionReviewUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection review JSON' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionReviewUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionReviewUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionReviewUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
+		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
 	});
 
 	it('describes mixed readiness review items as candidates, not primary findings', async () => {

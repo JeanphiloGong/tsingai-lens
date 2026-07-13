@@ -372,6 +372,47 @@ const translations: Record<Language, Translations> = {
 				expertGapReviewQueue:
 					'{count} candidate finding(s) remain in the review queue; do not treat them as usable conclusions until curated.',
 				expertGapNone: 'No major evidence gap is visible in the primary findings.',
+				reviewLoop: 'Review loop',
+				reviewLoopStatuses: {
+					loading: 'Checking dataset readiness',
+					empty: 'No reviewable findings',
+					dataset_unavailable: 'Dataset export not ready',
+					needs_reviewer: 'Reviewer sign-in required',
+					needs_review: 'Review needed before use',
+					continue_review: 'Continue expert review',
+					export_ready: 'Training export ready'
+				},
+				reviewLoopBodies: {
+					loading:
+						'Lens is checking whether this goal already has reviewed samples and fine-tuning messages.',
+					empty:
+						'No reviewable finding exists for this goal yet. Re-run analysis or inspect evidence coverage first.',
+					dataset_unavailable:
+						'The findings are visible, but the dataset export is not available for this scope yet.',
+					needs_reviewer:
+						'Sign in as a non-AI reviewer before accepting, rejecting, or correcting findings into the dataset.',
+					needs_review:
+						'{review} review candidate finding(s) need accept, reject, or correction before the goal can produce training-ready data.',
+					continue_review:
+						'{training} sample(s) are training-ready; {review} candidate finding(s) still need a final expert decision.',
+					export_ready:
+						'{messages} training message sample(s) are ready for evaluation or fine-tuning preparation.'
+				},
+				reviewLoopStepLogin: 'Sign in with an expert account so labels become human training-ready data.',
+				reviewLoopStepEvidence:
+					'Fix or reject {count} finding(s) whose direct evidence binding is missing.',
+				reviewLoopStepReview:
+					'Review {count} candidate finding(s): accept if grounded, reject if wrong, or correct the statement and evidence.',
+				reviewLoopStepMessages:
+					'{training} training-ready sample(s) exist, but only {messages} have valid training messages; inspect dataset export quality.',
+				reviewLoopStepExport:
+					'Export {count} training message sample(s) after the current review pass.',
+				reviewLoopStepDone:
+					'All visible findings for this goal have a usable review path. Keep evidence links attached when using them downstream.',
+				reviewLoopOpenQueue: 'Open review queue',
+				reviewLoopOpenTraining: 'Show training-ready',
+				reviewLoopOpenAll: 'Show all findings',
+				reviewLoopOpenDataset: 'Open dataset export',
 				coverageGaps: 'Coverage gaps',
 				coverageGapsBody:
 					'Requested axes not backed by primary findings yet. Treat these as missing evidence or review work before using the goal result.',
@@ -3319,6 +3360,41 @@ const translations: Record<Language, Translations> = {
 				expertGapReviewQueue:
 					'{count} 条候选研究发现仍在复核队列中，专家校正前不要当作可用结论。',
 				expertGapNone: '主研究发现没有明显证据缺口。',
+				reviewLoop: '复核闭环',
+				reviewLoopStatuses: {
+					loading: '正在检查数据集状态',
+					empty: '暂无可复核研究发现',
+					dataset_unavailable: '数据集导出未就绪',
+					needs_reviewer: '需要专家账号登录',
+					needs_review: '使用前需要复核',
+					continue_review: '继续专家复核',
+					export_ready: '训练导出已就绪'
+				},
+				reviewLoopBodies: {
+					loading: 'Lens 正在检查该目标是否已有复核样本和微调 messages。',
+					empty: '该目标还没有可复核研究发现。需要先重新分析或检查证据覆盖。',
+					dataset_unavailable: '当前能看到研究发现，但这个范围的数据集导出还不可用。',
+					needs_reviewer:
+						'需要使用非 AI 的专家账号登录，accept / reject / correct 才会进入可训练数据。',
+					needs_review:
+						'{review} 条待复核研究发现需要 accept、reject 或 correct 后，才能为该目标产出可训练数据。',
+					continue_review:
+						'{training} 条样本已经可训练；还有 {review} 条候选研究发现需要专家给出最终判断。',
+					export_ready: '{messages} 条训练 messages 已可用于评价或微调准备。'
+				},
+				reviewLoopStepLogin: '使用专家账号登录，让标注成为人工 training-ready 数据。',
+				reviewLoopStepEvidence: '修复或拒绝 {count} 条缺少直接证据绑定的研究发现。',
+				reviewLoopStepReview:
+					'复核 {count} 条候选研究发现：证据充分就接受，结论错误就拒绝，表述或证据需调整就校正。',
+				reviewLoopStepMessages:
+					'已有 {training} 条可训练样本，但只有 {messages} 条具备有效 training messages；需要检查数据集导出质量。',
+				reviewLoopStepExport: '本轮复核完成后导出 {count} 条训练 message 样本。',
+				reviewLoopStepDone:
+					'该目标当前可见研究发现都有可用复核路径。下游使用时继续保留证据链接。',
+				reviewLoopOpenQueue: '打开复核队列',
+				reviewLoopOpenTraining: '查看可训练样本',
+				reviewLoopOpenAll: '查看全部发现',
+				reviewLoopOpenDataset: '打开数据集导出',
 				coverageGaps: '覆盖缺口',
 				coverageGapsBody:
 					'这些研究目标轴尚未被主发现支撑，使用该目标结果前需要补证据或完成复核。',

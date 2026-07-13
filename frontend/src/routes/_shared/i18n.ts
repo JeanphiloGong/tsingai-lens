@@ -317,6 +317,7 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: 'Dataset',
 				datasetTrainingReady: 'Training ready',
 				datasetReviewCandidate: 'Needs review',
+				datasetErrorCategoriesTitle: 'Common error categories',
 				expertSummary: 'Expert readiness summary',
 				expertSummaryReady: 'Ready for expert use',
 				expertSummaryMixed: 'Mixed review and training set',
@@ -384,6 +385,19 @@ const translations: Record<Language, Translations> = {
 					training_ready: 'Training-ready',
 					review_candidate: 'Review candidate',
 					rejected: 'Rejected'
+				},
+				datasetErrorCategories: {
+					variable_error: 'Variable error',
+					outcome_error: 'Outcome error',
+					direction_error: 'Direction error',
+					context_error: 'Context error',
+					relation_error: 'Relation error',
+					evidence_error: 'Evidence error',
+					claim_scope_error: 'Overclaim',
+					statement_error: 'Unclear finding',
+					other_error: 'Other error',
+					none: 'No issue',
+					unreviewed: 'Unreviewed'
 				},
 				findingTrustSources: {
 					human_curation: 'Human curation',
@@ -3208,6 +3222,7 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: '数据集',
 				datasetTrainingReady: '可用于训练',
 				datasetReviewCandidate: '待复核',
+				datasetErrorCategoriesTitle: '常见错误类型',
 				expertSummary: '专家可用性摘要',
 				expertSummaryReady: '可供专家使用',
 				expertSummaryMixed: '复核和训练样本混合状态',
@@ -3272,6 +3287,19 @@ const translations: Record<Language, Translations> = {
 					training_ready: '可用于训练/评价',
 					review_candidate: '待复核样本',
 					rejected: '不使用'
+				},
+				datasetErrorCategories: {
+					variable_error: '变量误判',
+					outcome_error: '结果误判',
+					direction_error: '方向误判',
+					context_error: '条件/上下文错误',
+					relation_error: '关系错误',
+					evidence_error: '证据不足/不匹配',
+					claim_scope_error: '过度推断',
+					statement_error: '结论表述不清',
+					other_error: '其他错误',
+					none: '无问题',
+					unreviewed: '未复核'
 				},
 				findingTrustSources: {
 					human_curation: '人工校正',

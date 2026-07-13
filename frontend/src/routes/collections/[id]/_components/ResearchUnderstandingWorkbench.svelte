@@ -238,6 +238,11 @@
 		gold: 0,
 		rejected: 0
 	};
+	$: datasetErrorCategories = datasetSummary
+		? Object.entries(datasetSummary.quality_summary.by_error_category)
+				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
+				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		: [];
 	$: expertSummary = usesFindings
 		? expertReadinessSummary(
 				primaryFindingRows,
@@ -506,6 +511,10 @@
 
 	function datasetUseStatusLabel(status: ResearchUnderstandingDatasetUseStatus) {
 		return translatedCatalogLabel('research.understanding.datasetUseStatuses', status);
+	}
+
+	function datasetErrorCategoryLabel(category: string) {
+		return translatedCatalogLabel('research.understanding.datasetErrorCategories', category);
 	}
 
 	function findingTrustSourceLabel(source: FindingDatasetTrust['source']) {
@@ -2486,6 +2495,19 @@
 										</a>
 									{/if}
 								</div>
+								{#if datasetErrorCategories.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetErrorCategoriesTitle')}</strong>
+										<div>
+											{#each datasetErrorCategories as [category, count] (category)}
+												<span>
+													{datasetErrorCategoryLabel(category)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
 							</div>
 						{/if}
 						{#if datasetError}
@@ -3913,13 +3935,15 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		flex-wrap: wrap;
 		gap: 12px;
 		border-top: 1px solid var(--border-default);
 		padding: 10px 12px 12px;
 	}
 
 	.research-understanding-workbench__dataset-counts,
-	.research-understanding-workbench__dataset-actions {
+	.research-understanding-workbench__dataset-actions,
+	.research-understanding-workbench__dataset-errors div {
 		display: flex;
 		flex-wrap: wrap;
 		justify-content: flex-end;
@@ -3927,7 +3951,23 @@
 		min-width: 0;
 	}
 
-	.research-understanding-workbench__dataset-counts span {
+	.research-understanding-workbench__dataset-errors {
+		display: grid;
+		flex-basis: 100%;
+		gap: 6px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-errors > strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-counts span,
+	.research-understanding-workbench__dataset-errors span {
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
@@ -3942,7 +3982,8 @@
 		white-space: nowrap;
 	}
 
-	.research-understanding-workbench__dataset-counts strong {
+	.research-understanding-workbench__dataset-counts strong,
+	.research-understanding-workbench__dataset-errors span strong {
 		color: var(--text-primary);
 		font-size: 12px;
 		line-height: 18px;

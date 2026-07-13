@@ -366,6 +366,7 @@ export type ResearchUnderstandingDataset = {
 		training_ready_sample_count: number;
 		review_candidate_sample_count: number;
 		by_dataset_use_status: Record<ResearchUnderstandingDatasetUseStatus, number>;
+		by_error_category: Record<string, number>;
 	};
 	warnings: string[];
 };
@@ -857,6 +858,16 @@ function toNumber(value: unknown, fallback = 0): number {
 	return fallback;
 }
 
+function toNumberRecord(value: unknown): Record<string, number> {
+	const record = asRecord(value);
+	if (!record) return {};
+	return Object.fromEntries(
+		Object.entries(record)
+			.map(([key, item]) => [key, toNumber(item)] as const)
+			.filter(([, item]) => item > 0)
+	);
+}
+
 function toOptionalNumber(value: unknown): number | null {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string' && value.trim() !== '') {
@@ -1036,7 +1047,8 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 				training_ready: toNumber(rawUseCounts.training_ready),
 				review_candidate: toNumber(rawUseCounts.review_candidate),
 				rejected: toNumber(rawUseCounts.rejected)
-			}
+			},
+			by_error_category: toNumberRecord(qualitySummary.by_error_category)
 		},
 		warnings: toStringList(record?.warnings)
 	};

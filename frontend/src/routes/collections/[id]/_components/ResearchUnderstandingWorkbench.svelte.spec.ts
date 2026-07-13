@@ -40,10 +40,16 @@ function datasetResponse(overrides: {
 	rejected?: number;
 	itemCount?: number;
 	labelCounts?: Record<string, number>;
+	errorCategories?: Record<string, number>;
 } = {}) {
 	const trainingReady = overrides.trainingReady ?? 2;
 	const reviewCandidate = overrides.reviewCandidate ?? 1;
 	const rejected = overrides.rejected ?? 1;
+	const errorCategories = overrides.errorCategories ?? {
+		variable_error: 2,
+		direction_error: 1,
+		none: trainingReady
+	};
 	return {
 		schema_version: 'research_understanding_dataset.v1',
 		dataset_id: 'rud_col_123_objective_obj_1',
@@ -68,7 +74,8 @@ function datasetResponse(overrides: {
 				training_ready: trainingReady,
 				review_candidate: reviewCandidate,
 				rejected
-			}
+			},
+			by_error_category: errorCategories
 		},
 		items: [],
 		warnings: []
@@ -1872,6 +1879,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Silver 1');
 		expect(datasetText).toContain('Gold 1');
 		expect(datasetText).toContain('Rejected 1');
+		expect(datasetText).toContain('Common error categories');
+		expect(datasetText).toContain('Variable error 2');
+		expect(datasetText).toContain('Direction error 1');
+		expect(datasetText).not.toContain('No issue');
 
 		const jsonUrl = new URL(
 			browserPage

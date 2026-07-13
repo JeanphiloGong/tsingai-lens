@@ -245,6 +245,18 @@ for curated or accepted samples with an explicit non-AI reviewer id. AI-authored
 or anonymous feedback/curation remains `silver` and `review_candidate` until a
 human expert confirms it.
 
+To run the combined three-layer gate for expert review, dataset accumulation,
+and experiment-planning readiness:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py
+```
+
+The combined check passes only when the expert-facing Findings are reviewable,
+the dataset exports active samples, and at least one goal has a
+`training_ready` sample with valid message rows that Goal Copilot can use for
+traceable protocol drafting.
+
 By default `check_goal_dataset_quality.py` is a reviewability gate: a goal may
 pass with only `review_candidate` samples. To require samples that can be used
 for training export, add:
@@ -252,6 +264,9 @@ for training export, add:
 ```bash
 python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --require-training-ready
+
+python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --require-all-training-ready
 ```
 
 That stricter mode fails until every checked goal has at least one

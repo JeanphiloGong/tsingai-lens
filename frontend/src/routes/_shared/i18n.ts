@@ -273,7 +273,9 @@ const translations: Record<Language, Translations> = {
 				evidenceRequired:
 					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.',
 				sourceCitationRequired:
-					'Save is disabled until the answer names the visible source label, such as [Source 1].'
+					'Save is disabled until the answer names the visible source label, such as [Source 1].',
+				evidenceLinkMismatch:
+					'Save is disabled until source links match the reviewed evidence citations.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -3209,7 +3211,8 @@ const translations: Record<Language, Translations> = {
 				reviewRequired: '该研究目标还没有专家复核后的可训练 Findings，暂不能保存为实验方案。',
 				evidenceRequired: '该回答还没有引用用于方案的已复核证据，暂不能保存为实验方案。',
 				sourceCitationRequired:
-					'该回答还没有写出可见来源标签，例如 [Source 1]，暂不能保存为实验方案。'
+					'该回答还没有写出可见来源标签，例如 [Source 1]，暂不能保存为实验方案。',
+				evidenceLinkMismatch: '来源链接和已复核证据引用不一致，暂不能保存为实验方案。'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

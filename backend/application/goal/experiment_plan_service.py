@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Mapping
+from urllib.parse import parse_qs, urlparse
 
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
 from domain.ports import ExperimentPlanRepository, GoalSessionRepository
@@ -141,6 +142,17 @@ class ExperimentPlanService:
             raise ValueError(
                 "goal copilot answer does not cite a visible source label"
             )
+        linked_evidence_ids = {
+            evidence_id
+            for link in message.source_links
+            if (evidence_id := _evidence_id_from_href(link.href))
+        }
+        if linked_evidence_ids and not linked_evidence_ids.issubset(
+            set(message.used_evidence_ids)
+        ):
+            raise ValueError(
+                "goal copilot source links do not match evidence citations"
+            )
         requested_hrefs = {
             str(link.get("href"))
             for link in source_links or []
@@ -187,3 +199,9 @@ def _now_iso() -> str:
 def _plan_id(*parts: object) -> str:
     payload = "\x1f".join(str(part or "") for part in parts)
     return "exp_" + sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _evidence_id_from_href(href: str) -> str:
+    parsed = urlparse(href)
+    values = parse_qs(parsed.query).get("evidence_id") or []
+    return str(values[0]).strip() if values else ""

@@ -331,6 +331,14 @@
 		return visibleSourceLinks(message).some((link) => text.includes(link.label));
 	}
 
+	function sourceLinksMatchEvidenceCitations(message: GoalSessionMessage) {
+		const usedEvidenceIds = new Set(message.used_evidence_ids ?? []);
+		const linkedEvidenceIds = visibleSourceLinks(message)
+			.map((link) => new URL(link.href, 'http://localhost').searchParams.get('evidence_id') ?? '')
+			.filter(Boolean);
+		return linkedEvidenceIds.every((evidenceId) => usedEvidenceIds.has(evidenceId));
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -370,6 +378,7 @@
 				visibleSourceLinks(message).length > 0 &&
 				hasEvidenceCitations(message) &&
 				citesVisibleSourceLabel(message) &&
+				sourceLinksMatchEvidenceCitations(message) &&
 				!needsCuratedFindings(message)
 		);
 	}
@@ -586,6 +595,15 @@
 										!citesVisibleSourceLabel(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.sourceCitationRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										citesVisibleSourceLabel(message) &&
+										!sourceLinksMatchEvidenceCitations(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.evidenceLinkMismatch')}
 										</p>
 									{/if}
 									<div class="message-actions">

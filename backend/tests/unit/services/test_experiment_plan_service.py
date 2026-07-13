@@ -20,6 +20,7 @@ def _write_goal_message(
     warnings: list[str] | None = None,
     used_evidence_ids: list[str] | None = None,
     content: str = "Run a traceable validation matrix [Source 1].",
+    source_href: str = "/collections/col_1/documents/paper-a?evidence_id=ev_1",
 ) -> None:
     repository.write_session(
         {
@@ -59,7 +60,7 @@ def _write_goal_message(
                     {
                         "kind": "evidence",
                         "label": "Source 1",
-                        "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
+                        "href": source_href,
                     }
                 ],
                 "created_at": "2026-07-13T00:01:00+00:00",
@@ -146,6 +147,30 @@ def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
     )
 
     with pytest.raises(ValueError, match="does not cite a visible source label"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="Preheating validation matrix",
+            content="Run 25 C and 150 C LPBF 316L builds.",
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
+def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        used_evidence_ids=["ev_1"],
+        source_href="/collections/col_1/documents/paper-a?evidence_id=ev_other",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+
+    with pytest.raises(ValueError, match="source links do not match evidence citations"):
         service.create_plan(
             collection_id="col_1",
             goal_id="goal_1",

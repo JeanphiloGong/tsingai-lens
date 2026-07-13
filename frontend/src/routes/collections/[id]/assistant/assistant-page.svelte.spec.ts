@@ -217,7 +217,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
-			.toHaveAttribute('href', '/collections/col_123/goals/goal_1');
+			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=training_ready');
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
 			.toBeInTheDocument();
@@ -273,6 +273,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				)
 				)
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
+			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=queue');
 		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
 	});
 
@@ -326,6 +329,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
+			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=training_ready');
 		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
 	});
 

@@ -77,6 +77,13 @@
 	$: goalReviewCandidateCount =
 		goalDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
 	$: goalProtocolReady = goalTrainingReadyCount > 0 && goalTrainingMessageCount > 0;
+	$: goalReviewLinkHref = goalReviewHref(
+		collectionId,
+		queryGoalId,
+		goalReviewCandidateCount,
+		goalTrainingReadyCount,
+		goalProtocolReady
+	);
 	$: readinessStatus = goalProtocolReady
 		? 'ready'
 		: goalTrainingReadyCount > 0
@@ -341,6 +348,26 @@
 
 	function draftProtocolFromReviewedFindings() {
 		void sendMessage($t('goalCopilot.experimentReadiness.protocolPrompt'));
+	}
+
+	function goalReviewHref(
+		activeCollectionId: string,
+		activeGoalId: string,
+		reviewCandidateCount: number,
+		trainingReadyCount: number,
+		protocolReady: boolean
+	) {
+		if (!activeCollectionId || !activeGoalId) return '';
+		const baseHref = `/collections/${encodeURIComponent(activeCollectionId)}/goals/${encodeURIComponent(
+			activeGoalId
+		)}`;
+		if (reviewCandidateCount > 0 && !protocolReady) {
+			return `${baseHref}?review=queue`;
+		}
+		if (trainingReadyCount > 0) {
+			return `${baseHref}?review=training_ready`;
+		}
+		return baseHref;
 	}
 
 	function messageText(message: GoalSessionMessage) {
@@ -621,7 +648,7 @@
 							{$t('goalCopilot.experimentReadiness.draftProtocol')}
 						</button>
 					{/if}
-					<a href={`/collections/${collectionId}/goals/${queryGoalId}`}>
+					<a href={goalReviewLinkHref}>
 						{$t('goalCopilot.experimentReadiness.openGoal')}
 					</a>
 				</div>

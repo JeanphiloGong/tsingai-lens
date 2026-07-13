@@ -45,6 +45,8 @@ def _dataset_payload(**overrides):
             {
                 "evidence_ref_id": "ev-1",
                 "source_ref": "blk-1",
+                "label": "Paper A / p. 4",
+                "page": "4",
                 "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
                 "quote": "Preheating increased ductility by 14%.",
             }
@@ -121,6 +123,50 @@ def test_evaluate_goal_dataset_payload_accepts_review_candidate_sample():
     assert "dataset has at least one active sample" not in _failed_check_names(summary)
     check_names = {item["name"] for item in summary["checks"]}
     assert "dataset has at least one training-ready sample" not in check_names
+
+
+def test_build_goal_review_packet_lists_candidate_evidence():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "presentation_bucket": "review_queue",
+            "trace_status": "evidence_derived",
+            "system_prediction": {
+                "statement": "Preheating increased ductility by 14%.",
+                "variables": ["preheating"],
+                "outcomes": ["ductility"],
+                "direction": "increase",
+                "scope_summary": "LPBF 316L at 150 C",
+                "support_grade": "strong",
+                "review_status": "needs_review",
+            },
+            "expert_target": {
+                "source": "ai_review_feedback",
+                "statement": "Preheating increased ductility by 14%.",
+                "review_status": "correct",
+                "note": "AI suggestion; human review still required.",
+            },
+        }
+    )
+
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+    text = check.render_review_packet_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+
+    assert packet["candidate_count"] == 1
+    candidate = packet["candidates"][0]
+    assert candidate["statement"] == "Preheating increased ductility by 14%."
+    assert candidate["variables"] == ["preheating"]
+    assert candidate["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert candidate["evidence"][0]["href"] == "/collections/col-1/documents/doc-1?source_ref=blk-1"
+    assert "Goal goal-1: 1 review candidate(s)" in text
+    assert "fields: variables=preheating; outcomes=ductility; direction=increase" in text
+    assert "Paper A / p. 4 / p. 4" not in text
+    assert "AI suggestion; human review still required." in text
+    assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text
 
 
 def test_evaluate_goal_dataset_payload_requires_training_ready_when_requested():

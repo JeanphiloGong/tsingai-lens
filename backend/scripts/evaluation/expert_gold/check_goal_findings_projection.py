@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from decimal import Decimal, InvalidOperation
+import io
 import json
 import os
 from pathlib import Path
@@ -305,14 +307,15 @@ def check_goal_findings_projection(
 
 
 def _local_goal_analysis_payload(collection_id: str, goal_id: str) -> dict[str, Any]:
-    from application.pipeline.goal_analysis.service import (  # noqa: PLC0415
-        GoalAnalysisPipelineService,
-    )
-    from controllers.core.goal_analysis import _analysis_response  # noqa: PLC0415
+    with contextlib.redirect_stdout(io.StringIO()):
+        from application.pipeline.goal_analysis.service import (  # noqa: PLC0415
+            GoalAnalysisPipelineService,
+        )
+        from controllers.core.goal_analysis import _analysis_response  # noqa: PLC0415
 
-    service = GoalAnalysisPipelineService()
-    payload = service.get_goal_analysis(collection_id, goal_id)
-    return _analysis_response(collection_id, payload).model_dump(mode="json")
+        service = GoalAnalysisPipelineService()
+        payload = service.get_goal_analysis(collection_id, goal_id)
+        return _analysis_response(collection_id, payload).model_dump(mode="json")
 
 
 def fetch_goal_analysis_payload_from_api(
@@ -387,13 +390,14 @@ def _api_json_request(
 
 
 def build_source_artifact_index(collection_id: str) -> dict[str, Any]:
-    from infra.persistence.factory import (  # noqa: PLC0415
-        build_source_artifact_repository,
-    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        from infra.persistence.factory import (  # noqa: PLC0415
+            build_source_artifact_repository,
+        )
 
-    artifacts = build_source_artifact_repository().read_collection_artifacts(
-        collection_id
-    )
+        artifacts = build_source_artifact_repository().read_collection_artifacts(
+            collection_id
+        )
     documents = {
         document.document_id
         for document in artifacts.documents

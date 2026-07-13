@@ -245,6 +245,19 @@ for curated or accepted samples with an explicit non-AI reviewer id. AI-authored
 or anonymous feedback/curation remains `silver` and `review_candidate` until a
 human expert confirms it.
 
+To print a compact expert review packet with each pending candidate finding,
+its variables/outcomes/direction, evidence quote, source link, and frontend
+review entry, run:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format review-packet
+```
+
+This packet is read-only. It is meant to help a human expert decide whether to
+accept, reject, or correct each candidate in the goal review UI; it does not
+promote any sample to `training_ready`.
+
 To run the combined three-layer gate for expert review, dataset accumulation,
 and experiment-planning readiness:
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -21,6 +23,7 @@ DEFAULT_GOAL_IDS = (
     "goal_6bf7d2c1030e",
     "goal_3037e425673a",
 )
+REVIEW_PACKET_QUOTE_LIMIT = 360
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +62,15 @@ def parse_args() -> argparse.Namespace:
             "samples."
         ),
     )
+    parser.add_argument(
+        "--format",
+        choices=("json", "review-packet"),
+        default="json",
+        help=(
+            "Output format. JSON is stable for automation; review-packet is a "
+            "human-readable queue of candidate findings, evidence, and links."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -69,8 +81,12 @@ def main() -> None:
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
         require_training_ready=args.require_training_ready,
+        include_review_packet=args.format == "review-packet",
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.format == "review-packet":
+        print(render_review_packet_summary(summary))
+    else:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
         raise SystemExit(1)
 
@@ -81,6 +97,7 @@ def check_goal_dataset_quality(
     goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
     api_base_url: str | None = None,
     require_training_ready: bool = False,
+    include_review_packet: bool = False,
 ) -> dict[str, Any]:
     backend_root = str(DEFAULT_BACKEND_ROOT)
     if backend_root not in sys.path:
@@ -105,6 +122,11 @@ def check_goal_dataset_quality(
             require_training_ready=require_training_ready,
         )
         goal_summary["goal_id"] = goal_id
+        if include_review_packet:
+            goal_summary["review_packet"] = build_goal_review_packet(
+                dataset,
+                collection_id=collection_id,
+            )
         goal_summaries.append(goal_summary)
         checks.extend(goal_summary["checks"])
 
@@ -120,13 +142,14 @@ def check_goal_dataset_quality(
 
 
 def _local_goal_dataset(collection_id: str, goal_id: str) -> dict[str, Any]:
-    from application.evaluation import ResearchUnderstandingFeedbackService  # noqa: PLC0415
+    with contextlib.redirect_stdout(io.StringIO()):
+        from application.evaluation import ResearchUnderstandingFeedbackService  # noqa: PLC0415
 
-    return ResearchUnderstandingFeedbackService().export_dataset(
-        collection_id=collection_id,
-        scope_type="goal",
-        scope_id=goal_id,
-    )
+        return ResearchUnderstandingFeedbackService().export_dataset(
+            collection_id=collection_id,
+            scope_type="goal",
+            scope_id=goal_id,
+        )
 
 
 def fetch_goal_dataset_from_api(
@@ -316,6 +339,138 @@ def evaluate_goal_dataset_payload(
     }
 
 
+def build_goal_review_packet(
+    dataset: dict[str, Any],
+    *,
+    collection_id: str,
+) -> dict[str, Any]:
+    goal_id = _text(dataset.get("scope_id"))
+    candidates = []
+    for item in _mapping_list(dataset.get("items")):
+        if _text(item.get("dataset_use_status")) != "review_candidate":
+            continue
+        prediction = _mapping(item.get("system_prediction"))
+        expert_target = _mapping(item.get("expert_target"))
+        evidence_records = (
+            _mapping_list(item.get("training_evidence_refs"))
+            or _mapping_list(item.get("evidence_refs"))
+            or _mapping_list(item.get("input_blocks"))
+        )
+        candidates.append(
+            {
+                "sample_id": _text(item.get("sample_id")),
+                "finding_id": _text(item.get("finding_id")),
+                "presentation_bucket": _text(item.get("presentation_bucket")),
+                "trace_status": _text(item.get("trace_status")),
+                "statement": _text(prediction.get("statement"))
+                or _text(expert_target.get("statement")),
+                "variables": _text_list(prediction.get("variables")),
+                "mediators": _text_list(prediction.get("mediators")),
+                "outcomes": _text_list(prediction.get("outcomes")),
+                "direction": _text(prediction.get("direction")),
+                "scope_summary": _text(prediction.get("scope_summary")),
+                "support_grade": _text(prediction.get("support_grade")),
+                "review_status": _text(prediction.get("review_status"))
+                or _text(expert_target.get("review_status")),
+                "suggested_target": {
+                    "source": _text(expert_target.get("source")),
+                    "review_status": _text(expert_target.get("review_status")),
+                    "issue_type": _text(expert_target.get("issue_type")),
+                    "statement": _text(expert_target.get("statement")),
+                    "note": _text(expert_target.get("note")),
+                    "reviewer": _text(expert_target.get("reviewer")),
+                }
+                if expert_target
+                else {},
+                "evidence": [
+                    _review_evidence_record(record) for record in evidence_records
+                ],
+            }
+        )
+    return {
+        "goal_id": goal_id,
+        "review_url": _goal_review_url(collection_id, goal_id),
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+    }
+
+
+def render_review_packet_summary(summary: dict[str, Any]) -> str:
+    lines = [
+        f"Lens review packet: {summary.get('status')}",
+        f"Collection: {summary.get('collection_id')}",
+        "",
+        "Action rule: accept if the finding, direction, condition, and evidence match; "
+        "correct if the finding is partially right; reject if the evidence does not "
+        "support it.",
+    ]
+    goals = _mapping_list(summary.get("goals"))
+    for goal in goals:
+        packet = _mapping(goal.get("review_packet"))
+        candidates = _mapping_list(packet.get("candidates"))
+        if not candidates:
+            continue
+        lines.extend(
+            [
+                "",
+                f"Goal {packet.get('goal_id')}: {len(candidates)} review candidate(s)",
+                f"Open: {packet.get('review_url')}",
+            ]
+        )
+        for index, candidate in enumerate(candidates, start=1):
+            lines.extend(
+                [
+                    "",
+                    f"  {index}. {_clip(candidate.get('statement'), 240)}",
+                    (
+                        "     fields: "
+                        f"variables={_join(candidate.get('variables'))}; "
+                        f"outcomes={_join(candidate.get('outcomes'))}; "
+                        f"direction={_text(candidate.get('direction')) or 'n/a'}"
+                    ),
+                    (
+                        "     status: "
+                        f"bucket={_text(candidate.get('presentation_bucket')) or 'n/a'}; "
+                        f"support={_text(candidate.get('support_grade')) or 'n/a'}; "
+                        f"review={_text(candidate.get('review_status')) or 'n/a'}; "
+                        f"trace={_text(candidate.get('trace_status')) or 'n/a'}"
+                    ),
+                ]
+            )
+            if _text(candidate.get("scope_summary")):
+                lines.append(f"     scope: {_clip(candidate.get('scope_summary'), 220)}")
+            suggested = _mapping(candidate.get("suggested_target"))
+            if suggested:
+                lines.append(
+                    "     suggested target: "
+                    f"{_clip(suggested.get('statement'), 260)}"
+                )
+                if _text(suggested.get("note")):
+                    lines.append(f"     suggestion note: {_clip(suggested.get('note'), 260)}")
+            evidence = _mapping_list(candidate.get("evidence"))
+            if evidence:
+                lines.append("     evidence:")
+                for evidence_index, record in enumerate(evidence, start=1):
+                    label = _text(record.get("label")) or _text(record.get("source_ref"))
+                    page = _text(record.get("page"))
+                    page_text = (
+                        f" / p. {page}"
+                        if page and f"p. {page}" not in label
+                        else ""
+                    )
+                    lines.extend(
+                        [
+                            f"       {evidence_index}. {label}{page_text}",
+                            f"          quote: {_clip(record.get('quote'))}",
+                            f"          open: {_text(record.get('href')) or 'n/a'}",
+                        ]
+                    )
+    if len(lines) == 4:
+        lines.append("")
+        lines.append("No review candidates found.")
+    return "\n".join(lines)
+
+
 def _has_text_input_block(item: dict[str, Any]) -> bool:
     return any(_text(block.get("text")) for block in _mapping_list(item.get("input_blocks")))
 
@@ -374,6 +529,42 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "label": _text(record.get("label"))
+        or _text(record.get("source_label"))
+        or _text(record.get("source_kind")),
+        "source_ref": _text(record.get("source_ref")),
+        "page": _text(record.get("page")),
+        "href": _text(record.get("href")),
+        "quote": _text(record.get("quote"))
+        or _text(record.get("source_text"))
+        or _text(record.get("training_source_text"))
+        or _text(record.get("text")),
+    }
+
+
+def _text_list(value: Any) -> list[str]:
+    return [_text(item) for item in value if _text(item)] if isinstance(value, list) else []
+
+
+def _join(value: Any) -> str:
+    items = value if isinstance(value, list) else []
+    text = ", ".join(_text(item) for item in items if _text(item))
+    return text or "n/a"
+
+
+def _clip(value: Any, limit: int = REVIEW_PACKET_QUOTE_LIMIT) -> str:
+    text = _text(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _goal_review_url(collection_id: str, goal_id: str) -> str:
+    return f"/collections/{collection_id}/goals/{goal_id}?review=queue"
 
 
 def _text(value: Any) -> str:

@@ -1179,7 +1179,7 @@ const translations: Record<Language, Translations> = {
 				experimentPlanTrainingReadyGate: 'Reviewed training-ready findings',
 				experimentPlanCollectionGrounded: 'Collection evidence answer',
 				experimentPlanEvidenceCount: '{count} evidence link(s)',
-				experimentPlanSourceSession: 'Session {id}',
+				experimentPlanSources: 'Evidence sources',
 				progressEyebrow: 'Goal analysis',
 				progressTitle: 'Analyzing this research goal',
 				progressBody:
@@ -4078,7 +4078,7 @@ const translations: Record<Language, Translations> = {
 				experimentPlanTrainingReadyGate: '已复核可训练 Findings',
 				experimentPlanCollectionGrounded: '基于集合证据的回答',
 				experimentPlanEvidenceCount: '{count} 条证据链接',
-				experimentPlanSourceSession: '会话 {id}',
+				experimentPlanSources: '证据来源',
 				progressEyebrow: '目标分析',
 				progressTitle: '正在分析该研究目标',
 				progressBody: '系统正在围绕该目标抽取证据、构建逻辑链并生成研究理解。',

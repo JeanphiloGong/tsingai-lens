@@ -709,7 +709,8 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Collection evidence answer')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('training_ready_findings')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('1 evidence link(s)')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Session session_2')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Evidence sources')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('session_2')).not.toBeInTheDocument();
 	});
 
 	it('shows analysis errors instead of an empty research understanding workspace', async () => {

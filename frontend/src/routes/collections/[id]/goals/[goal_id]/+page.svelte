@@ -419,24 +419,20 @@
 											})}
 										</span>
 									{/if}
-									{#if metadataText(selectedPlan, 'source_session_id')}
-										<span>
-											{$t('research.goalWorkspace.experimentPlanSourceSession', {
-												id: metadataText(selectedPlan, 'source_session_id')
-											})}
-										</span>
-									{/if}
 								</div>
+								{#if selectedPlan.source_links.length}
+									<div class="experiment-plans__source-links">
+										<strong>{$t('research.goalWorkspace.experimentPlanSources')}</strong>
+										<div>
+											{#each selectedPlan.source_links as link}
+												<a href={link.href}>{link.label}</a>
+											{/each}
+										</div>
+									</div>
+								{/if}
 							</div>
 						{/if}
 						<div class="experiment-plans__footer">
-							<div>
-								{#if selectedPlan?.source_links.length}
-									{#each selectedPlan.source_links as link}
-										<a href={link.href}>{link.label}</a>
-									{/each}
-								{/if}
-							</div>
 							<button
 								class="btn btn--primary btn--small"
 								type="submit"
@@ -734,13 +730,26 @@
 		padding: 4px 7px;
 	}
 
-	.experiment-plans__footer a {
+	.experiment-plans__source-links > div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.experiment-plans__source-links a {
 		display: inline-flex;
-		margin: 0 8px 8px 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-sm);
+		background: var(--surface-card);
 		color: var(--accent);
-		font-size: 13px;
-		line-height: 20px;
+		font-size: 12px;
+		line-height: 18px;
+		padding: 4px 8px;
 		text-decoration: none;
+	}
+
+	.experiment-plans__source-links a:hover {
+		border-color: var(--accent);
 	}
 
 	.goal-progress__grid span {

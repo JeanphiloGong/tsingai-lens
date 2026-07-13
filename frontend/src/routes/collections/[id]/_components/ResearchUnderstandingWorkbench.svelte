@@ -1119,6 +1119,21 @@
 		return translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', code);
 	}
 
+	function findingAcceptLabel(
+		finding: ResearchUnderstandingPresentationFinding,
+		andNext = false
+	) {
+		const actionCode = findingDatasetSampleFor(finding)?.review_action.code.trim() ?? '';
+		if (actionCode === 'accept_as_paper_level') {
+			return andNext
+				? $t('research.understanding.quickAcceptPaperLevelAndNext')
+				: $t('research.understanding.quickAcceptPaperLevel');
+		}
+		return andNext
+			? $t('research.understanding.quickAcceptAndNext')
+			: $t('research.understanding.quickAccept');
+	}
+
 	function findingReviewReasonActionLabel(
 		finding: ResearchUnderstandingPresentationFinding,
 		datasetSample: ResearchUnderstandingDatasetSample | null = findingDatasetSampleFor(finding)
@@ -3750,7 +3765,7 @@
 															>
 																{feedbackSubmitting
 																	? $t('research.understanding.quickAcceptSaving')
-																	: $t('research.understanding.quickAccept')}
+																	: findingAcceptLabel(finding)}
 															</button>
 															<button
 																type="button"
@@ -3891,7 +3906,7 @@
 										>
 											{feedbackSubmitting
 												? $t('research.understanding.quickAcceptSaving')
-												: $t('research.understanding.quickAccept')}
+												: findingAcceptLabel(selectedFinding)}
 										</button>
 										<button
 											type="button"
@@ -3900,7 +3915,7 @@
 										>
 											{feedbackSubmitting
 												? $t('research.understanding.quickAcceptSaving')
-												: $t('research.understanding.quickAcceptAndNext')}
+												: findingAcceptLabel(selectedFinding, true)}
 										</button>
 										<button
 											type="button"

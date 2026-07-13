@@ -1778,7 +1778,66 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(findingsTable.getByText('Accept as paper-level evidence'))
 			.toBeInTheDocument();
+		await expect
+			.element(findingsTable.getByRole('button', { name: 'Accept paper-level' }))
+			.toBeInTheDocument();
 		await expect.element(findingsTable.getByText('Verify 1 direct evidence link(s) against the parsed source text.')).not.toBeInTheDocument();
+	});
+
+	it('labels selected paper-level accept actions without implying cross-paper acceptance', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_mechanism_limited',
+									finding_id: 'finding_mechanism_limited',
+									label_status: 'silver',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'accept_as_paper_level',
+										label: 'Accept as paper-level evidence'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const findingDetail = await openMechanismClaimDetail();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept paper-level and next' }))
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept', exact: true }))
+			.not.toBeInTheDocument();
 	});
 
 	it('opens directly on training-ready findings and dataset exports from a messages deep link', async () => {

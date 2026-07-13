@@ -676,11 +676,15 @@ class ResearchUnderstandingFeedbackService:
             "expert_target": expert_target,
             "evidence_refs": evidence_records,
             "training_evidence_refs": training_evidence_records,
-            "training_messages": _training_messages(
-                system_prediction=system_prediction,
-                expert_target=_mapping(expert_target),
-                evidence_records=training_evidence_records,
-                context_records=context_records,
+            "training_messages": (
+                _training_messages(
+                    system_prediction=system_prediction,
+                    expert_target=_mapping(expert_target),
+                    evidence_records=training_evidence_records,
+                    context_records=context_records,
+                )
+                if dataset_use_status == "training_ready"
+                else []
             ),
             "context_refs": context_records,
             "feedback_refs": [item.to_record() for item in feedback],

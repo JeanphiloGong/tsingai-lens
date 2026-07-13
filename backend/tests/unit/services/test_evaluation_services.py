@@ -800,10 +800,13 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-2"]["training_evidence_refs"] == [
         by_finding["finding-2"]["evidence_refs"][0]
     ]
+    assert by_finding["finding-2"]["training_messages"] == []
     assert by_finding["finding-3"]["label_status"] == "rejected"
     assert by_finding["finding-3"]["dataset_use_status"] == "rejected"
+    assert by_finding["finding-3"]["training_messages"] == []
     assert by_finding["finding-4"]["label_status"] == "candidate"
     assert by_finding["finding-4"]["dataset_use_status"] == "review_candidate"
+    assert by_finding["finding-4"]["training_messages"] == []
     assert by_finding["finding-4"]["trace_status"] == "evidence_derived"
 
 

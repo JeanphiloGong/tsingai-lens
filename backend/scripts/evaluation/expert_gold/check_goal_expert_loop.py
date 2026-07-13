@@ -258,6 +258,12 @@ def _goal_rollup(
                 "by_error_category": dict(_mapping(dataset_goal.get("by_error_category"))),
                 "by_review_reason": dict(_mapping(dataset_goal.get("by_review_reason"))),
                 "by_system_warning": dict(_mapping(dataset_goal.get("by_system_warning"))),
+                "by_review_candidate_reason": dict(
+                    _mapping(dataset_goal.get("by_review_candidate_reason"))
+                ),
+                "by_review_candidate_warning": dict(
+                    _mapping(dataset_goal.get("by_review_candidate_warning"))
+                ),
             }
         )
     return rows
@@ -306,11 +312,21 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             by_error_category[str(category)] = by_error_category.get(str(category), 0) + int(
                 count or 0
             )
-        for reason, count in _mapping(goal.get("by_review_reason")).items():
+        review_reason_source = _review_risk_source(
+            goal,
+            candidate_key="by_review_candidate_reason",
+            all_key="by_review_reason",
+        )
+        system_warning_source = _review_risk_source(
+            goal,
+            candidate_key="by_review_candidate_warning",
+            all_key="by_system_warning",
+        )
+        for reason, count in review_reason_source.items():
             by_review_reason[str(reason)] = by_review_reason.get(str(reason), 0) + int(
                 count or 0
             )
-        for warning, count in _mapping(goal.get("by_system_warning")).items():
+        for warning, count in system_warning_source.items():
             by_system_warning[str(warning)] = by_system_warning.get(str(warning), 0) + int(
                 count or 0
             )
@@ -351,6 +367,20 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _review_risk_source(
+    goal: dict[str, Any],
+    *,
+    candidate_key: str,
+    all_key: str,
+) -> dict[str, Any]:
+    if int(goal.get("review_candidate_count") or 0) <= 0:
+        return {}
+    candidate_counts = _mapping(goal.get(candidate_key))
+    if candidate_counts or candidate_key in goal:
+        return candidate_counts
+    return _mapping(goal.get(all_key))
 
 
 def render_text_summary(summary: dict[str, Any]) -> str:

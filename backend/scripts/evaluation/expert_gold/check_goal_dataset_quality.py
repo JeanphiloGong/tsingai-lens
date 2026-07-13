@@ -337,6 +337,12 @@ def evaluate_goal_dataset_payload(
         "by_error_category": dict(_mapping(quality.get("by_error_category"))),
         "by_review_reason": dict(_mapping(quality.get("by_review_reason"))),
         "by_system_warning": dict(_mapping(quality.get("by_system_warning"))),
+        "by_review_candidate_reason": dict(
+            _mapping(quality.get("by_review_candidate_reason"))
+        ),
+        "by_review_candidate_warning": dict(
+            _mapping(quality.get("by_review_candidate_warning"))
+        ),
         "by_trace_status": dict(_mapping(quality.get("by_trace_status"))),
         "warning_counts": dict(warning_counts),
         "checks": checks,

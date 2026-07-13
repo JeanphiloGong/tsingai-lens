@@ -722,6 +722,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         },
         "by_review_reason": {},
         "by_system_warning": {},
+        "by_review_candidate_reason": {},
+        "by_review_candidate_warning": {},
         "warning_counts": {
             "missing_evidence": 0,
             "missing_source_text": 0,
@@ -1163,6 +1165,14 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
         "partial_support": 1,
     }
     assert dataset["quality_summary"]["by_system_warning"] == {
+        "table_row_alignment_uncertain": 2,
+        "weak_evidence": 1,
+    }
+    assert dataset["quality_summary"]["by_review_candidate_reason"] == {
+        "single_paper_evidence": 2,
+        "partial_support": 1,
+    }
+    assert dataset["quality_summary"]["by_review_candidate_warning"] == {
         "table_row_alignment_uncertain": 2,
         "weak_evidence": 1,
     }

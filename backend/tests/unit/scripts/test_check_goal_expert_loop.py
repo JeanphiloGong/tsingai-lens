@@ -56,6 +56,8 @@ def _dataset_payload(status: str = "pass"):
                 "by_error_category": {"none": 1},
                 "by_review_reason": {},
                 "by_system_warning": {},
+                "by_review_candidate_reason": {},
+                "by_review_candidate_warning": {},
             },
             {
                 "goal_id": "goal-2",
@@ -70,6 +72,11 @@ def _dataset_payload(status: str = "pass"):
                     "needs_cross_paper_confirmation": 1,
                 },
                 "by_system_warning": {"table_row_alignment_uncertain": 1},
+                "by_review_candidate_reason": {
+                    "single_paper_evidence": 2,
+                    "needs_cross_paper_confirmation": 1,
+                },
+                "by_review_candidate_warning": {"table_row_alignment_uncertain": 1},
             },
         ],
     }

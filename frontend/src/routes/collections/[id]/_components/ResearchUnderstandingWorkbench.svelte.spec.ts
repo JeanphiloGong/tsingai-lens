@@ -45,6 +45,8 @@ function datasetResponse(overrides: {
 	presentationBuckets?: Record<string, number>;
 	reviewReasons?: Record<string, number>;
 	systemWarnings?: Record<string, number>;
+	reviewCandidateReasons?: Record<string, number>;
+	reviewCandidateWarnings?: Record<string, number>;
 	scopeType?: string;
 	scopeId?: string;
 	datasetId?: string;
@@ -97,7 +99,9 @@ function datasetResponse(overrides: {
 			},
 			by_error_category: errorCategories,
 			by_review_reason: reviewReasons,
-			by_system_warning: systemWarnings
+			by_system_warning: systemWarnings,
+			by_review_candidate_reason: overrides.reviewCandidateReasons ?? reviewReasons,
+			by_review_candidate_warning: overrides.reviewCandidateWarnings ?? systemWarnings
 		},
 		items: [],
 		warnings: []

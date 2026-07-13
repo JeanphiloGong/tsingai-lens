@@ -288,10 +288,24 @@
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 		: [];
 	$: datasetReviewReasons = datasetSummary
-		? topPositiveCounts(datasetSummary.quality_summary.by_review_reason, 5)
+		? topPositiveCounts(
+				preferredReviewRiskCounts(
+					datasetSummary.quality_summary.by_review_candidate_reason,
+					datasetSummary.quality_summary.by_review_reason,
+					datasetReviewCandidateSampleCount
+				),
+				5
+			)
 		: [];
 	$: datasetSystemWarnings = datasetSummary
-		? topPositiveCounts(datasetSummary.quality_summary.by_system_warning, 5)
+		? topPositiveCounts(
+				preferredReviewRiskCounts(
+					datasetSummary.quality_summary.by_review_candidate_warning,
+					datasetSummary.quality_summary.by_system_warning,
+					datasetReviewCandidateSampleCount
+				),
+				5
+			)
 		: [];
 	$: collectionDatasetTrainingReadySampleCount =
 		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
@@ -316,10 +330,24 @@
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 		: [];
 	$: collectionDatasetReviewReasons = collectionDatasetSummary
-		? topPositiveCounts(collectionDatasetSummary.quality_summary.by_review_reason, 5)
+		? topPositiveCounts(
+				preferredReviewRiskCounts(
+					collectionDatasetSummary.quality_summary.by_review_candidate_reason,
+					collectionDatasetSummary.quality_summary.by_review_reason,
+					collectionDatasetReviewCandidateSampleCount
+				),
+				5
+			)
 		: [];
 	$: collectionDatasetSystemWarnings = collectionDatasetSummary
-		? topPositiveCounts(collectionDatasetSummary.quality_summary.by_system_warning, 5)
+		? topPositiveCounts(
+				preferredReviewRiskCounts(
+					collectionDatasetSummary.quality_summary.by_review_candidate_warning,
+					collectionDatasetSummary.quality_summary.by_system_warning,
+					collectionDatasetReviewCandidateSampleCount
+				),
+				5
+			)
 		: [];
 	$: expertSummary = usesFindings
 		? expertReadinessSummary(
@@ -769,6 +797,15 @@
 			.filter(([, count]) => count > 0)
 			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 			.slice(0, limit);
+	}
+
+	function preferredReviewRiskCounts(
+		candidateCounts: Record<string, number>,
+		allCounts: Record<string, number>,
+		reviewCandidateCount: number
+	) {
+		if (reviewCandidateCount <= 0) return {};
+		return Object.keys(candidateCounts).length ? candidateCounts : allCounts;
 	}
 
 	function listLabel(values: string[]) {

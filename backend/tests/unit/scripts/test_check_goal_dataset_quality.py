@@ -75,6 +75,8 @@ def _dataset_payload(**overrides):
         "by_trace_status": {"evidence_derived": 1},
         "by_review_reason": {"single_paper_evidence": 1},
         "by_system_warning": {"table_row_alignment_uncertain": 1},
+        "by_review_candidate_reason": {},
+        "by_review_candidate_warning": {},
         "warning_counts": {
             "unavailable_trace": 0,
             "failed_trace": 0,
@@ -108,6 +110,8 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
     }
     assert summary["by_review_reason"] == {"single_paper_evidence": 1}
     assert summary["by_system_warning"] == {"table_row_alignment_uncertain": 1}
+    assert summary["by_review_candidate_reason"] == {}
+    assert summary["by_review_candidate_warning"] == {}
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 

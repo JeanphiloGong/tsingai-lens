@@ -378,6 +378,8 @@ export type ResearchUnderstandingDataset = {
 		by_error_category: Record<string, number>;
 		by_review_reason: Record<string, number>;
 		by_system_warning: Record<string, number>;
+		by_review_candidate_reason: Record<string, number>;
+		by_review_candidate_warning: Record<string, number>;
 	};
 	warnings: string[];
 };
@@ -1068,7 +1070,9 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 			by_presentation_bucket: toNumberRecord(qualitySummary.by_presentation_bucket),
 			by_error_category: toNumberRecord(qualitySummary.by_error_category),
 			by_review_reason: toNumberRecord(qualitySummary.by_review_reason),
-			by_system_warning: toNumberRecord(qualitySummary.by_system_warning)
+			by_system_warning: toNumberRecord(qualitySummary.by_system_warning),
+			by_review_candidate_reason: toNumberRecord(qualitySummary.by_review_candidate_reason),
+			by_review_candidate_warning: toNumberRecord(qualitySummary.by_review_candidate_warning)
 		},
 		warnings: toStringList(record?.warnings)
 	};

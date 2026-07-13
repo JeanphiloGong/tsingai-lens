@@ -705,6 +705,12 @@ describe('research view shared helpers', () => {
 				},
 				by_system_warning: {
 					table_row_alignment_uncertain: 1
+				},
+				by_review_candidate_reason: {
+					single_paper_evidence: 1
+				},
+				by_review_candidate_warning: {
+					table_row_alignment_uncertain: 1
 				}
 			},
 			warnings: []
@@ -723,6 +729,12 @@ describe('research view shared helpers', () => {
 			partial_support: 1
 		});
 		expect(dataset.quality_summary.by_system_warning).toEqual({
+			table_row_alignment_uncertain: 1
+		});
+		expect(dataset.quality_summary.by_review_candidate_reason).toEqual({
+			single_paper_evidence: 1
+		});
+		expect(dataset.quality_summary.by_review_candidate_warning).toEqual({
 			table_row_alignment_uncertain: 1
 		});
 	});

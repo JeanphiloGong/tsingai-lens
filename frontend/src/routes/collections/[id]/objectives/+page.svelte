@@ -45,6 +45,14 @@
 	);
 	$: goalReviewSummary = buildGoalReviewSummary(confirmedGoals, goalDatasetById);
 	$: goalReviewRows = buildGoalReviewRows(confirmedGoals, goalDatasetById);
+	$: goalReviewOpenGoalCount = goalReviewRows.filter(
+		(row) => row.status !== 'training_ready'
+	).length;
+	$: goalReviewMessagePendingGoalCount = goalReviewRows.filter(
+		(row) => row.status === 'messages_pending'
+	).length;
+	$: firstGoalReviewAction =
+		goalReviewRows.find((row) => row.status !== 'training_ready') ?? null;
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		void loadObjectives();
@@ -391,6 +399,39 @@
 						<strong>{goalReviewSummary.reviewCandidates}</strong>
 					</span>
 				</div>
+				{#if goalReviewOpenGoalCount > 0}
+					<div
+						class="goal-review-panel__completion goal-review-panel__completion--incomplete"
+						role="status"
+					>
+						<div>
+							<strong>{$t('research.objectives.goalReviewIncompleteTitle')}</strong>
+							<span>
+								{$t('research.objectives.goalReviewIncompleteBody', {
+									goals: goalReviewOpenGoalCount,
+									review: goalReviewSummary.reviewCandidates,
+									messages: goalReviewMessagePendingGoalCount
+								})}
+							</span>
+						</div>
+						{#if firstGoalReviewAction}
+							<a
+								class="btn btn--primary btn--small"
+								href={goalReviewHref(firstGoalReviewAction.goal)}
+							>
+								{$t('research.objectives.goalReviewOpenFirstPending')}
+							</a>
+						{/if}
+					</div>
+				{:else}
+					<div
+						class="goal-review-panel__completion goal-review-panel__completion--complete"
+						role="status"
+					>
+						<strong>{$t('research.objectives.goalReviewCompleteTitle')}</strong>
+						<span>{$t('research.objectives.goalReviewCompleteBody')}</span>
+					</div>
+				{/if}
 				<div class="goal-review-list">
 					{#each goalReviewRows as row (row.goal.goal_id)}
 						<a href={goalReviewHref(row.goal)} class="goal-review-item">
@@ -640,6 +681,44 @@
 		line-height: 18px;
 	}
 
+	.goal-review-panel__completion {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+	}
+
+	.goal-review-panel__completion div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.goal-review-panel__completion strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 21px;
+	}
+
+	.goal-review-panel__completion span {
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.goal-review-panel__completion--incomplete {
+		border-color: rgba(217, 119, 6, 0.36);
+		background: rgba(217, 119, 6, 0.08);
+	}
+
+	.goal-review-panel__completion--complete {
+		border-color: rgba(22, 163, 74, 0.34);
+		background: rgba(22, 163, 74, 0.08);
+	}
+
 	.goal-review-list {
 		display: grid;
 		gap: 8px;
@@ -835,6 +914,7 @@
 		}
 
 		.goal-review-panel__heading,
+		.goal-review-panel__completion,
 		.goal-review-item {
 			grid-template-columns: 1fr;
 		}

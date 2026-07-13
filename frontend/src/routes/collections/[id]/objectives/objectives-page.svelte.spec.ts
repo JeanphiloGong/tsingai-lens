@@ -406,6 +406,19 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Expert loop incomplete'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'2 goal(s) still need expert action: 2 finding(s) need accept/reject/correct, and 1 goal(s) are missing exportable training messages.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Review next goal' }))
+			.toHaveAttribute('href', '/collections/col_4c54ffe568ec/goals/goal_heat_strength');
 		const goalLinks = browserPage.getByRole('link').all();
 		const goalReviewLinks = await Promise.all(
 			goalLinks.map(async (link) => ({
@@ -413,7 +426,9 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				href: link.element().getAttribute('href')
 			}))
 		);
-		const reviewRows = goalReviewLinks.filter((link) => link.href?.includes('/goals/'));
+		const reviewRows = goalReviewLinks.filter(
+			(link) => link.href?.includes('/goals/') && link.text.includes('?')
+		);
 		expect(reviewRows[0]).toMatchObject({
 			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength'
 		});

@@ -883,6 +883,13 @@ const translations: Record<Language, Translations> = {
 					'{goals} confirmed goal(s): {training} training-ready sample(s), {messages} training message(s), {review} review candidate(s).',
 				goalReviewGoals: 'Confirmed goals',
 				refreshGoalReview: 'Refresh review status',
+				goalReviewIncompleteTitle: 'Expert loop incomplete',
+				goalReviewIncompleteBody:
+					'{goals} goal(s) still need expert action: {review} finding(s) need accept/reject/correct, and {messages} goal(s) are missing exportable training messages.',
+				goalReviewOpenFirstPending: 'Review next goal',
+				goalReviewCompleteTitle: 'Expert loop complete',
+				goalReviewCompleteBody:
+					'All confirmed goals are training-ready and have exportable training messages.',
 				goalReviewEmpty:
 					'No confirmed goals yet. Confirm and analyze an objective before expert review can begin.',
 				goalReviewError: 'Goal review status is unavailable: {message}',
@@ -3902,6 +3909,12 @@ const translations: Record<Language, Translations> = {
 					'{goals} 个已确认目标：{training} 条可训练样本，{messages} 条训练 messages，{review} 条待复核样本。',
 				goalReviewGoals: '已确认目标',
 				refreshGoalReview: '刷新复核状态',
+				goalReviewIncompleteTitle: '专家闭环未完成',
+				goalReviewIncompleteBody:
+					'{goals} 个目标仍需专家处理：{review} 条发现需要接受、拒绝或修正，{messages} 个目标缺少可导出的训练 messages。',
+				goalReviewOpenFirstPending: '复核下一个目标',
+				goalReviewCompleteTitle: '专家闭环已完成',
+				goalReviewCompleteBody: '所有已确认目标都已进入可训练状态，并生成了可导出的训练 messages。',
 				goalReviewEmpty: '还没有已确认目标。先确认并分析一个目标后，才能开始专家复核。',
 				goalReviewError: '目标复核状态不可用：{message}',
 				goalReviewDatasetPending: '该目标的数据集状态暂不可用。',

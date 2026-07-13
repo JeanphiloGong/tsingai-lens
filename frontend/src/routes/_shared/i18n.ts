@@ -274,6 +274,8 @@ const translations: Record<Language, Translations> = {
 					'This answer is limited because Lens could not verify a visible source citation. Review the findings and evidence before using it for a protocol.',
 				sourceCitationRequired:
 					'Save is disabled until the answer names the visible source label, such as [Source 1].',
+				sourceLinkRequired:
+					'Save is disabled until every reviewed evidence citation has a visible source link.',
 				evidenceLinkMismatch:
 					'Save is disabled until source links match the reviewed evidence citations.'
 			},
@@ -3220,6 +3222,7 @@ const translations: Record<Language, Translations> = {
 					'该回答因缺少可验证的可见来源引用而受限。请先检查 Findings 和证据，再用于实验方案。',
 				sourceCitationRequired:
 					'该回答还没有写出可见来源标签，例如 [Source 1]，暂不能保存为实验方案。',
+				sourceLinkRequired: '每条已复核证据引用都需要可见来源链接，暂不能保存为实验方案。',
 				evidenceLinkMismatch: '来源链接和已复核证据引用不一致，暂不能保存为实验方案。'
 			},
 			sourceMode: {

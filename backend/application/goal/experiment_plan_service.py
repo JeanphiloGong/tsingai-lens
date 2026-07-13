@@ -157,6 +157,11 @@ class ExperimentPlanService:
             raise ValueError(
                 "goal copilot source links do not match evidence citations"
             )
+        missing_linked_evidence_ids = set(message.used_evidence_ids) - linked_evidence_ids
+        if missing_linked_evidence_ids:
+            raise ValueError(
+                "goal copilot answer is missing source links for evidence citations"
+            )
         requested_hrefs = {
             str(link.get("href"))
             for link in source_links or []

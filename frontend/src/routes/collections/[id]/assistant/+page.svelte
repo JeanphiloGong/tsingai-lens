@@ -347,6 +347,16 @@
 		return linkedEvidenceIds.every((evidenceId) => usedEvidenceIds.has(evidenceId));
 	}
 
+	function allEvidenceCitationsHaveSourceLinks(message: GoalSessionMessage) {
+		const usedEvidenceIds = new Set(message.used_evidence_ids ?? []);
+		const linkedEvidenceIds = new Set(
+			visibleSourceLinks(message)
+				.map((link) => new URL(link.href, 'http://localhost').searchParams.get('evidence_id') ?? '')
+				.filter(Boolean)
+		);
+		return [...usedEvidenceIds].every((evidenceId) => linkedEvidenceIds.has(evidenceId));
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -388,6 +398,7 @@
 				hasEvidenceCitations(message) &&
 				citesVisibleSourceLabel(message) &&
 				sourceLinksMatchEvidenceCitations(message) &&
+				allEvidenceCitationsHaveSourceLinks(message) &&
 				!needsCuratedFindings(message)
 		);
 	}
@@ -623,6 +634,16 @@
 										!sourceLinksMatchEvidenceCitations(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.evidenceLinkMismatch')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										citesVisibleSourceLabel(message) &&
+										sourceLinksMatchEvidenceCitations(message) &&
+										!allEvidenceCitationsHaveSourceLinks(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceLinkRequired')}
 										</p>
 									{/if}
 									<div class="message-actions">

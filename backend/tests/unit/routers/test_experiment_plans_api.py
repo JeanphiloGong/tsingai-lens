@@ -48,12 +48,19 @@ def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
                 "message_id": "msg_1",
                 "session_id": "session_1",
                 "role": "assistant",
-                "content": "Compare room-temperature and 150 C preheated LPBF builds.",
-                "answer": "Compare room-temperature and 150 C preheated LPBF builds.",
+                "content": (
+                    "Compare room-temperature and 150 C preheated LPBF builds "
+                    "[Source 1]."
+                ),
+                "answer": (
+                    "Compare room-temperature and 150 C preheated LPBF builds "
+                    "[Source 1]."
+                ),
                 "source_mode": "collection_grounded",
                 "used_evidence_ids": ["ev_1"],
                 "warnings": [],
                 "links": {},
+                "review_gate": "training_ready_findings",
                 "source_links": [
                     {
                         "kind": "evidence",

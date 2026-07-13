@@ -111,6 +111,10 @@ class GoalSessionMessageResponse(BaseModel):
         default_factory=list,
         description="User-navigable document or evidence links used by the answer",
     )
+    review_gate: str | None = Field(
+        default=None,
+        description="Review gate satisfied by the answer, such as training_ready_findings",
+    )
     created_at: str = Field(..., description="Creation timestamp")
 
 

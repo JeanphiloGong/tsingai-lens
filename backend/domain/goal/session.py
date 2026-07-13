@@ -58,6 +58,7 @@ class GoalMessageRecord:
     warnings: tuple[str, ...] = ()
     links: Mapping[str, str] | None = None
     source_links: tuple[GoalSourceLink, ...] = ()
+    review_gate: str | None = None
 
     @classmethod
     def user(
@@ -89,13 +90,16 @@ class GoalMessageRecord:
         warnings: Any = None,
         links: Mapping[str, Any] | None = None,
         source_links: Any = None,
+        review_gate: Any = None,
     ) -> "GoalMessageRecord":
         normalized_source_mode = normalize_source_mode(source_mode)
         evidence_ids = _stable_strings(used_evidence_ids)
         public_source_links = _normalize_source_links(source_links)
+        normalized_review_gate = _normalize_optional_text(review_gate)
         if normalized_source_mode != "collection_grounded":
             evidence_ids = ()
             public_source_links = ()
+            normalized_review_gate = None
         return cls(
             message_id=_normalize_required_text(message_id, "message_id"),
             session_id=_normalize_required_text(session_id, "session_id"),
@@ -106,6 +110,7 @@ class GoalMessageRecord:
             warnings=_stable_strings(warnings),
             links=_normalize_string_mapping(links),
             source_links=public_source_links,
+            review_gate=normalized_review_gate,
             created_at=str(created_at),
         )
 
@@ -122,6 +127,7 @@ class GoalMessageRecord:
                 warnings=payload.get("warnings"),
                 links=payload.get("links"),
                 source_links=payload.get("source_links"),
+                review_gate=payload.get("review_gate"),
                 created_at=payload.get("created_at") or "",
             )
         return cls.user(
@@ -150,6 +156,7 @@ class GoalMessageRecord:
                     "source_links": [
                         source_link.to_record() for source_link in self.source_links
                     ],
+                    "review_gate": self.review_gate,
                 }
             )
         return record

@@ -66,6 +66,7 @@ class SqliteGoalSessionRepository:
                     warnings,
                     links,
                     source_links,
+                    review_gate,
                     created_at
                 FROM goal_messages
                 WHERE message_id = ?
@@ -143,6 +144,7 @@ class SqliteGoalSessionRepository:
                     warnings,
                     links,
                     source_links,
+                    review_gate,
                     created_at
                 FROM goal_messages
                 WHERE session_id = ?
@@ -176,8 +178,9 @@ class SqliteGoalSessionRepository:
                     warnings,
                     links,
                     source_links,
+                    review_gate,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     self._message_values(session_id, index, message)
@@ -257,6 +260,7 @@ class SqliteGoalSessionRepository:
                     warnings TEXT NOT NULL,
                     links TEXT NOT NULL,
                     source_links TEXT NOT NULL,
+                    review_gate TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(session_id)
                         REFERENCES goal_sessions(session_id)
@@ -271,6 +275,16 @@ class SqliteGoalSessionRepository:
                 ON goal_messages(session_id, position)
                 """
             )
+            try:
+                connection.execute(
+                    """
+                    ALTER TABLE goal_messages
+                    ADD COLUMN review_gate TEXT
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def _session_values(self, payload: Mapping[str, Any]) -> tuple[Any, ...]:
         return (
@@ -310,6 +324,7 @@ class SqliteGoalSessionRepository:
             _dump_json_list(payload.get("warnings")),
             _dump_json_object(payload.get("links")),
             _dump_json_list(payload.get("source_links")),
+            _optional_text(payload.get("review_gate")),
             str(payload["created_at"]),
         )
 
@@ -351,6 +366,7 @@ class SqliteGoalSessionRepository:
                     "warnings": _load_json_list(row["warnings"]),
                     "links": _load_json_object(row["links"]),
                     "source_links": _load_json_list(row["source_links"]),
+                    "review_gate": row["review_gate"],
                 }
             )
         return record

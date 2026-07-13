@@ -408,6 +408,12 @@ class GoalSessionService:
             warnings=warnings,
             links=links,
             source_links=source_links,
+            review_gate=(
+                "training_ready_findings"
+                if source_mode == "collection_grounded"
+                and context.get("review_gate") == "training_ready_findings"
+                else None
+            ),
             created_at=_now_iso(),
         )
         session = self._update_session_after_answer(
@@ -641,6 +647,9 @@ class GoalSessionService:
             "links": self._session_links(session),
             "source_links": self._public_source_links(source_refs),
             "source_refs": source_refs,
+            "review_gate": (
+                "training_ready_findings" if curated_research_findings else None
+            ),
             "payload": self._compact_value(source_context_payload),
             "prompt_source_links": self._prompt_source_links(source_refs),
             "prompt_payload": self._prompt_payload(source_context_payload, source_refs),

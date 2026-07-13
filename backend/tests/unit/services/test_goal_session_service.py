@@ -781,6 +781,7 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     loaded = service.get_session(session["session_id"])
 
     assert response["source_mode"] == "collection_grounded"
+    assert response["review_gate"] == "training_ready_findings"
     assert "<think>" not in response["answer"]
     assert response["used_evidence_ids"] == ["ev_preheat_ductility"]
     assert response["source_links"] == [
@@ -794,6 +795,9 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
         }
     ]
     assert loaded["focused_goal_id"] == "goal_preheat"
+    assert service.list_messages(session["session_id"])["items"][-1]["review_gate"] == (
+        "training_ready_findings"
+    )
     assert feedback_service.calls == [
         {
             "collection_id": collection["collection_id"],

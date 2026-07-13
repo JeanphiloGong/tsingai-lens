@@ -43,6 +43,7 @@ def test_goal_session_record_updates_chat_state_after_answer() -> None:
         content="Answer",
         source_mode="collection_grounded",
         used_evidence_ids=["E01", "E01", "E02"],
+        review_gate="training_ready_findings",
         source_links=[
             {
                 "kind": "evidence",
@@ -64,6 +65,7 @@ def test_goal_session_record_updates_chat_state_after_answer() -> None:
     )
 
     assert updated.last_evidence_ids == ("E01", "E02")
+    assert assistant_message.review_gate == "training_ready_findings"
     assert updated.last_material_ids == ("mat-316l",)
     assert updated.last_paper_ids == ("paper-a",)
     assert "collection_grounded" in updated.rolling_summary
@@ -85,13 +87,16 @@ def test_goal_message_record_keeps_general_answers_unlinked() -> None:
             }
         ],
         warnings=["no_collection_evidence_found"],
+        review_gate="training_ready_findings",
         created_at="2026-05-10T00:01:00+00:00",
     )
 
     assert message.used_evidence_ids == ()
     assert message.source_links == ()
+    assert message.review_gate is None
     assert message.to_record()["used_evidence_ids"] == []
     assert message.to_record()["source_links"] == []
+    assert message.to_record()["review_gate"] is None
 
 
 def test_goal_message_record_serializes_user_and_source_links() -> None:

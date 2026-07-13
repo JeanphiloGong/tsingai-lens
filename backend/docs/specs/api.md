@@ -159,6 +159,8 @@ message 返回必须包含：
 - `warnings`
 - `links`
 - `source_links`
+- `review_gate`: 只有基于专家确认的 `training_ready` Findings 生成的
+  collection-grounded 回答才返回 `training_ready_findings`；实验方案保存会检查该字段
 
 ### Goal Experiment Plans
 
@@ -203,7 +205,7 @@ message 返回必须包含：
 
 带 `source_message_id` 的创建请求必须引用同一用户、同一 collection、同一 goal 下已经保存的
 assistant message。该 message 必须是 `collection_grounded`，包含 evidence citations 和
-前端可跳转 `source_links`，且不能带有
+前端可跳转 `source_links`，`review_gate=training_ready_findings`，且不能带有
 `curated_research_findings_empty` 或 `goal_copilot_model_unavailable` warning。
 后端会从已验证的 message 回填权威 `source_links`，并在 `metadata` 中记录
 `source=goal_copilot`、`source_session_id`、`source_mode`、`used_evidence_ids` 和

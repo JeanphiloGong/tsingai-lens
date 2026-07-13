@@ -21,6 +21,7 @@ def _write_goal_message(
     used_evidence_ids: list[str] | None = None,
     content: str = "Run a traceable validation matrix [Source 1].",
     source_href: str = "/collections/col_1/documents/paper-a?evidence_id=ev_1",
+    review_gate: str | None = None,
 ) -> None:
     repository.write_session(
         {
@@ -63,6 +64,7 @@ def _write_goal_message(
                         "href": source_href,
                     }
                 ],
+                "review_gate": review_gate,
                 "created_at": "2026-07-13T00:01:00+00:00",
             }
         ],
@@ -71,7 +73,10 @@ def _write_goal_message(
 
 def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
-    _write_goal_message(goal_session_repository)
+    _write_goal_message(
+        goal_session_repository,
+        review_gate="training_ready_findings",
+    )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,
@@ -112,11 +117,34 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     assert [plan.plan_id for plan in plans] == [draft.plan_id]
 
 
+def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate(
+    tmp_path,
+):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(goal_session_repository)
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+
+    with pytest.raises(ValueError, match="training-ready findings"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="Preheating validation matrix",
+            content="Run 25 C and 150 C LPBF 316L builds.",
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
 def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path):
     goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
     _write_goal_message(
         goal_session_repository,
         warnings=["curated_research_findings_empty"],
+        review_gate="training_ready_findings",
     )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
@@ -140,6 +168,7 @@ def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
     _write_goal_message(
         goal_session_repository,
         content="Run a traceable validation matrix based on the accepted evidence.",
+        review_gate="training_ready_findings",
     )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
@@ -164,6 +193,7 @@ def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_p
         goal_session_repository,
         used_evidence_ids=["ev_1"],
         source_href="/collections/col_1/documents/paper-a?evidence_id=ev_other",
+        review_gate="training_ready_findings",
     )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
@@ -184,7 +214,11 @@ def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_p
 
 def test_experiment_plan_service_rejects_cross_goal_source_message(tmp_path):
     goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
-    _write_goal_message(goal_session_repository, goal_id="goal_other")
+    _write_goal_message(
+        goal_session_repository,
+        goal_id="goal_other",
+        review_gate="training_ready_findings",
+    )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,
@@ -203,7 +237,10 @@ def test_experiment_plan_service_rejects_cross_goal_source_message(tmp_path):
 
 def test_experiment_plan_service_rejects_source_message_without_user(tmp_path):
     goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
-    _write_goal_message(goal_session_repository)
+    _write_goal_message(
+        goal_session_repository,
+        review_gate="training_ready_findings",
+    )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,

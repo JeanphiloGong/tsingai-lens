@@ -269,6 +269,9 @@
 	);
 	$: visibleFindingRows = usesFindings ? filteredFindings : [];
 	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
+	$: visibleAcceptableFindings = visibleFindingRows.filter(
+		(finding) => findingDatasetTrust(finding).datasetUseStatus !== 'training_ready'
+	);
 	$: selectableEffects = usesFindings
 		? filteredFindings
 				.map((finding) => findingEffectFor(finding))
@@ -1281,6 +1284,15 @@
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
 			feedbackSubmitting = false;
+		}
+	}
+
+	async function acceptVisibleFindings() {
+		if (!visibleAcceptableFindings.length || feedbackSubmitting) return;
+		const findings = [...visibleAcceptableFindings];
+		for (const finding of findings) {
+			await acceptFinding(finding);
+			if (feedbackError) break;
 		}
 	}
 
@@ -2477,6 +2489,17 @@
 								{$t('research.understanding.reviewQueueCount', {
 									count: reviewQueueCount
 								})}
+							</button>
+							<button
+								type="button"
+								disabled={!visibleAcceptableFindings.length || feedbackSubmitting || !reviewerReady}
+								on:click={acceptVisibleFindings}
+							>
+								{feedbackSubmitting
+									? $t('research.understanding.quickAcceptSaving')
+									: $t('research.understanding.acceptVisibleFindings', {
+											count: visibleAcceptableFindings.length
+										})}
 							</button>
 						</div>
 					</div>

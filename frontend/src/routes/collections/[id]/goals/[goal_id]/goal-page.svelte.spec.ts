@@ -85,17 +85,18 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			}
 			if (path.endsWith('/research-understanding/feedback')) {
 				if (method === 'POST') {
+					const body = JSON.parse((init?.body as string | undefined) ?? '{}');
 					return Promise.resolve(
 						jsonResponse({
-							feedback_id: 'ruf_accept_1',
+							feedback_id: `ruf_${body.finding_id ?? 'accept'}`,
 							collection_id: 'col_123',
-							scope_type: 'goal',
-							scope_id: 'goal_1',
-							finding_id: 'finding_claim_1',
-							claim_id: 'claim_1',
-							review_status: 'correct',
-							issue_type: 'none',
-							note: null,
+							scope_type: body.scope_type ?? 'goal',
+							scope_id: body.scope_id ?? 'goal_1',
+							finding_id: body.finding_id ?? null,
+							claim_id: body.claim_id ?? null,
+							review_status: body.review_status ?? 'correct',
+							issue_type: body.issue_type ?? 'none',
+							note: body.note ?? null,
 							reviewer: 'materials-expert@example.com',
 							created_at: '2026-07-13T00:02:00+00:00'
 						})
@@ -215,6 +216,18 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 									context_ids: [],
 									source_object_ids: [],
 									warnings: []
+								},
+								{
+									claim_id: 'claim_2',
+									claim_type: 'finding',
+									statement: 'Aging treatment improves yield strength.',
+									status: 'supported',
+									confidence: 0.78,
+									strength: 'moderate',
+									evidence_ref_ids: [],
+									context_ids: [],
+									source_object_ids: [],
+									warnings: []
 								}
 							],
 							relations: [],
@@ -222,7 +235,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 							contexts: [],
 							warnings: [],
 							summary: {
-								claim_count: 1,
+								claim_count: 2,
 								relation_count: 0,
 								evidence_ref_count: 0,
 								context_count: 0
@@ -233,7 +246,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 									material_scope: ['316L stainless steel'],
 									variable_axes: ['heat treatment'],
 									property_scope: ['tensile strength'],
-									claim_count: 1,
+									claim_count: 2,
 									relation_count: 0,
 									evidence_count: 0,
 									context_count: 0,
@@ -259,6 +272,26 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 										relation_ids: [],
 										needs_review: false,
 										warnings: []
+									},
+									{
+										effect_id: 'effect_claim_2',
+										claim_id: 'claim_2',
+										title: 'aging treatment -> yield strength',
+										statement: 'Aging treatment improves yield strength.',
+										claim_type: 'finding',
+										support_status: 'supported',
+										confidence: 0.78,
+										effect_direction: 'increases',
+										variable_axis: 'aging treatment',
+										target_property: 'yield strength',
+										paper_count: 0,
+										evidence_count: 0,
+										context_summary: '316L stainless steel, aging treatment',
+										evidence_ref_ids: [],
+										context_ids: [],
+										relation_ids: [],
+										needs_review: false,
+										warnings: []
 									}
 								],
 								findings: [
@@ -275,6 +308,35 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 										support_grade: 'weak',
 										review_status: 'pending_review',
 										confidence: 0.84,
+										paper_count: 0,
+										evidence_count: 0,
+										evidence_ref_ids: [],
+										context_ids: [],
+										relation_ids: [],
+										evidence_bundle: {
+											direct_result: [],
+											mechanism: [],
+											condition_context: [],
+											background: [],
+											conflict: [],
+											noise: [],
+											uncategorized: []
+										},
+										warnings: []
+									},
+									{
+										finding_id: 'finding_claim_2',
+										claim_id: 'claim_2',
+										title: 'aging treatment -> yield strength',
+										statement: 'Aging treatment improves yield strength.',
+										variables: ['aging treatment'],
+										mediators: [],
+										outcomes: ['yield strength'],
+										direction: 'increases',
+										scope_summary: '316L stainless steel, aging treatment',
+										support_grade: 'weak',
+										review_status: 'pending_review',
+										confidence: 0.78,
 										paper_count: 0,
 										evidence_count: 0,
 										evidence_ref_ids: [],
@@ -344,6 +406,55 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Preheating validation matrix').first())
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('obj_1')).not.toBeInTheDocument();
+	});
+
+	it('accepts all visible findings for expert dataset review', async () => {
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Accept visible 2' }).click();
+
+		await vi.waitFor(() => {
+			const feedbackPosts = fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
+					requestMethod(input, init) === 'POST'
+			);
+			expect(feedbackPosts).toHaveLength(2);
+		});
+		const feedbackBodies = fetchMock.mock.calls
+			.filter(
+				([input, init]) =>
+					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
+					requestMethod(input, init) === 'POST'
+			)
+			.map(([, init]) => JSON.parse(init?.body as string));
+		expect(feedbackBodies).toEqual([
+			expect.objectContaining({
+				scope_type: 'goal',
+				scope_id: 'goal_1',
+				review_status: 'correct',
+				issue_type: 'none'
+			}),
+			expect.objectContaining({
+				scope_type: 'goal',
+				scope_id: 'goal_1',
+				review_status: 'correct',
+				issue_type: 'none'
+			})
+		]);
+		expect(feedbackBodies).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					finding_id: 'finding_claim_1',
+					claim_id: 'claim_1'
+				}),
+				expect.objectContaining({
+					finding_id: 'finding_claim_2',
+					claim_id: 'claim_2'
+				})
+			])
+		);
+		await expect.element(browserPage.getByText('Gold').first()).toBeInTheDocument();
 	});
 
 	it('edits saved experiment plan drafts on the goal page', async () => {

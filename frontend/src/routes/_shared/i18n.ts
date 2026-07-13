@@ -428,6 +428,9 @@ const translations: Record<Language, Translations> = {
 				reviewLoopOpenTraining: 'Show training-ready',
 				reviewLoopOpenAll: 'Show all findings',
 				reviewLoopOpenDataset: 'Open dataset export',
+				batchAcceptVisible: 'Accept visible ({count})',
+				batchAcceptSaving: 'Accepting visible...',
+				batchAcceptSaved: 'Accepted {count} visible finding(s).',
 				coverageGaps: 'Coverage gaps',
 				coverageGapsBody:
 					'Requested axes not backed by primary findings yet. Treat these as missing evidence or review work before using the goal result.',
@@ -3445,6 +3448,9 @@ const translations: Record<Language, Translations> = {
 				reviewLoopOpenTraining: '查看可训练样本',
 				reviewLoopOpenAll: '查看全部发现',
 				reviewLoopOpenDataset: '打开数据集导出',
+				batchAcceptVisible: '接受当前可见（{count}）',
+				batchAcceptSaving: '正在接受当前可见...',
+				batchAcceptSaved: '已接受 {count} 条当前可见研究发现。',
 				coverageGaps: '覆盖缺口',
 				coverageGapsBody:
 					'这些研究目标轴尚未被主发现支撑，使用该目标结果前需要补证据或完成复核。',

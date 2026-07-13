@@ -2898,6 +2898,116 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('accepts all currently visible review-candidate findings', async () => {
+		let datasetRequestCount = 0;
+		let feedbackPostCount = 0;
+		const feedbackIds = [
+			'finding_strength_supported',
+			'finding_mechanism_limited',
+			'finding_comparison_conflict'
+		];
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				datasetRequestCount += 1;
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse(
+							datasetRequestCount === 1
+								? {
+										trainingReady: 0,
+										reviewCandidate: 3,
+										rejected: 0,
+										itemCount: 3,
+										labelCounts: {
+											candidate: 3,
+											silver: 0,
+											gold: 0,
+											rejected: 0
+										}
+									}
+								: {
+										trainingReady: 3,
+										reviewCandidate: 0,
+										rejected: 0,
+										itemCount: 3,
+										labelCounts: {
+											candidate: 0,
+											silver: 0,
+											gold: 3,
+											rejected: 0
+										}
+									}
+						)
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'POST') {
+				const body = JSON.parse(String(init?.body ?? '{}'));
+				feedbackPostCount += 1;
+				return Promise.resolve(
+					jsonResponse({
+						feedback_id: `ruf_batch_${feedbackPostCount}`,
+						collection_id: 'col_123',
+						scope_type: 'objective',
+						scope_id: 'obj_1',
+						finding_id: body.finding_id,
+						claim_id: body.claim_id,
+						review_status: body.review_status,
+						issue_type: body.issue_type,
+						note: body.note,
+						reviewer: 'materials-expert@example.com',
+						created_at: '2026-07-13T09:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Open review queue' }).click();
+		await browserPage.getByRole('button', { name: 'Accept visible (3)' }).click();
+
+		await expect.element(browserPage.getByText('Accepted 3 visible finding(s).')).toBeInTheDocument();
+		const feedbackPayloads = fetchMock.mock.calls
+			.filter(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+					(init as RequestInit | undefined)?.method === 'POST'
+				);
+			})
+			.map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+		expect(feedbackPayloads).toHaveLength(3);
+		expect(feedbackPayloads.map((payload) => payload.finding_id).sort()).toEqual(
+			[...feedbackIds].sort()
+		);
+		for (const payload of feedbackPayloads) {
+			expect(payload).toMatchObject({
+				review_status: 'correct',
+				issue_type: 'none',
+				note: null
+			});
+		}
+		await expect.poll(() => datasetRequestCount).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => currentDatasetRegionText()).toContain('Training ready 3');
+	});
+
 	it('submits expert curation for the selected claim classification', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

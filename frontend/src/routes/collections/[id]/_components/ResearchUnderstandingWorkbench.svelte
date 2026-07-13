@@ -77,6 +77,13 @@
 		'gold',
 		'rejected'
 	];
+	type FindingDatasetUseFilter = 'all' | ResearchUnderstandingDatasetUseStatus;
+	const DATASET_USE_STATUS_FILTER_ORDER: FindingDatasetUseFilter[] = [
+		'all',
+		'training_ready',
+		'review_candidate',
+		'rejected'
+	];
 	const REJECTING_FEEDBACK_ISSUES = new Set<ResearchUnderstandingFeedbackIssueType>([
 		'evidence_not_grounded',
 		'missing_evidence',
@@ -128,6 +135,7 @@
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
+	let selectedDatasetUseStatus: FindingDatasetUseFilter = 'all';
 	let selectedEffectId = '';
 	let selectedFindingId = '';
 	let detailMode = false;
@@ -195,6 +203,7 @@
 	$: if (usesFindings !== lastUsesFindings) {
 		lastUsesFindings = usesFindings;
 		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = 'all';
 	}
 	$: presentationEvidenceById = new Map(
 		(presentation?.evidence_items ?? []).map((item) => [item.evidence_ref_id, item])
@@ -283,6 +292,8 @@
 	$: filteredFindings = findingRows.filter(
 		(finding) =>
 			(selectedClaimStatus === 'all' || finding.support_grade === selectedClaimStatus) &&
+			(selectedDatasetUseStatus === 'all' ||
+				findingDatasetTrust(finding).datasetUseStatus === selectedDatasetUseStatus) &&
 			(!reviewQueueOnly ||
 				finding.review_status === 'needs_review' ||
 				reviewQueueFindingIds.has(finding.finding_id) ||
@@ -310,6 +321,7 @@
 		}
 		return counts;
 	})();
+	$: findingDatasetUseCounts = usesFindings ? countFindingsByDatasetUse(findingRows) : new Map();
 	$: if (understanding && detailMode && selectableEffects.length && !selectableEffects.some((effect) => effect.effect_id === selectedEffectId)) {
 		selectedEffectId = selectableEffects[0]?.effect_id ?? '';
 	}
@@ -545,6 +557,11 @@
 
 	function datasetUseStatusLabel(status: ResearchUnderstandingDatasetUseStatus) {
 		return translatedCatalogLabel('research.understanding.datasetUseStatuses', status);
+	}
+
+	function datasetUseStatusFilterLabel(status: FindingDatasetUseFilter) {
+		if (status === 'all') return $t('research.understanding.allDatasetUseStatuses');
+		return datasetUseStatusLabel(status);
 	}
 
 	function datasetErrorCategoryLabel(category: string) {
@@ -1495,6 +1512,15 @@
 		const counts = new Map<string, number>([['all', currentEffects.length]]);
 		for (const effect of currentEffects) {
 			counts.set(effect[field], (counts.get(effect[field]) ?? 0) + 1);
+		}
+		return counts;
+	}
+
+	function countFindingsByDatasetUse(currentFindings: ResearchUnderstandingPresentationFinding[]) {
+		const counts = new Map<FindingDatasetUseFilter, number>([['all', currentFindings.length]]);
+		for (const finding of currentFindings) {
+			const status = findingDatasetTrust(finding).datasetUseStatus;
+			counts.set(status, (counts.get(status) ?? 0) + 1);
 		}
 		return counts;
 	}
@@ -2596,6 +2622,25 @@
 											count: visibleAcceptableFindings.length
 										})}
 							</button>
+						</div>
+					</div>
+					<div class="research-understanding-workbench__filter-group">
+						<span>{$t('research.understanding.filterByDatasetUse')}</span>
+						<div class="research-understanding-workbench__segmented" role="list">
+							{#each DATASET_USE_STATUS_FILTER_ORDER as status (status)}
+								{@const count = findingDatasetUseCounts.get(status) ?? 0}
+								{#if count || status === 'all'}
+									<button
+										type="button"
+										class:research-understanding-workbench__segment--active={selectedDatasetUseStatus ===
+											status}
+										aria-pressed={selectedDatasetUseStatus === status}
+										on:click={() => (selectedDatasetUseStatus = status)}
+									>
+										{optionLabel(datasetUseStatusFilterLabel(status), count)}
+									</button>
+								{/if}
+							{/each}
 						</div>
 					</div>
 					{#if curationLoadError || feedbackLoadError}

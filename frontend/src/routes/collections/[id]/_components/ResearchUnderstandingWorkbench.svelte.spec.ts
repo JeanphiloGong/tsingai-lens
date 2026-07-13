@@ -1378,6 +1378,94 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.not.toBeInTheDocument();
 	});
 
+	it('filters findings by dataset use status from current expert review state', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						items: [
+							{
+								feedback_id: 'ruf_human_reviewed',
+								collection_id: 'col_123',
+								scope_type: 'objective',
+								scope_id: 'obj_1',
+								finding_id: 'finding_strength_supported',
+								claim_id: 'claim_strength_supported',
+								review_status: 'correct',
+								issue_type: 'none',
+								note: 'Human expert accepted the source-backed paper-level finding.',
+								reviewer: 'materials-expert@example.com',
+								created_at: '2026-07-13T09:00:00+00:00'
+							}
+						]
+					})
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 2,
+							itemCount: 3,
+							labelCounts: { candidate: 2, silver: 0, gold: 1, rejected: 0 }
+						})
+					)
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await expect
+			.element(browserPage.getByRole('button', { name: 'All uses 1' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Training-ready 1' }))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Training-ready 1' }).click();
+
+		const findingsTable = browserPage.getByLabelText('Research findings table');
+		await expect
+			.element(findingsTable.getByText('Heat treatment changes LPBF 316L tensile response.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(findingsTable.getByText('Training-ready · Human confirmed', { exact: true }))
+			.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Review candidate 2' }))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Review candidate 2' }).click();
+		await expect
+			.element(findingsTable.getByText('Annealing may reduce cellular substructure.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(
+				findingsTable.getByText('Strength trends conflict across reported heat treatments.').first()
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(findingsTable.getByText('Heat treatment changes LPBF 316L tensile response.').first())
+			.not.toBeInTheDocument();
+	});
+
 	it('filters claim rows by type and opens the selected claim detail', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

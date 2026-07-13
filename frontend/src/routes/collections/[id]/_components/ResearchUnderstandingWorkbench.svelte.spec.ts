@@ -1625,6 +1625,46 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shows an expert acceptance checklist for the goal review loop', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const checklist = browserPage.getByLabelText('Expert acceptance checklist');
+		await expect.element(checklist.getByText('Findings are readable')).toBeInTheDocument();
+		await expect
+			.element(
+				checklist.getByText(
+					'3 finding(s) are visible with variable, outcome, condition, and support status.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(checklist.getByText('Evidence is auditable')).toBeInTheDocument();
+		await expect
+			.element(
+				checklist.getByText(
+					'2 finding(s) still lack direct result evidence and should be repaired or rejected.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(checklist.getByText('Human review is closed')).toBeInTheDocument();
+		await expect
+			.element(
+				checklist.getByText('1 candidate finding(s) still need accept, reject, or correction.')
+			)
+			.toBeInTheDocument();
+		await expect.element(checklist.getByText('Training export is ready')).toBeInTheDocument();
+		await expect
+			.element(
+				checklist.getByText(
+					'2 training message sample(s) can be exported for evaluation or fine-tuning preparation.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(checklist.getByText('Protocol drafting is safe')).toBeInTheDocument();
+	});
+
 	it('accepts the selected finding and advances to the next review candidate', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

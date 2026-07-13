@@ -431,6 +431,37 @@ const translations: Record<Language, Translations> = {
 					'Export {count} training message sample(s) after the current review pass.',
 				reviewLoopStepDone:
 					'All visible findings for this goal have a usable review path. Keep evidence links attached when using them downstream.',
+				reviewLoopChecklist: 'Expert acceptance checklist',
+				reviewLoopChecklistStatuses: {
+					done: 'Done',
+					active: 'In progress',
+					blocked: 'Blocked'
+				},
+				reviewLoopChecklistFindings: 'Findings are readable',
+				reviewLoopChecklistFindingsDone:
+					'{count} finding(s) are visible with variable, outcome, condition, and support status.',
+				reviewLoopChecklistFindingsBlocked:
+					'No readable finding exists for this goal yet.',
+				reviewLoopChecklistEvidence: 'Evidence is auditable',
+				reviewLoopChecklistEvidenceDone:
+					'Visible findings include direct evidence links for source inspection.',
+				reviewLoopChecklistEvidenceBlocked:
+					'{count} finding(s) still lack direct result evidence and should be repaired or rejected.',
+				reviewLoopChecklistReview: 'Human review is closed',
+				reviewLoopChecklistReviewDone:
+					'{count} expert-confirmed sample(s) are training-ready for this goal.',
+				reviewLoopChecklistReviewBlocked:
+					'{count} candidate finding(s) still need accept, reject, or correction.',
+				reviewLoopChecklistTraining: 'Training export is ready',
+				reviewLoopChecklistTrainingDone:
+					'{count} training message sample(s) can be exported for evaluation or fine-tuning preparation.',
+				reviewLoopChecklistTrainingBlocked:
+					'{training} training-ready sample(s), {messages} message sample(s). Check export quality before downstream use.',
+				reviewLoopChecklistProtocol: 'Protocol drafting is safe',
+				reviewLoopChecklistProtocolDone:
+					'Goal Copilot can draft a protocol from reviewed findings while preserving source links.',
+				reviewLoopChecklistProtocolBlocked:
+					'Protocol drafting remains blocked until reviewed findings and training messages exist.',
 				reviewLoopOpenQueue: 'Open review queue',
 				reviewLoopOpenNextFinding: 'Review next finding',
 				reviewLoopOpenTraining: 'Show training-ready',
@@ -3479,6 +3510,35 @@ const translations: Record<Language, Translations> = {
 				reviewLoopStepExport: '本轮复核完成后导出 {count} 条训练 message 样本。',
 				reviewLoopStepDone:
 					'该目标当前可见研究发现都有可用复核路径。下游使用时继续保留证据链接。',
+				reviewLoopChecklist: '专家验收检查清单',
+				reviewLoopChecklistStatuses: {
+					done: '已完成',
+					active: '处理中',
+					blocked: '阻塞'
+				},
+				reviewLoopChecklistFindings: '研究发现可阅读',
+				reviewLoopChecklistFindingsDone:
+					'已有 {count} 条研究发现展示变量、结果、条件和证据状态。',
+				reviewLoopChecklistFindingsBlocked: '该目标还没有可阅读的研究发现。',
+				reviewLoopChecklistEvidence: '证据可审计',
+				reviewLoopChecklistEvidenceDone: '当前研究发现包含可检查原文的直接证据链接。',
+				reviewLoopChecklistEvidenceBlocked:
+					'仍有 {count} 条研究发现缺少直接结果证据，需要修复或拒绝。',
+				reviewLoopChecklistReview: '人工复核已闭合',
+				reviewLoopChecklistReviewDone:
+					'该目标已有 {count} 条专家确认样本进入 training-ready。',
+				reviewLoopChecklistReviewBlocked:
+					'仍有 {count} 条候选研究发现需要 accept、reject 或 correct。',
+				reviewLoopChecklistTraining: '训练导出已就绪',
+				reviewLoopChecklistTrainingDone:
+					'已有 {count} 条 training message 样本可用于评价或微调准备。',
+				reviewLoopChecklistTrainingBlocked:
+					'当前有 {training} 条 training-ready 样本、{messages} 条 message 样本；下游使用前需要检查导出质量。',
+				reviewLoopChecklistProtocol: '实验方案生成可用',
+				reviewLoopChecklistProtocolDone:
+					'目标助手可以基于已复核发现生成带来源链接的实验方案草稿。',
+				reviewLoopChecklistProtocolBlocked:
+					'需要先具备已复核发现和训练 messages，才能安全生成实验方案。',
 				reviewLoopOpenQueue: '打开复核队列',
 				reviewLoopOpenNextFinding: '复核下一条发现',
 				reviewLoopOpenTraining: '查看可训练样本',

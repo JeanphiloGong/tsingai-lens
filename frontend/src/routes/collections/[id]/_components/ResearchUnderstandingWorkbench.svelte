@@ -244,6 +244,10 @@
 	$: reviewQueueFindingCount = usesFindings
 		? (presentationSummary?.review_queue_finding_count ?? reviewableFindingRows.length)
 		: 0;
+	$: reviewLoopFindingCount = usesFindings ? allDisplayFindingRows.length : 0;
+	$: reviewLoopMissingDirectEvidenceCount = usesFindings
+		? allDisplayFindingRows.filter((finding) => findingDirectEvidenceCount(finding) === 0).length
+		: 0;
 	$: reviewQueueCount = usesFindings
 		? reviewQueueFindingCount
 		: effectRows.filter(
@@ -327,6 +331,17 @@
 				datasetTrainingReadySampleCount,
 				datasetTrainingMessageSampleCount,
 				datasetReviewCandidateSampleCount
+			)
+		: [];
+	$: reviewLoopChecklist = expertSummary
+		? reviewLoopChecklistItems(
+				reviewerReady,
+				Boolean(datasetSummary),
+				datasetTrainingReadySampleCount,
+				datasetTrainingMessageSampleCount,
+				datasetReviewCandidateSampleCount,
+				reviewLoopFindingCount,
+				reviewLoopMissingDirectEvidenceCount
 			)
 		: [];
 	$: reviewLoopErrorItems = datasetErrorCategories.slice(0, 3);
@@ -2222,6 +2237,76 @@
 		return steps;
 	}
 
+	function reviewLoopChecklistItems(
+		hasReviewer: boolean,
+		hasDatasetSummary: boolean,
+		trainingReady: number,
+		trainingMessages: number,
+		reviewCandidates: number,
+		findingCount: number,
+		missingDirectEvidenceCount: number
+	) {
+		const hasReadableFindings = findingCount > 0;
+		const hasEvidence = missingDirectEvidenceCount === 0 && findingCount > 0;
+		const reviewComplete = hasDatasetSummary && reviewCandidates === 0 && trainingReady > 0;
+		const messagesReady = trainingMessages > 0 && trainingMessages >= trainingReady;
+		return [
+			{
+				key: 'findings',
+				status: hasReadableFindings ? 'done' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistFindings'),
+				detail: hasReadableFindings
+					? $t('research.understanding.reviewLoopChecklistFindingsDone', {
+							count: findingCount
+						})
+					: $t('research.understanding.reviewLoopChecklistFindingsBlocked')
+			},
+			{
+				key: 'evidence',
+				status: hasEvidence ? 'done' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistEvidence'),
+				detail: hasEvidence
+					? $t('research.understanding.reviewLoopChecklistEvidenceDone')
+					: $t('research.understanding.reviewLoopChecklistEvidenceBlocked', {
+							count: missingDirectEvidenceCount
+						})
+			},
+			{
+				key: 'review',
+				status: reviewComplete ? 'done' : hasReviewer && hasDatasetSummary ? 'active' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistReview'),
+				detail: reviewComplete
+					? $t('research.understanding.reviewLoopChecklistReviewDone', {
+							count: trainingReady
+						})
+					: $t('research.understanding.reviewLoopChecklistReviewBlocked', {
+							count: reviewCandidates
+						})
+			},
+			{
+				key: 'training',
+				status: messagesReady ? 'done' : trainingReady > 0 ? 'active' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistTraining'),
+				detail: messagesReady
+					? $t('research.understanding.reviewLoopChecklistTrainingDone', {
+							count: trainingMessages
+						})
+					: $t('research.understanding.reviewLoopChecklistTrainingBlocked', {
+							training: trainingReady,
+							messages: trainingMessages
+						})
+			},
+			{
+				key: 'protocol',
+				status: messagesReady ? 'done' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistProtocol'),
+				detail: messagesReady
+					? $t('research.understanding.reviewLoopChecklistProtocolDone')
+					: $t('research.understanding.reviewLoopChecklistProtocolBlocked')
+			}
+		];
+	}
+
 	function showReviewQueue() {
 		datasetReviewCandidatesOnly = true;
 		reviewQueueOnly = false;
@@ -2871,6 +2956,20 @@
 							{feedbackError}
 						</p>
 					{/if}
+					<div
+						class="research-understanding-workbench__review-loop-checklist"
+						aria-label={$t('research.understanding.reviewLoopChecklist')}
+					>
+						{#each reviewLoopChecklist as item (item.key)}
+							<div
+								class={`research-understanding-workbench__review-loop-check research-understanding-workbench__review-loop-check--${item.status}`}
+							>
+								<span>{item.label}</span>
+								<strong>{translatedCatalogLabel('research.understanding.reviewLoopChecklistStatuses', item.status)}</strong>
+								<p>{item.detail}</p>
+							</div>
+						{/each}
+					</div>
 					<ul>
 						{#each reviewLoopSteps as step}
 							<li>{step}</li>
@@ -4713,6 +4812,75 @@
 
 	.research-understanding-workbench__review-loop-link--disabled {
 		pointer-events: none;
+	}
+
+	.research-understanding-workbench__review-loop-checklist {
+		grid-column: 1 / -1;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-check {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 9px 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-loop-check span,
+	.research-understanding-workbench__review-loop-check strong {
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-check span {
+		color: var(--text-primary);
+		font-weight: 750;
+	}
+
+	.research-understanding-workbench__review-loop-check strong {
+		width: fit-content;
+		border-radius: 999px;
+		padding: 1px 7px;
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__review-loop-check p {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__review-loop-check--done {
+		border-color: rgba(22, 163, 74, 0.28);
+	}
+
+	.research-understanding-workbench__review-loop-check--done strong {
+		background: rgba(22, 163, 74, 0.12);
+		color: #166534;
+	}
+
+	.research-understanding-workbench__review-loop-check--active {
+		border-color: rgba(217, 119, 6, 0.28);
+	}
+
+	.research-understanding-workbench__review-loop-check--active strong {
+		background: rgba(217, 119, 6, 0.13);
+		color: #92400e;
+	}
+
+	.research-understanding-workbench__review-loop-check--blocked {
+		border-color: rgba(100, 116, 139, 0.28);
+	}
+
+	.research-understanding-workbench__review-loop-check--blocked strong {
+		background: rgba(100, 116, 139, 0.14);
+		color: var(--text-secondary);
 	}
 
 	.research-understanding-workbench__review-loop ul {

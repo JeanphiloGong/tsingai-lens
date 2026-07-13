@@ -13028,7 +13028,7 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
         "Specimens: (100/280) as-SLM(120/; Hardness (HV): ( +/- 9.2) 196.9"
         in evidence_item["quote"]
     )
-    assert "Cells:" not in evidence_item["quote"]
+    assert "Unaligned cells:" not in evidence_item["quote"]
     assert evidence_item["table_audit"]["relevant_rows"] == [
         {
             "row_index": 1,
@@ -13134,7 +13134,7 @@ def test_with_presentation_table_quote_does_not_mislabel_short_rows():
     understanding = service.with_presentation(stored)
 
     evidence_item = understanding["presentation"]["evidence_items"][0]
-    assert "Relevant rows: Cells: 10 | 20" in evidence_item["quote"]
+    assert "Relevant rows: Unaligned cells: 10 | 20" in evidence_item["quote"]
     assert "A: 10; B: 20" not in evidence_item["quote"]
 
 

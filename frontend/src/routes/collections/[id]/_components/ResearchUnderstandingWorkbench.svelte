@@ -1677,7 +1677,11 @@
 	function tableAuditRowText(ref: ResearchUnderstandingPresentationEvidence, row: { cells: string[] }) {
 		const columns = ref.table_audit?.columns ?? [];
 		if (!columns.length) return row.cells.join(' | ');
-		if (columns.length !== row.cells.length) return `Cells: ${row.cells.join(' | ')}`;
+		if (columns.length !== row.cells.length) {
+			return $t('research.understanding.unalignedTableRow', {
+				cells: row.cells.join(' | ')
+			});
+		}
 		return row.cells
 			.map((cell, index) => (columns[index] ? `${columns[index]}: ${cell}` : cell))
 			.join('; ');

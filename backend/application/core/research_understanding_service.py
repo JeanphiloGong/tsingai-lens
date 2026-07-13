@@ -12569,7 +12569,7 @@ def _presentation_table_row_quote(cells: list[str], columns: list[str]) -> str:
     if not columns:
         return " | ".join(cells)
     if len(cells) != len(columns):
-        return "Cells: " + " | ".join(cells)
+        return "Unaligned cells: " + " | ".join(cells)
     pairs: list[str] = []
     for index, cell in enumerate(cells):
         pairs.append(f"{columns[index]}: {cell}")

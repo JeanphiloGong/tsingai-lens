@@ -160,6 +160,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     candidate = packet["candidates"][0]
     assert candidate["statement"] == "Preheating increased ductility by 14%."
     assert candidate["variables"] == ["preheating"]
+    assert packet["goal_id"] == "goal-1"
     assert (
         candidate["open_url"]
         == "/collections/col-1/goals/goal-1?review=queue&finding_id=finding-1"
@@ -175,6 +176,9 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     assert "Paper A / p. 4 / p. 4" not in text
     assert "AI suggestion; human review still required." in text
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text
+
+    summary = check.evaluate_goal_dataset_payload(dataset)
+    assert summary["next_review_finding_id"] == "finding-1"
 
 
 def test_evaluate_goal_dataset_payload_requires_training_ready_when_requested():

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+from urllib.parse import urlencode
 
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -237,9 +238,15 @@ def _goal_rollup(
         rows.append(
             {
                 "goal_id": goal_id,
+                "collection_id": collection_id,
                 "question": _text(goal.get("question")),
                 "review_url": _goal_review_url(collection_id, goal_id),
                 "training_ready_url": _goal_training_ready_url(collection_id, goal_id),
+                "next_review_finding_id": (
+                    _text(dataset_goal.get("next_review_finding_id"))
+                    if int(dataset_goal.get("review_candidate_count") or 0) > 0
+                    else ""
+                ),
                 "primary_finding_count": int(goal.get("primary_finding_count") or 0),
                 "direct_evidence_count": int(goal.get("direct_evidence_count") or 0),
                 "dataset_item_count": int(dataset_goal.get("item_count") or 0),
@@ -277,6 +284,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "next_action": _pending_goal_action(goal),
             "href": _pending_goal_href(goal),
+            "next_review_finding_id": _text(goal.get("next_review_finding_id")),
         }
         for goal in goals
         if (
@@ -370,8 +378,16 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _goal_review_url(collection_id: str, goal_id: str) -> str:
-    return f"/collections/{collection_id}/goals/{goal_id}?review=queue"
+def _goal_review_url(
+    collection_id: str,
+    goal_id: str,
+    *,
+    finding_id: str = "",
+) -> str:
+    params = {"review": "queue"}
+    if finding_id:
+        params["finding_id"] = finding_id
+    return f"/collections/{collection_id}/goals/{goal_id}?{urlencode(params)}"
 
 
 def _goal_training_ready_url(collection_id: str, goal_id: str) -> str:
@@ -391,6 +407,13 @@ def _pending_goal_action(goal: dict[str, Any]) -> str:
 def _pending_goal_href(goal: dict[str, Any]) -> str:
     if _pending_goal_action(goal) == "inspect_training_messages":
         return _text(goal.get("training_ready_url"))
+    finding_id = _text(goal.get("next_review_finding_id"))
+    if finding_id:
+        return _goal_review_url(
+            _text(goal.get("collection_id")),
+            _text(goal.get("goal_id")),
+            finding_id=finding_id,
+        )
     return _text(goal.get("review_url"))
 
 

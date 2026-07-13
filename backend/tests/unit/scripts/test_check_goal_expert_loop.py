@@ -61,6 +61,7 @@ def _dataset_payload(status: str = "pass"):
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
                 "review_candidate_count": 2,
+                "next_review_finding_id": "finding-review-1",
                 "by_error_category": {"variable_error": 1, "direction_error": 1},
             },
         ],
@@ -119,7 +120,8 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
                 "next_action": "review_candidates",
-                "href": "/collections/col-1/goals/goal-2?review=queue",
+                "href": "/collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1",
+                "next_review_finding_id": "finding-review-1",
             }
         ],
         "by_error_category": {"direction_error": 1, "variable_error": 1},
@@ -189,7 +191,10 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "Lens expert loop: fail (incomplete)" in text
     assert "review candidates: 2" in text
     assert "How does porosity affect corrosion?" in text
-    assert "open: /collections/col-1/goals/goal-2?review=queue" in text
+    assert (
+        "open: /collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1"
+        in text
+    )
     assert "direction_error: 1" in text
     assert "variable_error: 1" in text
 
@@ -232,6 +237,7 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
             "training_message_ready_count": 0,
             "next_action": "inspect_training_messages",
             "href": "/collections/col-1/goals/goal-2?review=training_ready",
+            "next_review_finding_id": "",
         }
     ]
 

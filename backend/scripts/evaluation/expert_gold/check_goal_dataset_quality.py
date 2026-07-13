@@ -333,6 +333,7 @@ def evaluate_goal_dataset_payload(
                 if _text(item.get("dataset_use_status")) == "review_candidate"
             ]
         ),
+        "next_review_finding_id": _next_review_finding_id(items),
         "by_error_category": dict(_mapping(quality.get("by_error_category"))),
         "by_trace_status": dict(_mapping(quality.get("by_trace_status"))),
         "warning_counts": dict(warning_counts),
@@ -519,6 +520,13 @@ def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
     return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
         target_statement
     )
+
+
+def _next_review_finding_id(items: list[dict[str, Any]]) -> str:
+    for item in items:
+        if _text(item.get("dataset_use_status")) == "review_candidate":
+            return _text(item.get("finding_id"))
+    return ""
 
 
 def _sample_failure_detail(items: Any) -> str:

@@ -842,6 +842,10 @@
 		return `${terms.slice(0, 3).join(', ')} +${terms.length - 3} ${$t('research.understanding.moreScopeTerms')}`;
 	}
 
+	function findingSummaryId(finding: ResearchUnderstandingPresentationFinding) {
+		return `${titleId}-finding-${finding.finding_id.replace(/[^A-Za-z0-9_-]/g, '-')}-summary`;
+	}
+
 	function findingDirectEvidenceLabel(finding: ResearchUnderstandingPresentationFinding) {
 		return $t('research.understanding.directEvidenceCount', {
 			count: findingDirectEvidenceCount(finding)
@@ -3245,7 +3249,9 @@
 															type="button"
 															on:click={() => openFindingDetail(finding.finding_id)}
 														>
-															<strong>{displayFinding.statement || displayFinding.title}</strong>
+															<strong id={findingSummaryId(displayFinding)}>
+																{displayFinding.statement || displayFinding.title}
+															</strong>
 															{#if displayFinding.title && displayFinding.title !== displayFinding.statement}
 																<span>{displayFinding.title}</span>
 															{/if}
@@ -3322,12 +3328,14 @@
 														<div class="research-understanding-workbench__finding-actions">
 															<button
 																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
 																on:click={() => openFindingDetail(finding.finding_id)}
 															>
 																{$t('research.understanding.openFindingDetail')}
 															</button>
 															<button
 																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
 																disabled={feedbackSubmitting || !reviewerReady || trust.datasetUseStatus === 'training_ready'}
 																on:click={() => acceptFinding(finding)}
 															>
@@ -3337,12 +3345,14 @@
 															</button>
 															<button
 																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
 																on:click={() => openFindingReject(finding.finding_id)}
 															>
 																{$t('research.understanding.quickReject')}
 															</button>
 															<button
 																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
 																on:click={() => openFindingCorrection(finding.finding_id)}
 															>
 																{$t('research.understanding.quickCorrect')}

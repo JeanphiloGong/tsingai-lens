@@ -424,9 +424,22 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: /Accept visible/ }))
 			.not.toBeInTheDocument();
-		const acceptButtons = browserPage.getByRole('button', { name: 'Accept' });
-		await acceptButtons.first().click();
-		await acceptButtons.nth(1).click();
+		await browserPage
+			.getByRole('row', { name: /Heat treatment changes tensile strength\./ })
+			.getByRole('button', { name: 'Accept' })
+			.click();
+		await vi.waitFor(() => {
+			const feedbackPosts = fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
+					requestMethod(input, init) === 'POST'
+			);
+			expect(feedbackPosts).toHaveLength(1);
+		});
+		await browserPage
+			.getByRole('row', { name: /Aging treatment improves yield strength\./ })
+			.getByRole('button', { name: 'Accept' })
+			.click();
 
 		await vi.waitFor(() => {
 			const feedbackPosts = fetchMock.mock.calls.filter(
@@ -610,6 +623,61 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			status: 'ready_for_review'
 		});
 		await expect.element(browserPage.getByText('Edited validation matrix').first()).toBeInTheDocument();
+	});
+
+	it('shows an empty experiment plan state when saved plans are unavailable', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path.endsWith('/research-understanding/curations')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (
+				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
+				method === 'GET'
+			) {
+				return Promise.resolve(jsonResponse({ detail: 'Not Found' }, 404, 'Not Found'));
+			}
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal: {
+							goal_id: 'goal_1',
+							collection_id: 'col_123',
+							question: 'How does heat treatment affect strength?',
+							source_type: 'objective_candidate',
+							material_hints: [],
+							process_hints: [],
+							property_hints: [],
+							source_objective_id: null,
+							status: 'ready',
+							analysis_error: null,
+							analysis_progress: null,
+							created_at: null,
+							updated_at: null
+						},
+						understanding: null,
+						pipeline_nodes: {},
+						errors: [],
+						warnings: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('No experiment plans saved yet.')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('404 Not Found - Not Found')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Plan content')).not.toBeInTheDocument();
 	});
 
 	it('does not save copilot plan edits after removing source labels', async () => {

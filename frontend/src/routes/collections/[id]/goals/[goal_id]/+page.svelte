@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
 	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
-	import { errorMessage } from '../../../../_shared/api';
+	import { errorMessage, isHttpStatusError } from '../../../../_shared/api';
 	import {
 		fetchExperimentPlans,
 		updateExperimentPlan,
@@ -100,7 +100,12 @@
 			}
 		} catch (err) {
 			plans = [];
-			planError = errorMessage(err);
+			selectPlan(null);
+			if (isHttpStatusError(err, 404)) {
+				planError = '';
+			} else {
+				planError = errorMessage(err);
+			}
 		} finally {
 			plansLoading = false;
 		}

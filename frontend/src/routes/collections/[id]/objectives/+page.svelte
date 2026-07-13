@@ -258,7 +258,9 @@
 
 	function goalReviewActionHref(row: { goal: ConfirmedGoal; status: string }) {
 		const href = goalReviewHref(row.goal);
-		return row.status === 'needs_review' ? `${href}?review=queue` : href;
+		if (row.status === 'needs_review') return `${href}?review=queue`;
+		if (row.status === 'messages_pending') return `${href}?review=training_ready`;
+		return href;
 	}
 
 	async function confirmAndAnalyze(objective: ObjectiveListItem) {

@@ -435,7 +435,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
 		expect(reviewRows[0].text).toContain('Review findings');
 		expect(reviewRows[1]).toMatchObject({
-			href: '/collections/col_4c54ffe568ec/goals/goal_messages_pending'
+			href: '/collections/col_4c54ffe568ec/goals/goal_messages_pending?review=training_ready'
 		});
 		expect(reviewRows[1].text).toContain('Which reviewed finding is missing training messages?');
 		expect(reviewRows[1].text).toContain('Messages pending');

@@ -2201,6 +2201,7 @@
 			showReviewQueue();
 		} else if (focus === 'training_ready') {
 			showTrainingReady();
+			openDatasetExport();
 		}
 	}
 

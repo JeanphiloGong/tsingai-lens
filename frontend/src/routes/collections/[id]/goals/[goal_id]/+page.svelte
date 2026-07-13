@@ -20,7 +20,7 @@
 	} from '../../../../_shared/researchView';
 
 	const POLL_DELAY_MS = 2500;
-	type WorkbenchInitialFocus = '' | 'review_queue';
+	type WorkbenchInitialFocus = '' | 'review_queue' | 'training_ready';
 
 	let analysis: GoalAnalysis | null = null;
 	let loading = false;
@@ -44,7 +44,11 @@
 	$: goal = analysis?.goal ?? null;
 	$: understanding = analysis?.understanding ?? null;
 	$: workbenchInitialFocus = (
-		$page.url.searchParams.get('review') === 'queue' ? 'review_queue' : ''
+		$page.url.searchParams.get('review') === 'queue'
+			? 'review_queue'
+			: $page.url.searchParams.get('review') === 'training_ready'
+				? 'training_ready'
+				: ''
 	) as WorkbenchInitialFocus;
 	$: progress = goal?.analysis_progress ?? null;
 	$: isAnalysisRunning = goal?.status === 'running';

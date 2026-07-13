@@ -363,6 +363,15 @@
 		? findingUsagePath(selectedFinding, selectedFeedback, selectedCuration)
 		: null;
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
+	$: selectedFindingWarnings =
+		selectedFinding && selectedFindingTrust
+			? selectedFinding.warnings.filter((warning) =>
+					findingReviewReasonIsVisible(selectedFinding, warning, selectedFindingTrust)
+				)
+			: [];
+	$: selectedDetailWarnings = selectedFinding
+		? selectedFindingWarnings
+		: (selectedClaim?.warnings ?? []);
 	$: currentReviewer = currentReviewerLabel($authState.user);
 	$: reviewerReady = Boolean(currentReviewer);
 	$: selectedRelatedReviewFindings = selectedFinding
@@ -445,6 +454,34 @@
 
 	function findingReviewStatusLabel(status: string) {
 		return translatedCatalogLabel('research.understanding.findingReviewStatuses', status);
+	}
+
+	function findingReviewStatusForDisplay(
+		finding: ResearchUnderstandingPresentationFinding,
+		trust: FindingDatasetTrust = findingDatasetTrust(finding)
+	) {
+		if (trust.datasetUseStatus === 'training_ready' && trust.source === 'human_feedback') return 'accepted';
+		if (trust.datasetUseStatus === 'training_ready' && trust.source === 'human_curation') return 'curated';
+		return finding.review_status;
+	}
+
+	function findingIsUnreviewedForDisplay(
+		finding: ResearchUnderstandingPresentationFinding,
+		trust: FindingDatasetTrust = findingDatasetTrust(finding)
+	) {
+		const displayStatus = findingReviewStatusForDisplay(finding, trust);
+		return displayStatus === 'needs_review' || displayStatus === 'pending_review';
+	}
+
+	function findingReviewReasonIsVisible(
+		finding: ResearchUnderstandingPresentationFinding,
+		reason: string,
+		trust: FindingDatasetTrust = findingDatasetTrust(finding)
+	) {
+		if (reason === 'needs_expert_review' && !findingIsUnreviewedForDisplay(finding, trust)) {
+			return false;
+		}
+		return true;
 	}
 
 	function relationLabel(type: string) {
@@ -714,9 +751,10 @@
 			'single_paper_evidence',
 			'needs_expert_review'
 		];
+		const trust = findingDatasetTrust(finding);
 		const values = [...(finding.warnings ?? []), ...(finding.review_reasons ?? [])]
 			.map((reason) => reason.trim())
-			.filter(Boolean);
+			.filter((reason) => reason && findingReviewReasonIsVisible(finding, reason, trust));
 		return [...new Set(values)].sort((left, right) => {
 			const leftIndex = priority.indexOf(left);
 			const rightIndex = priority.indexOf(right);
@@ -742,7 +780,7 @@
 		if (findingDirectEvidenceCount(finding) === 0) {
 			notes.push($t('research.understanding.noDirectResultEvidence'));
 		}
-		if (finding.review_status === 'needs_review' || finding.review_status === 'pending_review') {
+		if (findingIsUnreviewedForDisplay(finding)) {
 			notes.push($t('research.understanding.findingNeedsExpertReview'));
 		}
 		return [...new Set(notes)];
@@ -751,7 +789,8 @@
 	function findingUseBoundaryNotes(finding: ResearchUnderstandingPresentationFinding) {
 		const notes = [];
 		if (finding.generalization_note) notes.push(finding.generalization_note);
-		if (finding.evidence_gap_summary) notes.push(finding.evidence_gap_summary);
+		const evidenceGapSummary = findingEvidenceGapSummaryForDisplay(finding);
+		if (evidenceGapSummary) notes.push(evidenceGapSummary);
 		notes.push(
 			finding.paper_count <= 1
 				? $t('research.understanding.useBoundaryPaperLevel')
@@ -760,10 +799,21 @@
 		if (finding.support_grade !== 'strong') {
 			notes.push($t('research.understanding.useBoundaryNeedsConfirmation'));
 		}
-		if (finding.review_status === 'needs_review' || finding.review_status === 'pending_review') {
+		if (findingIsUnreviewedForDisplay(finding)) {
 			notes.push($t('research.understanding.useBoundaryBeforeModelUse'));
 		}
 		return [...new Set(notes)];
+	}
+
+	function findingEvidenceGapSummaryForDisplay(finding: ResearchUnderstandingPresentationFinding) {
+		if (!finding.evidence_gap_summary || findingIsUnreviewedForDisplay(finding)) {
+			return finding.evidence_gap_summary;
+		}
+		return finding.evidence_gap_summary
+			.split(',')
+			.map((item) => item.trim())
+			.filter((item) => item && !/expert review/i.test(item))
+			.join(', ');
 	}
 
 	function findingGeneralizationStatusLabel(finding: ResearchUnderstandingPresentationFinding) {
@@ -936,10 +986,7 @@
 		const hasConflict =
 			finding.support_grade === 'conflict' || Boolean(finding.evidence_bundle.conflict?.length);
 		const needsReview =
-			finding.review_status === 'needs_review' ||
-			finding.review_status === 'pending_review' ||
-			finding.support_grade !== 'strong' ||
-			hasRejectingReview;
+			findingIsUnreviewedForDisplay(finding) || finding.support_grade !== 'strong' || hasRejectingReview;
 		const status = findingUsageStatus(finding, {
 			hasDirectEvidence,
 			hasSinglePaperEvidence,
@@ -1008,6 +1055,7 @@
 			? backendActions
 			: inferredFindingUpgradeActions(finding, flags.hasConflict, flags.needsReview);
 		const checklist = actions
+			.filter((action) => action !== 'record_expert_review' || !flags.hasAcceptedReview)
 			.map((action) => findingUpgradeActionLabel(action, flags.directEvidenceCount))
 			.filter(Boolean);
 		if (
@@ -2491,7 +2539,7 @@
 										<tbody>
 											{#each visibleFindingRows as finding (finding.finding_id)}
 												{@const curation = curationsByTargetId.get(finding.finding_id)}
-												{@const findingFeedback = feedbackByTargetId.get(finding.finding_id) ?? []}
+												{@const findingFeedback = findingFeedbackFor(finding)}
 												{@const usagePreview = findingUsagePreview(finding)}
 												{@const trust = findingDatasetTrust(finding)}
 												<tr>
@@ -2557,9 +2605,9 @@
 															{#if usagePreview.nextAction}
 																<span>{usagePreview.nextAction}</span>
 															{/if}
-															{#if findingReviewReasonSummary(finding)}
-																<span>{findingReviewReasonSummary(finding)}</span>
-															{/if}
+																{#if findingReviewReasonSummary(finding)}
+																	<span>{findingReviewReasonSummary(finding)}</span>
+																{/if}
 															</div>
 														</td>
 														<td>
@@ -2570,7 +2618,7 @@
 																	{datasetLabelStatusLabel(trust.labelStatus)}
 																</span>
 																<small>{findingDatasetTrustSubtitle(trust)}</small>
-																<small>{findingReviewStatusLabel(finding.review_status)}</small>
+																<small>{findingReviewStatusLabel(findingReviewStatusForDisplay(finding, trust))}</small>
 															</div>
 														</td>
 													<td>
@@ -2645,8 +2693,12 @@
 												</span>
 											{/if}
 											<span>{supportGradeLabel(selectedFinding.support_grade)}</span>
-											<span>{findingReviewStatusLabel(selectedFinding.review_status)}</span>
 											{#if selectedFindingTrust}
+												<span>
+													{findingReviewStatusLabel(
+														findingReviewStatusForDisplay(selectedFinding, selectedFindingTrust)
+													)}
+												</span>
 												<span>{datasetUseStatusLabel(selectedFindingTrust.datasetUseStatus)}</span>
 												<span>{findingTrustSourceLabel(selectedFindingTrust.source)}</span>
 											{/if}
@@ -3440,12 +3492,12 @@
 								{/each}
 							</div>
 
-							{#if selectedClaim && (selectedClaim.warnings.length || selectedClaim.source_object_ids.length)}
+							{#if selectedClaim && (selectedDetailWarnings.length || (!selectedFinding && selectedClaim.source_object_ids.length))}
 								<div class="research-understanding-workbench__detail-section">
 									<h5>{$t('research.warnings')}</h5>
-									{#if selectedClaim.warnings.length}
+									{#if selectedDetailWarnings.length}
 										<div class="research-understanding-workbench__chips">
-											{#each selectedClaim.warnings as warning (`${selectedClaim.claim_id}-${warning}`)}
+											{#each selectedDetailWarnings as warning (`${selectedClaim.claim_id}-${warning}`)}
 												<span>{humanizeCode(warning)}</span>
 											{/each}
 										</div>

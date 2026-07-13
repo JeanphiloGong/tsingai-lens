@@ -663,7 +663,9 @@ const translations: Record<Language, Translations> = {
 				},
 				findingReviewStatuses: {
 					pending_review: 'Pending review',
-					needs_review: 'Needs review'
+					needs_review: 'Needs review',
+					accepted: 'Accepted',
+					curated: 'Curated'
 				},
 				findingEvidenceGroups: {
 					direct_result: 'Direct result evidence',
@@ -3533,7 +3535,9 @@ const translations: Record<Language, Translations> = {
 				},
 				findingReviewStatuses: {
 					pending_review: '待复核',
-					needs_review: '需要复核'
+					needs_review: '需要复核',
+					accepted: '已接受',
+					curated: '已校正'
 				},
 				findingEvidenceGroups: {
 					direct_result: '直接结果证据',

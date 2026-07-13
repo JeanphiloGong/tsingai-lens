@@ -1219,6 +1219,136 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingDetail.getByText('Gold', { exact: true })).not.toBeInTheDocument();
 	});
 
+	it('shows human accepted training-ready findings without stale needs-review badges', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						items: [
+							{
+								feedback_id: 'ruf_human_reviewed',
+								collection_id: 'col_123',
+								scope_type: 'objective',
+								scope_id: 'obj_1',
+								finding_id: 'finding_strength_supported',
+								claim_id: 'claim_strength_supported',
+								review_status: 'correct',
+								issue_type: 'none',
+								note: 'Human expert accepted the source-backed paper-level finding.',
+								reviewer: 'materials-expert@example.com',
+								created_at: '2026-07-13T09:00:00+00:00'
+							}
+						]
+					})
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 0,
+							itemCount: 1,
+							labelCounts: { candidate: 0, silver: 0, gold: 1, rejected: 0 }
+						})
+					)
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		const fixture = understandingFixture();
+		fixture.presentation.findings[0].review_status = 'needs_review';
+		fixture.presentation.findings[0].review_reasons = [
+			'single_paper_evidence',
+			'needs_cross_paper_confirmation',
+			'partial_support',
+			'needs_expert_review'
+		];
+		fixture.presentation.findings[0].warnings = ['needs_expert_review'];
+		fixture.presentation.primary_findings[0].review_status = 'needs_review';
+		fixture.presentation.primary_findings[0].review_reasons = [
+			'single_paper_evidence',
+			'needs_cross_paper_confirmation',
+			'partial_support',
+			'needs_expert_review'
+		];
+		fixture.presentation.primary_findings[0].warnings = ['needs_expert_review'];
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: fixture,
+			collectionId: 'col_123'
+		});
+
+		const findingsTable = browserPage.getByLabelText('Research findings table');
+		await expect.element(findingsTable.getByText('Feedback 1', { exact: true })).toBeInTheDocument();
+		await expect.element(findingsTable.getByText('Gold', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(findingsTable.getByText('Training-ready · Human confirmed', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(findingsTable.getByText('Accepted', { exact: true })).toBeInTheDocument();
+		await expect.element(findingsTable.getByText('Needs review', { exact: true })).not.toBeInTheDocument();
+
+		await findingsTable
+			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
+			.click();
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect.element(findingDetail.getByText('Gold', { exact: true }).first()).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Training-ready', { exact: true }).first())
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Human confirmed', { exact: true }).first()).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Accepted', { exact: true }).first()).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Needs review', { exact: true }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('needs expert review', { exact: true }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Expert review is still required before using this as a settled conclusion.'
+				)
+			)
+			.not.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Record expert feedback or curation for the final label.'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Needs independent cross-paper confirmation, support-grade curation, expert review.'
+				)
+			)
+			.not.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText('Find a second paper that confirms, contradicts, or extends it.')
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Curate the support grade before treating it as strong.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Review this finding before using it for model evaluation, training data, or downstream answers.'
+				)
+			)
+			.not.toBeInTheDocument();
+	});
+
 	it('filters claim rows by type and opens the selected claim detail', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

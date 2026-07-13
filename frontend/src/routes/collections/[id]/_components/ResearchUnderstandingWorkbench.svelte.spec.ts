@@ -2185,6 +2185,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 								evidence_error: 2,
 								none: 1
 							},
+							labelCounts: {
+								candidate: 4,
+								silver: 10,
+								gold: 1,
+								rejected: 0
+							},
 							presentationBuckets: {
 								primary: 5,
 								review_queue: 10
@@ -2230,6 +2236,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Training ready 1');
 		expect(datasetText).toContain('Training messages 1');
 		expect(datasetText).toContain('Needs review 15');
+		expect(datasetText).toContain('Candidate 4');
+		expect(datasetText).toContain('Silver 10');
+		expect(datasetText).toContain('Gold 1');
+		expect(datasetText).toContain('Rejected 0');
 		expect(datasetText).toContain('Variable error 3');
 		expect(datasetText).toContain('Evidence error 2');
 		expect(datasetText).toContain('Primary findings 5');

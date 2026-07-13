@@ -283,6 +283,12 @@
 		collectionDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
 	$: collectionDatasetReviewCandidateSampleCount =
 		collectionDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: collectionDatasetLabelCounts = collectionDatasetSummary?.label_counts ?? {
+		candidate: 0,
+		silver: 0,
+		gold: 0,
+		rejected: 0
+	};
 	$: collectionDatasetErrorCategories = collectionDatasetSummary
 		? Object.entries(collectionDatasetSummary.quality_summary.by_error_category)
 				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
@@ -3146,6 +3152,12 @@
 													{$t('research.understanding.datasetReviewCandidate')}
 													<strong>{collectionDatasetReviewCandidateSampleCount}</strong>
 												</span>
+												{#each DATASET_LABEL_STATUS_ORDER as status (status)}
+													<span>
+														{datasetLabelStatusLabel(status)}
+														<strong>{collectionDatasetLabelCounts[status]}</strong>
+													</span>
+												{/each}
 												{#each collectionDatasetErrorCategories as [category, count] (category)}
 													<span>
 														{datasetErrorCategoryLabel(category)}

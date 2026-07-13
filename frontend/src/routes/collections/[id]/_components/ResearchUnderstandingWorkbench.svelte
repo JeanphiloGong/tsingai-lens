@@ -1426,7 +1426,16 @@
 		await acceptFinding(selectedFinding);
 	}
 
-	async function acceptFinding(finding: ResearchUnderstandingPresentationFinding) {
+	async function acceptSelectedFindingAndOpenNext() {
+		if (!selectedFinding) return;
+		activeReviewPanel = 'feedback';
+		await acceptFinding(selectedFinding, { openNext: true });
+	}
+
+	async function acceptFinding(
+		finding: ResearchUnderstandingPresentationFinding,
+		options: { openNext?: boolean } = {}
+	) {
 		if (!understanding || !collectionId || !selectedScopeId || !reviewerReady) return;
 		feedbackSubmitting = true;
 		feedbackMessage = '';
@@ -1445,16 +1454,36 @@
 				id: formatShortIdentifier(feedback.feedback_id)
 			});
 			const targetId = reviewTargetKey(feedback);
-			feedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
+			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
 				feedback,
 				...(feedbackByTargetId.get(targetId) ?? [])
 			]);
+			feedbackByTargetId = nextFeedbackByTargetId;
+			if (options.openNext) {
+				const nextFinding = nextReviewCandidateAfter(finding.finding_id, nextFeedbackByTargetId);
+				if (nextFinding) {
+					openFindingDetail(nextFinding.finding_id);
+				}
+			}
 			await refreshDatasetSummaryForCurrentScope();
 		} catch (error) {
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
 			feedbackSubmitting = false;
 		}
+	}
+
+	function nextReviewCandidateAfter(
+		currentFindingId: string,
+		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>
+	) {
+		const candidates = allDisplayFindingRows.filter(
+			(finding) =>
+				finding.finding_id !== currentFindingId &&
+				findingDatasetTrust(finding, currentFeedbackByTargetId).datasetUseStatus ===
+					'review_candidate'
+		);
+		return candidates[0] ?? null;
 	}
 
 	async function acceptVisibleReviewCandidates() {
@@ -3527,6 +3556,15 @@
 											{feedbackSubmitting
 												? $t('research.understanding.quickAcceptSaving')
 												: $t('research.understanding.quickAccept')}
+										</button>
+										<button
+											type="button"
+											disabled={feedbackSubmitting || !collectionId || !reviewerReady || !nextReviewCandidateAfter(selectedFinding.finding_id, feedbackByTargetId)}
+											on:click={acceptSelectedFindingAndOpenNext}
+										>
+											{feedbackSubmitting
+												? $t('research.understanding.quickAcceptSaving')
+												: $t('research.understanding.quickAcceptAndNext')}
 										</button>
 										<button
 											type="button"

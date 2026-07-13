@@ -109,6 +109,9 @@
 - `PATCH /api/v1/goal-sessions/{session_id}`
 - `POST /api/v1/goal-sessions/{session_id}/messages`
 - `GET /api/v1/goal-sessions/{session_id}/messages`
+- `POST /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans`
+- `GET /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans`
+- `PATCH /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans/{plan_id}`
 
 最小 session 字段：
 
@@ -156,6 +159,47 @@ message 返回必须包含：
 - `warnings`
 - `links`
 - `source_links`
+
+### Goal Experiment Plans
+
+实验方案草稿是 Goal Consumer 的人类可编辑输出，不替代旧的 conditional protocol
+浏览分支。它用于把 AI chat 基于 curated Findings 生成的下一步实验建议保存下来，后续由
+专家继续修改。
+
+最小创建请求：
+
+```json
+{
+  "title": "Preheating validation matrix",
+  "content": "Compare room-temperature and 150 C preheated LPBF builds.",
+  "source_message_id": "msg_xxx",
+  "source_links": [
+    {
+      "kind": "evidence",
+      "label": "Source 1",
+      "href": "/collections/col_xxx/documents/doc_xxx?evidence_id=ev_xxx"
+    }
+  ],
+  "metadata": {
+    "source": "goal_copilot"
+  }
+}
+```
+
+返回字段：
+
+- `plan_id`
+- `collection_id`
+- `goal_id`
+- `title`
+- `content`
+- `status`: `draft | ready_for_review | archived`
+- `source_message_id`
+- `source_links`
+- `metadata`
+- `created_by`
+- `created_at`
+- `updated_at`
 
 `source_mode` 可选值：
 

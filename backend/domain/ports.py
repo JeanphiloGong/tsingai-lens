@@ -43,6 +43,7 @@ from domain.evaluation import (
     ResearchUnderstandingCuration,
     ResearchUnderstandingFeedback,
 )
+from domain.goal import ExperimentPlanRecord
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,23 @@ class GoalSessionRepository(Protocol):
         session_id: str,
         messages: list[Mapping[str, Any]],
     ) -> None: ...
+
+
+class ExperimentPlanRepository(Protocol):
+    def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord: ...
+
+    def read_plan(
+        self,
+        collection_id: str,
+        goal_id: str,
+        plan_id: str,
+    ) -> ExperimentPlanRecord | None: ...
+
+    def list_plans(
+        self,
+        collection_id: str,
+        goal_id: str,
+    ) -> tuple[ExperimentPlanRecord, ...]: ...
 
 
 class SourceArtifactRepository(Protocol):

@@ -9,6 +9,9 @@ from infra.persistence.sqlite.evaluation_repository import (
 from infra.persistence.sqlite.goal_session_repository import (
     SqliteGoalSessionRepository,
 )
+from infra.persistence.sqlite.experiment_plan_repository import (
+    SqliteExperimentPlanRepository,
+)
 from infra.persistence.sqlite.source_artifact_repository import (
     SqliteSourceArtifactRepository,
 )
@@ -18,6 +21,7 @@ __all__ = [
     "SqliteAuthRepository",
     "SqliteCoreFactRepository",
     "SqliteEvaluationRepository",
+    "SqliteExperimentPlanRepository",
     "SqliteGoalSessionRepository",
     "SqliteSourceArtifactRepository",
 ]

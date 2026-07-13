@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
+	import { createExperimentPlan } from '../../../_shared/experimentPlans';
 	import {
 		createGoalSession,
 		fetchGoalSession,
@@ -49,6 +50,8 @@
 	let history: StoredGoalSession[] = [];
 	let loading = false;
 	let sending = false;
+	let savingPlanMessageId = '';
+	let savedPlanMessageIds: Record<string, string> = {};
 	let error = '';
 	let input = '';
 	let loadedKey = '';
@@ -344,6 +347,52 @@
 		if (!browser || !text) return;
 		void navigator.clipboard?.writeText(text);
 	}
+
+	function canSaveExperimentPlan(message: GoalSessionMessage) {
+		return Boolean(
+			queryGoalId &&
+				message.role === 'assistant' &&
+				message.source_mode === 'collection_grounded' &&
+				messageText(message).trim()
+		);
+	}
+
+	function experimentPlanTitle(text: string) {
+		const firstLine = text
+			.split('\n')
+			.map((line) => line.trim())
+			.find(Boolean);
+		if (!firstLine) return $t('goalCopilot.experimentPlan.defaultTitle');
+		const cleaned = firstLine.replace(/^#+\s*/, '').replace(/^\d+\.\s*/, '');
+		return cleaned.length > 80 ? `${cleaned.slice(0, 80)}...` : cleaned;
+	}
+
+	async function saveExperimentPlan(message: GoalSessionMessage) {
+		const content = messageText(message).trim();
+		if (!queryGoalId || !content || savingPlanMessageId) return;
+		savingPlanMessageId = message.message_id;
+		error = '';
+		try {
+			const plan = await createExperimentPlan(collectionId, queryGoalId, {
+				title: experimentPlanTitle(content),
+				content,
+				source_message_id: message.message_id,
+				source_links: visibleSourceLinks(message),
+				metadata: {
+					source: 'goal_copilot',
+					source_mode: message.source_mode
+				}
+			});
+			savedPlanMessageIds = {
+				...savedPlanMessageIds,
+				[message.message_id]: plan.plan_id
+			};
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			savingPlanMessageId = '';
+		}
+	}
 </script>
 
 <svelte:head>
@@ -518,6 +567,22 @@
 										>
 											<span aria-hidden="true">⧉</span>
 										</button>
+										{#if canSaveExperimentPlan(message)}
+											<button
+												class="action-button action-button--text"
+												type="button"
+												disabled={Boolean(savedPlanMessageIds[message.message_id]) || savingPlanMessageId === message.message_id}
+												on:click={() => saveExperimentPlan(message)}
+											>
+												{#if savedPlanMessageIds[message.message_id]}
+													{$t('goalCopilot.experimentPlan.saved')}
+												{:else if savingPlanMessageId === message.message_id}
+													{$t('goalCopilot.experimentPlan.saving')}
+												{:else}
+													{$t('goalCopilot.experimentPlan.save')}
+												{/if}
+											</button>
+										{/if}
 									</div>
 								</div>
 							</article>
@@ -1115,6 +1180,21 @@
 	.action-button:hover {
 		background: #f8fafc;
 		color: #2563eb;
+	}
+
+	.action-button--text {
+		width: auto;
+		min-width: 92px;
+		padding: 0 10px;
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0;
+		white-space: nowrap;
+	}
+
+	.action-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.65;
 	}
 
 	.input-area {

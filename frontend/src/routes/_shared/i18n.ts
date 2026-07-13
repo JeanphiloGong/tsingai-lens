@@ -262,6 +262,12 @@ const translations: Record<Language, Translations> = {
 				dislike: 'Dislike answer',
 				copy: 'Copy answer'
 			},
+			experimentPlan: {
+				save: 'Save plan',
+				saving: 'Saving...',
+				saved: 'Saved',
+				defaultTitle: 'Experiment plan draft'
+			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
 				collection_limited: 'Limited collection evidence',
@@ -3133,6 +3139,12 @@ const translations: Record<Language, Translations> = {
 				like: '点赞回答',
 				dislike: '点踩回答',
 				copy: '复制回答'
+			},
+			experimentPlan: {
+				save: '保存方案',
+				saving: '保存中...',
+				saved: '已保存',
+				defaultTitle: '实验方案草稿'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

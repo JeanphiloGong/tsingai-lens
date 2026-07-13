@@ -19,6 +19,7 @@ from controllers.core import (
 )
 from controllers.derived import graph
 from controllers.goal import intake as goals
+from controllers.goal import experiment_plans
 from controllers.goal import sessions as goal_sessions
 from controllers.source import collections, references, tasks
 from fastapi import FastAPI, Request
@@ -154,6 +155,7 @@ def create_app() -> FastAPI:
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(references.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goal_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)

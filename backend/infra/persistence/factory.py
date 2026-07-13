@@ -12,6 +12,7 @@ from domain.ports import (
     CollectionRepository,
     CoreFactRepository,
     EvaluationRepository,
+    ExperimentPlanRepository,
     GoalSessionRepository,
     SourceArtifactRepository,
     TaskRepository,
@@ -30,6 +31,7 @@ from infra.persistence.sqlite import (
     SqliteAuthRepository,
     SqliteCoreFactRepository,
     SqliteEvaluationRepository,
+    SqliteExperimentPlanRepository,
     SqliteGoalSessionRepository,
     SqliteSourceArtifactRepository,
 )
@@ -94,6 +96,12 @@ def build_goal_session_repository(
     db_path: Path | None = None,
 ) -> GoalSessionRepository:
     return SqliteGoalSessionRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_experiment_plan_repository(
+    db_path: Path | None = None,
+) -> ExperimentPlanRepository:
+    return SqliteExperimentPlanRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_auth_repository(

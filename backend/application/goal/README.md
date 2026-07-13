@@ -10,7 +10,8 @@ The active runtime path is a lightweight session over one collection:
 3. read existing Core or Core-derived artifacts when grounded context is allowed
 4. prefer expert-curated `training_ready` research-understanding Findings when
    the session is focused on a confirmed goal or objective
-5. label the answer source as collection-grounded, collection-limited, general
+5. save human-editable experiment plan drafts from goal-focused chat answers
+6. label the answer source as collection-grounded, collection-limited, general
    fallback, or general-only
 
 Structured Goal Brief data is optional context for this path. It is not a
@@ -29,6 +30,10 @@ own database connections, SQL, schema initialization, or row encoding.
   collection artifacts before grounded answers, prioritizes curated Findings
   for goal-focused experiment or protocol questions, and labels general
   fallback separately from collection evidence.
+- `experiment_plan_service.py`
+  Persists goal-scoped experiment plan drafts generated from chat answers. These
+  drafts are human-editable Goal Consumer outputs, not replacements for the
+  conditional Protocol browsing branch.
 - `brief_service.py`
   Optional goal-first collection-seeding path. It shapes a thin research brief
   and registers a `seed_collection` handoff into Source, but it is not required

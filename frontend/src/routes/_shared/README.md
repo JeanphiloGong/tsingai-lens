@@ -34,5 +34,8 @@ This node owns browser-side helpers that are shared across frontend routes.
 - `goalSessions.ts`
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references
+- `experimentPlans.ts`
+  Goal-scoped experiment plan draft API helper for saving and editing
+  human-reviewable protocol suggestions produced from grounded copilot answers
 - `i18n.ts`
   Shared translations and labels

@@ -255,6 +255,80 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		).toBe(false);
 	});
 
+	it('explains when a limited answer is missing auditable source citations', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						message_id: 'msg_assistant_missing_source_trace',
+						session_id: 'session_1',
+						role: 'assistant',
+						content:
+							'Lens could not verify source citations in the generated answer, so do not treat it as a traceable collection conclusion.',
+						answer:
+							'Lens could not verify source citations in the generated answer, so do not treat it as a traceable collection conclusion.',
+						source_mode: 'collection_limited',
+						used_evidence_ids: [],
+						warnings: ['goal_copilot_missing_source_citation'],
+						links: {},
+						source_links: [],
+						created_at: '2026-07-13T00:01:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect.element(browserPage.getByText(/could not verify source citations/)).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This answer is limited because Lens could not verify a visible source citation. Review the findings and evidence before using it for a protocol.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
+					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+				);
+			})
+		).toBe(false);
+	});
+
 	it('does not save grounded answers without evidence citations as experiment plans', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

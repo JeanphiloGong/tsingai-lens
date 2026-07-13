@@ -322,6 +322,10 @@
 		return (message.warnings ?? []).includes('curated_research_findings_empty');
 	}
 
+	function missingSourceCitation(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('goal_copilot_missing_source_citation');
+	}
+
 	function hasEvidenceCitations(message: GoalSessionMessage) {
 		return (message.used_evidence_ids ?? []).length > 0;
 	}
@@ -580,6 +584,10 @@
 									{#if needsCuratedFindings(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.reviewRequired')}
+										</p>
+									{:else if missingSourceCitation(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceTraceRequired')}
 										</p>
 									{:else if message.role === 'assistant' &&
 										message.source_mode === 'collection_grounded' &&

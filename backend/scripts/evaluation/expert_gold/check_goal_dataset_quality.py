@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 from typing import Any
+from urllib.parse import urlencode
 from urllib import request as request_url
 from urllib.error import HTTPError, URLError
 
@@ -349,6 +350,7 @@ def build_goal_review_packet(
     for item in _mapping_list(dataset.get("items")):
         if _text(item.get("dataset_use_status")) != "review_candidate":
             continue
+        finding_id = _text(item.get("finding_id"))
         prediction = _mapping(item.get("system_prediction"))
         expert_target = _mapping(item.get("expert_target"))
         evidence_records = (
@@ -359,7 +361,12 @@ def build_goal_review_packet(
         candidates.append(
             {
                 "sample_id": _text(item.get("sample_id")),
-                "finding_id": _text(item.get("finding_id")),
+                "finding_id": finding_id,
+                "open_url": _goal_review_url(
+                    collection_id,
+                    goal_id,
+                    finding_id=finding_id,
+                ),
                 "presentation_bucket": _text(item.get("presentation_bucket")),
                 "trace_status": _text(item.get("trace_status")),
                 "statement": _text(prediction.get("statement"))
@@ -435,6 +442,7 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                         f"review={_text(candidate.get('review_status')) or 'n/a'}; "
                         f"trace={_text(candidate.get('trace_status')) or 'n/a'}"
                     ),
+                    f"     open finding: {_text(candidate.get('open_url')) or packet.get('review_url')}",
                 ]
             )
             if _text(candidate.get("scope_summary")):
@@ -563,8 +571,16 @@ def _clip(value: Any, limit: int = REVIEW_PACKET_QUOTE_LIMIT) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
-def _goal_review_url(collection_id: str, goal_id: str) -> str:
-    return f"/collections/{collection_id}/goals/{goal_id}?review=queue"
+def _goal_review_url(
+    collection_id: str,
+    goal_id: str,
+    *,
+    finding_id: str = "",
+) -> str:
+    params = {"review": "queue"}
+    if finding_id:
+        params["finding_id"] = finding_id
+    return f"/collections/{collection_id}/goals/{goal_id}?{urlencode(params)}"
 
 
 def _text(value: Any) -> str:

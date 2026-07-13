@@ -50,6 +50,7 @@
 				? 'training_ready'
 				: ''
 	) as WorkbenchInitialFocus;
+	$: workbenchInitialFindingId = $page.url.searchParams.get('finding_id') ?? '';
 	$: progress = goal?.analysis_progress ?? null;
 	$: isAnalysisRunning = goal?.status === 'running';
 	$: analysisErrors = analysis?.errors ?? [];
@@ -388,6 +389,7 @@
 					goal_id: goalId
 				})}
 				initialFocus={workbenchInitialFocus}
+				initialFindingId={workbenchInitialFindingId}
 				bodyKey="research.understanding.objectiveBody"
 				titleId="goal-understanding-title"
 			/>

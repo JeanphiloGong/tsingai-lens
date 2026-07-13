@@ -1520,6 +1520,32 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('opens a specific review candidate finding from a deep link', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123',
+			initialFocus: 'review_queue',
+			initialFindingId: 'finding_mechanism_limited'
+		});
+
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Review candidate 3' }))
+			.toHaveAttribute('aria-pressed', 'true');
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept', exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Reject', exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Correct', exact: true }))
+			.toBeInTheDocument();
+	});
+
 	it('opens directly on training-ready findings and dataset exports from a messages deep link', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

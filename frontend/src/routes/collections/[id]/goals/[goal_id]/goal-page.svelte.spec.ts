@@ -493,7 +493,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByRole('heading', { name: 'Expert feedback' })).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Review result')).toHaveValue('incorrect');
 		await expect.element(browserPage.getByLabelText('Issue type')).toHaveValue('wrong_variable');
-		await expect.element(browserPage.getByRole('button', { name: 'Save feedback' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save feedback', exact: true }))
+			.toBeInTheDocument();
 	});
 
 	it('opens the correction form from a finding table row', async () => {
@@ -505,7 +507,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByLabelText('Curated statement'))
 			.toHaveValue('Heat treatment changes tensile strength.');
-		await expect.element(browserPage.getByRole('button', { name: 'Save curation' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save curation', exact: true }))
+			.toBeInTheDocument();
 	});
 
 	it('edits saved experiment plan drafts on the goal page', async () => {

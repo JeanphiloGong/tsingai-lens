@@ -246,8 +246,8 @@ or anonymous feedback/curation remains `silver` and `review_candidate` until a
 human expert confirms it.
 
 To print a compact expert review packet with each pending candidate finding,
-its variables/outcomes/direction, evidence quote, source link, and frontend
-review entry, run:
+its variables/outcomes/direction, evidence quote, source link, and direct
+frontend finding review entry, run:
 
 ```bash
 python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \

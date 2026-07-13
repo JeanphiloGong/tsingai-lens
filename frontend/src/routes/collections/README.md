@@ -48,7 +48,8 @@ This node owns the collection workspace route family in the frontend.
   source block in an expandable audit section with paper/page/heading/block
   provenance, and remains clickable back to the document reader; internal
   finding/claim/evidence ids remain hidden binding data for feedback, curation,
-  source navigation, and audit details
+  source navigation, audit details, and review-queue deep links that open a
+  specific finding for accept/reject/correct review
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

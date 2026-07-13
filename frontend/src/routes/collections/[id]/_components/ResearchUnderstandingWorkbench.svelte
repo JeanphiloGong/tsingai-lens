@@ -38,6 +38,7 @@
 	export let bodyKey = 'research.understanding.objectiveBody';
 	export let titleId = 'research-understanding-title';
 	export let initialFocus: '' | 'review_queue' | 'training_ready' = '';
+	export let initialFindingId = '';
 
 	const CLAIM_TYPE_ORDER = [
 		'all',
@@ -186,6 +187,7 @@
 	let collectionDatasetError = '';
 	let collectionDatasetRequestSequence = 0;
 	let appliedInitialFocusKey = '';
+	let appliedInitialFindingKey = '';
 
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
@@ -386,7 +388,10 @@
 		return counts;
 	})();
 	$: findingDatasetUseCounts = usesFindings ? countFindingsByDatasetUse(findingRows) : new Map();
-	$: if (understanding && detailMode && selectableEffects.length && !selectableEffects.some((effect) => effect.effect_id === selectedEffectId)) {
+	$: if (selectedFindingId && selectedEffectId) {
+		selectedEffectId = '';
+	}
+	$: if (understanding && detailMode && !selectedFindingId && selectableEffects.length && !selectableEffects.some((effect) => effect.effect_id === selectedEffectId)) {
 		selectedEffectId = selectableEffects[0]?.effect_id ?? '';
 	}
 	$: if ((!selectableEffects.length || !detailMode || selectedFindingId) && selectedEffectId) {
@@ -399,7 +404,9 @@
 		activeReviewPanel = '';
 	}
 	$: selectedEffect =
-		detailMode ? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
+		detailMode && !selectedFindingId
+			? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null)
+			: null;
 	$: selectedClaim = selectedFinding
 		? (claimById.get(selectedFinding.claim_id) ?? null)
 		: selectedEffect
@@ -519,11 +526,21 @@
 			: '';
 	$: if (
 		initialFocus &&
+		!initialFindingId &&
 		currentDatasetScopeKey &&
 		appliedInitialFocusKey !== `${currentDatasetScopeKey}:${initialFocus}`
 	) {
 		appliedInitialFocusKey = `${currentDatasetScopeKey}:${initialFocus}`;
 		applyInitialFocus(initialFocus);
+	}
+	$: if (
+		initialFindingId &&
+		currentDatasetScopeKey &&
+		allDisplayFindingRows.length &&
+		appliedInitialFindingKey !== `${currentDatasetScopeKey}:${initialFindingId}`
+	) {
+		appliedInitialFindingKey = `${currentDatasetScopeKey}:${initialFindingId}`;
+		void applyInitialFindingFocus(initialFindingId);
 	}
 	$: currentCollectionDatasetScopeKey =
 		understanding?.scope.scope_type === 'goal' && collectionId ? `${collectionId}:goal` : '';
@@ -1414,14 +1431,14 @@
 	}
 
 	function openClaimDetail(effectId: string) {
-		selectedEffectId = effectId;
 		selectedFindingId = '';
+		selectedEffectId = effectId;
 		detailMode = true;
 	}
 
 	function openFindingDetail(findingId: string) {
-		selectedFindingId = findingId;
 		selectedEffectId = '';
+		selectedFindingId = findingId;
 		detailMode = true;
 	}
 
@@ -2295,6 +2312,19 @@
 			showTrainingReady();
 			openDatasetExport();
 		}
+	}
+
+	async function applyInitialFindingFocus(findingId: string) {
+		const finding = allDisplayFindingRows.find((item) => item.finding_id === findingId);
+		if (!finding) return;
+		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = findingDatasetTrust(finding).datasetUseStatus;
+		datasetReviewCandidatesOnly = true;
+		reviewQueueOnly = false;
+		await tick();
+		selectedEffectId = '';
+		selectedFindingId = finding.finding_id;
+		detailMode = true;
 	}
 
 	function showTrainingReady() {

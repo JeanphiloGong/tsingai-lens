@@ -2984,7 +2984,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail
 			.getByLabelText('Feedback note')
 			.fill('Mechanism claim needs direct microstructure evidence.');
-		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
+		await claimDetail.getByRole('button', { name: 'Save feedback', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
 		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
@@ -3008,6 +3008,77 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('saves feedback and advances to the next review candidate', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'POST') {
+				const body = JSON.parse(String(init?.body ?? '{}'));
+				return Promise.resolve(
+					jsonResponse({
+						feedback_id: `ruf_${body.finding_id}`,
+						collection_id: 'col_123',
+						scope_type: body.scope_type,
+						scope_id: body.scope_id,
+						finding_id: body.finding_id,
+						claim_id: body.claim_id,
+						review_status: body.review_status,
+						issue_type: body.issue_type,
+						note: body.note,
+						reviewer: 'materials-expert@example.com',
+						created_at: '2026-07-13T09:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Review next finding' }).click();
+		let claimDetail = browserPage.getByLabelText('Finding detail');
+		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
+		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
+		await claimDetail.getByLabelText('Issue type').selectOptions('wrong_direction');
+		await claimDetail.getByLabelText('Feedback note').fill('Direction is not supported.');
+		await claimDetail.getByRole('button', { name: 'Save feedback and next' }).click();
+
+		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+				(init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(feedbackPostCall).toBeTruthy();
+		expect(JSON.parse(String(feedbackPostCall![1].body))).toMatchObject({
+			finding_id: 'finding_strength_supported',
+			review_status: 'incorrect',
+			issue_type: 'wrong_direction',
+			note: 'Direction is not supported.'
+		});
+		claimDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(claimDetail.getByText('Annealing may reduce cellular substructure.').first())
+			.toBeInTheDocument();
+	});
+
 	it('submits material-specific feedback issue types', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
@@ -3021,7 +3092,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail
 			.getByLabelText('Feedback note')
 			.fill('The finding uses the wrong experimental variable.');
-		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
+		await claimDetail.getByRole('button', { name: 'Save feedback', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
 		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
@@ -3095,7 +3166,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		await expect.element(claimDetail.getByText('Sign in required')).toBeInTheDocument();
 		await expect
-			.element(claimDetail.getByRole('button', { name: 'Save feedback' }))
+			.element(claimDetail.getByRole('button', { name: 'Save feedback', exact: true }))
 			.toBeDisabled();
 	});
 
@@ -3184,7 +3255,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
 		await claimDetail.getByLabelText('Review result').selectOptions('correct');
 		await claimDetail.getByLabelText('Issue type').selectOptions('none');
-		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
+		await claimDetail.getByRole('button', { name: 'Save feedback', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
 		await expect.poll(() => datasetRequestCount).toBeGreaterThanOrEqual(2);
@@ -3203,7 +3274,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const claimDetail = await openMechanismClaimDetail();
 		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
-		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
+		await claimDetail.getByRole('button', { name: 'Save feedback', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
 		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
@@ -3357,7 +3428,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail
 			.getByLabelText('Curation note')
 			.fill('Keep limited until EBSD evidence is added.');
-		await claimDetail.getByRole('button', { name: 'Save curation' }).click();
+		await claimDetail.getByRole('button', { name: 'Save curation', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Curation saved:/)).toBeInTheDocument();
 		const curationPostCall = fetchMock.mock.calls.find(([input, init]) => {
@@ -3393,6 +3464,87 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('saves curation and advances to the next review candidate', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'POST') {
+				const body = JSON.parse(String(init?.body ?? '{}'));
+				return Promise.resolve(
+					jsonResponse({
+						curation_id: `ruc_${body.finding_id}`,
+						collection_id: 'col_123',
+						scope_type: body.scope_type,
+						scope_id: body.scope_id,
+						finding_id: body.finding_id,
+						claim_id: body.claim_id,
+						curated_claim_type: body.curated_claim_type,
+						curated_status: body.curated_status,
+						curated_statement: body.curated_statement,
+						curated_support_grade: body.curated_support_grade,
+						curated_review_status: body.curated_review_status,
+						curated_variables: body.curated_variables,
+						curated_mediators: body.curated_mediators,
+						curated_outcomes: body.curated_outcomes,
+						curated_direction: body.curated_direction,
+						curated_scope_summary: body.curated_scope_summary,
+						curated_evidence_ref_ids: body.curated_evidence_ref_ids,
+						curated_context_ids: body.curated_context_ids,
+						note: body.note,
+						reviewer: 'materials-expert@example.com',
+						updated_at: '2026-07-13T09:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Review next finding' }).click();
+		let claimDetail = browserPage.getByLabelText('Finding detail');
+		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
+		await claimDetail
+			.getByLabelText('Curated statement')
+			.fill('Heat treatment changes LPBF 316L tensile response with limited scope.');
+		await claimDetail.getByRole('button', { name: 'Save curation and next' }).click();
+
+		const curationPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith(
+					'/research-understanding/curations'
+				) && (init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(curationPostCall).toBeTruthy();
+		expect(JSON.parse(String(curationPostCall![1].body))).toMatchObject({
+			finding_id: 'finding_strength_supported',
+			claim_id: 'claim_strength_supported',
+			curated_statement: 'Heat treatment changes LPBF 316L tensile response with limited scope.'
+		});
+		claimDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(claimDetail.getByText('Annealing may reduce cellular substructure.').first())
+			.toBeInTheDocument();
+	});
+
 	it('requires an authenticated curator before expert curation can be saved', async () => {
 		authState.set({ status: 'anonymous', user: null });
 		render(ResearchUnderstandingWorkbench, {
@@ -3408,7 +3560,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		await expect.element(claimDetail.getByText('Sign in required')).toBeInTheDocument();
 		await expect
-			.element(claimDetail.getByRole('button', { name: 'Save curation' }))
+			.element(claimDetail.getByRole('button', { name: 'Save curation', exact: true }))
 			.toBeDisabled();
 	});
 
@@ -3507,7 +3659,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail
 			.getByLabelText('Curated statement')
 			.fill('Annealing may reduce cellular substructure, but the mechanism evidence is limited.');
-		await claimDetail.getByRole('button', { name: 'Save curation' }).click();
+		await claimDetail.getByRole('button', { name: 'Save curation', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Curation saved:/)).toBeInTheDocument();
 		await expect.poll(() => datasetRequestCount).toBeGreaterThanOrEqual(2);
@@ -3532,7 +3684,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail
 			.getByLabelText('Curated statement')
 			.fill('Annealing may reduce cellular substructure, but current evidence should be removed.');
-		await claimDetail.getByRole('button', { name: 'Save curation' }).click();
+		await claimDetail.getByRole('button', { name: 'Save curation', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Curation saved:/)).toBeInTheDocument();
 		const curationPostCall = fetchMock.mock.calls.find(([input, init]) => {

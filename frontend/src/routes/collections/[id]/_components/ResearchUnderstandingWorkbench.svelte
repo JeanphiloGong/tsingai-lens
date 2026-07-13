@@ -1475,12 +1475,13 @@
 
 	function nextReviewCandidateAfter(
 		currentFindingId: string,
-		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>
+		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]> = feedbackByTargetId,
+		currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration> = curationsByTargetId
 	) {
 		const candidates = allDisplayFindingRows.filter(
 			(finding) =>
 				finding.finding_id !== currentFindingId &&
-				findingDatasetTrust(finding, currentFeedbackByTargetId).datasetUseStatus ===
+				findingDatasetTrust(finding, currentFeedbackByTargetId, currentCurationsByTargetId).datasetUseStatus ===
 					'review_candidate'
 		);
 		return candidates[0] ?? null;
@@ -2608,9 +2609,10 @@
 		}
 	}
 
-	async function submitClaimFeedback() {
+	async function submitClaimFeedback(options: { openNext?: boolean } = {}) {
 		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
 		if (!reviewerReady) return;
+		const currentFindingId = selectedFinding?.finding_id ?? '';
 		feedbackSubmitting = true;
 		feedbackMessage = '';
 		feedbackError = '';
@@ -2628,11 +2630,18 @@
 				id: formatShortIdentifier(feedback.feedback_id)
 			});
 			const targetId = reviewTargetKey(feedback);
-			feedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
+			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
 				feedback,
 				...(feedbackByTargetId.get(targetId) ?? [])
 			]);
+			feedbackByTargetId = nextFeedbackByTargetId;
 			feedbackNote = '';
+			if (options.openNext && currentFindingId) {
+				const nextFinding = nextReviewCandidateAfter(currentFindingId, nextFeedbackByTargetId);
+				if (nextFinding) {
+					openFindingDetail(nextFinding.finding_id);
+				}
+			}
 			await refreshDatasetSummaryForCurrentScope();
 		} catch (error) {
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
@@ -2641,9 +2650,10 @@
 		}
 	}
 
-	async function submitClaimCuration() {
+	async function submitClaimCuration(options: { openNext?: boolean } = {}) {
 		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
 		if (!curationStatement.trim() || !reviewerReady) return;
+		const currentFindingId = selectedFinding?.finding_id ?? '';
 		curationSubmitting = true;
 		curationMessage = '';
 		curationError = '';
@@ -2670,7 +2680,21 @@
 			curationMessage = $t('research.understanding.curationSaved', {
 				id: formatShortIdentifier(curation.curation_id)
 			});
-			curationsByTargetId = new Map(curationsByTargetId).set(reviewTargetKey(curation), curation);
+			const nextCurationsByTargetId = new Map(curationsByTargetId).set(
+				reviewTargetKey(curation),
+				curation
+			);
+			curationsByTargetId = nextCurationsByTargetId;
+			if (options.openNext && currentFindingId) {
+				const nextFinding = nextReviewCandidateAfter(
+					currentFindingId,
+					feedbackByTargetId,
+					nextCurationsByTargetId
+				);
+				if (nextFinding) {
+					openFindingDetail(nextFinding.finding_id);
+				}
+			}
 			await refreshDatasetSummaryForCurrentScope();
 		} catch (error) {
 			curationError = error instanceof Error ? error.message : $t('error.unexpected');
@@ -3769,7 +3793,7 @@
 							{#if activeReviewPanel === 'feedback'}
 								<form
 									class="research-understanding-workbench__feedback research-understanding-workbench__feedback--primary"
-									on:submit|preventDefault={submitClaimFeedback}
+									on:submit|preventDefault={() => submitClaimFeedback()}
 								>
 									<h5>{$t('research.understanding.feedbackTitle')}</h5>
 									<label>
@@ -3821,6 +3845,15 @@
 											? $t('research.understanding.feedbackSaving')
 											: $t('research.understanding.feedbackSubmit')}
 									</button>
+									<button
+										type="button"
+										disabled={feedbackSubmitting || !collectionId || !reviewerReady || !selectedFinding || !nextReviewCandidateAfter(selectedFinding.finding_id)}
+										on:click={() => submitClaimFeedback({ openNext: true })}
+									>
+										{feedbackSubmitting
+											? $t('research.understanding.feedbackSaving')
+											: $t('research.understanding.feedbackSubmitAndNext')}
+									</button>
 									{#if feedbackMessage}
 										<p class="research-understanding-workbench__feedback-state" role="status">
 											{feedbackMessage}
@@ -3838,7 +3871,7 @@
 							{:else if activeReviewPanel === 'curation'}
 								<form
 									class="research-understanding-workbench__feedback research-understanding-workbench__feedback--primary"
-									on:submit|preventDefault={submitClaimCuration}
+									on:submit|preventDefault={() => submitClaimCuration()}
 								>
 									<h5>{$t('research.understanding.curationTitle')}</h5>
 									<label>
@@ -4023,6 +4056,20 @@
 										{curationSubmitting
 											? $t('research.understanding.curationSaving')
 											: $t('research.understanding.curationSubmit')}
+									</button>
+									<button
+										type="button"
+										disabled={curationSubmitting ||
+											!collectionId ||
+											!curationStatement.trim() ||
+											!reviewerReady ||
+											!selectedFinding ||
+											!nextReviewCandidateAfter(selectedFinding.finding_id)}
+										on:click={() => submitClaimCuration({ openNext: true })}
+									>
+										{curationSubmitting
+											? $t('research.understanding.curationSaving')
+											: $t('research.understanding.curationSubmitAndNext')}
 									</button>
 									{#if curationMessage}
 										<p class="research-understanding-workbench__feedback-state" role="status">

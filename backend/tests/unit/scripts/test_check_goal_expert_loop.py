@@ -90,9 +90,15 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     )
 
     assert summary["status"] == "pass"
+    assert summary["completion_status"] == "incomplete"
     assert summary["layers"]["expert_review"]["status"] == "pass"
     assert summary["layers"]["dataset_accumulation"]["training_ready_goal_count"] == 1
     assert summary["layers"]["experiment_design"]["eligible_goal_ids"] == ["goal-1"]
+    assert summary["remaining_work"] == {
+        "review_candidate_count": 2,
+        "goals_without_training_ready": ["goal-2"],
+        "goals_without_training_messages": ["goal-2"],
+    }
 
 
 def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypatch):
@@ -123,6 +129,7 @@ def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypa
     )
 
     assert summary["status"] == "fail"
+    assert summary["completion_status"] == "incomplete"
     assert summary["layers"]["dataset_accumulation"]["status"] == "fail"
     assert summary["layers"]["experiment_design"]["status"] == "pass"
 

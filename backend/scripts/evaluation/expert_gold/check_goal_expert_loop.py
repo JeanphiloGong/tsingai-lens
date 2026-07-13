@@ -105,16 +105,20 @@ def check_goal_expert_loop(
         ),
         "experiment_design": _experiment_layer(dataset),
     }
+    goals = _goal_rollup(findings, dataset)
+    completion = _completion_summary(goals)
     status = "fail" if any(layer["status"] == "fail" for layer in layers.values()) else "pass"
     return {
         "status": status,
+        "completion_status": completion["status"],
         "collection_id": collection_id,
         "goal_count": len(goal_ids),
         "require_all_training_ready": require_all_training_ready,
         "layers": layers,
+        "remaining_work": completion["remaining_work"],
         "findings_status": findings["status"],
         "dataset_status": dataset["status"],
-        "goals": _goal_rollup(findings, dataset),
+        "goals": goals,
     }
 
 
@@ -217,6 +221,35 @@ def _goal_rollup(
             }
         )
     return rows
+
+
+def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
+    total_goals = len(goals)
+    goals_without_training_ready = [
+        str(goal.get("goal_id"))
+        for goal in goals
+        if int(goal.get("training_ready_count") or 0) == 0
+    ]
+    goals_without_training_messages = [
+        str(goal.get("goal_id"))
+        for goal in goals
+        if int(goal.get("training_message_ready_count") or 0) == 0
+    ]
+    review_candidate_count = sum(int(goal.get("review_candidate_count") or 0) for goal in goals)
+    completed = (
+        total_goals > 0
+        and not goals_without_training_ready
+        and not goals_without_training_messages
+        and review_candidate_count == 0
+    )
+    return {
+        "status": "complete" if completed else "incomplete",
+        "remaining_work": {
+            "review_candidate_count": review_candidate_count,
+            "goals_without_training_ready": goals_without_training_ready,
+            "goals_without_training_messages": goals_without_training_messages,
+        },
+    }
 
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:

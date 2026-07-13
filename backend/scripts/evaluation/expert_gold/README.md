@@ -255,7 +255,10 @@ python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py
 The combined check passes only when the expert-facing Findings are reviewable,
 the dataset exports active samples, and at least one goal has a
 `training_ready` sample with valid message rows that Goal Copilot can use for
-traceable protocol drafting.
+traceable protocol drafting. Its `completion_status` can still be
+`incomplete`; use `remaining_work` to see how many review candidates and
+goal-level training/message gaps remain before calling the full expert loop
+finished.
 
 By default `check_goal_dataset_quality.py` is a reviewability gate: a goal may
 pass with only `review_candidate` samples. To require samples that can be used

@@ -225,3 +225,34 @@ async def export_research_understanding_dataset(
             body += "\n"
         return Response(content=body, media_type="application/x-ndjson")
     return response
+
+
+@router.get(
+    "/{collection_id}/research-understanding/dataset/collection",
+    response_model=ResearchUnderstandingDatasetResponse,
+    summary="导出 collection 级 research understanding finding 数据集样本",
+)
+async def export_collection_research_understanding_dataset(
+    collection_id: str,
+    scope_type: str = Query(default="goal", max_length=32),
+    label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
+    dataset_use_status: ResearchUnderstandingDatasetUseStatus | None = Query(default=None),
+    format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
+) -> ResearchUnderstandingDatasetResponse | Response:
+    dataset = await run_in_threadpool(
+        feedback_service.export_collection_dataset,
+        collection_id=collection_id,
+        scope_type=scope_type,
+        label_status=label_status,
+        dataset_use_status=dataset_use_status,
+    )
+    response = ResearchUnderstandingDatasetResponse(**dataset)
+    if format == "jsonl":
+        body = "\n".join(
+            json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
+            for item in response.items
+        )
+        if body:
+            body += "\n"
+        return Response(content=body, media_type="application/x-ndjson")
+    return response

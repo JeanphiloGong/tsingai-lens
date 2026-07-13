@@ -655,6 +655,7 @@ Research understanding 专家反馈资源：
 - `GET /api/v1/collections/{collection_id}/research-understanding/curations`
 - `GET /api/v1/collections/{collection_id}/research-understanding/gold-draft`
 - `GET /api/v1/collections/{collection_id}/research-understanding/dataset`
+- `GET /api/v1/collections/{collection_id}/research-understanding/dataset/collection`
 
 `POST` 请求体：
 
@@ -722,6 +723,15 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 可选 `format=json | jsonl`，默认 `json`。`json` 返回完整数据集 envelope，
 `jsonl` 返回 newline-delimited sample，便于离线评价或训练数据准备。前端下载训练集
 时应使用 `dataset_use_status=training_ready`，避免把未复核候选样本混入训练输入。
+
+`GET /dataset/collection` 用于按 collection 聚合导出多个 research-understanding
+scope 的样本。它不需要 `scope_id`，query 中的 `scope_type` 表示要聚合的 artifact
+类型，默认 `goal`；同样支持 `label_status`、`dataset_use_status` 和
+`format=json | jsonl`。返回 envelope 使用 `scope_type=collection`，
+`scope_id=<聚合的 scope_type>`，但每个 sample 仍保留自己的原始
+`scope_type` 和 `scope_id`。专家批量导出训练数据时应优先使用
+`/dataset/collection?scope_type=goal&dataset_use_status=training_ready`，这样可以一次
+导出同一 collection 下所有已人工复核可训练的 goal Findings。
 
 返回 envelope 包含：
 

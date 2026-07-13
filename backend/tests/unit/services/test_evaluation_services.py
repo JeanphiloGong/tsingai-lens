@@ -154,8 +154,13 @@ class FakeCoreFactRepository:
 class FakeResearchUnderstandingRepository:
     backend_name = "fake"
 
-    def __init__(self, understanding: ResearchUnderstanding | None) -> None:
+    def __init__(
+        self,
+        understanding: ResearchUnderstanding | None,
+        understandings: tuple[ResearchUnderstanding, ...] | None = None,
+    ) -> None:
         self.understanding = understanding
+        self.understandings = understandings
 
     def read_research_understanding(
         self,
@@ -164,6 +169,22 @@ class FakeResearchUnderstandingRepository:
         scope_id: str,  # noqa: ARG002
     ):
         return self.understanding
+
+    def list_research_understandings(
+        self,
+        collection_id: str,  # noqa: ARG002
+        scope_type: str | None = None,
+    ):
+        understandings = self.understandings
+        if understandings is None:
+            understandings = (self.understanding,) if self.understanding else ()
+        if scope_type is None:
+            return tuple(understandings)
+        return tuple(
+            understanding
+            for understanding in understandings
+            if understanding.scope.scope_type == scope_type
+        )
 
 
 class FakeResearchUnderstandingProjectionService:
@@ -1926,6 +1947,78 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
             scope_id="goal-1",
             dataset_use_status="ready",
         )
+
+
+def test_research_understanding_feedback_service_exports_collection_dataset():
+    goal_one = _sample_understanding()
+    goal_two_record = _sample_understanding().to_record()
+    goal_two_record["scope"]["goal_id"] = "goal-2"
+    goal_two_record["scope"]["title"] = "How does VED affect density?"
+    goal_two_record["presentation"]["findings"] = [
+        goal_two_record["presentation"]["findings"][1]
+    ]
+    goal_two = ResearchUnderstanding.from_mapping(goal_two_record)
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-goal-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "review_status": "correct",
+                "issue_type": "none",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:00:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-goal-2",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-2",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "review_status": "correct",
+                "issue_type": "none",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:01:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            None,
+            understandings=(goal_one, goal_two),
+        ),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_collection_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        dataset_use_status="training_ready",
+    )
+
+    assert dataset["collection_id"] == "col-gold"
+    assert dataset["scope_type"] == "collection"
+    assert dataset["scope_id"] == "goal"
+    assert dataset["dataset_use_status_filter"] == "training_ready"
+    assert dataset["item_count"] == 2
+    assert {(item["scope_id"], item["finding_id"]) for item in dataset["items"]} == {
+        ("goal-1", "finding-1"),
+        ("goal-2", "finding-2"),
+    }
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 2
+    assert dataset["quality_summary"]["by_dataset_use_status"] == {
+        "training_ready": 2,
+        "review_candidate": 0,
+        "rejected": 0,
+    }
 
 
 def test_research_understanding_feedback_service_keeps_anonymous_correct_feedback_silver():

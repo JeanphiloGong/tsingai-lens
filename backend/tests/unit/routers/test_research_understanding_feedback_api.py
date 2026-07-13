@@ -265,6 +265,23 @@ class FakeResearchUnderstandingFeedbackService:
             "warnings": [],
         }
 
+    def export_collection_dataset(self, **kwargs):  # noqa: ANN003
+        self.collection_dataset_exported = kwargs
+        dataset = self.export_dataset(
+            collection_id=kwargs["collection_id"],
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=kwargs["label_status"],
+            dataset_use_status=kwargs["dataset_use_status"],
+        )
+        dataset["dataset_id"] = "dataset_col-1_collection_goal_research_understanding"
+        dataset["scope_type"] = "collection"
+        dataset["scope_id"] = kwargs["scope_type"]
+        for item in dataset["items"]:
+            item["scope_type"] = "goal"
+            item["scope_id"] = "goal-1"
+        return dataset
+
 
 def test_research_understanding_feedback_route_records_contract_payload(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
@@ -636,6 +653,73 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
         "collection_id": "col-1",
         "scope_type": "goal",
         "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            format="json",
+        )
+    )
+
+    assert response.collection_id == "col-1"
+    assert response.scope_type == "collection"
+    assert response.scope_id == "goal"
+    assert response.label_status_filter == "gold"
+    assert response.dataset_use_status_filter == "training_ready"
+    assert response.item_count == 1
+    assert response.items[0].scope_type == "goal"
+    assert response.items[0].scope_id == "goal-1"
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status=None,
+            format="jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["scope_type"] == "goal"
+    assert line["scope_id"] == "goal-1"
+    assert line["sample_id"] == "rus-1"
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": None,
     }

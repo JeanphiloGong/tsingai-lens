@@ -294,66 +294,13 @@ class ResearchUnderstandingFeedbackService:
                 warnings=["research understanding artifact is not available"],
             )
 
-        understanding_record = (
-            self.research_understanding_service.with_presentation(understanding)
-            or understanding.to_record()
-        )
-        feedback = self.list_feedback(
-            collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
-        curations = self.list_curations(
-            collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
-        feedback_index = _feedback_index(feedback)
-        curation_index = _curation_index(curations)
-        presentation = _mapping(understanding_record.get("presentation"))
-        evidence_items = _by_id(
-            _mapping_list(presentation.get("evidence_items")),
-            "evidence_ref_id",
-        )
-        context_summaries = _by_id(
-            _mapping_list(presentation.get("context_summaries")),
-            "context_id",
-        )
-        evidence_refs = {
-            ref.evidence_ref_id: ref.to_record()
-            for ref in understanding.evidence_refs
-        }
-        contexts = {
-            context.context_id: context.to_record()
-            for context in understanding.contexts
-        }
-        relations = {
-            relation.relation_id: relation.to_record()
-            for relation in understanding.relations
-        }
-        model_traces = tuple(dict(trace) for trace in understanding.model_traces)
-        finding_buckets = _finding_bucket_index(presentation)
-
         items: list[dict[str, object]] = []
-        for finding in self._finding_records(understanding_record):
-            sample = self._dataset_sample(
-                collection_id=collection_id,
-                scope_type=scope_type,
-                scope_id=scope_id,
-                finding=finding,
-                evidence_refs=evidence_refs,
-                evidence_items=evidence_items,
-                contexts=contexts,
-                context_summaries=context_summaries,
-                relations=relations,
-                model_traces=model_traces,
-                feedback_index=feedback_index,
-                curation_index=curation_index,
-                presentation_bucket=_presentation_bucket_for_finding(
-                    finding,
-                    finding_buckets,
-                ),
-            )
+        for sample in self._dataset_items_for_understanding(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            understanding=understanding,
+        ):
             if label_status and sample["label_status"] != label_status:
                 continue
             if (
@@ -371,6 +318,55 @@ class ResearchUnderstandingFeedbackService:
             dataset_use_status_filter=dataset_use_status,
             items=items,
             warnings=[],
+        )
+
+    def export_collection_dataset(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str = "goal",
+        label_status: str | None = None,
+        dataset_use_status: str | None = None,
+    ) -> dict[str, object]:
+        if label_status and label_status not in DATASET_LABEL_STATUSES:
+            raise ValueError(f"unsupported label_status: {label_status}")
+        if dataset_use_status and dataset_use_status not in DATASET_USE_STATUSES:
+            raise ValueError(f"unsupported dataset_use_status: {dataset_use_status}")
+
+        understandings = self.core_fact_repository.list_research_understandings(
+            collection_id,
+            scope_type,
+        )
+        items: list[dict[str, object]] = []
+        warnings: list[str] = []
+        for understanding in understandings:
+            scope_id = understanding.scope_id
+            scope_items = self._dataset_items_for_understanding(
+                collection_id=collection_id,
+                scope_type=understanding.scope.scope_type,
+                scope_id=scope_id,
+                understanding=understanding,
+            )
+            for sample in scope_items:
+                if label_status and sample["label_status"] != label_status:
+                    continue
+                if (
+                    dataset_use_status
+                    and sample["dataset_use_status"] != dataset_use_status
+                ):
+                    continue
+                items.append(sample)
+        if not understandings:
+            warnings.append("research understanding artifacts are not available")
+
+        return self._dataset_payload(
+            collection_id=collection_id,
+            scope_type="collection",
+            scope_id=scope_type,
+            label_status_filter=label_status,
+            dataset_use_status_filter=dataset_use_status,
+            items=items,
+            warnings=warnings,
         )
 
     def _dataset_payload(
@@ -459,6 +455,76 @@ class ResearchUnderstandingFeedbackService:
                 }
             )
         return tuple(records)
+
+    def _dataset_items_for_understanding(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+        understanding: Any,
+    ) -> list[dict[str, object]]:
+        understanding_record = (
+            self.research_understanding_service.with_presentation(understanding)
+            or understanding.to_record()
+        )
+        feedback = self.list_feedback(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        curations = self.list_curations(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        feedback_index = _feedback_index(feedback)
+        curation_index = _curation_index(curations)
+        presentation = _mapping(understanding_record.get("presentation"))
+        evidence_items = _by_id(
+            _mapping_list(presentation.get("evidence_items")),
+            "evidence_ref_id",
+        )
+        context_summaries = _by_id(
+            _mapping_list(presentation.get("context_summaries")),
+            "context_id",
+        )
+        evidence_refs = {
+            ref.evidence_ref_id: ref.to_record()
+            for ref in understanding.evidence_refs
+        }
+        contexts = {
+            context.context_id: context.to_record()
+            for context in understanding.contexts
+        }
+        relations = {
+            relation.relation_id: relation.to_record()
+            for relation in understanding.relations
+        }
+        model_traces = tuple(dict(trace) for trace in understanding.model_traces)
+        finding_buckets = _finding_bucket_index(presentation)
+
+        return [
+            self._dataset_sample(
+                collection_id=collection_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                finding=finding,
+                evidence_refs=evidence_refs,
+                evidence_items=evidence_items,
+                contexts=contexts,
+                context_summaries=context_summaries,
+                relations=relations,
+                model_traces=model_traces,
+                feedback_index=feedback_index,
+                curation_index=curation_index,
+                presentation_bucket=_presentation_bucket_for_finding(
+                    finding,
+                    finding_buckets,
+                ),
+            )
+            for finding in self._finding_records(understanding_record)
+        ]
 
     def _dataset_sample(
         self,

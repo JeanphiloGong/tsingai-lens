@@ -62,6 +62,16 @@ function requestMethod(input: string | URL | Request, init?: RequestInit) {
 	return input instanceof Request ? input.method : (init?.method ?? 'GET');
 }
 
+function structuredProtocol(sourceLabel = 'Source 1') {
+	return [
+		`Hypothesis: 150 C preheating improves ductility [${sourceLabel}].`,
+		'Variable matrix: compare 25 C and 150 C builds.',
+		'Measurements: elongation and microstructure.',
+		'Controls: same LPBF parameters except preheating.',
+		'Risks or limits: single-alloy validation.'
+	].join('\n');
+}
+
 describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 	beforeEach(() => {
 		authState.set({
@@ -154,7 +164,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 								collection_id: 'col_123',
 								goal_id: 'goal_1',
 								title: 'Preheating validation matrix',
-								content: 'Compare 25 C and 150 C preheated builds.',
+								content: structuredProtocol(),
 								status: 'draft',
 								source_message_id: 'msg_1',
 								source_links: [
@@ -511,7 +521,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 								title: 'Preheating validation matrix',
 								content: 'Compare 25 C and 150 C preheated builds.',
 								status: 'draft',
-								source_message_id: 'msg_1',
+								source_message_id: null,
 								source_links: [],
 								metadata: {},
 								created_by: 'expert-a',
@@ -534,7 +544,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 						title: 'Edited validation matrix',
 						content: 'Add a no-preheat control.',
 						status: 'ready_for_review',
-						source_message_id: 'msg_1',
+						source_message_id: null,
 						source_links: [],
 						metadata: {},
 						created_by: 'expert-a',
@@ -602,6 +612,62 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Edited validation matrix').first()).toBeInTheDocument();
 	});
 
+	it('does not save copilot plan edits after removing source labels', async () => {
+		render(Page);
+
+		await browserPage
+			.getByLabelText('Plan content')
+			.fill(
+				[
+					'Hypothesis: 150 C preheating improves ductility.',
+					'Variable matrix: compare 25 C and 150 C builds.',
+					'Measurements: elongation and microstructure.',
+					'Controls: same LPBF parameters except preheating.',
+					'Risks or limits: single-alloy validation.'
+				].join('\n')
+			);
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'Goal Copilot plans must keep at least one visible source label, such as [Source 1].'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).toBeDisabled();
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input) ===
+						'/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
+					requestMethod(input, init) === 'PATCH'
+			)
+		).toBe(false);
+	});
+
+	it('does not save unstructured copilot plan edits', async () => {
+		render(Page);
+
+		await browserPage.getByLabelText('Plan content').fill('Run 25 C and 150 C LPBF builds [Source 1].');
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'Goal Copilot plans must keep hypothesis, variable matrix, measurements, controls, and risks or limits.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).toBeDisabled();
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input) ===
+						'/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
+					requestMethod(input, init) === 'PATCH'
+			)
+		).toBe(false);
+	});
+
 	it('opens the experiment plan requested by the copilot deep link', async () => {
 		setPage({
 			params: { id: 'col_123', goal_id: 'goal_1' },
@@ -632,7 +698,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 								title: 'Older validation matrix',
 								content: 'Earlier draft.',
 								status: 'draft',
-								source_message_id: 'msg_1',
+								source_message_id: null,
 								source_links: [],
 								metadata: {},
 								created_by: 'expert-a',
@@ -644,7 +710,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 								collection_id: 'col_123',
 								goal_id: 'goal_1',
 								title: 'Copied copilot validation plan',
-								content: 'Use accepted VED evidence to validate fatigue response.',
+								content: structuredProtocol(),
 								status: 'draft',
 								source_message_id: 'msg_2',
 								source_links: [
@@ -703,7 +769,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByLabelText('Title')).toHaveValue('Copied copilot validation plan');
 		await expect
 			.element(browserPage.getByLabelText('Plan content'))
-			.toHaveValue('Use accepted VED evidence to validate fatigue response.');
+			.toHaveValue(structuredProtocol());
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');

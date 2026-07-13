@@ -1189,6 +1189,10 @@ const translations: Record<Language, Translations> = {
 				experimentPlanCollectionGrounded: 'Collection evidence answer',
 				experimentPlanEvidenceCount: '{count} evidence link(s)',
 				experimentPlanSources: 'Evidence sources',
+				experimentPlanProtocolStructureRequired:
+					'Goal Copilot plans must keep hypothesis, variable matrix, measurements, controls, and risks or limits.',
+				experimentPlanSourceLabelRequired:
+					'Goal Copilot plans must keep at least one visible source label, such as [Source 1].',
 				progressEyebrow: 'Goal analysis',
 				progressTitle: 'Analyzing this research goal',
 				progressBody:
@@ -4096,6 +4100,10 @@ const translations: Record<Language, Translations> = {
 				experimentPlanCollectionGrounded: '基于集合证据的回答',
 				experimentPlanEvidenceCount: '{count} 条证据链接',
 				experimentPlanSources: '证据来源',
+				experimentPlanProtocolStructureRequired:
+					'目标助手生成的方案需要保留假设、变量矩阵、测试指标、对照和风险/限制。',
+				experimentPlanSourceLabelRequired:
+					'目标助手生成的方案需要保留至少一个可见来源标签，例如 [Source 1]。',
 				progressEyebrow: '目标分析',
 				progressTitle: '正在分析该研究目标',
 				progressBody: '系统正在围绕该目标抽取证据、构建逻辑链并生成研究理解。',

@@ -54,6 +54,10 @@
 	$: progressPercent = progressPercentLabel(progress);
 	$: currentDocumentLabel = progressDocumentLabel(progress);
 	$: selectedPlan = plans.find((plan) => plan.plan_id === selectedPlanId) ?? null;
+	$: selectedPlanEditWarning = experimentPlanEditWarning(selectedPlan, planContent);
+	$: canSaveSelectedPlan = Boolean(
+		selectedPlan && planTitle.trim() && planContent.trim() && !selectedPlanEditWarning
+	);
 	$: if (browser && collectionId && goalId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		clearPoll();
@@ -110,7 +114,7 @@
 	}
 
 	async function savePlanEdits() {
-		if (!selectedPlan || !planTitle.trim() || !planContent.trim()) return;
+		if (!canSaveSelectedPlan || !selectedPlan) return;
 		planSaving = true;
 		planError = '';
 		try {
@@ -211,7 +215,38 @@
 	}
 
 	function isCopilotPlan(plan: ExperimentPlan | null) {
-		return metadataText(plan, 'source') === 'goal_copilot';
+		return Boolean(
+			plan?.source_message_id ||
+				metadataText(plan, 'source') === 'goal_copilot' ||
+				metadataText(plan, 'review_gate') === 'training_ready_findings'
+		);
+	}
+
+	function hasProtocolDraftStructure(content: string) {
+		const text = content.toLowerCase();
+		return [
+			['hypothesis', '假设'],
+			['variable matrix', '变量矩阵', '变量'],
+			['measurement', 'measurements', '表征', '测试指标', '测量'],
+			['control', 'controls', '对照'],
+			['risk', 'risks', 'limit', 'limits', '风险', '限制']
+		].every((terms) => terms.some((term) => text.includes(term)));
+	}
+
+	function sourceLabels(plan: ExperimentPlan | null) {
+		return (plan?.source_links ?? []).map((link) => link.label.trim()).filter(Boolean);
+	}
+
+	function experimentPlanEditWarning(plan: ExperimentPlan | null, content: string) {
+		if (!isCopilotPlan(plan) || !content.trim()) return '';
+		if (!hasProtocolDraftStructure(content)) {
+			return $t('research.goalWorkspace.experimentPlanProtocolStructureRequired');
+		}
+		const labels = sourceLabels(plan);
+		if (labels.length && !labels.some((label) => content.includes(label))) {
+			return $t('research.goalWorkspace.experimentPlanSourceLabelRequired');
+		}
+		return '';
 	}
 
 	function progressDocumentLabel(value: GoalAnalysisProgress | null) {
@@ -402,6 +437,9 @@
 								bind:value={planContent}
 							></textarea>
 						</label>
+						{#if selectedPlanEditWarning}
+							<p class="experiment-plans__edit-warning" role="status">{selectedPlanEditWarning}</p>
+						{/if}
 						{#if selectedPlan}
 							<div
 								class="experiment-plans__provenance"
@@ -441,7 +479,7 @@
 							<button
 								class="btn btn--primary btn--small"
 								type="submit"
-								disabled={planSaving || !selectedPlan || !planTitle.trim() || !planContent.trim()}
+								disabled={planSaving || !canSaveSelectedPlan}
 							>
 								{planSaving
 									? $t('research.goalWorkspace.experimentPlanSaving')
@@ -693,6 +731,17 @@
 	.experiment-plans__editor textarea {
 		min-height: 220px;
 		resize: vertical;
+	}
+
+	.experiment-plans__edit-warning {
+		margin: 0;
+		border: 1px solid rgba(217, 119, 6, 0.32);
+		border-radius: var(--radius-md);
+		background: rgba(255, 251, 235, 0.86);
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+		padding: 10px 12px;
 	}
 
 	.experiment-plans__provenance {

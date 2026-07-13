@@ -55,8 +55,10 @@ This node owns the collection workspace route family in the frontend.
   primary paper-level Findings that still need human confirmation are included,
   while the separate evidence-repair filter only narrows to Findings whose
   evidence, support, or projection needs closer inspection; Finding detail also
-  shows the selected candidate's position in the active review queue for
-  continuous accept/reject/correct review
+  shows the selected candidate's position in the active review queue and
+  prioritizes the next review action for table-row checks, conflict resolution,
+  mechanism-evidence decisions, paper-level scope limits, and continuous
+  accept/reject/correct review
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

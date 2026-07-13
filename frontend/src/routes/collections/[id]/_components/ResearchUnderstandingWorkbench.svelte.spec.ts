@@ -1293,6 +1293,82 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingDetail.getByText('Gold', { exact: true })).not.toBeInTheDocument();
 	});
 
+	it('prioritizes table row verification in finding review actions', async () => {
+		const fixture = understandingFixture();
+		for (const findingRows of [fixture.presentation.findings, fixture.presentation.primary_findings]) {
+			const finding = findingRows.find((item) => item.finding_id === 'finding_strength_supported');
+			if (!finding) continue;
+			finding.review_reasons = [
+				...finding.review_reasons,
+				'table_row_alignment_uncertain'
+			];
+			finding.warnings = ['table_row_alignment_uncertain'];
+		}
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: fixture,
+			collectionId: 'col_123'
+		});
+
+		await browserPage
+			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
+			.click();
+
+		const reviewPriorities = browserPage.getByLabelText('Review priorities');
+		await expect
+			.element(
+				reviewPriorities.getByText(
+					'Verify the parsed table rows against the original source table before accepting or correcting.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				reviewPriorities.getByText(
+					'Selected table rows do not align cleanly with the parsed columns; verify the source table before accepting.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				reviewPriorities.getByText(
+					'Accept only as paper-level evidence unless another paper confirms, contradicts, or extends it.'
+				)
+			)
+			.not.toBeInTheDocument();
+	});
+
+	it('prioritizes mechanism evidence decisions when direct evidence exists', async () => {
+		const fixture = understandingFixture();
+		for (const findingRows of [fixture.presentation.findings, fixture.presentation.primary_findings]) {
+			const finding = findingRows.find((item) => item.finding_id === 'finding_strength_supported');
+			if (!finding) continue;
+			finding.review_reasons = ['missing_mechanism_evidence', 'needs_expert_review'];
+			finding.warnings = [];
+		}
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: fixture,
+			collectionId: 'col_123'
+		});
+
+		await browserPage
+			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
+			.click();
+
+		const reviewPriorities = browserPage.getByLabelText('Review priorities');
+		await expect
+			.element(
+				reviewPriorities.getByText(
+					'Decide whether mechanism evidence is required for the final label; otherwise scope the finding to the direct result.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(reviewPriorities.getByText('Mechanism evidence is not yet linked.'))
+			.toBeInTheDocument();
+	});
+
 	it('shows human accepted training-ready findings without stale needs-review badges', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
@@ -2119,7 +2195,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				reviewPriorities.getByText(
-					'Review these points before accepting, rejecting, or correcting this finding.'
+					'Accept only as paper-level evidence unless another paper confirms, contradicts, or extends it.'
 				)
 			)
 			.toBeInTheDocument();
@@ -2287,6 +2363,14 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(claimDetail.getByText('1 low-level relation(s) are hidden until normalized.'))
+			.toBeInTheDocument();
+		const mechanismReviewPriorities = claimDetail.getByLabelText('Review priorities');
+		await expect
+			.element(
+				mechanismReviewPriorities.getByText(
+					'Repair or reject the evidence binding before accepting this finding.'
+				)
+			)
 			.toBeInTheDocument();
 		await expect.element(claimDetail.getByText('sample_number: 2')).not.toBeInTheDocument();
 		await expect

@@ -1105,14 +1105,38 @@
 
 	function findingReviewReasonActionLabel(finding: ResearchUnderstandingPresentationFinding) {
 		const trust = findingDatasetTrust(finding);
+		const reasons = new Set(findingReviewReasonValues(finding));
 		if (trust.datasetUseStatus === 'training_ready') {
 			return $t('research.understanding.findingReviewReasonActionReady');
 		}
-		if (finding.support_grade === 'conflict' || finding.evidence_bundle.conflict.length) {
+		if (reasons.has('table_row_alignment_uncertain')) {
+			return $t('research.understanding.findingReviewReasonActionVerifyTableRows');
+		}
+		if (reasons.has('confounded_table_row_comparison')) {
+			return $t('research.understanding.findingReviewReasonActionReviewTableVariables');
+		}
+		if (
+			reasons.has('conflicting_direction') ||
+			finding.support_grade === 'conflict' ||
+			finding.evidence_bundle.conflict.length
+		) {
 			return $t('research.understanding.findingReviewReasonActionResolve');
 		}
-		if (findingDirectEvidenceCount(finding) === 0) {
+		if (reasons.has('missing_direct_result_evidence') || findingDirectEvidenceCount(finding) === 0) {
 			return $t('research.understanding.findingReviewReasonActionRepair');
+		}
+		if (reasons.has('missing_mechanism_evidence')) {
+			return $t('research.understanding.findingReviewReasonActionCheckMechanism');
+		}
+		if (reasons.has('model_validation_finding')) {
+			return $t('research.understanding.findingReviewReasonActionValidateModel');
+		}
+		if (
+			reasons.has('needs_cross_paper_confirmation') ||
+			reasons.has('single_paper_evidence') ||
+			finding.paper_count <= 1
+		) {
+			return $t('research.understanding.findingReviewReasonActionPaperLevel');
 		}
 		return $t('research.understanding.findingReviewReasonActionReview');
 	}

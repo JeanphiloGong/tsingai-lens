@@ -676,6 +676,16 @@ const translations: Record<Language, Translations> = {
 					'Repair or reject the evidence binding before accepting this finding.',
 				findingReviewReasonActionResolve:
 					'Resolve the conflicting evidence before using this finding downstream.',
+				findingReviewReasonActionVerifyTableRows:
+					'Verify the parsed table rows against the original source table before accepting or correcting.',
+				findingReviewReasonActionReviewTableVariables:
+					'Check whether multiple table variables changed before treating this as a single-variable effect.',
+				findingReviewReasonActionCheckMechanism:
+					'Decide whether mechanism evidence is required for the final label; otherwise scope the finding to the direct result.',
+				findingReviewReasonActionValidateModel:
+					'Validate the model-prediction or validation evidence before accepting this finding.',
+				findingReviewReasonActionPaperLevel:
+					'Accept only as paper-level evidence unless another paper confirms, contradicts, or extends it.',
 				findingReviewReasonActionReview:
 					'Review these points before accepting, rejecting, or correcting this finding.',
 				findingEvidenceRoleCoverage: 'Evidence role coverage',
@@ -3797,6 +3807,11 @@ const translations: Record<Language, Translations> = {
 				findingReviewReasonActionReady: '已有人类专家标注。这些原因只用于审计，不再作为队列优先级。',
 				findingReviewReasonActionRepair: '接受该发现前，需要先修复或拒绝当前证据绑定。',
 				findingReviewReasonActionResolve: '下游使用前，需要先处理冲突证据。',
+				findingReviewReasonActionVerifyTableRows: '接受或校正前，先把解析表格行和原始表格核对清楚。',
+				findingReviewReasonActionReviewTableVariables: '先确认表格中是否有多个变量同时变化，再决定能否作为单变量效应。',
+				findingReviewReasonActionCheckMechanism: '判断最终标签是否需要机制证据；否则只按直接结果限定该发现。',
+				findingReviewReasonActionValidateModel: '接受前需要核对模型预测或验证证据。',
+				findingReviewReasonActionPaperLevel: '除非有其他文献确认、反驳或扩展，否则只能按单篇文献证据接受。',
 				findingReviewReasonActionReview: '接受、拒绝或校正该发现前，先核对这些复核点。',
 				findingEvidenceRoleCoverage: '证据角色覆盖',
 				findingEvidenceRoleLabels: {

@@ -457,6 +457,29 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Gold').first()).toBeInTheDocument();
 	});
 
+	it('opens the rejection form from a finding table row', async () => {
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Reject' }).first().click();
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Expert feedback' })).toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Review result')).toHaveValue('incorrect');
+		await expect.element(browserPage.getByLabelText('Issue type')).toHaveValue('wrong_variable');
+		await expect.element(browserPage.getByRole('button', { name: 'Save feedback' })).toBeInTheDocument();
+	});
+
+	it('opens the correction form from a finding table row', async () => {
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Correct' }).first().click();
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Expert curation' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByLabelText('Curated statement'))
+			.toHaveValue('Heat treatment changes tensile strength.');
+		await expect.element(browserPage.getByRole('button', { name: 'Save curation' })).toBeInTheDocument();
+	});
+
 	it('edits saved experiment plan drafts on the goal page', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

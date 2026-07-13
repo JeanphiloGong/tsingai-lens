@@ -1239,6 +1239,18 @@
 		activeReviewPanel = 'feedback';
 	}
 
+	async function openFindingReject(findingId: string) {
+		openFindingDetail(findingId);
+		await tick();
+		rejectSelectedFinding();
+	}
+
+	async function openFindingCorrection(findingId: string) {
+		openFindingDetail(findingId);
+		await tick();
+		correctSelectedFinding();
+	}
+
 	function closeClaimDetail() {
 		detailMode = false;
 		selectedEffectId = '';
@@ -2735,9 +2747,15 @@
 															</button>
 															<button
 																type="button"
-																on:click={() => openFindingFeedback(finding.finding_id)}
+																on:click={() => openFindingReject(finding.finding_id)}
 															>
-																{$t('research.understanding.openFindingFeedback')}
+																{$t('research.understanding.quickReject')}
+															</button>
+															<button
+																type="button"
+																on:click={() => openFindingCorrection(finding.finding_id)}
+															>
+																{$t('research.understanding.quickCorrect')}
 															</button>
 														</div>
 													</td>

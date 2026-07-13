@@ -1603,6 +1603,26 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(messagesUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 	});
 
+	it('opens the next review candidate detail from the review loop', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Review next finding' }).click();
+
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(findingDetail.getByText('Heat treatment changes LPBF 316L tensile response.').first())
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
+		await expect.element(findingDetail.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+		await expect.element(findingDetail.getByRole('button', { name: 'Correct' })).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Table 2. Columns: Build platform conditions').first())
+			.toBeInTheDocument();
+	});
+
 	it('filters claim rows by type and opens the selected claim detail', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

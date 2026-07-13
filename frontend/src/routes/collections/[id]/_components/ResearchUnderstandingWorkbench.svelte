@@ -351,6 +351,10 @@
 	$: visibleReviewCandidateFindings = visibleFindingRows.filter(
 		(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
 	);
+	$: nextReviewCandidateFinding =
+		allDisplayFindingRows.find(
+			(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
+		) ?? null;
 	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
 	$: selectableEffects = usesFindings
 		? filteredFindings
@@ -2762,6 +2766,15 @@
 							on:click={showReviewQueue}
 						>
 							{$t('research.understanding.reviewLoopOpenQueue')}
+						</button>
+						<button
+							type="button"
+							disabled={!nextReviewCandidateFinding}
+							on:click={() =>
+								nextReviewCandidateFinding &&
+								openFindingDetail(nextReviewCandidateFinding.finding_id)}
+						>
+							{$t('research.understanding.reviewLoopOpenNextFinding')}
 						</button>
 						<button
 							type="button"

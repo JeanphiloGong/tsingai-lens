@@ -432,6 +432,7 @@ const translations: Record<Language, Translations> = {
 				reviewLoopStepDone:
 					'All visible findings for this goal have a usable review path. Keep evidence links attached when using them downstream.',
 				reviewLoopOpenQueue: 'Open review queue',
+				reviewLoopOpenNextFinding: 'Review next finding',
 				reviewLoopOpenTraining: 'Show training-ready',
 				reviewLoopOpenAll: 'Show all findings',
 				reviewLoopOpenDataset: 'Open dataset export',
@@ -3476,6 +3477,7 @@ const translations: Record<Language, Translations> = {
 				reviewLoopStepDone:
 					'该目标当前可见研究发现都有可用复核路径。下游使用时继续保留证据链接。',
 				reviewLoopOpenQueue: '打开复核队列',
+				reviewLoopOpenNextFinding: '复核下一条发现',
 				reviewLoopOpenTraining: '查看可训练样本',
 				reviewLoopOpenAll: '查看全部发现',
 				reviewLoopOpenDataset: '打开数据集导出',

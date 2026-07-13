@@ -350,6 +350,11 @@ export type ResearchUnderstandingDatasetFilters = {
 	label_status?: ResearchUnderstandingDatasetLabelStatus;
 	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
 };
+export type ResearchUnderstandingCollectionDatasetFilters = {
+	scope_type: string;
+	label_status?: ResearchUnderstandingDatasetLabelStatus;
+	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
+};
 export type ResearchUnderstandingDataset = {
 	schema_version: string;
 	dataset_id: string;
@@ -2674,6 +2679,20 @@ export function researchUnderstandingDatasetUrl(
 	const encodedCollection = encodeURIComponent(collectionId);
 	const params = researchUnderstandingDatasetParams(filters, format);
 	return `/api/v1/collections/${encodedCollection}/research-understanding/dataset?${params.toString()}`;
+}
+
+export function researchUnderstandingCollectionDatasetUrl(
+	collectionId: string,
+	filters: ResearchUnderstandingCollectionDatasetFilters,
+	format: ResearchUnderstandingDatasetExportFormat
+): string {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
+	params.set('format', format);
+	return `/api/v1/collections/${encodedCollection}/research-understanding/dataset/collection?${params.toString()}`;
 }
 
 export async function fetchResearchUnderstandingDataset(

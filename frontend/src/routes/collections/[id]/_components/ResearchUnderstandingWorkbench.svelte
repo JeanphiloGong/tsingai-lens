@@ -11,6 +11,7 @@
 		fetchResearchUnderstandingFeedback,
 		fetchResearchUnderstandingCurations,
 		formatShortIdentifier,
+		researchUnderstandingCollectionDatasetUrl,
 		researchUnderstandingDatasetUrl,
 		type ResearchUnderstanding,
 		type ResearchUnderstandingClaim,
@@ -1767,6 +1768,21 @@
 		);
 	}
 
+	function collectionDatasetDownloadUrl(
+		format: 'json' | 'jsonl',
+		datasetUseStatus: ResearchUnderstandingDatasetUseStatus
+	) {
+		if (!collectionId || understanding?.scope.scope_type !== 'goal') return '';
+		return researchUnderstandingCollectionDatasetUrl(
+			collectionId,
+			{
+				scope_type: 'goal',
+				dataset_use_status: datasetUseStatus
+			},
+			format
+		);
+	}
+
 	function findingIsExpertReady(finding: ResearchUnderstandingPresentationFinding) {
 		return (
 			finding.support_grade === 'strong' &&
@@ -2566,6 +2582,14 @@
 										<a href={datasetDownloadUrl('jsonl', 'training_ready')} download>
 											{$t('research.understanding.datasetDownloadTrainingJsonl')}
 										</a>
+										{#if understanding.scope.scope_type === 'goal'}
+											<a href={collectionDatasetDownloadUrl('json', 'training_ready')} download>
+												{$t('research.understanding.datasetDownloadCollectionTrainingJson')}
+											</a>
+											<a href={collectionDatasetDownloadUrl('jsonl', 'training_ready')} download>
+												{$t('research.understanding.datasetDownloadCollectionTrainingJsonl')}
+											</a>
+										{/if}
 									{:else}
 										<span
 											class="research-understanding-workbench__dataset-action-disabled"

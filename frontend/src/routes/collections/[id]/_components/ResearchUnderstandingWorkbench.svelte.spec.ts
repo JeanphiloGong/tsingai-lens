@@ -1524,9 +1524,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(findingsTable.getByRole('button', { name: 'Review evidence' }))
 			.toBeInTheDocument();
 		await expect
-			.element(findingsTable.getByRole('button', { name: 'Give feedback' }))
+			.element(findingsTable.getByRole('button', { name: 'Reject' }))
 			.toBeInTheDocument();
-		await findingsTable.getByRole('button', { name: 'Give feedback' }).click();
+		await findingsTable.getByRole('button', { name: 'Reject' }).click();
 		await expect
 			.element(
 				browserPage
@@ -2009,6 +2009,50 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(requestedUrl.searchParams.get('scope_id')).toBe('obj_1');
 		expect(requestedUrl.searchParams.get('dataset_use_status')).toBeNull();
 		expect(requestedUrl.searchParams.get('format')).toBeNull();
+	});
+
+	it('exposes collection-level training export links on goal scopes', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = browserPage.getByText('Dataset');
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+		await expect.poll(() => datasetRegion?.textContent ?? '').toContain(
+			'Collection training JSON'
+		);
+
+		const collectionJsonUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection training JSON', exact: true })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionJsonUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionJsonUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionJsonUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		expect(collectionJsonUrl.searchParams.get('format')).toBe('json');
+
+		const collectionJsonlUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection training JSONL' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionJsonlUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionJsonlUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionJsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		expect(collectionJsonlUrl.searchParams.get('format')).toBe('jsonl');
 	});
 
 	it('describes mixed readiness review items as candidates, not primary findings', async () => {
@@ -2950,7 +2994,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Give feedback' }))
+			.element(browserPage.getByRole('button', { name: 'Reject' }))
 			.toBeInTheDocument();
 	});
 });

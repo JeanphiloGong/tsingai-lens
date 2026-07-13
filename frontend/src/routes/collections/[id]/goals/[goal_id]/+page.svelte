@@ -185,6 +185,25 @@
 			: [];
 	}
 
+	function reviewGateLabel(value: string) {
+		if (value === 'training_ready_findings') {
+			return $t('research.goalWorkspace.experimentPlanTrainingReadyGate');
+		}
+		return statusLabel(value);
+	}
+
+	function selectedPlanReviewGateLabel(plan: ExperimentPlan | null) {
+		const gate = metadataText(plan, 'review_gate');
+		return gate ? reviewGateLabel(gate) : $t('research.goalWorkspace.experimentPlanNoReviewGate');
+	}
+
+	function sourceModeLabel(value: string) {
+		if (value === 'collection_grounded') {
+			return $t('research.goalWorkspace.experimentPlanCollectionGrounded');
+		}
+		return statusLabel(value);
+	}
+
 	function isCopilotPlan(plan: ExperimentPlan | null) {
 		return metadataText(plan, 'source') === 'goal_copilot';
 	}
@@ -387,14 +406,11 @@
 											? $t('research.goalWorkspace.experimentPlanCopilotSource')
 											: $t('research.goalWorkspace.experimentPlanManualSource')}
 									</strong>
-									<span>
-										{metadataText(selectedPlan, 'review_gate') ||
-											$t('research.goalWorkspace.experimentPlanNoReviewGate')}
-									</span>
+									<span>{selectedPlanReviewGateLabel(selectedPlan)}</span>
 								</div>
 								<div class="experiment-plans__provenance-meta">
 									{#if metadataText(selectedPlan, 'source_mode')}
-										<span>{statusLabel(metadataText(selectedPlan, 'source_mode'))}</span>
+										<span>{sourceModeLabel(metadataText(selectedPlan, 'source_mode'))}</span>
 									{/if}
 									{#if metadataList(selectedPlan, 'used_evidence_ids').length}
 										<span>

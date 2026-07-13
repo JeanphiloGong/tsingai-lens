@@ -705,7 +705,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Generated from reviewed Goal Copilot evidence'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('training_ready_findings')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Reviewed training-ready findings')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Collection evidence answer')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('training_ready_findings')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('1 evidence link(s)')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Session session_2')).toBeInTheDocument();
 	});

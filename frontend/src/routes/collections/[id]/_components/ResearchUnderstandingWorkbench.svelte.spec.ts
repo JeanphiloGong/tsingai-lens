@@ -1727,6 +1727,14 @@ describe('ResearchUnderstandingWorkbench', () => {
 			issue_type: 'none',
 			note: null
 		});
+		await expect
+			.element(
+				browserPage.getByText(
+					'Dataset now has 2 training-ready, 2 message-exportable, and 1 review-candidate sample(s).',
+					{ exact: false }
+				)
+			)
+			.toBeInTheDocument();
 		const findingDetail = browserPage.getByLabelText('Finding detail');
 		await expect
 			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())

@@ -733,6 +733,8 @@ const translations: Record<Language, Translations> = {
 				feedbackSubmitAndNext: 'Save feedback and next',
 				feedbackSaving: 'Saving...',
 				feedbackSaved: 'Feedback saved: {id}',
+				reviewSaveDatasetStatus:
+					'Dataset now has {training} training-ready, {messages} message-exportable, and {review} review-candidate sample(s).',
 				feedbackCount: 'Feedback {count}',
 				noFeedback: 'No feedback has been recorded for this claim.',
 				noFeedbackNote: 'No note.',
@@ -3815,6 +3817,8 @@ const translations: Record<Language, Translations> = {
 				feedbackSubmitAndNext: '保存反馈并下一条',
 				feedbackSaving: '保存中...',
 				feedbackSaved: '反馈已保存：{id}',
+				reviewSaveDatasetStatus:
+					'当前数据集有 {training} 条可训练样本、{messages} 条可导出 messages、{review} 条待复核样本。',
 				feedbackCount: '反馈 {count}',
 				noFeedback: '当前 Claim 暂无反馈记录。',
 				noFeedbackNote: '无备注。',

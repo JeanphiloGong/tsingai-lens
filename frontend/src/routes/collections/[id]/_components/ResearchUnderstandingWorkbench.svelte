@@ -1484,9 +1484,6 @@
 				issue_type: 'none',
 				note: null
 			});
-			feedbackMessage = $t('research.understanding.feedbackSaved', {
-				id: formatShortIdentifier(feedback.feedback_id)
-			});
 			const targetId = reviewTargetKey(feedback);
 			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
 				feedback,
@@ -1499,7 +1496,12 @@
 					openFindingDetail(nextFinding.finding_id);
 				}
 			}
-			await refreshDatasetSummaryForCurrentScope();
+			const refreshed = await refreshDatasetSummaryForCurrentScope();
+			feedbackMessage = reviewSaveMessage(
+				'feedback',
+				formatShortIdentifier(feedback.feedback_id),
+				refreshed
+			);
 		} catch (error) {
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
@@ -2584,7 +2586,7 @@
 
 	async function loadDatasetSummary(scopeKey: string, force = false) {
 		const filters = datasetFilters();
-		if (!understanding || !collectionId || !filters) return;
+		if (!understanding || !collectionId || !filters) return null;
 		if (force) {
 			datasetScopeKey = '';
 		}
@@ -2597,6 +2599,7 @@
 			if (requestSequence === datasetRequestSequence) {
 				datasetSummary = nextDatasetSummary;
 			}
+			return nextDatasetSummary;
 		} catch (error) {
 			if (requestSequence === datasetRequestSequence) {
 				datasetSummary = null;
@@ -2606,6 +2609,7 @@
 						? error.message
 						: $t('error.unexpected');
 			}
+			return null;
 		} finally {
 			if (requestSequence === datasetRequestSequence) {
 				datasetLoading = false;
@@ -2646,11 +2650,29 @@
 	}
 
 	async function refreshDatasetSummaryForCurrentScope() {
-		if (!currentDatasetScopeKey) return;
-		await loadDatasetSummary(currentDatasetScopeKey, true);
+		if (!currentDatasetScopeKey) return null;
+		const refreshed = await loadDatasetSummary(currentDatasetScopeKey, true);
 		if (datasetPanelOpen && currentCollectionDatasetScopeKey) {
 			await loadCollectionDatasetSummary(currentCollectionDatasetScopeKey, true);
 		}
+		return refreshed;
+	}
+
+	function reviewSaveMessage(kind: 'feedback' | 'curation', id: string, dataset: ResearchUnderstandingDataset | null) {
+		const fallbackKey =
+			kind === 'feedback'
+				? 'research.understanding.feedbackSaved'
+				: 'research.understanding.curationSaved';
+		const saved = $t(fallbackKey, { id });
+		if (!dataset) {
+			return saved;
+		}
+		return `${saved}. ${$t('research.understanding.reviewSaveDatasetStatus', {
+			id,
+			training: dataset.quality_summary.training_ready_sample_count,
+			messages: dataset.quality_summary.training_message_sample_count,
+			review: dataset.quality_summary.review_candidate_sample_count
+		})}`;
 	}
 
 	function handleDatasetToggle(event: Event) {
@@ -2682,9 +2704,6 @@
 				issue_type: feedbackIssue,
 				note: feedbackNote.trim() || null
 			});
-			feedbackMessage = $t('research.understanding.feedbackSaved', {
-				id: formatShortIdentifier(feedback.feedback_id)
-			});
 			const targetId = reviewTargetKey(feedback);
 			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
 				feedback,
@@ -2698,7 +2717,12 @@
 					openFindingDetail(nextFinding.finding_id);
 				}
 			}
-			await refreshDatasetSummaryForCurrentScope();
+			const refreshed = await refreshDatasetSummaryForCurrentScope();
+			feedbackMessage = reviewSaveMessage(
+				'feedback',
+				formatShortIdentifier(feedback.feedback_id),
+				refreshed
+			);
 		} catch (error) {
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
@@ -2733,9 +2757,6 @@
 				curated_context_ids: curationContextIds,
 				note: curationNote.trim() || null
 			});
-			curationMessage = $t('research.understanding.curationSaved', {
-				id: formatShortIdentifier(curation.curation_id)
-			});
 			const nextCurationsByTargetId = new Map(curationsByTargetId).set(
 				reviewTargetKey(curation),
 				curation
@@ -2751,7 +2772,12 @@
 					openFindingDetail(nextFinding.finding_id);
 				}
 			}
-			await refreshDatasetSummaryForCurrentScope();
+			const refreshed = await refreshDatasetSummaryForCurrentScope();
+			curationMessage = reviewSaveMessage(
+				'curation',
+				formatShortIdentifier(curation.curation_id),
+				refreshed
+			);
 		} catch (error) {
 			curationError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {

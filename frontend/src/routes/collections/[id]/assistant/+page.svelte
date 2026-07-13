@@ -322,6 +322,10 @@
 		return (message.warnings ?? []).includes('curated_research_findings_empty');
 	}
 
+	function hasEvidenceCitations(message: GoalSessionMessage) {
+		return (message.used_evidence_ids ?? []).length > 0;
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -359,6 +363,7 @@
 				message.source_mode === 'collection_grounded' &&
 				messageText(message).trim() &&
 				visibleSourceLinks(message).length > 0 &&
+				hasEvidenceCitations(message) &&
 				!needsCuratedFindings(message)
 		);
 	}
@@ -560,6 +565,13 @@
 									{#if needsCuratedFindings(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.reviewRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										!hasEvidenceCitations(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.evidenceRequired')}
 										</p>
 									{/if}
 									<div class="message-actions">

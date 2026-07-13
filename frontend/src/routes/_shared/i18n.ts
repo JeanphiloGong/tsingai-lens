@@ -269,7 +269,9 @@ const translations: Record<Language, Translations> = {
 				open: 'Open plan',
 				defaultTitle: 'Experiment plan draft',
 				reviewRequired:
-					'Save is disabled until this goal has expert-reviewed training-ready findings.'
+					'Save is disabled until this goal has expert-reviewed training-ready findings.',
+				evidenceRequired:
+					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -3198,7 +3200,8 @@ const translations: Record<Language, Translations> = {
 				saved: '已保存',
 				open: '打开方案',
 				defaultTitle: '实验方案草稿',
-				reviewRequired: '该研究目标还没有专家复核后的可训练 Findings，暂不能保存为实验方案。'
+				reviewRequired: '该研究目标还没有专家复核后的可训练 Findings，暂不能保存为实验方案。',
+				evidenceRequired: '该回答还没有引用用于方案的已复核证据，暂不能保存为实验方案。'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

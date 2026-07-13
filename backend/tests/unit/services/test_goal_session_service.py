@@ -276,6 +276,78 @@ class _EmptyTrainingReadyResearchUnderstandingFeedbackService:
         }
 
 
+class _NonActionableTrainingReadyResearchUnderstandingFeedbackService:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(dict(kwargs))
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": "goal",
+            "scope_id": kwargs["scope_id"],
+            "dataset_use_status_filter": kwargs["dataset_use_status"],
+            "item_count": 3,
+            "items": [
+                {
+                    "finding_id": "finding_unsupported",
+                    "label_status": "gold",
+                    "dataset_use_status": "training_ready",
+                    "system_prediction": {
+                        "statement": "Claim rejected by expert support status.",
+                    },
+                    "expert_target": {
+                        "statement": "Preheating does not have sufficient support for ductility improvement.",
+                        "status": "unsupported",
+                        "support_grade": "strong",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_unsupported",
+                            "document_id": "paper-unsupported",
+                            "training_source_text": "The reviewed evidence does not support the claimed improvement.",
+                        }
+                    ],
+                },
+                {
+                    "finding_id": "finding_conflict",
+                    "label_status": "gold",
+                    "dataset_use_status": "training_ready",
+                    "expert_target": {
+                        "statement": "VED effects conflict across the available papers.",
+                        "status": "conflicted",
+                        "support_grade": "partial",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_conflict",
+                            "document_id": "paper-conflict",
+                            "training_source_text": "Conflicting results were reported.",
+                        }
+                    ],
+                },
+                {
+                    "finding_id": "finding_insufficient",
+                    "label_status": "gold",
+                    "dataset_use_status": "training_ready",
+                    "expert_target": {
+                        "statement": "Evidence remains insufficient for a protocol decision.",
+                        "status": "limited",
+                        "support_grade": "insufficient",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_insufficient",
+                            "document_id": "paper-insufficient",
+                            "training_source_text": "Only background context was available.",
+                        }
+                    ],
+                },
+            ],
+            "warnings": [],
+        }
+
+
 class _ObjectiveResearchService(_EmptyResearchObjectiveService):
     def list_objective_workspaces(self, collection_id: str) -> dict:
         return {
@@ -731,6 +803,38 @@ def test_goal_chat_warns_when_focused_scope_has_no_training_ready_findings(tmp_p
             "dataset_use_status": "training_ready",
         }
     ]
+
+
+def test_goal_chat_excludes_non_actionable_training_ready_findings(tmp_path):
+    feedback_service = _NonActionableTrainingReadyResearchUnderstandingFeedbackService()
+    service, collection_service = _service(
+        tmp_path,
+        content="No reviewed actionable findings are available.",
+        research_understanding_feedback_service=feedback_service,
+        paper_facts_service=_EvidencePaperFactsService(),
+    )
+    collection = collection_service.create_collection("Non Actionable Findings")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_non_actionable",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Draft a protocol from reviewed findings.",
+        page_context={"goal_id": "goal_non_actionable"},
+    )
+
+    assert response["source_mode"] == "collection_grounded"
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
+    assert "curated_research_findings_empty" in response["warnings"]
+    prompt = service.llm_client.chat.completions.calls[0]["messages"][1]["content"]
+    assert "curated_research_findings" not in prompt
+    assert "ev_unsupported" not in prompt
+    assert "ev_conflict" not in prompt
+    assert "ev_insufficient" not in prompt
 
 
 def test_goal_chat_returns_limited_response_when_llm_is_unavailable(tmp_path):

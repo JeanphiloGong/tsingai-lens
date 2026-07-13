@@ -8,8 +8,8 @@ The active runtime path is a lightweight session over one collection:
 1. create a goal session bound to `collection_id`
 2. accept plain natural-language messages
 3. read existing Core or Core-derived artifacts when grounded context is allowed
-4. prefer expert-curated `training_ready` research-understanding Findings when
-   the session is focused on a confirmed goal or objective
+4. prefer actionable expert-curated `training_ready` research-understanding
+   Findings when the session is focused on a confirmed goal or objective
 5. save human-editable experiment plan drafts from goal-focused chat answers
 6. label the answer source as collection-grounded, collection-limited, general
    fallback, or general-only
@@ -27,10 +27,11 @@ own database connections, SQL, schema initialization, or row encoding.
 
 - `session_service.py`
   Primary current conversation service. It persists session context, retrieves
-  collection artifacts before grounded answers, prioritizes curated Findings
-  for goal-focused experiment or protocol questions, limits cited protocol
-  sources to those curated Findings when they are available, and labels general
-  fallback separately from collection evidence.
+  collection artifacts before grounded answers, prioritizes actionable curated
+  Findings for goal-focused experiment or protocol questions, filters out
+  unsupported/conflicted/insufficient reviewed findings as protocol sources,
+  limits cited protocol sources to curated Findings when they are available,
+  and labels general fallback separately from collection evidence.
 - `experiment_plan_service.py`
   Persists goal-scoped experiment plan drafts generated from chat answers. When
   a draft references a chat message, the service verifies that the message is a

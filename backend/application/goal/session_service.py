@@ -581,15 +581,16 @@ class GoalSessionService:
             "evidence_cards": evidence_cards,
             "curated_research_findings": curated_research_findings,
         }
-        if curated_research_findings:
+        if curated_research_findings or focused_goal_id:
             source_context_payload = {
                 "collection": collection,
                 "focused_material_id": focused_material_id,
                 "focused_paper_id": session.focused_paper_id,
                 "focused_objective_id": focused_objective_id,
                 "focused_goal_id": focused_goal_id,
-                "curated_research_findings": curated_research_findings,
             }
+            if curated_research_findings:
+                source_context_payload["curated_research_findings"] = curated_research_findings
         else:
             source_context_payload = context_payload
         evidence_ids = self._collect_evidence_ids(source_context_payload)
@@ -772,6 +773,8 @@ class GoalSessionService:
         )
         if not statement:
             return {}
+        if not self._curated_research_finding_is_actionable(target, prediction):
+            return {}
         evidence_refs = [
             self._curated_evidence_ref_for_prompt(ref)
             for ref in item.get("training_evidence_refs", [])
@@ -801,6 +804,24 @@ class GoalSessionService:
             ),
             "evidence": [ref for ref in evidence_refs if ref][:4],
         }
+
+    def _curated_research_finding_is_actionable(
+        self,
+        target: dict[str, Any],
+        prediction: dict[str, Any],
+    ) -> bool:
+        status = (
+            _clean_text(target.get("status") or prediction.get("status")) or ""
+        ).lower()
+        support_grade = (
+            _clean_text(target.get("support_grade") or prediction.get("support_grade"))
+            or ""
+        ).lower()
+        if status in {"unsupported", "conflicted"}:
+            return False
+        if support_grade in {"insufficient", "conflict", "conflicted", "weak"}:
+            return False
+        return True
 
     def _curated_evidence_ref_for_prompt(self, ref: dict[str, Any]) -> dict[str, Any]:
         evidence_id = _clean_text(ref.get("evidence_ref_id") or ref.get("evidence_id"))

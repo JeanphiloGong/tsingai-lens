@@ -28,6 +28,26 @@ router = APIRouter(prefix="/collections", tags=["research-understanding-feedback
 feedback_service = ResearchUnderstandingFeedbackService()
 
 
+def _dataset_jsonl_response(
+    response: ResearchUnderstandingDatasetResponse,
+    *,
+    messages_only: bool = False,
+) -> Response:
+    rows: list[dict[str, Any]]
+    if messages_only:
+        rows = [
+            {"messages": item.training_messages}
+            for item in response.items
+            if item.training_messages
+        ]
+    else:
+        rows = [item.model_dump(mode="json") for item in response.items]
+    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    if body:
+        body += "\n"
+    return Response(content=body, media_type="application/x-ndjson")
+
+
 @router.post(
     "/{collection_id}/research-understanding/feedback",
     response_model=ResearchUnderstandingFeedbackResponse,
@@ -217,13 +237,9 @@ async def export_research_understanding_dataset(
     )
     response = ResearchUnderstandingDatasetResponse(**dataset)
     if format == "jsonl":
-        body = "\n".join(
-            json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
-            for item in response.items
-        )
-        if body:
-            body += "\n"
-        return Response(content=body, media_type="application/x-ndjson")
+        return _dataset_jsonl_response(response)
+    if format == "messages_jsonl":
+        return _dataset_jsonl_response(response, messages_only=True)
     return response
 
 
@@ -248,11 +264,7 @@ async def export_collection_research_understanding_dataset(
     )
     response = ResearchUnderstandingDatasetResponse(**dataset)
     if format == "jsonl":
-        body = "\n".join(
-            json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
-            for item in response.items
-        )
-        if body:
-            body += "\n"
-        return Response(content=body, media_type="application/x-ndjson")
+        return _dataset_jsonl_response(response)
+    if format == "messages_jsonl":
+        return _dataset_jsonl_response(response, messages_only=True)
     return response

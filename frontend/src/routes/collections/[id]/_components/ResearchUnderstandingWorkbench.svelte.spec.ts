@@ -2090,6 +2090,21 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(jsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 		expect(jsonlUrl.searchParams.get('format')).toBe('jsonl');
 
+		const messagesJsonlUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Training messages JSONL' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(messagesJsonlUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(messagesJsonlUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(messagesJsonlUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(messagesJsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		expect(messagesJsonlUrl.searchParams.get('format')).toBe('messages_jsonl');
+
 		const reviewJsonUrl = new URL(
 			browserPage
 				.getByRole('link', { name: 'Review candidates JSON' })
@@ -2214,6 +2229,22 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(collectionJsonlUrl.searchParams.get('scope_type')).toBe('goal');
 		expect(collectionJsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 		expect(collectionJsonlUrl.searchParams.get('format')).toBe('jsonl');
+
+		const collectionMessagesJsonlUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection training messages JSONL' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionMessagesJsonlUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionMessagesJsonlUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionMessagesJsonlUrl.searchParams.get('dataset_use_status')).toBe(
+			'training_ready'
+		);
+		expect(collectionMessagesJsonlUrl.searchParams.get('format')).toBe('messages_jsonl');
 
 		const collectionReviewUrl = new URL(
 			browserPage

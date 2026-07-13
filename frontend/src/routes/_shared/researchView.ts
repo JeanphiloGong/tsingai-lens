@@ -343,7 +343,7 @@ export type ResearchUnderstandingDatasetUseStatus =
 	| 'training_ready'
 	| 'review_candidate'
 	| 'rejected';
-export type ResearchUnderstandingDatasetExportFormat = 'json' | 'jsonl';
+export type ResearchUnderstandingDatasetExportFormat = 'json' | 'jsonl' | 'messages_jsonl';
 export type ResearchUnderstandingDatasetFilters = {
 	scope_type: string;
 	scope_id: string;

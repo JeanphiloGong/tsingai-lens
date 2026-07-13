@@ -257,6 +257,27 @@ class FakeResearchUnderstandingFeedbackService:
                             "training_source_text": "Preheating increased ductility by 14%.",
                         }
                     ],
+                    "training_messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Research goal: improve LPBF 316L ductility.\n\n"
+                                "Evidence ev-1: Preheating increased ductility by 14%."
+                            ),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                {
+                                    "finding": (
+                                        "Preheating improves ductility by 14%."
+                                    ),
+                                    "evidence_ref_ids": ["ev-1"],
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    ],
                     "context_refs": [],
                     "feedback_refs": [],
                     "metadata": {"curation_id": "ruc-existing"},
@@ -615,6 +636,8 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.items[0].training_evidence_refs[0]["training_source_text"] == (
         "Preheating increased ductility by 14%."
     )
+    assert response.items[0].training_messages[0]["role"] == "user"
+    assert response.items[0].training_messages[1]["role"] == "assistant"
     assert service.dataset_exported == {
         "collection_id": "col-1",
         "scope_type": "goal",
@@ -655,6 +678,43 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            format="messages_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert list(line) == ["messages"]
+    assert line["messages"][0]["role"] == "user"
+    assert line["messages"][1]["role"] == "assistant"
+    assert "Preheating increased ductility by 14%." in line["messages"][0]["content"]
+    assert '"evidence_ref_ids": ["ev-1"]' in line["messages"][1]["content"]
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
     }
 
 
@@ -722,4 +782,39 @@ def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypat
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            format="messages_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert list(line) == ["messages"]
+    assert line["messages"][0]["role"] == "user"
+    assert line["messages"][1]["role"] == "assistant"
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
     }

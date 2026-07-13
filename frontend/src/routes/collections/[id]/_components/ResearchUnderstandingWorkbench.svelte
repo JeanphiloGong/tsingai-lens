@@ -18,6 +18,7 @@
 		type ResearchUnderstandingClaim,
 		type ResearchUnderstandingCuration,
 		type ResearchUnderstandingDataset,
+		type ResearchUnderstandingDatasetExportFormat,
 		type ResearchUnderstandingDatasetLabelStatus,
 		type ResearchUnderstandingDatasetUseStatus,
 		type ResearchUnderstandingAxisCoverageItem,
@@ -1814,7 +1815,7 @@
 	}
 
 	function datasetDownloadUrl(
-		format: 'json' | 'jsonl',
+		format: ResearchUnderstandingDatasetExportFormat,
 		datasetUseStatus: ResearchUnderstandingDatasetUseStatus
 	) {
 		const filters = datasetFilters();
@@ -1827,7 +1828,7 @@
 	}
 
 	function collectionDatasetDownloadUrl(
-		format: 'json' | 'jsonl',
+		format: ResearchUnderstandingDatasetExportFormat,
 		datasetUseStatus: ResearchUnderstandingDatasetUseStatus
 	) {
 		if (!collectionId || understanding?.scope.scope_type !== 'goal') return '';
@@ -2694,12 +2695,20 @@
 										<a href={datasetDownloadUrl('jsonl', 'training_ready')} download>
 											{$t('research.understanding.datasetDownloadTrainingJsonl')}
 										</a>
+										<a href={datasetDownloadUrl('messages_jsonl', 'training_ready')} download>
+											{$t('research.understanding.datasetDownloadTrainingMessagesJsonl')}
+										</a>
 										{#if understanding.scope.scope_type === 'goal'}
 											<a href={collectionDatasetDownloadUrl('json', 'training_ready')} download>
 												{$t('research.understanding.datasetDownloadCollectionTrainingJson')}
 											</a>
 											<a href={collectionDatasetDownloadUrl('jsonl', 'training_ready')} download>
 												{$t('research.understanding.datasetDownloadCollectionTrainingJsonl')}
+											</a>
+											<a href={collectionDatasetDownloadUrl('messages_jsonl', 'training_ready')} download>
+												{$t(
+													'research.understanding.datasetDownloadCollectionTrainingMessagesJsonl'
+												)}
 											</a>
 										{/if}
 									{:else}

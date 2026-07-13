@@ -63,6 +63,15 @@ def _dataset_payload(status: str = "pass"):
     }
 
 
+def _completed_dataset_payload(status: str = "pass"):
+    payload = _dataset_payload(status)
+    for goal in payload["goals"]:
+        goal["training_ready_count"] = max(1, goal["training_ready_count"])
+        goal["training_message_ready_count"] = max(1, goal["training_message_ready_count"])
+        goal["review_candidate_count"] = 0
+    return payload
+
+
 def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkeypatch):
     check = _load_goal_expert_loop_module()
 
@@ -99,6 +108,70 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
         "goals_without_training_ready": ["goal-2"],
         "goals_without_training_messages": ["goal-2"],
     }
+
+
+def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeypatch):
+    check = _load_goal_expert_loop_module()
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: _dataset_payload())},
+            )
+        ),
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        require_complete=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["completion_status"] == "incomplete"
+    assert summary["require_complete"] is True
+
+
+def test_check_goal_expert_loop_require_complete_passes_when_no_work_remains(monkeypatch):
+    check = _load_goal_expert_loop_module()
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: _completed_dataset_payload())},
+            )
+        ),
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        require_complete=True,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["completion_status"] == "complete"
+    assert summary["remaining_work"]["review_candidate_count"] == 0
 
 
 def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypatch):

@@ -55,6 +55,14 @@ def parse_args() -> argparse.Namespace:
             "sample with valid fine-tuning messages."
         ),
     )
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help=(
+            "Fail unless every checked goal is training/message-ready and no "
+            "review candidates remain."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -65,6 +73,7 @@ def main() -> None:
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
         require_all_training_ready=args.require_all_training_ready,
+        require_complete=args.require_complete,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
@@ -77,6 +86,7 @@ def check_goal_expert_loop(
     goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
     api_base_url: str | None = None,
     require_all_training_ready: bool = False,
+    require_complete: bool = False,
 ) -> dict[str, Any]:
     findings_module = _load_sibling_module(
         "check_goal_findings_projection.py",
@@ -107,13 +117,19 @@ def check_goal_expert_loop(
     }
     goals = _goal_rollup(findings, dataset)
     completion = _completion_summary(goals)
-    status = "fail" if any(layer["status"] == "fail" for layer in layers.values()) else "pass"
+    status = (
+        "fail"
+        if any(layer["status"] == "fail" for layer in layers.values())
+        or (require_complete and completion["status"] != "complete")
+        else "pass"
+    )
     return {
         "status": status,
         "completion_status": completion["status"],
         "collection_id": collection_id,
         "goal_count": len(goal_ids),
         "require_all_training_ready": require_all_training_ready,
+        "require_complete": require_complete,
         "layers": layers,
         "remaining_work": completion["remaining_work"],
         "findings_status": findings["status"],

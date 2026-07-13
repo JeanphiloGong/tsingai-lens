@@ -276,6 +276,16 @@ That stricter mode fails until every checked goal has at least one
 `training_ready` sample. Both scripts are read-only and do not rebuild
 collections or mutate feedback.
 
+For final acceptance of the full expert loop, use:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --require-complete
+```
+
+This mode fails unless every checked goal has a training-ready sample, valid
+training messages, and zero remaining review candidates.
+
 The evaluator is offline and read-only. It does not call LLMs, rebuild PDFs, or
 change collection state. Natural language is scored through required claims,
 numbers, paper ids, mechanism-chain phrases, limitations, and forbidden

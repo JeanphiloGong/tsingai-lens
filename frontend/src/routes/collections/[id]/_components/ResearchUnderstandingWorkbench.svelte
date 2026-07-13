@@ -303,7 +303,8 @@
 	);
 	$: filteredFindings = findingRows.filter(
 		(finding) =>
-			(selectedClaimStatus === 'all' || finding.support_grade === selectedClaimStatus) &&
+			(selectedClaimStatus === 'all' ||
+				findingForDisplay(finding).support_grade === selectedClaimStatus) &&
 			(selectedDatasetUseStatus === 'all' ||
 				findingDatasetTrust(finding).datasetUseStatus === selectedDatasetUseStatus) &&
 			(!reviewQueueOnly ||
@@ -326,7 +327,8 @@
 		if (!usesFindings) return countEffectsBy(effectRows, 'support_status');
 		const counts = new Map<string, number>([['all', findingRows.length]]);
 		for (const finding of findingRows) {
-			counts.set(finding.support_grade, (counts.get(finding.support_grade) ?? 0) + 1);
+			const grade = findingForDisplay(finding).support_grade;
+			counts.set(grade, (counts.get(grade) ?? 0) + 1);
 		}
 		return counts;
 	})();
@@ -375,6 +377,9 @@
 			(selectedReviewFallbackId ? curationsByTargetId.get(selectedReviewFallbackId) : null) ??
 			null)
 		: null;
+	$: selectedDisplayFinding = selectedFinding
+		? findingForDisplay(selectedFinding, selectedCuration)
+		: null;
 	$: selectedFeedback = selectedReviewTargetId
 		? [
 				...(feedbackByTargetId.get(selectedReviewTargetId) ?? []),
@@ -407,12 +412,12 @@
 	$: selectedFindingContextRefs = selectedFinding
 		? presentationContextsForIds(selectedFinding.context_ids)
 		: [];
-	$: selectedFindingDisplayContextRefs = selectedFinding
-		? compactFindingContextDisplay(selectedFindingContextRefs, selectedFinding)
+	$: selectedFindingDisplayContextRefs = selectedDisplayFinding
+		? compactFindingContextDisplay(selectedFindingContextRefs, selectedDisplayFinding)
 		: [];
-	$: selectedFindingDecision = selectedFinding ? findingDecision(selectedFinding) : null;
-	$: selectedFindingUsagePath = selectedFinding
-		? findingUsagePath(selectedFinding, selectedFeedback, selectedCuration)
+	$: selectedFindingDecision = selectedDisplayFinding ? findingDecision(selectedDisplayFinding) : null;
+	$: selectedFindingUsagePath = selectedDisplayFinding
+		? findingUsagePath(selectedDisplayFinding, selectedFeedback, selectedCuration)
 		: null;
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
 	$: selectedFindingWarnings =
@@ -937,6 +942,39 @@
 			currentCurationsByTargetId.get(finding.claim_id) ??
 			null
 		);
+	}
+
+	function curatedListOrOriginal(
+		curatedValues: string[] | undefined,
+		originalValues: string[]
+	) {
+		const cleaned = [...new Set((curatedValues ?? []).map((value) => value.trim()).filter(Boolean))];
+		return cleaned.length ? cleaned : originalValues;
+	}
+
+	function curatedTextOrOriginal(
+		curatedValue: string | null | undefined,
+		originalValue: string
+	) {
+		const cleaned = curatedValue?.trim() ?? '';
+		return cleaned || originalValue;
+	}
+
+	function findingForDisplay(
+		finding: ResearchUnderstandingPresentationFinding,
+		curation: ResearchUnderstandingCuration | null = findingCurationFor(finding)
+	): ResearchUnderstandingPresentationFinding {
+		if (!curation) return finding;
+		return {
+			...finding,
+			statement: curatedTextOrOriginal(curation.curated_statement, finding.statement),
+			variables: curatedListOrOriginal(curation.curated_variables, finding.variables),
+			mediators: curatedListOrOriginal(curation.curated_mediators, finding.mediators),
+			outcomes: curatedListOrOriginal(curation.curated_outcomes, finding.outcomes),
+			direction: curatedTextOrOriginal(curation.curated_direction, finding.direction),
+			scope_summary: curatedTextOrOriginal(curation.curated_scope_summary, finding.scope_summary),
+			support_grade: curatedTextOrOriginal(curation.curated_support_grade, finding.support_grade)
+		};
 	}
 
 	function findingHasAcceptedReview(feedback: ResearchUnderstandingFeedback[]) {
@@ -2883,9 +2921,10 @@
 									</thead>
 										<tbody>
 											{#each visibleFindingRows as finding (finding.finding_id)}
-												{@const curation = curationsByTargetId.get(finding.finding_id)}
+												{@const curation = findingCurationFor(finding)}
+												{@const displayFinding = findingForDisplay(finding, curation)}
 												{@const findingFeedback = findingFeedbackFor(finding)}
-												{@const usagePreview = findingUsagePreview(finding)}
+												{@const usagePreview = findingUsagePreview(displayFinding)}
 												{@const trust = findingDatasetTrust(finding)}
 												<tr>
 													<td class="research-understanding-workbench__finding-main">
@@ -2893,9 +2932,9 @@
 															type="button"
 															on:click={() => openFindingDetail(finding.finding_id)}
 														>
-															<strong>{finding.statement || finding.title}</strong>
-															{#if finding.title && finding.title !== finding.statement}
-																<span>{finding.title}</span>
+															<strong>{displayFinding.statement || displayFinding.title}</strong>
+															{#if displayFinding.title && displayFinding.title !== displayFinding.statement}
+																<span>{displayFinding.title}</span>
 															{/if}
 																{#if curation || findingFeedback.length}
 																	<span>
@@ -2913,14 +2952,14 @@
 															{/if}
 														</button>
 													</td>
-													<td>{findingListLabel(finding.variables)}</td>
-													<td>{findingListLabel(finding.mediators)}</td>
+													<td>{findingListLabel(displayFinding.variables)}</td>
+													<td>{findingListLabel(displayFinding.mediators)}</td>
 													<td>
-														{#if finding.direction}
-															<span>{relationLabel(finding.direction)}</span>
+														{#if displayFinding.direction}
+															<span>{relationLabel(displayFinding.direction)}</span>
 														{/if}
-														{#if finding.outcomes.length}
-															<span>{findingListLabel(finding.outcomes)}</span>
+														{#if displayFinding.outcomes.length}
+															<span>{findingListLabel(displayFinding.outcomes)}</span>
 														{:else}
 															<span>{findingListLabel([])}</span>
 														{/if}
@@ -2935,23 +2974,23 @@
 															</div>
 														{/if}
 													</td>
-													<td title={finding.scope_summary || ''}>{findingScopeTableLabel(finding)}</td>
+													<td title={displayFinding.scope_summary || ''}>{findingScopeTableLabel(displayFinding)}</td>
 													<td>
 														<span class="research-understanding-workbench__grade">
-															{supportGradeLabel(finding.support_grade)}
+															{supportGradeLabel(displayFinding.support_grade)}
 														</span>
 													</td>
 													<td>
 														<div class="research-understanding-workbench__basis">
 															<strong>{usagePreview.title}</strong>
-															<span>{findingDirectEvidenceLabel(finding)}</span>
-															<span>{findingPaperCoverageLabel(finding)}</span>
+															<span>{findingDirectEvidenceLabel(displayFinding)}</span>
+															<span>{findingPaperCoverageLabel(displayFinding)}</span>
 															<span>{usagePreview.datasetNote}</span>
 															{#if usagePreview.nextAction}
 																<span>{usagePreview.nextAction}</span>
 															{/if}
-																{#if findingReviewReasonSummary(finding)}
-																	<span>{findingReviewReasonSummary(finding)}</span>
+																{#if findingReviewReasonSummary(displayFinding)}
+																	<span>{findingReviewReasonSummary(displayFinding)}</span>
 																{/if}
 															</div>
 														</td>
@@ -3052,7 +3091,7 @@
 													{datasetLabelStatusLabel(selectedFindingTrust.labelStatus)}
 												</span>
 											{/if}
-											<span>{supportGradeLabel(selectedFinding.support_grade)}</span>
+											<span>{supportGradeLabel(selectedDisplayFinding?.support_grade ?? selectedFinding.support_grade)}</span>
 											{#if selectedFindingTrust}
 												<span>
 													{findingReviewStatusLabel(
@@ -3093,14 +3132,14 @@
 										{/if}
 									</div>
 									<strong>
-										{selectedFinding?.statement ||
-											selectedFinding?.title ||
+										{selectedDisplayFinding?.statement ||
+											selectedDisplayFinding?.title ||
 											displayClaim?.statement ||
 											selectedClaim?.statement ||
 											''}
 									</strong>
-									{#if selectedFinding?.title && selectedFinding.title !== selectedFinding.statement}
-										<p>{selectedFinding.title}</p>
+									{#if selectedDisplayFinding?.title && selectedDisplayFinding.title !== selectedDisplayFinding.statement}
+										<p>{selectedDisplayFinding.title}</p>
 									{:else if !selectedFinding && selectedEffect && selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim?.statement)}
 										<p>{selectedEffect.title}</p>
 									{/if}
@@ -3274,26 +3313,26 @@
 								<div class="research-understanding-workbench__context research-understanding-workbench__context--finding-chain">
 									<div>
 										<span>{$t('research.understanding.findingVariables')}</span>
-										<p>{findingChainText(selectedFinding.variables)}</p>
+										<p>{findingChainText(selectedDisplayFinding?.variables ?? selectedFinding.variables)}</p>
 									</div>
 									<div>
 										<span>{$t('research.understanding.findingMechanism')}</span>
-										<p>{findingChainText(selectedFinding.mediators)}</p>
+										<p>{findingChainText(selectedDisplayFinding?.mediators ?? selectedFinding.mediators)}</p>
 									</div>
 									<div>
 										<span>{$t('research.understanding.findingOutcomes')}</span>
-										<p>{findingChainText(selectedFinding.outcomes)}</p>
+										<p>{findingChainText(selectedDisplayFinding?.outcomes ?? selectedFinding.outcomes)}</p>
 									</div>
-									{#if selectedFinding.direction}
+									{#if selectedDisplayFinding?.direction || selectedFinding.direction}
 										<div>
 											<span>{$t('research.understanding.relationDirection')}</span>
-											<p>{relationLabel(selectedFinding.direction)}</p>
+											<p>{relationLabel(selectedDisplayFinding?.direction ?? selectedFinding.direction)}</p>
 										</div>
 									{/if}
-									{#if selectedFinding.scope_summary}
+									{#if selectedDisplayFinding?.scope_summary || selectedFinding.scope_summary}
 										<div>
 											<span>{$t('research.understanding.findingScope')}</span>
-											<p>{selectedFinding.scope_summary}</p>
+											<p>{selectedDisplayFinding?.scope_summary ?? selectedFinding.scope_summary}</p>
 										</div>
 									{/if}
 								</div>

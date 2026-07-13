@@ -1054,12 +1054,12 @@ function findingWithDuplicateEvidenceTargetsFixture(): ResearchUnderstanding {
 	return fixture;
 }
 
-async function openMechanismClaimDetail() {
+async function openMechanismClaimDetail(
+	findingName: RegExp = /Annealing may reduce cellular substructure\./
+) {
 	await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
 	await browserPage.getByRole('button', { name: 'Weak 1' }).click();
-	await browserPage
-		.getByRole('button', { name: /Annealing may reduce cellular substructure\./ })
-		.click();
+	await browserPage.getByRole('button', { name: findingName }).click();
 	return browserPage.getByLabelText('Finding detail');
 }
 
@@ -2216,7 +2216,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		clickDatasetSummary(datasetRegion);
 		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain(
-			'Collection training JSON'
+			'1 training-ready, 1 message-exportable, and 15 review-candidate goal sample(s) in this collection.'
 		);
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Collection dataset');
@@ -3146,7 +3146,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const claimDetail = await openMechanismClaimDetail();
+		const claimDetail = await openMechanismClaimDetail(/Existing expert curation/);
 
 		await expect.element(claimDetail.getByLabelText('Curated statement')).not.toBeInTheDocument();
 		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
@@ -3161,9 +3161,119 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				claimDetail.getByText('Existing expert curation: mechanism evidence remains limited.')
+					.first()
 			)
 			.toBeInTheDocument();
 		await expect.element(claimDetail.getByText('Original classification')).toBeInTheDocument();
+	});
+
+	it('uses existing expert curation as the main finding display', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						items: [
+							{
+								curation_id: 'ruc_existing',
+								collection_id: 'col_123',
+								scope_type: 'objective',
+								scope_id: 'obj_1',
+								finding_id: 'finding_mechanism_limited',
+								claim_id: 'claim_mechanism_limited',
+								curated_claim_type: 'mechanism',
+								curated_status: 'limited',
+								curated_statement:
+									'Preheating at 150 C improves LPBF 316L ductility through GND density changes.',
+								curated_support_grade: 'partial',
+								curated_review_status: 'accepted',
+								curated_variables: ['preheating'],
+								curated_mediators: ['GND density'],
+								curated_outcomes: ['ductility'],
+								curated_direction: 'increase',
+								curated_scope_summary: 'LPBF 316L, 150 C build platform preheating',
+								curated_evidence_ref_ids: ['ev_section_3'],
+								curated_context_ids: ['ctx_heat_treatment'],
+								note: 'Corrected by domain expert.',
+								reviewer: 'materials-expert@example.com',
+								updated_at: '2026-06-18T09:00:00+00:00'
+							}
+						]
+					})
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset/collection') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 15,
+							rejected: 0,
+							scopeType: 'collection',
+							scopeId: 'goal',
+							datasetId: 'rud_col_123_collection_goal'
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Review candidates 2' }).click();
+		await expect
+			.element(
+				browserPage.getByRole('button', {
+					name: /Preheating at 150 C improves LPBF 316L ductility/
+				})
+			)
+			.toBeInTheDocument();
+		const findingsTable = browserPage.getByLabelText('Research findings table');
+		await expect.element(findingsTable.getByText('preheating', { exact: true })).toBeInTheDocument();
+		await expect.element(findingsTable.getByText('GND density', { exact: true })).toBeInTheDocument();
+		await expect.element(findingsTable.getByText('ductility', { exact: true })).toBeInTheDocument();
+		await expect.element(findingsTable.getByText('LPBF 316L, 150 C build platform preheating')).toBeInTheDocument();
+		await expect.element(findingsTable.getByText('Partial', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Partial 1' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Weak 1' })).not.toBeInTheDocument();
+
+		await browserPage
+			.getByRole('button', { name: /Preheating at 150 C improves LPBF 316L ductility/ })
+			.click();
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Preheating at 150 C improves LPBF 316L ductility through GND density changes.'
+				).first()
+			)
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Variables')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('preheating', { exact: true })).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('GND density', { exact: true })).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Outcomes ductility')).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('LPBF 316L, 150 C build platform preheating'))
+			.toBeInTheDocument();
 	});
 
 	it('loads existing expert feedback into the selected claim review history', async () => {

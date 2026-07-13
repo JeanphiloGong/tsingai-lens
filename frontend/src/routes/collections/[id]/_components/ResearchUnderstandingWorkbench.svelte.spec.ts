@@ -1080,6 +1080,28 @@ function currentDatasetRegionText() {
 	);
 }
 
+function collectionDatasetGetRequestCount() {
+	return fetchMock.mock.calls.filter(([input, init]) => {
+		const method =
+			input instanceof Request
+				? input.method
+				: typeof (init as RequestInit | undefined)?.method === 'string'
+					? (init as RequestInit).method
+					: 'GET';
+		return (
+			requestPath(input as string | URL | Request).endsWith(
+				'/research-understanding/dataset/collection'
+			) && method === 'GET'
+		);
+	}).length;
+}
+
+function clickDatasetSummary(datasetRegion: HTMLDetailsElement | null) {
+	const summary = datasetRegion?.querySelector('summary');
+	expect(summary).toBeTruthy();
+	(summary as HTMLElement).click();
+}
+
 describe('ResearchUnderstandingWorkbench', () => {
 	beforeEach(() => {
 		authState.set({
@@ -2190,7 +2212,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
-		datasetRegion?.setAttribute('open', '');
+		expect(collectionDatasetGetRequestCount()).toBe(0);
+		clickDatasetSummary(datasetRegion);
+		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain(
 			'Collection training JSON'
 		);
@@ -2306,7 +2330,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
-		datasetRegion?.setAttribute('open', '');
+		expect(collectionDatasetGetRequestCount()).toBe(0);
+		clickDatasetSummary(datasetRegion);
+		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain('Training ready 1');
 
 		await expect

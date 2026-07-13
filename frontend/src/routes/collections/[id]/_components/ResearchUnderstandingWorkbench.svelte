@@ -171,6 +171,7 @@
 	let datasetLoading = false;
 	let datasetError = '';
 	let datasetRequestSequence = 0;
+	let datasetPanelOpen = false;
 	let collectionDatasetSummary: ResearchUnderstandingDataset | null = null;
 	let collectionDatasetScopeKey = '';
 	let collectionDatasetLoading = false;
@@ -461,6 +462,7 @@
 		void loadDatasetSummary(currentDatasetScopeKey);
 	}
 	$: if (
+		datasetPanelOpen &&
 		currentCollectionDatasetScopeKey &&
 		currentCollectionDatasetScopeKey !== collectionDatasetScopeKey
 	) {
@@ -2278,8 +2280,20 @@
 	async function refreshDatasetSummaryForCurrentScope() {
 		if (!currentDatasetScopeKey) return;
 		await loadDatasetSummary(currentDatasetScopeKey, true);
-		if (currentCollectionDatasetScopeKey) {
+		if (datasetPanelOpen && currentCollectionDatasetScopeKey) {
 			await loadCollectionDatasetSummary(currentCollectionDatasetScopeKey, true);
+		}
+	}
+
+	function handleDatasetToggle(event: Event) {
+		const details = event.currentTarget as HTMLDetailsElement | null;
+		datasetPanelOpen = details?.open ?? false;
+		if (
+			datasetPanelOpen &&
+			currentCollectionDatasetScopeKey &&
+			currentCollectionDatasetScopeKey !== collectionDatasetScopeKey
+		) {
+			void loadCollectionDatasetSummary(currentCollectionDatasetScopeKey);
 		}
 	}
 
@@ -2658,7 +2672,11 @@
 					{/if}
 				</div>
 				{#if currentDatasetScopeKey}
-					<details class="research-understanding-workbench__dataset" aria-busy={datasetLoading}>
+					<details
+						class="research-understanding-workbench__dataset"
+						aria-busy={datasetLoading || collectionDatasetLoading}
+						on:toggle={handleDatasetToggle}
+					>
 						<summary>
 							<span>{$t('research.understanding.datasetSummary')}</span>
 							<small>

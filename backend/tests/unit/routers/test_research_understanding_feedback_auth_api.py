@@ -133,6 +133,15 @@ class StaticResearchUnderstandingRepository:
     ):
         return self.understanding
 
+    def list_research_understandings(
+        self,
+        collection_id: str,  # noqa: ARG002
+        scope_type: str | None = None,
+    ):
+        if scope_type and self.understanding.scope.scope_type != scope_type:
+            return ()
+        return (self.understanding,)
+
 
 class PassthroughResearchUnderstandingService:
     def with_presentation(self, understanding: ResearchUnderstanding):
@@ -484,3 +493,23 @@ def test_human_curation_route_makes_dataset_sample_training_ready(
     assert payload["items"][0]["training_evidence_refs"][0]["source_ref"] == (
         "blk-preheat"
     )
+
+    collection_dataset = client.get(
+        (
+            f"/api/v1/collections/{collection_id}"
+            "/research-understanding/dataset/collection?scope_type=goal"
+        )
+    )
+
+    assert collection_dataset.status_code == 200
+    collection_payload = collection_dataset.json()
+    assert collection_payload["scope_type"] == "collection"
+    assert collection_payload["scope_id"] == "goal"
+    assert collection_payload["quality_summary"]["training_ready_sample_count"] == 1
+    assert (
+        collection_payload["quality_summary"]["by_dataset_use_status"][
+            "training_ready"
+        ]
+        == 1
+    )
+    assert collection_payload["items"][0]["dataset_use_status"] == "training_ready"

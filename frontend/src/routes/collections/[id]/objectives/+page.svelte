@@ -196,11 +196,9 @@
 		if (goal.status !== 'ready') return goal.status;
 		if (!dataset) return 'dataset_pending';
 		if (dataset.quality_summary.review_candidate_sample_count > 0) return 'needs_review';
-		if (
-			dataset.quality_summary.training_ready_sample_count > 0 &&
-			dataset.quality_summary.training_message_sample_count > 0
-		) {
-			return 'training_ready';
+		if (dataset.quality_summary.training_ready_sample_count > 0) {
+			if (dataset.quality_summary.training_message_sample_count > 0) return 'training_ready';
+			return 'messages_pending';
 		}
 		return 'needs_review';
 	}
@@ -208,9 +206,10 @@
 	function goalReviewPriority(status: string) {
 		if (status === 'needs_review') return 0;
 		if (status === 'dataset_pending') return 1;
-		if (status === 'failed') return 2;
-		if (status === 'running' || status === 'pending') return 3;
-		if (status === 'training_ready') return 4;
+		if (status === 'messages_pending') return 2;
+		if (status === 'failed') return 3;
+		if (status === 'running' || status === 'pending') return 4;
+		if (status === 'training_ready') return 5;
 		return 5;
 	}
 
@@ -234,6 +233,7 @@
 	function goalReviewActionLabel(status: string) {
 		if (status === 'needs_review') return $t('research.objectives.goalReviewActionReview');
 		if (status === 'training_ready') return $t('research.objectives.goalReviewActionProtocol');
+		if (status === 'messages_pending') return $t('research.objectives.goalReviewActionMessages');
 		if (status === 'failed') return $t('research.objectives.goalReviewActionRepair');
 		if (status === 'running' || status === 'pending') {
 			return $t('research.objectives.goalReviewActionWait');
@@ -696,6 +696,7 @@
 
 	.goal-review-item__status--needs_review,
 	.goal-review-item__status--dataset_pending,
+	.goal-review-item__status--messages_pending,
 	.goal-review-item__status--pending,
 	.goal-review-item__status--running {
 		border-color: rgba(217, 119, 6, 0.36);

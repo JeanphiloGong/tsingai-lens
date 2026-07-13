@@ -109,6 +109,21 @@ function confirmedGoalsResponse() {
 		collection_id: 'col_4c54ffe568ec',
 		goals: [
 			{
+				goal_id: 'goal_messages_pending',
+				collection_id: 'col_4c54ffe568ec',
+				question: 'Which reviewed finding is missing training messages?',
+				source_type: 'objective_candidate',
+				material_hints: ['316L stainless steel'],
+				process_hints: ['VED'],
+				property_hints: ['fatigue strength'],
+				source_objective_id: 'obj_messages_pending',
+				status: 'ready',
+				analysis_error: null,
+				analysis_progress: null,
+				created_at: null,
+				updated_at: null
+			},
+			{
 				goal_id: 'goal_protocol_ready',
 				collection_id: 'col_4c54ffe568ec',
 				question: 'Which reviewed finding can support a protocol?',
@@ -154,9 +169,11 @@ function goalReviewResponse(input: string | URL | Request) {
 		const scopeId = url.searchParams.get('scope_id') ?? '';
 		return jsonResponse(
 			researchUnderstandingDatasetResponse({
-				trainingReady: scopeId === 'goal_protocol_ready' ? 1 : 0,
+				trainingReady:
+					scopeId === 'goal_protocol_ready' || scopeId === 'goal_messages_pending' ? 1 : 0,
 				trainingMessages: scopeId === 'goal_protocol_ready' ? 1 : 0,
-				reviewCandidate: scopeId === 'goal_protocol_ready' ? 0 : 2,
+				reviewCandidate:
+					scopeId === 'goal_protocol_ready' || scopeId === 'goal_messages_pending' ? 0 : 2,
 				scopeId
 			})
 		);
@@ -385,7 +402,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'2 confirmed goal(s): 1 training-ready sample(s), 1 training message(s), 2 review candidate(s).'
+					'3 confirmed goal(s): 2 training-ready sample(s), 1 training message(s), 2 review candidate(s).'
 				)
 			)
 			.toBeInTheDocument();
@@ -403,10 +420,16 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
 		expect(reviewRows[0].text).toContain('Review findings');
 		expect(reviewRows[1]).toMatchObject({
+			href: '/collections/col_4c54ffe568ec/goals/goal_messages_pending'
+		});
+		expect(reviewRows[1].text).toContain('Which reviewed finding is missing training messages?');
+		expect(reviewRows[1].text).toContain('Messages pending');
+		expect(reviewRows[1].text).toContain('Check messages');
+		expect(reviewRows[2]).toMatchObject({
 			href: '/collections/col_4c54ffe568ec/goals/goal_protocol_ready'
 		});
-		expect(reviewRows[1].text).toContain('Which reviewed finding can support a protocol?');
-		expect(reviewRows[1].text).toContain('Draft protocol');
+		expect(reviewRows[2].text).toContain('Which reviewed finding can support a protocol?');
+		expect(reviewRows[2].text).toContain('Draft protocol');
 	});
 
 	it('confirms an objective without existing routed evidence and lets analysis build coverage', async () => {

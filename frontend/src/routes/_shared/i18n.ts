@@ -883,6 +883,7 @@ const translations: Record<Language, Translations> = {
 					'{training} training-ready · {messages} messages · {review} needs review',
 				goalReviewActionReview: 'Review findings',
 				goalReviewActionProtocol: 'Draft protocol',
+				goalReviewActionMessages: 'Check messages',
 				goalReviewActionRepair: 'Open and repair',
 				goalReviewActionWait: 'View progress',
 				goalReviewActionOpen: 'Open goal',
@@ -893,6 +894,7 @@ const translations: Record<Language, Translations> = {
 					failed: 'Analysis failed',
 					dataset_pending: 'Dataset pending',
 					needs_review: 'Needs expert review',
+					messages_pending: 'Messages pending',
 					training_ready: 'Training-ready'
 				},
 				paperFrames: 'Paper frames',
@@ -3891,6 +3893,7 @@ const translations: Record<Language, Translations> = {
 					'{training} 条可训练 · {messages} 条 messages · {review} 条待复核',
 				goalReviewActionReview: '复核发现',
 				goalReviewActionProtocol: '生成实验方案',
+				goalReviewActionMessages: '检查 messages',
 				goalReviewActionRepair: '打开并修复',
 				goalReviewActionWait: '查看进度',
 				goalReviewActionOpen: '打开目标',
@@ -3901,6 +3904,7 @@ const translations: Record<Language, Translations> = {
 					failed: '分析失败',
 					dataset_pending: '数据集待生成',
 					needs_review: '需要专家复核',
+					messages_pending: 'Messages 待生成',
 					training_ready: '可用于训练'
 				},
 				paperFrames: '文献框架',

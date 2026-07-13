@@ -60,7 +60,16 @@ class ExperimentPlanService:
             created_by=created_by,
         )
         if validated_source is not None:
-            source_links = [link.to_record() for link in validated_source.source_links]
+            source_session, source_message = validated_source
+            source_links = [link.to_record() for link in source_message.source_links]
+            metadata = {
+                **dict(metadata or {}),
+                "source": "goal_copilot",
+                "source_session_id": source_session.session_id,
+                "source_mode": source_message.source_mode,
+                "used_evidence_ids": list(source_message.used_evidence_ids),
+                "review_gate": "training_ready_findings",
+            }
         now = _now_iso()
         plan = ExperimentPlanRecord.from_mapping(
             {
@@ -96,7 +105,7 @@ class ExperimentPlanService:
         source_links: list[Mapping[str, Any]] | None,
         metadata: Mapping[str, Any] | None,
         created_by: str | None,
-    ) -> GoalMessageRecord | None:
+    ) -> tuple[GoalSessionRecord, GoalMessageRecord] | None:
         _ = metadata
         if not source_message_id:
             return None
@@ -131,7 +140,7 @@ class ExperimentPlanService:
         message_hrefs = {link.href for link in message.source_links}
         if requested_hrefs and not requested_hrefs.issubset(message_hrefs):
             raise ValueError("source_links must come from the saved goal message")
-        return message
+        return session, message
 
     def list_plans(
         self,

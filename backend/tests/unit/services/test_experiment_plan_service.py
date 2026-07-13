@@ -85,11 +85,11 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
         source_links=[
             {
                 "kind": "evidence",
-                "label": "Source 1",
+                "label": "Stale client label",
                 "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
             }
         ],
-        metadata={"model": "fake-model"},
+        metadata={"source": "client-supplied", "model": "fake-model"},
     )
     plans = service.list_plans("col_1", "goal_1")
 
@@ -102,6 +102,11 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     assert draft.created_by == "expert-a"
     assert draft.source_links[0]["label"] == "Source 1"
     assert draft.metadata["model"] == "fake-model"
+    assert draft.metadata["source"] == "goal_copilot"
+    assert draft.metadata["source_session_id"] == "session_1"
+    assert draft.metadata["source_mode"] == "collection_grounded"
+    assert draft.metadata["used_evidence_ids"] == ["ev_1"]
+    assert draft.metadata["review_gate"] == "training_ready_findings"
     assert [plan.plan_id for plan in plans] == [draft.plan_id]
 
 

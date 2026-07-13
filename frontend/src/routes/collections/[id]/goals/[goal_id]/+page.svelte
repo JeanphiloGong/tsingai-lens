@@ -329,11 +329,15 @@
 					<form class="experiment-plans__editor" on:submit|preventDefault={savePlanEdits}>
 						<label>
 							<span>{$t('research.goalWorkspace.experimentPlanTitle')}</span>
-							<input bind:value={planTitle} />
+							<input id="experiment-plan-title" name="experiment_plan_title" bind:value={planTitle} />
 						</label>
 						<label>
 							<span>{$t('research.goalWorkspace.experimentPlanStatus')}</span>
-							<select bind:value={planStatus}>
+							<select
+								id="experiment-plan-status"
+								name="experiment_plan_status"
+								bind:value={planStatus}
+							>
 								<option value="draft">{$t('research.goalWorkspace.experimentPlanDraft')}</option>
 								<option value="ready_for_review">
 									{$t('research.goalWorkspace.experimentPlanReady')}
@@ -343,7 +347,12 @@
 						</label>
 						<label class="experiment-plans__content">
 							<span>{$t('research.goalWorkspace.experimentPlanContent')}</span>
-							<textarea rows="12" bind:value={planContent}></textarea>
+							<textarea
+								id="experiment-plan-content"
+								name="experiment_plan_content"
+								rows="12"
+								bind:value={planContent}
+							></textarea>
 						</label>
 						<div class="experiment-plans__footer">
 							<div>

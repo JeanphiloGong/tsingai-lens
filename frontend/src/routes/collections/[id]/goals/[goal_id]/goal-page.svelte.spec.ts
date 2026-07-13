@@ -360,6 +360,13 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 
 		const titleInput = browserPage.getByLabelText('Title');
 		await expect.element(titleInput).toHaveValue('Preheating validation matrix');
+		await expect.element(titleInput).toHaveAttribute('name', 'experiment_plan_title');
+		await expect
+			.element(browserPage.getByLabelText('Plan content'))
+			.toHaveAttribute('name', 'experiment_plan_content');
+		await expect
+			.element(browserPage.getByLabelText('Status'))
+			.toHaveAttribute('name', 'experiment_plan_status');
 		await titleInput.fill('Edited validation matrix');
 		await browserPage.getByLabelText('Plan content').fill('Add a no-preheat control.');
 		await browserPage.getByLabelText('Status').selectOptions('ready_for_review');

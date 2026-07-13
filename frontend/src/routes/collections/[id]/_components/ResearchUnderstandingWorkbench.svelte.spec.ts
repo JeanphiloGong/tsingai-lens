@@ -2055,6 +2055,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Candidate 1');
 		expect(datasetText).toContain('Training ready 2');
 		expect(datasetText).toContain('Needs review 1');
+		expect(datasetText).toContain(
+			'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.'
+		);
 		expect(datasetText).toContain('Silver 1');
 		expect(datasetText).toContain('Gold 1');
 		expect(datasetText).toContain('Rejected 1');

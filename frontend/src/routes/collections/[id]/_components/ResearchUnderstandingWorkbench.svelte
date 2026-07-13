@@ -2721,6 +2721,11 @@
 										</a>
 									{/if}
 								</div>
+								{#if datasetTrainingReadySampleCount > 0}
+									<p class="research-understanding-workbench__dataset-note">
+										{$t('research.understanding.datasetTrainingMessagesNote')}
+									</p>
+								{/if}
 								{#if understanding.scope.scope_type === 'goal'}
 									<div class="research-understanding-workbench__dataset-collection">
 										<strong>{$t('research.understanding.collectionDatasetSummary')}</strong>

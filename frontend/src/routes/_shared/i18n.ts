@@ -323,6 +323,8 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadCollectionReviewJson: 'Collection review JSON',
 				datasetDownloadReviewJson: 'Review candidates JSON',
 				datasetNoTrainingReady: 'No training-ready samples',
+				datasetTrainingMessagesNote:
+					'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.',
 				datasetSummary: 'Dataset',
 				collectionDatasetSummary: 'Collection dataset',
 				collectionDatasetReady:
@@ -3251,6 +3253,8 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadCollectionReviewJson: '全集合待复核 JSON',
 				datasetDownloadReviewJson: '待复核 JSON',
 				datasetNoTrainingReady: '暂无可训练样本',
+				datasetTrainingMessagesNote:
+					'训练导出包含基于证据的 user/assistant messages，可用于评价或微调准备。',
 				datasetSummary: '数据集',
 				collectionDatasetSummary: '全集合数据集',
 				collectionDatasetReady:

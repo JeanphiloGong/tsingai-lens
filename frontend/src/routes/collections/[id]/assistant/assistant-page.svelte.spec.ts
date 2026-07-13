@@ -60,6 +60,44 @@ function requestMethod(input: string | URL | Request, init?: RequestInit) {
 	return input instanceof Request ? input.method : (init?.method ?? 'GET');
 }
 
+function datasetResponse({
+	trainingReady = 1,
+	trainingMessages = 1,
+	reviewCandidate = 0
+} = {}) {
+	return {
+		schema_version: 'research_understanding_dataset.v1',
+		dataset_id: 'dataset_goal_1',
+		collection_id: 'col_123',
+		scope_type: 'goal',
+		scope_id: 'goal_1',
+		task_type: 'research_understanding_finding',
+		metric_profile: 'research_understanding_v1',
+		label_status_filter: null,
+		dataset_use_status_filter: null,
+		item_count: trainingReady + reviewCandidate,
+		label_counts: {
+			candidate: reviewCandidate,
+			silver: 0,
+			gold: trainingReady,
+			rejected: 0
+		},
+		quality_summary: {
+			training_ready_sample_count: trainingReady,
+			training_message_sample_count: trainingMessages,
+			review_candidate_sample_count: reviewCandidate,
+			by_dataset_use_status: {
+				training_ready: trainingReady,
+				review_candidate: reviewCandidate,
+				rejected: 0
+			},
+			by_presentation_bucket: {},
+			by_error_category: {}
+		},
+		warnings: []
+	};
+}
+
 describe('collections/[id]/assistant/+page.svelte', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -71,6 +109,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
+			if (path === '/api/v1/collections/col_123/research-understanding/dataset' && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
 			if (path === '/api/v1/goal-sessions' && method === 'POST') {
 				return Promise.resolve(
 					jsonResponse({
@@ -159,6 +200,76 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			}
 			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
 		});
+	});
+
+	it('shows protocol readiness for goals with training-ready message samples', async () => {
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Experiment readiness'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 training-ready finding(s) and 1 message-ready sample(s) are available for traceable protocol drafts.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
+			.toHaveAttribute('href', '/collections/col_123/goals/goal_1');
+	});
+
+	it('shows review backlog before protocol drafts are ready', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/collections/col_123/research-understanding/dataset' && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							trainingMessages: 0,
+							reviewCandidate: 3
+						})
+					)
+				);
+			}
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'3 finding(s) still need expert review before protocol drafts can be saved.'
+				)
+			)
+			.toBeInTheDocument();
 	});
 
 	it('saves grounded copilot answers as traceable experiment plans', async () => {

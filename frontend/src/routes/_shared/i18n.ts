@@ -281,6 +281,18 @@ const translations: Record<Language, Translations> = {
 				protocolStructureRequired:
 					'Save is disabled until the answer includes a hypothesis, variable matrix, measurements, controls, and risks or limits.'
 			},
+			experimentReadiness: {
+				title: 'Experiment readiness',
+				loading: 'Checking reviewed findings for this goal...',
+				noGoal: 'Select a confirmed goal before saving protocol drafts.',
+				ready:
+					'{training} training-ready finding(s) and {messages} message-ready sample(s) are available for traceable protocol drafts.',
+				needsReview:
+					'{review} finding(s) still need expert review before protocol drafts can be saved.',
+				empty: 'No training-ready findings are available for this goal yet.',
+				error: 'Readiness is unavailable: {message}',
+				openGoal: 'Open goal review'
+			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
 				collection_limited: 'Limited collection evidence',
@@ -3294,6 +3306,17 @@ const translations: Record<Language, Translations> = {
 				evidenceLinkMismatch: '来源链接和已复核证据引用不一致，暂不能保存为实验方案。',
 				protocolStructureRequired:
 					'回答需要包含假设、变量矩阵、测试指标、对照和风险/限制后，才能保存为实验方案。'
+			},
+			experimentReadiness: {
+				title: '实验方案就绪度',
+				loading: '正在检查该目标下已复核的 Findings...',
+				noGoal: '请选择一个已确认研究目标后，再保存实验方案草稿。',
+				ready:
+					'当前有 {training} 条可训练 Finding，{messages} 条可导出 messages，可用于带证据的实验方案草稿。',
+				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
+				empty: '该目标还没有可用于实验方案的 training-ready Findings。',
+				error: '就绪度不可用：{message}',
+				openGoal: '打开目标复核'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

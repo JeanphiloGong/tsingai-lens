@@ -13,6 +13,10 @@
 		type GoalSourceLink
 	} from '../../../_shared/goalSessions';
 	import { t } from '../../../_shared/i18n';
+	import {
+		fetchResearchUnderstandingDataset,
+		type ResearchUnderstandingDataset
+	} from '../../../_shared/researchView';
 
 	type StoredGoalSession = {
 		session_id: string;
@@ -53,8 +57,12 @@
 	let savingPlanMessageId = '';
 	let savedPlanMessageIds: Record<string, string> = {};
 	let error = '';
+	let readinessError = '';
 	let input = '';
 	let loadedKey = '';
+	let goalDatasetSummary: ResearchUnderstandingDataset | null = null;
+	let goalDatasetLoading = false;
+	let readinessText = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: queryMaterialId = $page.url.searchParams.get('material_id') ?? '';
@@ -63,6 +71,41 @@
 	$: queryGoalId = $page.url.searchParams.get('goal_id') ?? '';
 	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}:${queryGoalId}`;
 	$: activeSessionId = session?.session_id ?? '';
+	$: goalTrainingReadyCount = goalDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: goalTrainingMessageCount =
+		goalDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: goalReviewCandidateCount =
+		goalDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: goalProtocolReady = goalTrainingReadyCount > 0 && goalTrainingMessageCount > 0;
+	$: readinessStatus = goalProtocolReady
+		? 'ready'
+		: goalReviewCandidateCount > 0
+			? 'needs_review'
+			: goalDatasetSummary
+				? 'empty'
+				: readinessError
+					? 'error'
+					: 'pending';
+	$: {
+		if (!queryGoalId) {
+			readinessText = $t('goalCopilot.experimentReadiness.noGoal');
+		} else if (goalDatasetLoading) {
+			readinessText = $t('goalCopilot.experimentReadiness.loading');
+		} else if (readinessError) {
+			readinessText = $t('goalCopilot.experimentReadiness.error', { message: readinessError });
+		} else if (goalProtocolReady) {
+			readinessText = $t('goalCopilot.experimentReadiness.ready', {
+				training: goalTrainingReadyCount,
+				messages: goalTrainingMessageCount
+			});
+		} else if (goalReviewCandidateCount > 0) {
+			readinessText = $t('goalCopilot.experimentReadiness.needsReview', {
+				review: goalReviewCandidateCount
+			});
+		} else {
+			readinessText = $t('goalCopilot.experimentReadiness.empty');
+		}
+	}
 	$: if (collectionId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadSession();
@@ -143,6 +186,8 @@
 	}
 
 	async function loadSession(sessionId = '') {
+		const activeCollectionId = collectionId;
+		const activeGoalId = queryGoalId;
 		loading = true;
 		error = '';
 		history = readHistory();
@@ -175,12 +220,37 @@
 				storeSessionId(session.session_id);
 				upsertHistory(session);
 			}
+			await loadGoalReadiness(activeCollectionId, activeGoalId);
 		} catch (err) {
 			error = errorMessage(err);
 			session = null;
 			messages = [];
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadGoalReadiness(
+		activeCollectionId: string,
+		activeGoalId: string
+	) {
+		goalDatasetSummary = null;
+		readinessError = '';
+		if (!activeCollectionId || !activeGoalId) {
+			goalDatasetLoading = false;
+			return;
+		}
+		goalDatasetLoading = true;
+		try {
+			const dataset = await fetchResearchUnderstandingDataset(activeCollectionId, {
+				scope_type: 'goal',
+				scope_id: activeGoalId
+			});
+			goalDatasetSummary = dataset;
+		} catch (err) {
+			readinessError = errorMessage(err);
+		} finally {
+			goalDatasetLoading = false;
 		}
 	}
 
@@ -527,6 +597,18 @@
 				<span aria-hidden="true">⋮</span>
 			</button>
 		</header>
+
+		{#if queryGoalId}
+			<section class={`experiment-readiness experiment-readiness--${readinessStatus}`}>
+				<div>
+					<span>{$t('goalCopilot.experimentReadiness.title')}</span>
+					<strong>{readinessText}</strong>
+				</div>
+				<a href={`/collections/${collectionId}/goals/${queryGoalId}`}>
+					{$t('goalCopilot.experimentReadiness.openGoal')}
+				</a>
+			</section>
+		{/if}
 
 		{#if error}
 			<div class="status-message" role="alert">{error}</div>
@@ -1052,6 +1134,69 @@
 		font-style: normal;
 		font-weight: 700;
 		vertical-align: -1px;
+	}
+
+	.experiment-readiness {
+		margin: 12px 40px 0;
+		border: 1px solid #d8e0ec;
+		border-radius: 8px;
+		padding: 12px 14px;
+		background: #f8fafc;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.experiment-readiness div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.experiment-readiness span {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.experiment-readiness strong {
+		color: #111827;
+		font-size: 14px;
+		line-height: 21px;
+		font-weight: 650;
+	}
+
+	.experiment-readiness a {
+		flex: 0 0 auto;
+		color: #2563eb;
+		font-size: 13px;
+		line-height: 20px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.experiment-readiness a:hover,
+	.experiment-readiness a:focus-visible {
+		text-decoration: underline;
+	}
+
+	.experiment-readiness--ready {
+		border-color: #bbf7d0;
+		background: #f0fdf4;
+	}
+
+	.experiment-readiness--needs_review,
+	.experiment-readiness--pending {
+		border-color: #fed7aa;
+		background: #fff7ed;
+	}
+
+	.experiment-readiness--error {
+		border-color: #fecaca;
+		background: #fef2f2;
 	}
 
 	.more-button {

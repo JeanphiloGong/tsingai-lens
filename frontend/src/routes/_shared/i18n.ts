@@ -689,6 +689,8 @@ const translations: Record<Language, Translations> = {
 				relevantTableRows: 'Relevant table rows',
 				tableRowLabel: 'Row {row}',
 				unalignedTableRow: 'Unaligned cells: {cells}',
+				unalignedTableRowsWarning:
+					'Some selected rows are not aligned with the parsed columns. Verify the source table before accepting this finding.',
 				parsedSourceBlock: 'Parsed source block',
 				openEvidenceSource: 'Open source',
 				auditBinding: 'Audit binding',
@@ -825,6 +827,8 @@ const translations: Record<Language, Translations> = {
 					weak_support: 'Support is weak.',
 					insufficient_support: 'Support is insufficient.',
 					missing_mechanism_evidence: 'Mechanism evidence is not yet linked.',
+					table_row_alignment_uncertain:
+						'Selected table rows do not align cleanly with the parsed columns; verify the source table before accepting.',
 					confounded_table_row_comparison:
 						'Multiple table-row variables changed; review before treating this as a single-axis effect.',
 					model_validation_finding:
@@ -3775,6 +3779,7 @@ const translations: Record<Language, Translations> = {
 				relevantTableRows: '相关表格行',
 				tableRowLabel: '第 {row} 行',
 				unalignedTableRow: '未对齐单元格：{cells}',
+				unalignedTableRowsWarning: '部分选中行没有和解析列名对齐，接受这个发现前需要核对原表。',
 				parsedSourceBlock: '完整解析原文块',
 				openEvidenceSource: '打开原文',
 				auditBinding: '审计绑定',
@@ -3909,6 +3914,8 @@ const translations: Record<Language, Translations> = {
 					weak_support: '当前支持较弱。',
 					insufficient_support: '当前证据不足。',
 					missing_mechanism_evidence: '尚未绑定机制证据。',
+					table_row_alignment_uncertain:
+						'选中的表格行和解析列名没有完全对齐，接受前需要核对原表。',
 					confounded_table_row_comparison: '表格行中多项变量同时变化，不能直接当作单变量效应。',
 					model_validation_finding: '模型预测或验证证据需要专家复核。',
 					has_unreviewed_comparable_candidates: '复核队列中还有可比较候选发现待确认。',

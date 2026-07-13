@@ -5133,6 +5133,15 @@ class ResearchUnderstandingService:
         review_queue_findings = self._review_findings_without_confounded_table_rows(
             review_queue_findings
         )
+        review_queue_findings = [
+            self._finding_with_table_alignment_review_reason(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+                relations_by_id=relations_by_id,
+            )
+            for finding in review_queue_findings
+        ]
         review_queue_findings = self._review_findings_without_low_magnitude_table_rows(
             review_queue_findings,
             evidence_by_id=evidence_by_id,
@@ -6989,6 +6998,66 @@ class ResearchUnderstandingService:
                 density_deltas_by_outcome=density_deltas_by_outcome,
             )
         ]
+
+    def _finding_with_table_alignment_review_reason(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+        relations_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not self._finding_uses_unaligned_table_rows(
+            finding,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
+            relations_by_id=relations_by_id,
+        ):
+            return dict(finding)
+        updated = dict(finding)
+        updated["review_reasons"] = _dedupe_strings(
+            [
+                *_strings(updated.get("review_reasons")),
+                "table_row_alignment_uncertain",
+                "needs_expert_review",
+            ]
+        )
+        updated["warnings"] = _dedupe_strings(
+            [
+                *_strings(updated.get("warnings")),
+                "table_row_alignment_uncertain",
+            ]
+        )
+        return updated
+
+    def _finding_uses_unaligned_table_rows(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+        relations_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        quote_hints = self._quote_hints_for_finding(
+            finding,
+            relations_by_id=relations_by_id,
+        )
+        for ref_id in _strings(bundle.get("direct_result")):
+            ref = evidence_by_id.get(ref_id, {})
+            if "table" not in (_text(ref.get("source_kind")) or "").lower():
+                continue
+            source_ref = _text(_locator_mapping(ref.get("locator")).get("source_ref"))
+            table = tables_by_id.get(source_ref)
+            if table is None:
+                continue
+            table_audit = self._presentation_table_audit(
+                table,
+                quote_hints=quote_hints,
+            )
+            if _table_audit_has_unaligned_rows(table_audit):
+                return True
+        return False
 
     def _finding_is_low_magnitude_table_row_candidate(
         self,
@@ -10752,54 +10821,10 @@ class ResearchUnderstandingService:
             )
             if not direct_ref_ids:
                 continue
-            hint_terms = {
-                "variable": set(),
-                "outcome": set(),
-                "relation": set(),
-                "statement": set(),
-                "result_numeric": set(),
-                "result_numeric_endpoints": set(),
-            }
-            for value in _strings(finding.get("variables")):
-                hint_terms["variable"].update(_quote_hint_terms(value))
-            for value in _strings(finding.get("outcomes")):
-                hint_terms["outcome"].update(_quote_hint_terms(value))
-            hint_terms["statement"].update(_quote_hint_terms(finding.get("statement")))
-            hint_terms["statement"].update(
-                _quote_numeric_hint_terms(finding.get("statement"))
+            hint_terms = self._quote_hints_for_finding(
+                finding,
+                relations_by_id=relations_by_id,
             )
-            hint_terms["result_numeric"].update(
-                _quote_result_numeric_hint_terms(finding.get("statement"))
-            )
-            hint_terms["result_numeric_endpoints"].update(
-                _quote_result_numeric_endpoint_terms(finding.get("statement"))
-            )
-            for value in (
-                _text(finding.get("statement")),
-                _text(finding.get("title")),
-                _text(finding.get("direction")),
-                *_strings(finding.get("mediators")),
-            ):
-                hint_terms["relation"].update(_quote_hint_terms(value))
-                hint_terms["relation"].update(_quote_numeric_hint_terms(value))
-            for relation_id in _strings(finding.get("relation_ids")):
-                relation = relations_by_id.get(relation_id, {})
-                hint_terms["variable"].update(
-                    _quote_hint_terms(
-                        self._presentation_relation_side(relation.get("subject"))
-                    )
-                )
-                object_chain = self._relation_object_chain(relation)
-                if object_chain:
-                    hint_terms["outcome"].update(_quote_hint_terms(object_chain[-1]))
-                    for mediator in object_chain[:-1]:
-                        hint_terms["relation"].update(_quote_hint_terms(mediator))
-                for value in (
-                    _text(relation.get("predicate")),
-                    _text(relation.get("relation_type")),
-                    self._presentation_relation_summary(relation),
-                ):
-                    hint_terms["relation"].update(_quote_hint_terms(value))
             if not any(hint_terms.values()):
                 continue
             for ref_id in direct_ref_ids:
@@ -10817,6 +10842,58 @@ class ResearchUnderstandingService:
                 for key, terms in hint_terms.items():
                     ref_hints[key].update(terms)
         return hints_by_ref
+
+    def _quote_hints_for_finding(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        relations_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, set[str]]:
+        hint_terms = {
+            "variable": set(),
+            "outcome": set(),
+            "relation": set(),
+            "statement": set(),
+            "result_numeric": set(),
+            "result_numeric_endpoints": set(),
+        }
+        for value in _strings(finding.get("variables")):
+            hint_terms["variable"].update(_quote_hint_terms(value))
+        for value in _strings(finding.get("outcomes")):
+            hint_terms["outcome"].update(_quote_hint_terms(value))
+        hint_terms["statement"].update(_quote_hint_terms(finding.get("statement")))
+        hint_terms["statement"].update(_quote_numeric_hint_terms(finding.get("statement")))
+        hint_terms["result_numeric"].update(
+            _quote_result_numeric_hint_terms(finding.get("statement"))
+        )
+        hint_terms["result_numeric_endpoints"].update(
+            _quote_result_numeric_endpoint_terms(finding.get("statement"))
+        )
+        for value in (
+            _text(finding.get("statement")),
+            _text(finding.get("title")),
+            _text(finding.get("direction")),
+            *_strings(finding.get("mediators")),
+        ):
+            hint_terms["relation"].update(_quote_hint_terms(value))
+            hint_terms["relation"].update(_quote_numeric_hint_terms(value))
+        for relation_id in _strings(finding.get("relation_ids")):
+            relation = relations_by_id.get(relation_id, {})
+            hint_terms["variable"].update(
+                _quote_hint_terms(self._presentation_relation_side(relation.get("subject")))
+            )
+            object_chain = self._relation_object_chain(relation)
+            if object_chain:
+                hint_terms["outcome"].update(_quote_hint_terms(object_chain[-1]))
+                for mediator in object_chain[:-1]:
+                    hint_terms["relation"].update(_quote_hint_terms(mediator))
+            for value in (
+                _text(relation.get("predicate")),
+                _text(relation.get("relation_type")),
+                self._presentation_relation_summary(relation),
+            ):
+                hint_terms["relation"].update(_quote_hint_terms(value))
+        return hint_terms
 
     def _presentation_effect(
         self,
@@ -11873,6 +11950,7 @@ class ResearchUnderstandingService:
                 {
                     "row_index": int(row["row_index"]),
                     "cells": [cell if cell else "-" for cell in row["cells"]],
+                    "aligned": _table_row_cells_are_aligned(row["cells"], columns),
                 }
                 for row in relevant_rows
             ],
@@ -12551,12 +12629,18 @@ def _presentation_evidence_href(
 def _presentation_table_audit_quote(table_audit: Mapping[str, Any] | None) -> str:
     if not table_audit:
         return ""
-    columns = _strings(table_audit.get("columns"))
+    columns = _ordered_texts(table_audit.get("columns"))
     row_texts: list[str] = []
     for row in _mapping_list(table_audit.get("relevant_rows")):
-        cells = _strings(row.get("cells"))
+        cells = _ordered_texts(row.get("cells"))
         if cells:
-            row_texts.append(_presentation_table_row_quote(cells, columns))
+            row_texts.append(
+                _presentation_table_row_quote(
+                    cells,
+                    columns,
+                    aligned=row.get("aligned"),
+                )
+            )
     parts: list[str] = []
     if columns:
         parts.append("Columns: " + " | ".join(columns))
@@ -12565,15 +12649,67 @@ def _presentation_table_audit_quote(table_audit: Mapping[str, Any] | None) -> st
     return _short_text(" ".join(parts), limit=900)
 
 
-def _presentation_table_row_quote(cells: list[str], columns: list[str]) -> str:
+def _presentation_table_row_quote(
+    cells: list[str],
+    columns: list[str],
+    *,
+    aligned: Any = None,
+) -> str:
     if not columns:
         return " | ".join(cells)
-    if len(cells) != len(columns):
+    if not _table_row_is_aligned(cells, columns, aligned=aligned):
         return "Unaligned cells: " + " | ".join(cells)
     pairs: list[str] = []
     for index, cell in enumerate(cells):
         pairs.append(f"{columns[index]}: {cell}")
     return "; ".join(pairs)
+
+
+def _table_row_is_aligned(
+    cells: list[str],
+    columns: list[str],
+    *,
+    aligned: Any = None,
+) -> bool:
+    if isinstance(aligned, bool):
+        return aligned
+    return _table_row_cells_are_aligned(cells, columns)
+
+
+def _table_row_cells_are_aligned(cells: list[str], columns: list[str]) -> bool:
+    return not columns or (
+        len(cells) == len(columns)
+        and all(_text(cell) and _text(cell) != "-" for cell in cells)
+    )
+
+
+def _table_audit_has_unaligned_rows(table_audit: Mapping[str, Any] | None) -> bool:
+    if not table_audit:
+        return False
+    columns = _ordered_texts(table_audit.get("columns"))
+    if not columns:
+        return False
+    for row in _mapping_list(table_audit.get("relevant_rows")):
+        cells = _ordered_texts(row.get("cells"))
+        if cells and not _table_row_is_aligned(
+            cells,
+            columns,
+            aligned=row.get("aligned"),
+        ):
+            return True
+    return False
+
+
+def _ordered_texts(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, Mapping):
+        items = value.values()
+    elif isinstance(value, (list, tuple)):
+        items = value
+    else:
+        items = (value,)
+    return [text for item in items if (text := _text(item))]
 
 
 def _mapping(value: Any) -> dict[str, Any]:

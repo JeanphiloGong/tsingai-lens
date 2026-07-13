@@ -213,6 +213,7 @@ export type ResearchUnderstandingPresentationTableAudit = {
 export type ResearchUnderstandingPresentationTableRow = {
 	row_index: number;
 	cells: string[];
+	aligned: boolean;
 };
 export type ResearchUnderstandingPresentationContext = {
 	context_id: string;
@@ -1545,7 +1546,11 @@ function normalizeResearchUnderstandingPresentationTableAudit(
 			if (!cells.some((cell) => cell && cell !== '-')) return null;
 			return {
 				row_index: toOptionalNumber(rowRecord.row_index) ?? 0,
-				cells
+				cells,
+				aligned:
+					typeof rowRecord.aligned === 'boolean'
+						? rowRecord.aligned
+						: !columns.length || cells.length === columns.length
 			};
 		})
 		.filter((row): row is ResearchUnderstandingPresentationTableRow => Boolean(row));

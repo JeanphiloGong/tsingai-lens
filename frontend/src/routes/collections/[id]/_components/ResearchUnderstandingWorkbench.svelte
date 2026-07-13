@@ -948,6 +948,7 @@
 			'confounded_table_row_comparison',
 			'model_validation_finding',
 			'missing_direct_result_evidence',
+			'table_row_alignment_uncertain',
 			'missing_mechanism_evidence',
 			'conflicting_direction',
 			'partial_support',
@@ -1674,10 +1675,14 @@
 		return ref.table_audit?.relevant_rows ?? [];
 	}
 
-	function tableAuditRowText(ref: ResearchUnderstandingPresentationEvidence, row: { cells: string[] }) {
+	function tableAuditHasUnalignedRows(ref: ResearchUnderstandingPresentationEvidence) {
+		return tableAuditRows(ref).some((row) => !row.aligned);
+	}
+
+	function tableAuditRowText(ref: ResearchUnderstandingPresentationEvidence, row: { cells: string[]; aligned?: boolean }) {
 		const columns = ref.table_audit?.columns ?? [];
 		if (!columns.length) return row.cells.join(' | ');
-		if (columns.length !== row.cells.length) {
+		if (row.aligned === false || columns.length !== row.cells.length) {
 			return $t('research.understanding.unalignedTableRow', {
 				cells: row.cells.join(' | ')
 			});
@@ -4295,6 +4300,11 @@
 															{#if tableAuditColumns(ref)}
 																<p>{tableAuditColumns(ref)}</p>
 															{/if}
+															{#if tableAuditHasUnalignedRows(ref)}
+																<p class="research-understanding-workbench__table-audit-warning">
+																	{$t('research.understanding.unalignedTableRowsWarning')}
+																</p>
+															{/if}
 															{#if tableAuditRows(ref).length}
 																<ul>
 																	{#each tableAuditRows(ref) as row (row.row_index)}
@@ -4365,6 +4375,11 @@
 													<span>{$t('research.understanding.relevantTableRows')}</span>
 													{#if tableAuditColumns(ref)}
 														<p>{tableAuditColumns(ref)}</p>
+													{/if}
+													{#if tableAuditHasUnalignedRows(ref)}
+														<p class="research-understanding-workbench__table-audit-warning">
+															{$t('research.understanding.unalignedTableRowsWarning')}
+														</p>
 													{/if}
 													{#if tableAuditRows(ref).length}
 														<ul>
@@ -6140,6 +6155,13 @@
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 750;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__table-audit-warning {
+		color: var(--warning-text);
+		font-size: 12px;
+		font-weight: 650;
 		line-height: 18px;
 	}
 

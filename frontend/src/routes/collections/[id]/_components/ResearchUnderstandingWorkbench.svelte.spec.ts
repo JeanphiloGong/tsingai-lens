@@ -713,9 +713,9 @@ function understandingFixture(): ResearchUnderstanding {
 					table_audit: {
 						columns: ['Build platform conditions', 'Yield strength', 'Elongation'],
 						relevant_rows: [
-							{ row_index: 1, cells: ['Non-preheated', '448', '72'] },
-							{ row_index: 2, cells: ['Preheated', '465', '82'] },
-							{ row_index: 3, cells: ['Parsed short row', '470'] }
+							{ row_index: 1, cells: ['Non-preheated', '448', '72'], aligned: true },
+							{ row_index: 2, cells: ['Preheated', '465', '82'], aligned: true },
+							{ row_index: 3, cells: ['Parsed short row', '470'], aligned: false }
 						]
 					},
 					traceability_status: 'traceable',
@@ -2177,6 +2177,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			'Build platform conditions: Preheated; Yield strength: 465; Elongation: 82'
 		);
 		expect(tableAudit?.textContent).toContain('Unaligned cells: Parsed short row | 470');
+		expect(tableAudit?.textContent).toContain(
+			'Some selected rows are not aligned with the parsed columns.'
+		);
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 
 		const claimDetail = await openMechanismClaimDetail();

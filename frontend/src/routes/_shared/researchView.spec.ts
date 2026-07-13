@@ -413,6 +413,13 @@ describe('research view shared helpers', () => {
 							title: 'P001 Table 2 / p. 5',
 							source_label: 'P001 Table 2',
 							source_kind: 'table',
+							table_audit: {
+								columns: ['Condition', 'Strength', 'Elongation'],
+								relevant_rows: [
+									{ row_index: 1, cells: ['As built', '450', '12'] },
+									{ row_index: 2, cells: ['Parsed short row', '470'], aligned: false }
+								]
+							},
 							traceability_status: 'traceable',
 							evidence_role: 'direct_support'
 						}
@@ -448,6 +455,12 @@ describe('research view shared helpers', () => {
 		expect(analysis.understanding?.presentation.evidence_items[0].evidence_role).toBe(
 			'direct_support'
 		);
+		expect(
+			analysis.understanding?.presentation.evidence_items[0].table_audit?.relevant_rows
+		).toEqual([
+			{ row_index: 1, cells: ['As built', '450', '12'], aligned: true },
+			{ row_index: 2, cells: ['Parsed short row', '470'], aligned: false }
+		]);
 	});
 
 	it('posts research understanding feedback through the same-origin collection contract', async () => {

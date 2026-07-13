@@ -818,10 +818,12 @@ def test_objective_understanding_table_evidence_quote_includes_relevant_rows():
         {
             "row_index": 2,
             "cells": ["Non-preheated", "448", "617", "72"],
+            "aligned": True,
         },
         {
             "row_index": 3,
             "cells": ["Preheated", "465", "618", "82"],
+            "aligned": True,
         },
     ]
 
@@ -2955,10 +2957,12 @@ def test_objective_understanding_recovers_ved_fatigue_from_relevant_frames_when_
         {
             "row_index": 1,
             "cells": ["L-VED", "610 ± 6", "93", "0.15", "340", "394"],
+            "aligned": True,
         },
         {
             "row_index": 2,
             "cells": ["M-VED", "595 ± 13", "82", "0.14", "450", "179"],
+            "aligned": True,
         },
     ]
     assert "quote=" in (recovered["href"] or "")
@@ -12877,10 +12881,12 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
         {
             "row_index": 1,
             "cells": ["140", "100", "HIP", "98.16"],
+            "aligned": True,
         },
         {
             "row_index": 2,
             "cells": ["140", "100", "Furnace HT", "99.33"],
+            "aligned": True,
         },
     ]
     response_payload = ResearchUnderstandingResponse.model_validate(
@@ -13039,6 +13045,7 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
                 "593.0 (+/- 9.1)",
                 "35.0 (+/- 9.6)",
             ],
+            "aligned": True,
         },
         {
             "row_index": 2,
@@ -13049,6 +13056,7 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
                 "566.7 (+/- 6.2)",
                 "52.7 (+/- 3.6)",
             ],
+            "aligned": True,
         },
     ]
 
@@ -13136,6 +13144,155 @@ def test_with_presentation_table_quote_does_not_mislabel_short_rows():
     evidence_item = understanding["presentation"]["evidence_items"][0]
     assert "Relevant rows: Unaligned cells: 10 | 20" in evidence_item["quote"]
     assert "A: 10; B: 20" not in evidence_item["quote"]
+    assert evidence_item["table_audit"]["relevant_rows"] == [
+        {
+            "row_index": 1,
+            "cells": ["10", "20"],
+            "aligned": False,
+        }
+    ]
+
+
+def test_table_quote_preserves_repeated_cells_for_alignment():
+    service = ResearchUnderstandingService(
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-repeated-row",
+                    human_readable_id=8,
+                    title="Repeated cells table study",
+                    text="",
+                )
+            ],
+            tables=[
+                SourceTable(
+                    table_id="table-repeated-row",
+                    document_id="paper-repeated-row",
+                    table_order=1,
+                    page=2,
+                    caption_text="Repeated cells from parsed table.",
+                    caption_block_id=None,
+                    bbox=None,
+                    heading_path="Results",
+                    column_headers=["Condition number", "Sample number", "Density"],
+                    table_matrix=[
+                        ["Condition number", "Sample number", "Density"],
+                        ["1", "1", "95.4"],
+                    ],
+                )
+            ],
+        )
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-repeated-row",
+                "goal_id": "goal-repeated-row",
+                "title": "How does condition affect density?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_repeated_row",
+                    "claim_type": "comparison",
+                    "statement": "Condition number 1 sample 1 reported density 95.4.",
+                    "status": "supported",
+                    "confidence": 0.7,
+                    "evidence_ref_ids": ["evref_repeated_row"],
+                    "context_ids": ["ctx_repeated_row"],
+                    "source_object_ids": ["oeu_repeated_row"],
+                    "warnings": [],
+                }
+            ],
+            "relations": [],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_repeated_row",
+                    "source_kind": "table",
+                    "document_id": "paper-repeated-row",
+                    "label": "Table 1",
+                    "locator": {
+                        "source_kind": "table",
+                        "source_ref": "table-repeated-row",
+                    },
+                    "fact_ids": ["oeu_repeated_row"],
+                    "traceability_status": "resolved",
+                    "quote": None,
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_repeated_row",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"variable_process_axes": ["condition number"]},
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    quote = understanding["presentation"]["evidence_items"][0]["quote"]
+    assert "Condition number: 1; Sample number: 1; Density: 95.4" in quote
+    assert "Unaligned cells:" not in quote
+
+
+def test_table_alignment_review_reason_marks_unaligned_direct_table_rows():
+    service = ResearchUnderstandingService()
+    finding = {
+        "finding_id": "finding_short_row",
+        "claim_id": "claim_short_row",
+        "title": "A -> C",
+        "statement": "Under B 20, A increased C from 10 to 30.",
+        "variables": ["A"],
+        "outcomes": ["C"],
+        "mediators": [],
+        "evidence_bundle": {
+            "direct_result": ["evref_short_row"],
+            "mechanism": [],
+            "condition_context": [],
+            "background": [],
+            "conflict": [],
+            "noise": [],
+            "uncategorized": [],
+        },
+        "review_reasons": ["single_paper_evidence"],
+        "warnings": [],
+    }
+    evidence_by_id = {
+        "evref_short_row": {
+            "source_kind": "table",
+            "locator": {"source_ref": "table-short-row"},
+        }
+    }
+    tables_by_id = {
+        "table-short-row": SourceTable(
+            table_id="table-short-row",
+            document_id="paper-short-row",
+            table_order=1,
+            page=2,
+            caption_text="Short rows from parsed table.",
+            caption_block_id=None,
+            bbox=None,
+            heading_path="Results",
+            column_headers=["A", "B", "C"],
+            table_matrix=[["A", "B", "C"], ["10", "20"]],
+        )
+    }
+
+    updated = service._finding_with_table_alignment_review_reason(
+        finding,
+        evidence_by_id=evidence_by_id,
+        tables_by_id=tables_by_id,
+        relations_by_id={},
+    )
+
+    assert "table_row_alignment_uncertain" in updated["review_reasons"]
+    assert "table_row_alignment_uncertain" in updated["warnings"]
+    assert "needs_expert_review" in updated["review_reasons"]
 
 
 def test_with_presentation_projects_property_axis_relation_as_finding():

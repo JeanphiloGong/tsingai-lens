@@ -295,6 +295,7 @@ def evaluate_goal_dataset_payload(
                 if _text(item.get("dataset_use_status")) == "review_candidate"
             ]
         ),
+        "by_error_category": dict(_mapping(quality.get("by_error_category"))),
         "by_trace_status": dict(_mapping(quality.get("by_trace_status"))),
         "warning_counts": dict(warning_counts),
         "checks": checks,

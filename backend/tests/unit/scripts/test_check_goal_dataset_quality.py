@@ -56,6 +56,10 @@ def _dataset_payload(**overrides):
     }
     item.update(overrides.pop("item_overrides", {}))
     quality_summary = {
+        "by_error_category": {
+            "variable_error": 1,
+            "evidence_error": 1,
+        },
         "by_trace_status": {"evidence_derived": 1},
         "warning_counts": {
             "unavailable_trace": 0,
@@ -83,6 +87,10 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
 
     assert summary["item_count"] == 1
     assert summary["training_ready_count"] == 1
+    assert summary["by_error_category"] == {
+        "variable_error": 1,
+        "evidence_error": 1,
+    }
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 

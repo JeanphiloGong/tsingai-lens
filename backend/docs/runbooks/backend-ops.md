@@ -16,6 +16,7 @@ Set backend LLM runtime variables before local runs:
 ```bash
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
+export GOAL_COPILOT_LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
 export CORE_LLM_EXTRACTION_MODE=json_text
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
@@ -25,6 +26,19 @@ export CORE_EXTRACTION_MAX_CONCURRENCY=4
 `4`.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
+`GOAL_COPILOT_LLM_MODEL` is optional. When unset, goal chat uses `LLM_MODEL`;
+when set, it must match one of the model ids returned by the configured
+OpenAI-compatible endpoint, for example:
+
+```bash
+curl "$LLM_BASE_URL/models"
+```
+
+If the goal copilot model name does not match the served model id, goal chat
+returns `goal_copilot_model_unavailable`. In that state Lens deliberately
+refuses to save AI-generated experiment plans from the message, because those
+plans require a `collection_grounded` answer with source links and the
+`training_ready_findings` review gate.
 
 ## Start the Backend
 

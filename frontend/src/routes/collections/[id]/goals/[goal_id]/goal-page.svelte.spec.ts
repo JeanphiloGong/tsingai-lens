@@ -1152,7 +1152,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Review before use').first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Review candidates 1' }))
+			.element(browserPage.getByRole('button', { name: 'Repair candidates 1' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('No expert findings yet')).not.toBeInTheDocument();
 		await expect
@@ -1170,7 +1170,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Review candidates 1' }))
+			.element(browserPage.getByRole('button', { name: 'Repair candidates 1' }))
 			.toHaveAttribute('aria-pressed', 'true');
 	});
 

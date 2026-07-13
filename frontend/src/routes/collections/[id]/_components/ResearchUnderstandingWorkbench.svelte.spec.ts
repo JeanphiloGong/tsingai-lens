@@ -2114,13 +2114,30 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(usagePath.getByText('Record expert feedback or curation for the final label.'))
 			.toBeInTheDocument();
+		const reviewPriorities = primaryDetail.getByLabelText('Review priorities');
+		await expect.element(reviewPriorities.getByText('Review priorities')).toBeInTheDocument();
+		await expect
+			.element(
+				reviewPriorities.getByText(
+					'Review these points before accepting, rejecting, or correcting this finding.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(reviewPriorities.getByText('Evidence comes from one paper.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				reviewPriorities.getByText('Comparable candidate findings are waiting in the review queue.')
+			)
+			.toBeInTheDocument();
 		await expect.element(primaryDetail.getByText('Conclusion use boundary')).toBeInTheDocument();
 		await expect.element(primaryDetail.getByText('Paper-level only')).toBeInTheDocument();
 		await expect
-			.element(primaryDetail.getByText('Evidence comes from one paper.'))
+			.element(evidenceBasis.getByText('Evidence comes from one paper.'))
 			.toBeInTheDocument();
 		await expect
-			.element(primaryDetail.getByText('Needs another paper to confirm, contradict, or extend it.'))
+			.element(evidenceBasis.getByText('Needs another paper to confirm, contradict, or extend it.'))
 			.toBeInTheDocument();
 		await expect
 			.element(
@@ -2137,7 +2154,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(primaryDetail.getByText('Needs expert review before use as a settled conclusion.'))
+			.element(
+				reviewPriorities.getByText('Needs expert review before use as a settled conclusion.')
+			)
 			.toBeInTheDocument();
 		await expect
 			.element(
@@ -2173,8 +2192,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(relatedDetail.getByText('Strength trends conflict across reported heat treatments.'))
 			.toBeInTheDocument();
 		await expect.element(relatedDetail.getByText('Do not use yet')).toBeInTheDocument();
+		const conflictReviewPriorities = relatedDetail.getByLabelText('Review priorities');
 		await expect
-			.element(relatedDetail.getByText('Evidence contains conflicting directions.'))
+			.element(
+				conflictReviewPriorities.getByText(
+					'Resolve the conflicting evidence before using this finding downstream.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(conflictReviewPriorities.getByText('Evidence contains conflicting directions.'))
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await browserPage.getByRole('button', { name: 'Repair candidates 2' }).click();
@@ -3012,12 +3039,22 @@ describe('ResearchUnderstandingWorkbench', () => {
 			"The achieved density measured using the Archimedes ' method was 91.9, 98.9 and 99.6 % for L-VED, M-VED and H-VED, respectively."
 		);
 		expect(densityEvidenceCard?.textContent).toContain('Selected quote');
-		await expect.element(findingDetail.getByText('Evidence basis')).toBeInTheDocument();
+		const findingOnlyReviewPriorities = findingDetail.getByLabelText('Review priorities');
+		await expect.element(findingOnlyReviewPriorities.getByText('Review priorities')).toBeInTheDocument();
 		await expect
-			.element(findingDetail.getByText('Evidence comes from one paper.'))
+			.element(findingOnlyReviewPriorities.getByText('Evidence comes from one paper.'))
+			.toBeInTheDocument();
+		const findingOnlyEvidenceBasis = findingDetail.getByLabelText('Evidence basis');
+		await expect.element(findingOnlyEvidenceBasis.getByText('Evidence basis')).toBeInTheDocument();
+		await expect
+			.element(findingOnlyEvidenceBasis.getByText('Evidence comes from one paper.'))
 			.toBeInTheDocument();
 		await expect
-			.element(findingDetail.getByText('Needs another paper to confirm, contradict, or extend it.'))
+			.element(
+				findingOnlyEvidenceBasis.getByText(
+					'Needs another paper to confirm, contradict, or extend it.'
+				)
+			)
 			.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Variables')).toBeInTheDocument();
 		await expect.element(findingDetail.getByText('VED', { exact: true })).toBeInTheDocument();

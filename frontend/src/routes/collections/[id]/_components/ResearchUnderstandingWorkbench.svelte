@@ -536,6 +536,9 @@
 		? findingUsagePath(selectedDisplayFinding, selectedFeedback, selectedCuration)
 		: null;
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
+	$: selectedFindingReviewReasons = selectedDisplayFinding
+		? findingReviewReasonValues(selectedDisplayFinding)
+		: [];
 	$: selectedFindingWarnings =
 		selectedFinding && selectedFindingTrust
 			? selectedFinding.warnings.filter((warning) =>
@@ -1098,6 +1101,20 @@
 		const reviewReasons = findingReviewReasonValues(finding);
 		if (!reviewReasons.length) return '';
 		return reviewReasons.slice(0, 2).map(findingReviewReasonLabel).join(' · ');
+	}
+
+	function findingReviewReasonActionLabel(finding: ResearchUnderstandingPresentationFinding) {
+		const trust = findingDatasetTrust(finding);
+		if (trust.datasetUseStatus === 'training_ready') {
+			return $t('research.understanding.findingReviewReasonActionReady');
+		}
+		if (finding.support_grade === 'conflict' || finding.evidence_bundle.conflict.length) {
+			return $t('research.understanding.findingReviewReasonActionResolve');
+		}
+		if (findingDirectEvidenceCount(finding) === 0) {
+			return $t('research.understanding.findingReviewReasonActionRepair');
+		}
+		return $t('research.understanding.findingReviewReasonActionReview');
 	}
 
 	function relatedReviewFindings(
@@ -3922,6 +3939,22 @@
 										</div>
 									</section>
 								{/if}
+								{#if selectedFindingReviewReasons.length}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-reasons"
+										aria-label={$t('research.understanding.findingReviewReasonPanel')}
+									>
+										<div>
+											<strong>{$t('research.understanding.findingReviewReasonPanel')}</strong>
+											<span>{findingReviewReasonActionLabel(selectedDisplayFinding ?? selectedFinding)}</span>
+										</div>
+										<ul>
+											{#each selectedFindingReviewReasons as reason (reason)}
+												<li>{findingReviewReasonLabel(reason)}</li>
+											{/each}
+										</ul>
+									</section>
+								{/if}
 								<section
 									class="research-understanding-workbench__basis-panel"
 									aria-label={$t('research.understanding.evidenceBasis')}
@@ -5828,6 +5861,22 @@
 
 	.research-understanding-workbench__basis-panel--decision p {
 		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-reasons {
+		border-color: var(--accent-border);
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__basis-panel--review-reasons > div {
+		display: grid;
+		gap: 3px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-reasons span {
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;

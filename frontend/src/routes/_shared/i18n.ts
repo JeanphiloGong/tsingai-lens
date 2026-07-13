@@ -669,6 +669,15 @@ const translations: Record<Language, Translations> = {
 				findingUsageResolveConflict: 'Resolve conflicting evidence before use.',
 				findingUsageRecordReview: 'Record expert feedback or curation for the final label.',
 				findingUsageKeepScope: 'Keep the stated scope and conditions attached when using it.',
+				findingReviewReasonPanel: 'Review priorities',
+				findingReviewReasonActionReady:
+					'Already expert-labeled. Keep these notes for audit, not queue priority.',
+				findingReviewReasonActionRepair:
+					'Repair or reject the evidence binding before accepting this finding.',
+				findingReviewReasonActionResolve:
+					'Resolve the conflicting evidence before using this finding downstream.',
+				findingReviewReasonActionReview:
+					'Review these points before accepting, rejecting, or correcting this finding.',
 				findingEvidenceRoleCoverage: 'Evidence role coverage',
 				findingEvidenceRoleLabels: {
 					direct_result: 'Direct',
@@ -3784,6 +3793,11 @@ const translations: Record<Language, Translations> = {
 				findingUsageResolveConflict: '使用前需要处理冲突证据。',
 				findingUsageRecordReview: '记录专家反馈或校正，形成最终标签。',
 				findingUsageKeepScope: '使用时保留原始范围和条件。',
+				findingReviewReasonPanel: '复核优先原因',
+				findingReviewReasonActionReady: '已有人类专家标注。这些原因只用于审计，不再作为队列优先级。',
+				findingReviewReasonActionRepair: '接受该发现前，需要先修复或拒绝当前证据绑定。',
+				findingReviewReasonActionResolve: '下游使用前，需要先处理冲突证据。',
+				findingReviewReasonActionReview: '接受、拒绝或校正该发现前，先核对这些复核点。',
 				findingEvidenceRoleCoverage: '证据角色覆盖',
 				findingEvidenceRoleLabels: {
 					direct_result: '直接',

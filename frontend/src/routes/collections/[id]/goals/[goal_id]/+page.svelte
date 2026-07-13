@@ -20,6 +20,7 @@
 	} from '../../../../_shared/researchView';
 
 	const POLL_DELAY_MS = 2500;
+	type WorkbenchInitialFocus = '' | 'review_queue';
 
 	let analysis: GoalAnalysis | null = null;
 	let loading = false;
@@ -42,6 +43,9 @@
 	$: loadKey = `${collectionId}:${goalId}`;
 	$: goal = analysis?.goal ?? null;
 	$: understanding = analysis?.understanding ?? null;
+	$: workbenchInitialFocus = (
+		$page.url.searchParams.get('review') === 'queue' ? 'review_queue' : ''
+	) as WorkbenchInitialFocus;
 	$: progress = goal?.analysis_progress ?? null;
 	$: isAnalysisRunning = goal?.status === 'running';
 	$: analysisErrors = analysis?.errors ?? [];
@@ -379,6 +383,7 @@
 					id: collectionId,
 					goal_id: goalId
 				})}
+				initialFocus={workbenchInitialFocus}
 				bodyKey="research.understanding.objectiveBody"
 				titleId="goal-understanding-title"
 			/>

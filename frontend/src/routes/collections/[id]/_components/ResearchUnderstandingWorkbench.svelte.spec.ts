@@ -1495,6 +1495,31 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.not.toBeInTheDocument();
 	});
 
+	it('opens directly on dataset review candidates from a review queue deep link', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123',
+			initialFocus: 'review_queue'
+		});
+
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Review candidate 3' }))
+			.toHaveAttribute('aria-pressed', 'true');
+		await expect.element(browserPage.getByText('3 of 3')).toBeInTheDocument();
+		const findingsTable = browserPage.getByLabelText('Research findings table');
+		await expect
+			.element(findingsTable.getByText('Heat treatment changes LPBF 316L tensile response.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(findingsTable.getByText('Annealing may reduce cellular substructure.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(
+				findingsTable.getByText('Strength trends conflict across reported heat treatments.').first()
+			)
+			.toBeInTheDocument();
+	});
+
 	it('filters claim rows by type and opens the selected claim detail', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

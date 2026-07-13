@@ -37,6 +37,7 @@
 	export let returnTo = '';
 	export let bodyKey = 'research.understanding.objectiveBody';
 	export let titleId = 'research-understanding-title';
+	export let initialFocus: '' | 'review_queue' | 'training_ready' = '';
 
 	const CLAIM_TYPE_ORDER = [
 		'all',
@@ -185,6 +186,7 @@
 	let collectionDatasetLoading = false;
 	let collectionDatasetError = '';
 	let collectionDatasetRequestSequence = 0;
+	let appliedInitialFocusKey = '';
 
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
@@ -500,6 +502,14 @@
 		understanding && collectionId && selectedScopeId
 			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
 			: '';
+	$: if (
+		initialFocus &&
+		currentDatasetScopeKey &&
+		appliedInitialFocusKey !== `${currentDatasetScopeKey}:${initialFocus}`
+	) {
+		appliedInitialFocusKey = `${currentDatasetScopeKey}:${initialFocus}`;
+		applyInitialFocus(initialFocus);
+	}
 	$: currentCollectionDatasetScopeKey =
 		understanding?.scope.scope_type === 'goal' && collectionId ? `${collectionId}:goal` : '';
 	$: goalCopilotHref =
@@ -2184,6 +2194,14 @@
 		selectedClaimStatus = 'all';
 		selectedDatasetUseStatus = 'review_candidate';
 		closeClaimDetail();
+	}
+
+	function applyInitialFocus(focus: typeof initialFocus) {
+		if (focus === 'review_queue') {
+			showReviewQueue();
+		} else if (focus === 'training_ready') {
+			showTrainingReady();
+		}
 	}
 
 	function showTrainingReady() {

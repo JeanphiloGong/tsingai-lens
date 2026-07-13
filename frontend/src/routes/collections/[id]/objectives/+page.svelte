@@ -256,6 +256,11 @@
 		});
 	}
 
+	function goalReviewActionHref(row: { goal: ConfirmedGoal; status: string }) {
+		const href = goalReviewHref(row.goal);
+		return row.status === 'needs_review' ? `${href}?review=queue` : href;
+	}
+
 	async function confirmAndAnalyze(objective: ObjectiveListItem) {
 		if (!canAnalyzeObjective(objective)) return;
 		analyzingObjectiveId = objective.objective_id;
@@ -417,7 +422,7 @@
 						{#if firstGoalReviewAction}
 							<a
 								class="btn btn--primary btn--small"
-								href={goalReviewHref(firstGoalReviewAction.goal)}
+								href={goalReviewActionHref(firstGoalReviewAction)}
 							>
 								{$t('research.objectives.goalReviewOpenFirstPending')}
 							</a>
@@ -434,7 +439,7 @@
 				{/if}
 				<div class="goal-review-list">
 					{#each goalReviewRows as row (row.goal.goal_id)}
-						<a href={goalReviewHref(row.goal)} class="goal-review-item">
+						<a href={goalReviewActionHref(row)} class="goal-review-item">
 							<div>
 								<strong>{row.goal.question}</strong>
 								<span>{goalReviewBody(row.dataset)}</span>

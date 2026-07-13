@@ -418,7 +418,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Review next goal' }))
-			.toHaveAttribute('href', '/collections/col_4c54ffe568ec/goals/goal_heat_strength');
+			.toHaveAttribute('href', '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue');
 		const goalLinks = browserPage.getByRole('link').all();
 		const goalReviewLinks = await Promise.all(
 			goalLinks.map(async (link) => ({
@@ -430,7 +430,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			(link) => link.href?.includes('/goals/') && link.text.includes('?')
 		);
 		expect(reviewRows[0]).toMatchObject({
-			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength'
+			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue'
 		});
 		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
 		expect(reviewRows[0].text).toContain('Review findings');

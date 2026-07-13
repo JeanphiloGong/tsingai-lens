@@ -4,9 +4,16 @@ from openai import APIConnectionError
 
 from application.core.comparison_service import ComparisonRowsNotReadyError
 from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError
+from application.evaluation import ResearchUnderstandingFeedbackService
+from application.goal.experiment_plan_service import ExperimentPlanService
 from application.goal.session_service import GoalSessionService
 from application.source.collection_service import CollectionService
+from domain.core.research_understanding import ResearchUnderstanding
 from infra.persistence.factory import build_goal_session_repository
+from infra.persistence.sqlite import (
+    SqliteEvaluationRepository,
+    SqliteExperimentPlanRepository,
+)
 
 
 class _FakeMessage:
@@ -358,6 +365,33 @@ class _NonActionableTrainingReadyResearchUnderstandingFeedbackService:
             ],
             "warnings": [],
         }
+
+
+class _SingleUnderstandingRepository:
+    backend_name = "fake"
+
+    def __init__(self, understanding: ResearchUnderstanding) -> None:
+        self.understanding = understanding
+
+    def read_research_understanding(
+        self,
+        collection_id: str,  # noqa: ARG002
+        scope_type: str,  # noqa: ARG002
+        scope_id: str,  # noqa: ARG002
+    ):
+        return self.understanding
+
+    def list_research_understandings(
+        self,
+        collection_id: str,  # noqa: ARG002
+        scope_type: str | None = None,  # noqa: ARG002
+    ):
+        return (self.understanding,)
+
+
+class _PassthroughResearchUnderstandingProjectionService:
+    def with_presentation(self, understanding):
+        return understanding.to_record()
 
 
 class _ObjectiveResearchService(_EmptyResearchObjectiveService):
@@ -816,6 +850,199 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt
     assert "finding_review_candidate" not in prompt
+
+
+def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
+    understanding = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-reviewed",
+                "goal_id": "goal_reviewed",
+                "title": "How does preheating affect ductility?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat",
+                    "claim_type": "finding",
+                    "statement": "Preheating improves ductility.",
+                    "status": "supported",
+                    "evidence_ref_ids": ["ev_preheat"],
+                    "context_ids": ["ctx_lpbf"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "ev_preheat",
+                    "source_kind": "text",
+                    "document_id": "paper-preheat",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-preheat"},
+                    "traceability_status": "direct",
+                    "evidence_role": "direct_result",
+                    "quote": "Preheating increased ductility by 14% in LPBF 316L.",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_lpbf",
+                    "label": "LPBF 316L",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "test_condition": {"temperature": "room"},
+                    "property_scope": ["ductility"],
+                    "limitations": [],
+                }
+            ],
+            "presentation": {
+                "findings": [
+                    {
+                        "finding_id": "finding_preheat",
+                        "claim_id": "claim_preheat",
+                        "title": "preheating -> ductility",
+                        "statement": "Preheating improves ductility.",
+                        "variables": ["preheating"],
+                        "mediators": ["microstructure"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "scope_summary": "LPBF 316L",
+                        "support_grade": "partial",
+                        "review_status": "needs_review",
+                        "paper_count": 1,
+                        "evidence_count": 1,
+                        "evidence_bundle": {"direct_result": ["ev_preheat"]},
+                        "evidence_ref_ids": ["ev_preheat"],
+                        "context_ids": ["ctx_lpbf"],
+                    }
+                ],
+                "evidence_items": [
+                    {
+                        "evidence_ref_id": "ev_preheat",
+                        "document_id": "paper-preheat",
+                        "title": "P001 Results",
+                        "source_label": "P001 p.7",
+                        "source_kind": "text",
+                        "source_ref": "blk-preheat",
+                        "page": "7",
+                        "quote": "Preheating increased ductility by 14%.",
+                        "source_text": (
+                            "The sample preheated at 150 C shows a 14% "
+                            "improvement in ductility."
+                        ),
+                        "traceability_status": "direct",
+                        "evidence_role": "direct_result",
+                    }
+                ],
+                "context_summaries": [
+                    {
+                        "context_id": "ctx_lpbf",
+                        "label": "LPBF 316L",
+                        "material_scope": ["316L stainless steel"],
+                        "property_scope": ["ductility"],
+                        "process_summary": "LPBF",
+                        "test_summary": "room temperature",
+                    }
+                ],
+            },
+            "model_traces": [],
+        }
+    )
+    feedback_service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=SqliteEvaluationRepository(tmp_path / "lens.sqlite"),
+        core_fact_repository=_SingleUnderstandingRepository(understanding),
+        research_understanding_service=(
+            _PassthroughResearchUnderstandingProjectionService()
+        ),
+    )
+    service, collection_service = _service(
+        tmp_path,
+        content="Use the accepted preheating finding in the protocol [Source 1].",
+        research_understanding_feedback_service=feedback_service,
+        paper_facts_service=_EvidencePaperFactsService(),
+    )
+    collection = collection_service.create_collection("Reviewed Goal Collection")
+    collection_id = collection["collection_id"]
+    feedback_service.record_curation(
+        collection_id=collection_id,
+        scope_type="goal",
+        scope_id="goal_reviewed",
+        finding_id="finding_preheat",
+        claim_id="claim_preheat",
+        curated_claim_type="finding",
+        curated_status="supported",
+        curated_statement=(
+            "150 C preheating improves LPBF 316L ductility through "
+            "microstructure changes."
+        ),
+        curated_support_grade="partial",
+        curated_review_status="accepted",
+        curated_variables=["preheating"],
+        curated_mediators=["microstructure"],
+        curated_outcomes=["ductility"],
+        curated_direction="increase",
+        curated_scope_summary="LPBF 316L",
+        curated_evidence_ref_ids=["ev_preheat"],
+        curated_context_ids=["ctx_lpbf"],
+        reviewer="materials-expert",
+    )
+
+    dataset = feedback_service.export_dataset(
+        collection_id=collection_id,
+        scope_type="goal",
+        scope_id="goal_reviewed",
+        dataset_use_status="training_ready",
+    )
+    session = service.create_session(
+        collection_id=collection_id,
+        focused_goal_id="goal_reviewed",
+        answer_mode="hybrid",
+        user_id="expert-a",
+    )
+    response = service.post_message(
+        session["session_id"],
+        message="Draft a protocol from reviewed findings.",
+        page_context={"goal_id": "goal_reviewed"},
+    )
+    plan_service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=service.goal_session_repository,
+    )
+    plan = plan_service.create_plan(
+        collection_id=collection_id,
+        goal_id="goal_reviewed",
+        title="Preheating validation protocol",
+        content=response["answer"],
+        source_message_id=response["message_id"],
+        source_links=response["source_links"],
+        metadata={"source": "goal_copilot"},
+        created_by="expert-a",
+    )
+
+    assert dataset["item_count"] == 1
+    assert dataset["items"][0]["label_status"] == "gold"
+    assert dataset["items"][0]["dataset_use_status"] == "training_ready"
+    assert len(dataset["items"][0]["training_messages"]) == 2
+    assert response["source_mode"] == "collection_grounded"
+    assert response["review_gate"] == "training_ready_findings"
+    assert response["used_evidence_ids"] == ["ev_preheat"]
+    assert response["source_links"] == [
+        {
+            "kind": "evidence",
+            "label": "Source 1",
+            "href": (
+                f"/collections/{collection_id}/documents/"
+                "paper-preheat?evidence_id=ev_preheat"
+            ),
+        }
+    ]
+    prompt = service.llm_client.chat.completions.calls[0]["messages"][1]["content"]
+    assert "curated_research_findings" in prompt
+    assert "microstructure changes" in prompt
+    assert "ev_preheat" not in prompt
+    assert plan.metadata["review_gate"] == "training_ready_findings"
+    assert plan.metadata["used_evidence_ids"] == ["ev_preheat"]
+    assert plan.source_links[0]["href"].endswith("evidence_id=ev_preheat")
 
 
 def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_exist(

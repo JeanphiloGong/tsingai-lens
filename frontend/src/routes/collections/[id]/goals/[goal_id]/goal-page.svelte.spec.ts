@@ -708,9 +708,21 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
 		await expect
-			.element(browserPage.getByText('Generated from reviewed Goal Copilot evidence'))
+			.element(browserPage.getByText('Manual expert draft · No automated review gate recorded'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Reviewed training-ready findings')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Generated from reviewed Goal Copilot evidence · Reviewed training-ready findings'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Generated from reviewed Goal Copilot evidence', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Reviewed training-ready findings', { exact: true }))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Collection evidence answer')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('training_ready_findings')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('1 evidence link(s)')).toBeInTheDocument();

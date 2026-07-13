@@ -197,6 +197,12 @@
 		return gate ? reviewGateLabel(gate) : $t('research.goalWorkspace.experimentPlanNoReviewGate');
 	}
 
+	function planSourceLabel(plan: ExperimentPlan | null) {
+		return isCopilotPlan(plan)
+			? $t('research.goalWorkspace.experimentPlanCopilotSource')
+			: $t('research.goalWorkspace.experimentPlanManualSource');
+	}
+
 	function sourceModeLabel(value: string) {
 		if (value === 'collection_grounded') {
 			return $t('research.goalWorkspace.experimentPlanCollectionGrounded');
@@ -364,6 +370,7 @@
 							>
 								<strong>{plan.title}</strong>
 								<span>{statusLabel(plan.status)}</span>
+								<small>{planSourceLabel(plan)} · {selectedPlanReviewGateLabel(plan)}</small>
 							</button>
 						{/each}
 					</div>
@@ -402,9 +409,7 @@
 							>
 								<div>
 									<strong>
-										{isCopilotPlan(selectedPlan)
-											? $t('research.goalWorkspace.experimentPlanCopilotSource')
-											: $t('research.goalWorkspace.experimentPlanManualSource')}
+										{planSourceLabel(selectedPlan)}
 									</strong>
 									<span>{selectedPlanReviewGateLabel(selectedPlan)}</span>
 								</div>

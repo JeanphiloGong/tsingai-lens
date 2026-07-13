@@ -756,6 +756,22 @@ const translations: Record<Language, Translations> = {
 					unclear_statement: 'Unclear statement',
 					other: 'Other'
 				},
+				feedbackIssueCategory: 'Counts as {category}. ',
+				feedbackIssueGuidance: {
+					none: 'Use only when the finding is acceptable as written.',
+					evidence_not_grounded:
+						'Use when the cited source does not actually support the finding.',
+					missing_evidence: 'Use when required source evidence is absent.',
+					insufficient_evidence: 'Use when evidence is too weak or incomplete for the claim.',
+					wrong_variable: 'Use when the process, input, or material variable is wrong.',
+					wrong_outcome: 'Use when the reported property or output is wrong.',
+					wrong_direction: 'Use when increase, decrease, correlation, or conflict is wrong.',
+					wrong_context: 'Use when material, process, test, or scope conditions are wrong.',
+					wrong_relation: 'Use when the causal or associative relation is wrong.',
+					overclaim: 'Use when the statement generalizes beyond the evidence.',
+					unclear_statement: 'Use when the finding cannot be judged because wording is unclear.',
+					other: 'Use only when no specific issue type fits.'
+				},
 				noClaims: 'No claims are available yet.',
 				noEffects: 'No claim rows are available yet.',
 				noFindings: 'No findings match the current filters.',
@@ -3821,6 +3837,21 @@ const translations: Record<Language, Translations> = {
 					overclaim: '过度结论',
 					unclear_statement: '表述不清',
 					other: '其他'
+				},
+				feedbackIssueCategory: '计入{category}。 ',
+				feedbackIssueGuidance: {
+					none: '仅在该发现可以按当前表述接受时使用。',
+					evidence_not_grounded: '引用来源并不真正支持该发现时使用。',
+					missing_evidence: '缺少必要原文证据时使用。',
+					insufficient_evidence: '证据太弱或不完整，无法支撑该结论时使用。',
+					wrong_variable: '工艺、输入变量或材料变量错误时使用。',
+					wrong_outcome: '性能、结果或输出指标错误时使用。',
+					wrong_direction: '提升、降低、相关或冲突方向错误时使用。',
+					wrong_context: '材料、工艺、测试或适用范围条件错误时使用。',
+					wrong_relation: '因果或关联关系错误时使用。',
+					overclaim: '结论推广范围超过证据支持时使用。',
+					unclear_statement: '结论表述不清，导致无法判断时使用。',
+					other: '只有没有更具体的问题类型时使用。'
 				},
 				noClaims: '暂未得到 Claim。',
 				noEffects: '暂未得到 Claim 行。',

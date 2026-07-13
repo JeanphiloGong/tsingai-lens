@@ -3129,6 +3129,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
 		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
 		await claimDetail.getByLabelText('Issue type').selectOptions('wrong_variable');
+		await expect
+			.element(
+				claimDetail.getByText(
+					'Counts as Variable error. Use when the process, input, or material variable is wrong.'
+				)
+			)
+			.toBeInTheDocument();
 		await claimDetail
 			.getByLabelText('Feedback note')
 			.fill('The finding uses the wrong experimental variable.');

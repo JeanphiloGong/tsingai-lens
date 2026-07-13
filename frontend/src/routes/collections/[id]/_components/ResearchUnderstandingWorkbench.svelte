@@ -633,6 +633,29 @@
 		return translatedCatalogLabel('research.understanding.feedbackIssues', issue);
 	}
 
+	function feedbackIssueCategory(issue: ResearchUnderstandingFeedbackIssueType) {
+		if (issue === 'none') return 'none';
+		if (issue === 'wrong_variable') return 'variable_error';
+		if (issue === 'wrong_outcome') return 'outcome_error';
+		if (issue === 'wrong_direction') return 'direction_error';
+		if (issue === 'wrong_context') return 'context_error';
+		if (issue === 'wrong_relation') return 'relation_error';
+		if (
+			issue === 'evidence_not_grounded' ||
+			issue === 'missing_evidence' ||
+			issue === 'insufficient_evidence'
+		) {
+			return 'evidence_error';
+		}
+		if (issue === 'overclaim') return 'claim_scope_error';
+		if (issue === 'unclear_statement') return 'statement_error';
+		return 'other_error';
+	}
+
+	function feedbackIssueGuidance(issue: ResearchUnderstandingFeedbackIssueType) {
+		return $t(`research.understanding.feedbackIssueGuidance.${issue}`);
+	}
+
 	function datasetLabelStatusLabel(status: ResearchUnderstandingDatasetLabelStatus) {
 		return translatedCatalogLabel('research.understanding.datasetLabelStatuses', status);
 	}
@@ -3857,6 +3880,12 @@
 												<option value={issue}>{feedbackIssueLabel(issue)}</option>
 											{/each}
 										</select>
+										<small class="research-understanding-workbench__feedback-guidance">
+											{$t('research.understanding.feedbackIssueCategory', {
+												category: datasetErrorCategoryLabel(feedbackIssueCategory(feedbackIssue))
+											})}
+											{feedbackIssueGuidance(feedbackIssue)}
+										</small>
 									</label>
 									<label>
 										<span>{$t('research.understanding.feedbackNote')}</span>
@@ -5767,6 +5796,12 @@
 
 	.research-understanding-workbench__feedback textarea {
 		resize: vertical;
+	}
+
+	.research-understanding-workbench__feedback-guidance {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__curation-picker {

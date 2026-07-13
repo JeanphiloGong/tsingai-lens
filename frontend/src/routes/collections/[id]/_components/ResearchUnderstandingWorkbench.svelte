@@ -1343,7 +1343,7 @@
 		const usagePath = findingUsagePathForDisplay(finding);
 		return {
 			...usagePath,
-			nextAction: usagePath.checklist[0] ?? ''
+			nextAction: datasetReviewActionLabel(findingDatasetSampleFor(finding)) || usagePath.checklist[0] || ''
 		};
 	}
 

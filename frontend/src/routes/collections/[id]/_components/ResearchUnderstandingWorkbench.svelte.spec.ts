@@ -1729,6 +1729,58 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingDetail.getByText('Repair evidence binding')).not.toBeInTheDocument();
 	});
 
+	it('shows the backend dataset review action in the findings table', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_strength_supported',
+									finding_id: 'finding_strength_supported',
+									label_status: 'silver',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'accept_as_paper_level',
+										label: 'Accept as paper-level evidence'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const findingsTable = browserPage.getByLabelText('Research findings table');
+		await expect
+			.element(findingsTable.getByText('Accept as paper-level evidence'))
+			.toBeInTheDocument();
+		await expect.element(findingsTable.getByText('Verify 1 direct evidence link(s) against the parsed source text.')).not.toBeInTheDocument();
+	});
+
 	it('opens directly on training-ready findings and dataset exports from a messages deep link', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

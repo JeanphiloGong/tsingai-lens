@@ -15,6 +15,17 @@ from infra.persistence.sqlite import (
 )
 
 
+PROTOCOL_DRAFT = """Hypothesis: 150 C build-platform preheating improves LPBF 316L ductility compared with room-temperature builds [Source 1].
+
+Variable matrix: compare room-temperature and 150 C build-platform settings under the same LPBF material and scan setup.
+
+Measurements: tensile ductility, yield strength, and microstructure indicators after printing.
+
+Controls: include a no-preheat control build and repeat specimens for both temperatures.
+
+Risks and limits: one reviewed finding is not enough to generalize beyond the cited 316L condition."""
+
+
 def _request(user_id: str = "expert-a"):
     return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
@@ -48,14 +59,8 @@ def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
                 "message_id": "msg_1",
                 "session_id": "session_1",
                 "role": "assistant",
-                "content": (
-                    "Compare room-temperature and 150 C preheated LPBF builds "
-                    "[Source 1]."
-                ),
-                "answer": (
-                    "Compare room-temperature and 150 C preheated LPBF builds "
-                    "[Source 1]."
-                ),
+                "content": PROTOCOL_DRAFT,
+                "answer": PROTOCOL_DRAFT,
                 "source_mode": "collection_grounded",
                 "used_evidence_ids": ["ev_1"],
                 "warnings": [],
@@ -93,7 +98,7 @@ def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
             "goal_1",
             ExperimentPlanCreateRequest(
                 title="Preheating validation matrix",
-                content="Compare room-temperature and 150 C preheated LPBF builds.",
+                content=PROTOCOL_DRAFT,
                 source_message_id="msg_1",
                 source_links=[
                     {
@@ -116,7 +121,10 @@ def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
             created.plan_id,
             ExperimentPlanUpdateRequest(
                 title="Edited validation matrix",
-                content="Add a no-preheat control and repeat tensile testing.",
+                content=(
+                    PROTOCOL_DRAFT
+                    + "\n\nMeasurements: add repeat tensile testing and EBSD checks."
+                ),
                 status="ready_for_review",
             ),
         )

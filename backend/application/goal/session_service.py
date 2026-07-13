@@ -375,6 +375,19 @@ class GoalSessionService:
                 warnings.append(failed_warning)
                 used_evidence_ids = []
                 source_links = []
+            elif source_links and not self._answer_cites_source_link(
+                answer,
+                source_links,
+            ):
+                source_mode = "collection_limited"
+                warnings.append("goal_copilot_missing_source_citation")
+                answer = (
+                    "Lens could not verify source citations in the generated answer, "
+                    "so do not treat it as a traceable collection conclusion.\n\n"
+                    f"{answer}"
+                )
+                used_evidence_ids = []
+                source_links = []
         else:
             source_mode = "general_fallback"
             warnings.append("no_collection_evidence_found")
@@ -1351,6 +1364,20 @@ class GoalSessionService:
 
     def _strip_thinking_blocks(self, answer: str) -> str:
         return _THINK_BLOCK_RE.sub("", answer).strip()
+
+    def _answer_cites_source_link(
+        self,
+        answer: str,
+        source_links: list[dict[str, str]],
+    ) -> bool:
+        for link in source_links:
+            label = _clean_text(link.get("label"))
+            if not label:
+                continue
+            pattern = rf"(?<![A-Za-z0-9])\[?\s*{re.escape(label)}\s*\]?(?![A-Za-z0-9])"
+            if re.search(pattern, answer, flags=re.IGNORECASE):
+                return True
+        return False
 
     def _ensure_general_fallback_boundary(self, answer: str) -> str:
         if "not a collection-supported conclusion" in answer.lower():

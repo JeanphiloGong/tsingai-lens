@@ -656,7 +656,7 @@ def test_hybrid_message_uses_general_fallback_when_collection_has_no_context(tmp
 
 def test_material_page_context_scopes_grounded_answer(tmp_path):
     service, collection_service = _service(
-        tmp_path, content="S001 hardness is supported by [E02]."
+        tmp_path, content="S001 hardness is supported by [Source 1]."
     )
     collection = collection_service.create_collection("Material Collection")
     session = service.create_session(
@@ -725,6 +725,34 @@ def test_objective_context_is_available_to_grounded_chat(tmp_path):
     assert "objective_research_view" in prompt
     assert "LPBF energy density and scan strategy shape strength" in prompt
     assert "oeu_strength" in prompt
+
+
+def test_goal_chat_downgrades_uncited_grounded_answer(tmp_path):
+    service, collection_service = _service(
+        tmp_path,
+        content="The objective is supported by the collection evidence.",
+        research_objective_service=_ObjectiveResearchService(),
+    )
+    collection = collection_service.create_collection("Uncited Objective Collection")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_objective_id="obj_lpbf_strength",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Summarize the logic chain for this objective.",
+        page_context={"objective_id": "obj_lpbf_strength"},
+    )
+    loaded = service.get_session(session["session_id"])
+
+    assert response["source_mode"] == "collection_limited"
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
+    assert "goal_copilot_missing_source_citation" in response["warnings"]
+    assert "do not treat it as a traceable collection conclusion" in response["answer"]
+    assert loaded["last_evidence_ids"] == []
 
 
 def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):

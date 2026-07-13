@@ -222,6 +222,9 @@ assistant message。该 message 必须是 `collection_grounded`，包含 evidenc
 - session 可以在没有结构化 Goal Brief 的情况下开始
 - grounded/hybrid 模式必须先检索当前 collection 的 Core 或 derived Core artifact
 - collection-grounded 结论不得编造 evidence id、sample id、paper name 或 property value
+- collection-grounded assistant answer 必须引用返回的可见 source label（例如
+  `[Source 1]`）；如果模型没有引用可见来源，后端应降级为 `collection_limited`
+  并清空 `used_evidence_ids` / `source_links`
 - `source_links` 必须是前端可访问的 document/evidence 路由；普通回答 UI 不应把文献
   内部 ID 当作主要来源展示
 - general fallback 必须明确标注不是当前 collection 证据结论

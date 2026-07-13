@@ -649,6 +649,10 @@ class ResearchUnderstandingFeedbackService:
             matched_trace,
             evidence_records=evidence_records,
         )
+        review_action = _review_action_for_sample(
+            system_prediction=system_prediction,
+            evidence_records=evidence_records,
+        )
         return {
             "sample_id": _sample_id(
                 "rus",
@@ -674,6 +678,7 @@ class ResearchUnderstandingFeedbackService:
             ),
             "model_output": _trace_model_output(matched_trace),
             "system_prediction": system_prediction,
+            "review_action": review_action,
             "expert_target": expert_target,
             "evidence_refs": evidence_records,
             "training_evidence_refs": training_evidence_records,
@@ -1360,6 +1365,48 @@ def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:
         "review_reasons": list(_strings(finding.get("review_reasons"))),
         "warnings": list(_strings(finding.get("warnings"))),
     }
+
+
+def _review_action_for_sample(
+    *,
+    system_prediction: Mapping[str, Any],
+    evidence_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    risk_codes = {
+        *list(_strings(system_prediction.get("review_reasons"))),
+        *list(_strings(system_prediction.get("warnings"))),
+    }
+    if "table_row_alignment_uncertain" in risk_codes:
+        code = "verify_table_rows"
+        label = "verify parsed table rows before accepting or correcting"
+    elif "non_single_variable_table_comparison" in risk_codes:
+        code = "review_table_variables"
+        label = "check whether multiple table variables changed before accepting"
+    elif "table_row_needs_expert_review" in risk_codes:
+        code = "review_table_rows"
+        label = "review selected table rows before accepting or correcting"
+    elif "conflicting_direction" in risk_codes:
+        code = "resolve_conflict"
+        label = "resolve conflicting evidence before downstream use"
+    elif "missing_direct_result_evidence" in risk_codes or not evidence_records:
+        code = "repair_evidence_binding"
+        label = "repair or reject the evidence binding"
+    elif "missing_mechanism_evidence" in risk_codes:
+        code = "check_mechanism_requirement"
+        label = "check whether mechanism evidence is required for the final label"
+    elif "model_validation_finding" in risk_codes:
+        code = "validate_model_evidence"
+        label = "validate the model-prediction or validation evidence"
+    elif (
+        "needs_cross_paper_confirmation" in risk_codes
+        or "single_paper_evidence" in risk_codes
+    ):
+        code = "accept_as_paper_level"
+        label = "accept only as paper-level evidence unless another paper confirms it"
+    else:
+        code = "review_evidence"
+        label = "accept, reject, or correct after checking the evidence"
+    return {"code": code, "label": label}
 
 
 def _expert_target_from_curation(

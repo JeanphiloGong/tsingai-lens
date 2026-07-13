@@ -149,8 +149,12 @@ def test_build_goal_review_packet_lists_candidate_evidence():
                 "scope_summary": "LPBF 316L at 150 C",
                 "support_grade": "strong",
                 "review_status": "needs_review",
-                "review_reasons": ["single_paper_evidence"],
-                "warnings": ["table_row_alignment_uncertain"],
+                "review_reasons": ["single_paper_evidence", "table_row_needs_expert_review"],
+                "warnings": [],
+            },
+            "review_action": {
+                "code": "review_table_rows",
+                "label": "review selected table rows before accepting or correcting",
             },
             "expert_target": {
                 "source": "ai_review_feedback",
@@ -170,12 +174,16 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     candidate = packet["candidates"][0]
     assert candidate["statement"] == "Preheating increased ductility by 14%."
     assert candidate["variables"] == ["preheating"]
-    assert candidate["review_reasons"] == ["single_paper_evidence"]
-    assert candidate["warnings"] == ["table_row_alignment_uncertain"]
+    assert candidate["review_reasons"] == [
+        "single_paper_evidence",
+        "table_row_needs_expert_review",
+    ]
+    assert candidate["warnings"] == []
     assert (
         candidate["recommended_action"]
-        == "verify parsed table rows before accepting or correcting"
+        == "review selected table rows before accepting or correcting"
     )
+    assert candidate["recommended_action_code"] == "review_table_rows"
     assert packet["goal_id"] == "goal-1"
     assert (
         candidate["open_url"]
@@ -190,11 +198,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     )
     assert "fields: variables=preheating; outcomes=ductility; direction=increase" in text
     assert (
-        "recommended action: verify parsed table rows before accepting or correcting"
+        "recommended action: review selected table rows before accepting or correcting"
         in text
     )
-    assert "review reasons: single_paper_evidence" in text
-    assert "warnings: table_row_alignment_uncertain" in text
+    assert "review reasons: single_paper_evidence, table_row_needs_expert_review" in text
     assert "Paper A / p. 4 / p. 4" not in text
     assert "AI suggestion; human review still required." in text
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text

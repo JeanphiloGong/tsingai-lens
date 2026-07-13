@@ -1138,8 +1138,10 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
     ]
     projected["presentation"]["findings"][1]["warnings"] = [
         "weak_evidence",
-        "table_row_alignment_uncertain",
     ]
+    projected["presentation"]["findings"][1]["review_reasons"].append(
+        "table_row_needs_expert_review"
+    )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
@@ -1160,20 +1162,30 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
     assert by_finding["finding-1"]["system_prediction"]["warnings"] == [
         "table_row_alignment_uncertain"
     ]
+    assert by_finding["finding-1"]["review_action"] == {
+        "code": "verify_table_rows",
+        "label": "verify parsed table rows before accepting or correcting",
+    }
+    assert by_finding["finding-2"]["review_action"] == {
+        "code": "review_table_rows",
+        "label": "review selected table rows before accepting or correcting",
+    }
     assert dataset["quality_summary"]["by_review_reason"] == {
         "single_paper_evidence": 2,
         "partial_support": 1,
+        "table_row_needs_expert_review": 1,
     }
     assert dataset["quality_summary"]["by_system_warning"] == {
-        "table_row_alignment_uncertain": 2,
+        "table_row_alignment_uncertain": 1,
         "weak_evidence": 1,
     }
     assert dataset["quality_summary"]["by_review_candidate_reason"] == {
         "single_paper_evidence": 2,
         "partial_support": 1,
+        "table_row_needs_expert_review": 1,
     }
     assert dataset["quality_summary"]["by_review_candidate_warning"] == {
-        "table_row_alignment_uncertain": 2,
+        "table_row_alignment_uncertain": 1,
         "weak_evidence": 1,
     }
 

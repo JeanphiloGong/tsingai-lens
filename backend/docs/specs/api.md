@@ -794,13 +794,18 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
 `label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、
 `input_blocks`、`prompt_version`、`model_output`、`system_prediction`、
-`expert_target`、`evidence_refs`、`training_evidence_refs`、`training_messages`、
-`context_refs`、
+`review_action`、`expert_target`、`evidence_refs`、`training_evidence_refs`、
+`training_messages`、`context_refs`、
 `feedback_refs` 和 `metadata`。`evidence_refs` 保留完整审计证据链，包含
 direct、mechanism、condition context、background 等角色；`training_evidence_refs`
 只保留应作为监督输入的 direct/mechanism 证据，若旧样本没有角色分桶则回退到
 `evidence_refs`。每条 evidence record 里的 `source_text` 保留完整原文块供审计；
 `training_source_text` 优先使用精确 `quote`，没有 quote 时才回退到 `source_text`。
+`review_action` 是从系统 review reasons、warnings 和证据绑定状态派生的
+`{code, label}`，用于专家 UI、review packet 和 agent 复核队列排序；它只说明下一步
+应该核对什么，例如 `verify_table_rows`、`repair_evidence_binding`、
+`review_table_rows`、`check_mechanism_requirement` 或 `accept_as_paper_level`，
+不代表人工标签结果。
 离线训练或微调准备应优先消费
 `training_evidence_refs[*].training_source_text`，不要把 condition/background
 证据当作结论监督文本。`training_messages` 是从

@@ -513,6 +513,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     prompt_version: str | None = None
     model_output: dict[str, Any] | None = None
     system_prediction: dict[str, Any] = Field(default_factory=dict)
+    review_action: dict[str, str] = Field(default_factory=dict)
     expert_target: dict[str, Any] | None = None
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     training_evidence_refs: list[dict[str, Any]] = Field(default_factory=list)

@@ -1124,7 +1124,13 @@
 		andNext = false
 	) {
 		const actionCode = findingDatasetSampleFor(finding)?.review_action.code.trim() ?? '';
-		if (actionCode === 'accept_as_paper_level') {
+		const reviewReasons = new Set(findingReviewReasonValues(finding));
+		const isPaperLevelAccept =
+			actionCode === 'accept_as_paper_level' ||
+			reviewReasons.has('single_paper_evidence') ||
+			reviewReasons.has('needs_cross_paper_confirmation') ||
+			finding.paper_count <= 1;
+		if (isPaperLevelAccept) {
 			return andNext
 				? $t('research.understanding.quickAcceptPaperLevelAndNext')
 				: $t('research.understanding.quickAcceptPaperLevel');

@@ -73,6 +73,8 @@ def _dataset_payload(**overrides):
             "evidence_error": 1,
         },
         "by_trace_status": {"evidence_derived": 1},
+        "by_review_reason": {"single_paper_evidence": 1},
+        "by_system_warning": {"table_row_alignment_uncertain": 1},
         "warning_counts": {
             "unavailable_trace": 0,
             "failed_trace": 0,
@@ -104,6 +106,8 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
         "variable_error": 1,
         "evidence_error": 1,
     }
+    assert summary["by_review_reason"] == {"single_paper_evidence": 1}
+    assert summary["by_system_warning"] == {"table_row_alignment_uncertain": 1}
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
@@ -141,6 +145,8 @@ def test_build_goal_review_packet_lists_candidate_evidence():
                 "scope_summary": "LPBF 316L at 150 C",
                 "support_grade": "strong",
                 "review_status": "needs_review",
+                "review_reasons": ["single_paper_evidence"],
+                "warnings": ["table_row_alignment_uncertain"],
             },
             "expert_target": {
                 "source": "ai_review_feedback",
@@ -160,6 +166,8 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     candidate = packet["candidates"][0]
     assert candidate["statement"] == "Preheating increased ductility by 14%."
     assert candidate["variables"] == ["preheating"]
+    assert candidate["review_reasons"] == ["single_paper_evidence"]
+    assert candidate["warnings"] == ["table_row_alignment_uncertain"]
     assert packet["goal_id"] == "goal-1"
     assert (
         candidate["open_url"]
@@ -173,6 +181,8 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         in text
     )
     assert "fields: variables=preheating; outcomes=ductility; direction=increase" in text
+    assert "review reasons: single_paper_evidence" in text
+    assert "warnings: table_row_alignment_uncertain" in text
     assert "Paper A / p. 4 / p. 4" not in text
     assert "AI suggestion; human review still required." in text
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text

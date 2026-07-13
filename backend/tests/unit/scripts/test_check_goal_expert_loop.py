@@ -54,6 +54,8 @@ def _dataset_payload(status: str = "pass"):
                 "training_message_ready_count": 1,
                 "review_candidate_count": 0,
                 "by_error_category": {"none": 1},
+                "by_review_reason": {},
+                "by_system_warning": {},
             },
             {
                 "goal_id": "goal-2",
@@ -63,6 +65,11 @@ def _dataset_payload(status: str = "pass"):
                 "review_candidate_count": 2,
                 "next_review_finding_id": "finding-review-1",
                 "by_error_category": {"variable_error": 1, "direction_error": 1},
+                "by_review_reason": {
+                    "single_paper_evidence": 2,
+                    "needs_cross_paper_confirmation": 1,
+                },
+                "by_system_warning": {"table_row_alignment_uncertain": 1},
             },
         ],
     }
@@ -125,6 +132,11 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
             }
         ],
         "by_error_category": {"direction_error": 1, "variable_error": 1},
+        "by_review_reason": {
+            "single_paper_evidence": 2,
+            "needs_cross_paper_confirmation": 1,
+        },
+        "by_system_warning": {"table_row_alignment_uncertain": 1},
     }
 
 
@@ -197,6 +209,9 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     )
     assert "direction_error: 1" in text
     assert "variable_error: 1" in text
+    assert "single_paper_evidence: 2" in text
+    assert "needs_cross_paper_confirmation: 1" in text
+    assert "table_row_alignment_uncertain: 1" in text
 
 
 def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypatch):

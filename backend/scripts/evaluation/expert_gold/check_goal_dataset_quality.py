@@ -335,6 +335,8 @@ def evaluate_goal_dataset_payload(
         ),
         "next_review_finding_id": _next_review_finding_id(items),
         "by_error_category": dict(_mapping(quality.get("by_error_category"))),
+        "by_review_reason": dict(_mapping(quality.get("by_review_reason"))),
+        "by_system_warning": dict(_mapping(quality.get("by_system_warning"))),
         "by_trace_status": dict(_mapping(quality.get("by_trace_status"))),
         "warning_counts": dict(warning_counts),
         "checks": checks,
@@ -380,6 +382,8 @@ def build_goal_review_packet(
                 "support_grade": _text(prediction.get("support_grade")),
                 "review_status": _text(prediction.get("review_status"))
                 or _text(expert_target.get("review_status")),
+                "review_reasons": _text_list(prediction.get("review_reasons")),
+                "warnings": _text_list(prediction.get("warnings")),
                 "suggested_target": {
                     "source": _text(expert_target.get("source")),
                     "review_status": _text(expert_target.get("review_status")),
@@ -446,6 +450,12 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                     f"     open finding: {_text(candidate.get('open_url')) or packet.get('review_url')}",
                 ]
             )
+            review_reasons = _text_list(candidate.get("review_reasons"))
+            warnings = _text_list(candidate.get("warnings"))
+            if review_reasons:
+                lines.append(f"     review reasons: {_join(review_reasons)}")
+            if warnings:
+                lines.append(f"     warnings: {_join(warnings)}")
             if _text(candidate.get("scope_summary")):
                 lines.append(f"     scope: {_clip(candidate.get('scope_summary'), 220)}")
             suggested = _mapping(candidate.get("suggested_target"))

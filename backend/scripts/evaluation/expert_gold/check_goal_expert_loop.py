@@ -256,6 +256,8 @@ def _goal_rollup(
                 ),
                 "review_candidate_count": int(dataset_goal.get("review_candidate_count") or 0),
                 "by_error_category": dict(_mapping(dataset_goal.get("by_error_category"))),
+                "by_review_reason": dict(_mapping(dataset_goal.get("by_review_reason"))),
+                "by_system_warning": dict(_mapping(dataset_goal.get("by_system_warning"))),
             }
         )
     return rows
@@ -295,11 +297,21 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     review_candidate_count = sum(int(goal.get("review_candidate_count") or 0) for goal in goals)
     by_error_category: dict[str, int] = {}
+    by_review_reason: dict[str, int] = {}
+    by_system_warning: dict[str, int] = {}
     for goal in goals:
         for category, count in _mapping(goal.get("by_error_category")).items():
             if category in {"none", "unreviewed"}:
                 continue
             by_error_category[str(category)] = by_error_category.get(str(category), 0) + int(
+                count or 0
+            )
+        for reason, count in _mapping(goal.get("by_review_reason")).items():
+            by_review_reason[str(reason)] = by_review_reason.get(str(reason), 0) + int(
+                count or 0
+            )
+        for warning, count in _mapping(goal.get("by_system_warning")).items():
+            by_system_warning[str(warning)] = by_system_warning.get(str(warning), 0) + int(
                 count or 0
             )
     completed = (
@@ -318,6 +330,18 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "by_error_category": dict(
                 sorted(
                     by_error_category.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
+            "by_review_reason": dict(
+                sorted(
+                    by_review_reason.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
+            "by_system_warning": dict(
+                sorted(
+                    by_system_warning.items(),
                     key=lambda item: (-item[1], item[0]),
                 )
             ),
@@ -354,6 +378,16 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         lines.append("- error categories:")
         for category, count in error_categories.items():
             lines.append(f"  - {category}: {count}")
+    review_reasons = _mapping(remaining_work.get("by_review_reason"))
+    if review_reasons:
+        lines.append("- review priorities:")
+        for reason, count in review_reasons.items():
+            lines.append(f"  - {reason}: {count}")
+    system_warnings = _mapping(remaining_work.get("by_system_warning"))
+    if system_warnings:
+        lines.append("- system warnings:")
+        for warning, count in system_warnings.items():
+            lines.append(f"  - {warning}: {count}")
     pending_goals = _mapping_list(remaining_work.get("pending_goals"))
     if pending_goals:
         lines.extend(["", "Pending goals:"])

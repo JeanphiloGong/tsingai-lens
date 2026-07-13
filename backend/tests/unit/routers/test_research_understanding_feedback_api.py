@@ -338,6 +338,35 @@ def test_research_understanding_feedback_route_preserves_agent_reviewer(monkeypa
     assert service.created["reviewer"] == "ai-reviewer-codex-evidence-audit"
 
 
+def test_research_understanding_feedback_route_accepts_material_error_issue_type(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.create_research_understanding_feedback(
+            "col-1",
+            ResearchUnderstandingFeedbackCreateRequest(
+                scope_type="goal",
+                scope_id="goal-1",
+                finding_id="finding-1",
+                claim_id="claim-1",
+                review_status="incorrect",
+                issue_type="wrong_variable",
+                note="The finding attributes the effect to VED, but the paper varied preheating.",
+                reviewer="materials-expert",
+            ),
+            request_with_user(),
+        )
+    )
+
+    assert response.issue_type == "wrong_variable"
+    assert service.created["issue_type"] == "wrong_variable"
+
+
 def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
     monkeypatch.setattr(

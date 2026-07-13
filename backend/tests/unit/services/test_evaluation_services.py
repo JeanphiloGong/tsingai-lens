@@ -1728,6 +1728,98 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 1
 
 
+def test_research_understanding_feedback_service_counts_material_error_issue_types():
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-wrong-variable",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "review_status": "incorrect",
+                "issue_type": "wrong_variable",
+                "note": "The finding uses VED, but the evidence varies preheating.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:30:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-wrong-outcome",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "review_status": "incorrect",
+                "issue_type": "wrong_outcome",
+                "note": "The paper reports density, not tensile strength.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:31:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-wrong-direction",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-3",
+                "claim_id": "claim-3",
+                "review_status": "incorrect",
+                "issue_type": "wrong_direction",
+                "note": "The system reversed the reported trend.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:32:00+00:00",
+            }
+        ),
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-insufficient-evidence",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-4",
+                "claim_id": "claim-4",
+                "review_status": "incorrect",
+                "issue_type": "insufficient_evidence",
+                "note": "The source sentence is only background, not result evidence.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-06-18T10:33:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    assert dataset["label_counts"] == {
+        "candidate": 0,
+        "silver": 0,
+        "gold": 0,
+        "rejected": 4,
+    }
+    assert dataset["quality_summary"]["system_error_count"] == 4
+    assert dataset["quality_summary"]["by_issue_type"] == {
+        "wrong_variable": 1,
+        "wrong_outcome": 1,
+        "wrong_direction": 1,
+        "insufficient_evidence": 1,
+    }
+    assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 4
+
+
 def test_research_understanding_feedback_service_filters_dataset_by_use_status():
     repository = FakeEvaluationRepository()
     repository.feedback = (

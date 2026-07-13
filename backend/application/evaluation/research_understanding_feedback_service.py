@@ -25,6 +25,10 @@ _REJECTING_ISSUE_TYPES = frozenset(
     {
         "evidence_not_grounded",
         "missing_evidence",
+        "insufficient_evidence",
+        "wrong_variable",
+        "wrong_outcome",
+        "wrong_direction",
         "wrong_context",
         "wrong_relation",
         "overclaim",

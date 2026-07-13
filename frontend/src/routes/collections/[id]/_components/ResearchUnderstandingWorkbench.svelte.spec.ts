@@ -2127,6 +2127,36 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('submits material-specific feedback issue types', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
+		await claimDetail.getByLabelText('Review result').selectOptions('incorrect');
+		await claimDetail.getByLabelText('Issue type').selectOptions('wrong_variable');
+		await claimDetail
+			.getByLabelText('Feedback note')
+			.fill('The finding uses the wrong experimental variable.');
+		await claimDetail.getByRole('button', { name: 'Save feedback' }).click();
+
+		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
+		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+				(init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(feedbackPostCall).toBeTruthy();
+		expect(JSON.parse(String(feedbackPostCall![1].body))).toMatchObject({
+			review_status: 'incorrect',
+			issue_type: 'wrong_variable',
+			note: 'The finding uses the wrong experimental variable.'
+		});
+	});
+
 	it('requires an authenticated reviewer before expert feedback can be saved', async () => {
 		authState.set({ status: 'anonymous', user: null });
 		render(ResearchUnderstandingWorkbench, {

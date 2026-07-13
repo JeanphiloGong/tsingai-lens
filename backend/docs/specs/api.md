@@ -608,7 +608,8 @@ Research understanding 专家反馈资源：
 - `claim_id`：可选，finding 绑定的底层 claim id
 - `review_status`：`correct | partial | incorrect | unclear`
 - `issue_type`：
-  `none | evidence_not_grounded | missing_evidence | wrong_context |
+  `none | evidence_not_grounded | missing_evidence | insufficient_evidence |
+  wrong_variable | wrong_outcome | wrong_direction | wrong_context |
   wrong_relation | overclaim | unclear_statement | other`
 - `note`：可选专家备注，最多 2000 字符
 - `reviewer`：可选自动复核人标识，最多 120 字符。浏览器/人工提交时后端
@@ -738,7 +739,8 @@ feedback 和 curations 派生样本，不注册 gold set，也不修改原始 ar
 - `gold`：存在带明确非 AI reviewer 的专家 curation，或带明确非 AI reviewer
   的专家反馈标记 `correct`
 - `rejected`：专家反馈标记 `incorrect`，或 issue 是
-  `evidence_not_grounded`、`missing_evidence`、`wrong_context`、
+  `evidence_not_grounded`、`missing_evidence`、`insufficient_evidence`、
+  `wrong_variable`、`wrong_outcome`、`wrong_direction`、`wrong_context`、
   `wrong_relation`、`overclaim`、`unclear_statement`
 
 历史样本或 deterministic-only finding 没有匹配模型调用且没有可定位原文证据时使用

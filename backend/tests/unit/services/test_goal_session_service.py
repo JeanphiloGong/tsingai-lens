@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from openai import APIConnectionError
 
+from application.core.comparison_service import ComparisonRowsNotReadyError
+from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError
 from application.goal.session_service import GoalSessionService
 from application.source.collection_service import CollectionService
 from infra.persistence.factory import build_goal_session_repository
@@ -78,6 +80,16 @@ class _EmptyComparisonService:
 class _EmptyPaperFactsService:
     def list_evidence_cards(self, collection_id: str, limit: int = 10) -> dict:
         return {"collection_id": collection_id, "items": [], "total": 0, "limit": limit}
+
+
+class _NotReadyComparisonService:
+    def list_comparison_rows(self, collection_id: str, limit: int = 10) -> dict:
+        raise ComparisonRowsNotReadyError(collection_id)
+
+
+class _NotReadyPaperFactsService:
+    def list_evidence_cards(self, collection_id: str, limit: int = 10) -> dict:
+        raise PaperFactsNotReadyError(collection_id)
 
 
 class _EvidencePaperFactsService:
@@ -488,6 +500,7 @@ def _service(
     content: str = "draft answer",
     research_objective_service=None,
     research_understanding_feedback_service=None,
+    comparison_service=None,
     paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
     collection_service = CollectionService(tmp_path / "collections")
@@ -495,7 +508,7 @@ def _service(
         collection_service=collection_service,
         research_view_service=_MaterialResearchViewService(),
         workspace_service=_FakeWorkspaceService(),
-        comparison_service=_EmptyComparisonService(),
+        comparison_service=comparison_service or _EmptyComparisonService(),
         paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
         research_objective_service=research_objective_service
         or _EmptyResearchObjectiveService(),
@@ -512,6 +525,7 @@ def _service_with_llm_client(
     llm_client,
     research_objective_service=None,
     research_understanding_feedback_service=None,
+    comparison_service=None,
     paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
     collection_service = CollectionService(tmp_path / "collections")
@@ -519,7 +533,7 @@ def _service_with_llm_client(
         collection_service=collection_service,
         research_view_service=_MaterialResearchViewService(),
         workspace_service=_FakeWorkspaceService(),
-        comparison_service=_EmptyComparisonService(),
+        comparison_service=comparison_service or _EmptyComparisonService(),
         paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
         research_objective_service=research_objective_service
         or _EmptyResearchObjectiveService(),
@@ -770,6 +784,38 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt
     assert "finding_review_candidate" not in prompt
+
+
+def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_exist(
+    tmp_path,
+):
+    service, collection_service = _service(
+        tmp_path,
+        content="Use the accepted preheating finding for the next protocol [Source 1].",
+        research_understanding_feedback_service=(
+            _TrainingReadyResearchUnderstandingFeedbackService()
+        ),
+        comparison_service=_NotReadyComparisonService(),
+        paper_facts_service=_NotReadyPaperFactsService(),
+    )
+    collection = collection_service.create_collection("Curated Warning Collection")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_preheat",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Design the next experiment from reviewed findings.",
+        page_context={"goal_id": "goal_preheat"},
+    )
+
+    assert response["source_mode"] == "collection_grounded"
+    assert response["used_evidence_ids"] == ["ev_preheat_ductility"]
+    assert "comparison_rows_not_ready" not in response["warnings"]
+    assert "evidence_cards_not_ready" not in response["warnings"]
+    assert "curated_research_findings_empty" not in response["warnings"]
 
 
 def test_goal_chat_warns_when_focused_scope_has_no_training_ready_findings(tmp_path):

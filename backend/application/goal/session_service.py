@@ -565,6 +565,13 @@ class GoalSessionService:
         )
         if (focused_goal_id or focused_objective_id) and not curated_research_findings:
             warnings.append("curated_research_findings_empty")
+        if curated_research_findings:
+            warnings = [
+                warning
+                for warning in warnings
+                if warning
+                not in {"comparison_rows_not_ready", "evidence_cards_not_ready"}
+            ]
 
         context_payload = {
             "collection": collection,

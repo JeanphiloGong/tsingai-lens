@@ -234,6 +234,7 @@ def _goal_rollup(
                     dataset_goal.get("training_message_ready_count") or 0
                 ),
                 "review_candidate_count": int(dataset_goal.get("review_candidate_count") or 0),
+                "by_error_category": dict(_mapping(dataset_goal.get("by_error_category"))),
             }
         )
     return rows
@@ -252,6 +253,14 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
         if int(goal.get("training_message_ready_count") or 0) == 0
     ]
     review_candidate_count = sum(int(goal.get("review_candidate_count") or 0) for goal in goals)
+    by_error_category: dict[str, int] = {}
+    for goal in goals:
+        for category, count in _mapping(goal.get("by_error_category")).items():
+            if category in {"none", "unreviewed"}:
+                continue
+            by_error_category[str(category)] = by_error_category.get(str(category), 0) + int(
+                count or 0
+            )
     completed = (
         total_goals > 0
         and not goals_without_training_ready
@@ -264,8 +273,18 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "review_candidate_count": review_candidate_count,
             "goals_without_training_ready": goals_without_training_ready,
             "goals_without_training_messages": goals_without_training_messages,
+            "by_error_category": dict(
+                sorted(
+                    by_error_category.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
         },
     }
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:

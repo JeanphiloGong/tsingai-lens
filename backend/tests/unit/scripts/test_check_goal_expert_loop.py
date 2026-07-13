@@ -51,6 +51,7 @@ def _dataset_payload(status: str = "pass"):
                 "training_ready_count": 1,
                 "training_message_ready_count": 1,
                 "review_candidate_count": 0,
+                "by_error_category": {"none": 1},
             },
             {
                 "goal_id": "goal-2",
@@ -58,6 +59,7 @@ def _dataset_payload(status: str = "pass"):
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
                 "review_candidate_count": 2,
+                "by_error_category": {"variable_error": 1, "direction_error": 1},
             },
         ],
     }
@@ -107,6 +109,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
         "review_candidate_count": 2,
         "goals_without_training_ready": ["goal-2"],
         "goals_without_training_messages": ["goal-2"],
+        "by_error_category": {"direction_error": 1, "variable_error": 1},
     }
 
 

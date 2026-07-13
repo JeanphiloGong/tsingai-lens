@@ -258,8 +258,6 @@ const translations: Record<Language, Translations> = {
 				samples: 'What comparable samples are in these papers?'
 			},
 			actions: {
-				like: 'Like answer',
-				dislike: 'Dislike answer',
 				copy: 'Copy answer'
 			},
 			experimentPlan: {
@@ -3201,8 +3199,6 @@ const translations: Record<Language, Translations> = {
 				samples: '这些论文里有哪些可比样品？'
 			},
 			actions: {
-				like: '点赞回答',
-				dislike: '点踩回答',
 				copy: '复制回答'
 			},
 			experimentPlan: {

@@ -156,6 +156,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
+		await expect.element(browserPage.getByRole('button', { name: 'Copy answer' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Like answer' })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Dislike answer' })).not.toBeInTheDocument();
 
 		await browserPage.getByRole('button', { name: 'Save plan' }).click();
 

@@ -610,20 +610,6 @@
 										<button
 											class="action-button"
 											type="button"
-											aria-label={$t('goalCopilot.actions.like')}
-										>
-											<span aria-hidden="true">⌃</span>
-										</button>
-										<button
-											class="action-button"
-											type="button"
-											aria-label={$t('goalCopilot.actions.dislike')}
-										>
-											<span aria-hidden="true">⌄</span>
-										</button>
-										<button
-											class="action-button"
-											type="button"
 											aria-label={$t('goalCopilot.actions.copy')}
 											on:click={() => copyMessage(messageText(message))}
 										>

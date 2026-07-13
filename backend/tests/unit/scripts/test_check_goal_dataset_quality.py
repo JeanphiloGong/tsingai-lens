@@ -208,6 +208,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
 
     summary = check.evaluate_goal_dataset_payload(dataset)
     assert summary["next_review_finding_id"] == "finding-1"
+    assert summary["next_review_action"] == {
+        "code": "review_table_rows",
+        "label": "review selected table rows before accepting or correcting",
+    }
 
 
 def test_evaluate_goal_dataset_payload_requires_training_ready_when_requested():

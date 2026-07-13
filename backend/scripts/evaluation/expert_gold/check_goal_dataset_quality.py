@@ -334,6 +334,7 @@ def evaluate_goal_dataset_payload(
             ]
         ),
         "next_review_finding_id": _next_review_finding_id(items),
+        "next_review_action": _next_review_action(items),
         "by_error_category": dict(_mapping(quality.get("by_error_category"))),
         "by_review_reason": dict(_mapping(quality.get("by_review_reason"))),
         "by_system_warning": dict(_mapping(quality.get("by_system_warning"))),
@@ -554,6 +555,32 @@ def _next_review_finding_id(items: list[dict[str, Any]]) -> str:
         if _text(item.get("dataset_use_status")) == "review_candidate":
             return _text(item.get("finding_id"))
     return ""
+
+
+def _next_review_action(items: list[dict[str, Any]]) -> dict[str, str]:
+    for item in items:
+        if _text(item.get("dataset_use_status")) != "review_candidate":
+            continue
+        review_action = _mapping(item.get("review_action"))
+        code = _text(review_action.get("code"))
+        label = _text(review_action.get("label"))
+        if code or label:
+            return {"code": code, "label": label}
+        prediction = _mapping(item.get("system_prediction"))
+        evidence_records = (
+            _mapping_list(item.get("training_evidence_refs"))
+            or _mapping_list(item.get("evidence_refs"))
+            or _mapping_list(item.get("input_blocks"))
+        )
+        return {
+            "code": "",
+            "label": _review_packet_action(
+                review_reasons=_text_list(prediction.get("review_reasons")),
+                warnings=_text_list(prediction.get("warnings")),
+                evidence_records=evidence_records,
+            ),
+        }
+    return {}
 
 
 def _sample_failure_detail(items: Any) -> str:

@@ -247,6 +247,11 @@ def _goal_rollup(
                     if int(dataset_goal.get("review_candidate_count") or 0) > 0
                     else ""
                 ),
+                "next_review_action": (
+                    dict(_mapping(dataset_goal.get("next_review_action")))
+                    if int(dataset_goal.get("review_candidate_count") or 0) > 0
+                    else {}
+                ),
                 "primary_finding_count": int(goal.get("primary_finding_count") or 0),
                 "direct_evidence_count": int(goal.get("direct_evidence_count") or 0),
                 "dataset_item_count": int(dataset_goal.get("item_count") or 0),
@@ -291,6 +296,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
                 goal.get("training_message_ready_count") or 0
             ),
             "next_action": _pending_goal_action(goal),
+            "next_review_action": dict(_mapping(goal.get("next_review_action"))),
             "href": _pending_goal_href(goal),
             "next_review_finding_id": _text(goal.get("next_review_finding_id")),
         }
@@ -426,6 +432,15 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                 [
                     f"{index}. {_text(goal.get('question')) or _text(goal.get('goal_id'))}",
                     f"   action: {_text(goal.get('next_action'))}",
+                ]
+            )
+            review_action_label = _text(
+                _mapping(goal.get("next_review_action")).get("label")
+            )
+            if review_action_label:
+                lines.append(f"   review action: {review_action_label}")
+            lines.extend(
+                [
                     (
                         "   counts: "
                         f"review={int(goal.get('review_candidate_count') or 0)}, "

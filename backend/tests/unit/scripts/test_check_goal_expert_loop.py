@@ -66,6 +66,10 @@ def _dataset_payload(status: str = "pass"):
                 "training_message_ready_count": 0,
                 "review_candidate_count": 2,
                 "next_review_finding_id": "finding-review-1",
+                "next_review_action": {
+                    "code": "verify_table_rows",
+                    "label": "verify parsed table rows before accepting or correcting",
+                },
                 "by_error_category": {"variable_error": 1, "direction_error": 1},
                 "by_review_reason": {
                     "single_paper_evidence": 2,
@@ -134,6 +138,10 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
                 "next_action": "review_candidates",
+                "next_review_action": {
+                    "code": "verify_table_rows",
+                    "label": "verify parsed table rows before accepting or correcting",
+                },
                 "href": "/collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1",
                 "next_review_finding_id": "finding-review-1",
             }
@@ -214,6 +222,10 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         "open: /collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1"
         in text
     )
+    assert (
+        "review action: verify parsed table rows before accepting or correcting"
+        in text
+    )
     assert "direction_error: 1" in text
     assert "variable_error: 1" in text
     assert "single_paper_evidence: 2" in text
@@ -258,6 +270,7 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
             "training_ready_count": 1,
             "training_message_ready_count": 0,
             "next_action": "inspect_training_messages",
+            "next_review_action": {},
             "href": "/collections/col-1/goals/goal-2?review=training_ready",
             "next_review_finding_id": "",
         }

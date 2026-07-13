@@ -63,7 +63,9 @@ function requestMethod(input: string | URL | Request, init?: RequestInit) {
 function datasetResponse({
 	trainingReady = 1,
 	trainingMessages = 1,
-	reviewCandidate = 0
+	reviewCandidate = 0,
+	nextReviewFindingId = '',
+	reviewActionCode = ''
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -86,6 +88,7 @@ function datasetResponse({
 			training_ready_sample_count: trainingReady,
 			training_message_sample_count: trainingMessages,
 			review_candidate_sample_count: reviewCandidate,
+			next_review_finding_id: nextReviewFindingId,
 			by_dataset_use_status: {
 				training_ready: trainingReady,
 				review_candidate: reviewCandidate,
@@ -94,6 +97,22 @@ function datasetResponse({
 			by_presentation_bucket: {},
 			by_error_category: {}
 		},
+		items: reviewCandidate
+			? [
+					{
+						sample_id: 'sample_review_1',
+						finding_id: nextReviewFindingId || 'finding_review_1',
+						label_status: 'silver',
+						dataset_use_status: 'review_candidate',
+						review_action: reviewActionCode
+							? {
+									code: reviewActionCode,
+									label: 'review selected table rows before accepting or correcting'
+								}
+							: {}
+					}
+				]
+			: [],
 		warnings: []
 	};
 }
@@ -233,7 +252,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						datasetResponse({
 							trainingReady: 0,
 							trainingMessages: 0,
-							reviewCandidate: 3
+							reviewCandidate: 3,
+							nextReviewFindingId: 'finding_review_1',
+							reviewActionCode: 'review_table_rows'
 						})
 					)
 				);
@@ -269,7 +290,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'3 finding(s) still need expert review before protocol drafts can be saved.'
+					'3 finding(s) still need expert review before protocol drafts can be saved. Next: Review selected table rows.'
 				)
 				)
 			.toBeInTheDocument();

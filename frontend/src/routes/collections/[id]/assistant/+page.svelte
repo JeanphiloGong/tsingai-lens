@@ -77,6 +77,7 @@
 	$: goalReviewCandidateCount =
 		goalDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
 	$: goalProtocolReady = goalTrainingReadyCount > 0 && goalTrainingMessageCount > 0;
+	$: nextReviewAction = nextReviewActionForDisplay(goalDatasetSummary);
 	$: goalReviewLinkHref = goalReviewHref(
 		collectionId,
 		queryGoalId,
@@ -113,9 +114,14 @@
 				messages: goalTrainingMessageCount
 			});
 		} else if (goalReviewCandidateCount > 0) {
-			readinessText = $t('goalCopilot.experimentReadiness.needsReview', {
-				review: goalReviewCandidateCount
-			});
+			readinessText = nextReviewAction
+				? $t('goalCopilot.experimentReadiness.needsReviewAction', {
+						review: goalReviewCandidateCount,
+						action: nextReviewAction
+					})
+				: $t('goalCopilot.experimentReadiness.needsReview', {
+						review: goalReviewCandidateCount
+					});
 		} else {
 			readinessText = $t('goalCopilot.experimentReadiness.empty');
 		}
@@ -348,6 +354,25 @@
 
 	function draftProtocolFromReviewedFindings() {
 		void sendMessage($t('goalCopilot.experimentReadiness.protocolPrompt'));
+	}
+
+	function nextReviewActionForDisplay(dataset: ResearchUnderstandingDataset | null) {
+		if (!dataset) return '';
+		const nextFindingId = dataset.quality_summary.next_review_finding_id;
+		const sample =
+			(nextFindingId
+				? dataset.items.find(
+						(item) =>
+							item.finding_id === nextFindingId &&
+							item.dataset_use_status === 'review_candidate'
+					)
+				: null) ??
+			dataset.items.find((item) => item.dataset_use_status === 'review_candidate') ??
+			null;
+		const code = sample?.review_action?.code ?? '';
+		if (!code) return '';
+		const localized = $t(`research.objectives.goalReviewRecommendedActions.${code}`);
+		return localized.startsWith('research.') ? (sample?.review_action?.label ?? '') : localized;
 	}
 
 	function goalReviewHref(

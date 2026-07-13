@@ -291,6 +291,8 @@ const translations: Record<Language, Translations> = {
 					'{training} training-ready finding(s) exist, but only {messages} training message sample(s) are exportable. Check dataset export quality before drafting a protocol.',
 				needsReview:
 					'{review} finding(s) still need expert review before protocol drafts can be saved.',
+				needsReviewAction:
+					'{review} finding(s) still need expert review before protocol drafts can be saved. Next: {action}.',
 				empty: 'No training-ready findings are available for this goal yet.',
 				error: 'Readiness is unavailable: {message}',
 				openGoal: 'Open goal review',
@@ -3457,6 +3459,8 @@ const translations: Record<Language, Translations> = {
 				messagesPending:
 					'当前有 {training} 条可训练 Finding，但只有 {messages} 条训练 messages 可导出。生成实验方案前需要检查数据集导出质量。',
 				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
+				needsReviewAction:
+					'还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。下一步：{action}。',
 				empty: '该目标还没有可用于实验方案的 training-ready Findings。',
 				error: '就绪度不可用：{message}',
 				openGoal: '打开目标复核',

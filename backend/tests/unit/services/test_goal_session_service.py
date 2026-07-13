@@ -867,8 +867,11 @@ def test_goal_chat_warns_when_focused_scope_has_no_training_ready_findings(tmp_p
         page_context={"goal_id": "goal_unreviewed"},
     )
 
-    assert response["source_mode"] == "collection_grounded"
+    assert response["source_mode"] == "collection_limited"
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
     assert "curated_research_findings_empty" in response["warnings"]
+    assert "goal_copilot_missing_source_citation" in response["warnings"]
     assert feedback_service.calls == [
         {
             "collection_id": collection["collection_id"],
@@ -900,10 +903,11 @@ def test_goal_chat_excludes_non_actionable_training_ready_findings(tmp_path):
         page_context={"goal_id": "goal_non_actionable"},
     )
 
-    assert response["source_mode"] == "collection_grounded"
+    assert response["source_mode"] == "collection_limited"
     assert response["used_evidence_ids"] == []
     assert response["source_links"] == []
     assert "curated_research_findings_empty" in response["warnings"]
+    assert "goal_copilot_missing_source_citation" in response["warnings"]
     prompt = service.llm_client.chat.completions.calls[0]["messages"][1]["content"]
     assert "curated_research_findings" not in prompt
     assert "ev_unsupported" not in prompt

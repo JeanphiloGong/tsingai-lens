@@ -375,10 +375,7 @@ class GoalSessionService:
                 warnings.append(failed_warning)
                 used_evidence_ids = []
                 source_links = []
-            elif source_links and not self._answer_cites_source_link(
-                answer,
-                source_links,
-            ):
+            elif not source_links or not self._answer_cites_source_link(answer, source_links):
                 source_mode = "collection_limited"
                 warnings.append("goal_copilot_missing_source_citation")
                 answer = (

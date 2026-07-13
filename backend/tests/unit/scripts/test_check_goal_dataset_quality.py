@@ -172,6 +172,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     assert candidate["variables"] == ["preheating"]
     assert candidate["review_reasons"] == ["single_paper_evidence"]
     assert candidate["warnings"] == ["table_row_alignment_uncertain"]
+    assert (
+        candidate["recommended_action"]
+        == "verify parsed table rows before accepting or correcting"
+    )
     assert packet["goal_id"] == "goal-1"
     assert (
         candidate["open_url"]
@@ -185,6 +189,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         in text
     )
     assert "fields: variables=preheating; outcomes=ductility; direction=increase" in text
+    assert (
+        "recommended action: verify parsed table rows before accepting or correcting"
+        in text
+    )
     assert "review reasons: single_paper_evidence" in text
     assert "warnings: table_row_alignment_uncertain" in text
     assert "Paper A / p. 4 / p. 4" not in text

@@ -367,6 +367,8 @@ def build_goal_review_packet(
             or _mapping_list(item.get("evidence_refs"))
             or _mapping_list(item.get("input_blocks"))
         )
+        review_reasons = _text_list(prediction.get("review_reasons"))
+        warnings = _text_list(prediction.get("warnings"))
         candidates.append(
             {
                 "sample_id": _text(item.get("sample_id")),
@@ -388,8 +390,13 @@ def build_goal_review_packet(
                 "support_grade": _text(prediction.get("support_grade")),
                 "review_status": _text(prediction.get("review_status"))
                 or _text(expert_target.get("review_status")),
-                "review_reasons": _text_list(prediction.get("review_reasons")),
-                "warnings": _text_list(prediction.get("warnings")),
+                "review_reasons": review_reasons,
+                "warnings": warnings,
+                "recommended_action": _review_packet_action(
+                    review_reasons=review_reasons,
+                    warnings=warnings,
+                    evidence_records=evidence_records,
+                ),
                 "suggested_target": {
                     "source": _text(expert_target.get("source")),
                     "review_status": _text(expert_target.get("review_status")),
@@ -454,6 +461,7 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                         f"trace={_text(candidate.get('trace_status')) or 'n/a'}"
                     ),
                     f"     open finding: {_text(candidate.get('open_url')) or packet.get('review_url')}",
+                    f"     recommended action: {_text(candidate.get('recommended_action'))}",
                 ]
             )
             review_reasons = _text_list(candidate.get("review_reasons"))
@@ -576,6 +584,26 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
         or _text(record.get("training_source_text"))
         or _text(record.get("text")),
     }
+
+
+def _review_packet_action(
+    *,
+    review_reasons: list[str],
+    warnings: list[str],
+    evidence_records: list[dict[str, Any]],
+) -> str:
+    risk_codes = {*review_reasons, *warnings}
+    if "table_row_alignment_uncertain" in risk_codes:
+        return "verify parsed table rows before accepting or correcting"
+    if "conflicting_direction" in risk_codes:
+        return "resolve conflicting evidence before downstream use"
+    if "missing_direct_result_evidence" in risk_codes or not evidence_records:
+        return "repair or reject the evidence binding"
+    if "missing_mechanism_evidence" in risk_codes:
+        return "check whether mechanism evidence is required for the final label"
+    if "needs_cross_paper_confirmation" in risk_codes or "single_paper_evidence" in risk_codes:
+        return "accept only as paper-level evidence unless another paper confirms it"
+    return "accept, reject, or correct after checking the evidence"
 
 
 def _text_list(value: Any) -> list[str]:

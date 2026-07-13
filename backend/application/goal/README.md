@@ -8,7 +8,9 @@ The active runtime path is a lightweight session over one collection:
 1. create a goal session bound to `collection_id`
 2. accept plain natural-language messages
 3. read existing Core or Core-derived artifacts when grounded context is allowed
-4. label the answer source as collection-grounded, collection-limited, general
+4. prefer expert-curated `training_ready` research-understanding Findings when
+   the session is focused on a confirmed goal or objective
+5. label the answer source as collection-grounded, collection-limited, general
    fallback, or general-only
 
 Structured Goal Brief data is optional context for this path. It is not a
@@ -24,8 +26,9 @@ own database connections, SQL, schema initialization, or row encoding.
 
 - `session_service.py`
   Primary current conversation service. It persists session context, retrieves
-  collection artifacts before grounded answers, and labels general fallback
-  separately from collection evidence.
+  collection artifacts before grounded answers, prioritizes curated Findings
+  for goal-focused experiment or protocol questions, and labels general
+  fallback separately from collection evidence.
 - `brief_service.py`
   Optional goal-first collection-seeding path. It shapes a thin research brief
   and registers a `seed_collection` handoff into Source, but it is not required

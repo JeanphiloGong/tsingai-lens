@@ -117,6 +117,8 @@
 - `collection_id`
 - `focused_material_id`
 - `focused_paper_id`
+- `focused_objective_id`
+- `focused_goal_id`
 - `goal_text`
 - `goal_brief_json`
 - `answer_mode`
@@ -134,9 +136,11 @@
 }
 ```
 
-`goal_text`、`focused_material_id`、`focused_paper_id`、`answer_mode` 和
-`goal_brief_json` 都是可选会话上下文。`goal_brief_json` 是可选 metadata，不是开始
-对话的前置条件。
+`goal_text`、`focused_material_id`、`focused_paper_id`、`focused_objective_id`、
+`focused_goal_id`、`answer_mode` 和 `goal_brief_json` 都是可选会话上下文。
+`focused_goal_id` 用于把对话绑定到已确认研究目标，并优先消费该目标下已经进入
+`training_ready` 的 research-understanding Findings。`goal_brief_json` 是可选 metadata，
+不是开始对话的前置条件。
 
 `answer_mode` 可选值：
 

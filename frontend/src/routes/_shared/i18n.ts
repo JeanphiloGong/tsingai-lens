@@ -1108,6 +1108,7 @@ const translations: Record<Language, Translations> = {
 			},
 			goalWorkspace: {
 				eyebrow: 'Confirmed goal',
+				askCopilot: 'Ask Copilot',
 				progressEyebrow: 'Goal analysis',
 				progressTitle: 'Analyzing this research goal',
 				progressBody:
@@ -3938,6 +3939,7 @@ const translations: Record<Language, Translations> = {
 			},
 			goalWorkspace: {
 				eyebrow: '已确认目标',
+				askCopilot: '询问助手',
 				progressEyebrow: '目标分析',
 				progressTitle: '正在分析该研究目标',
 				progressBody: '系统正在围绕该目标抽取证据、构建逻辑链并生成研究理解。',

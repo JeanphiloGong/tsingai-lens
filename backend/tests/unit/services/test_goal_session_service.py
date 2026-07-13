@@ -145,6 +145,83 @@ class _EmptyResearchObjectiveService:
         }
 
 
+class _TrainingReadyResearchUnderstandingFeedbackService:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(dict(kwargs))
+        if kwargs["scope_type"] != "goal":
+            return {
+                "collection_id": kwargs["collection_id"],
+                "scope_type": kwargs["scope_type"],
+                "scope_id": kwargs["scope_id"],
+                "dataset_use_status_filter": kwargs["dataset_use_status"],
+                "item_count": 0,
+                "items": [],
+                "warnings": [],
+            }
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": "goal",
+            "scope_id": kwargs["scope_id"],
+            "dataset_use_status_filter": kwargs["dataset_use_status"],
+            "item_count": 2,
+            "items": [
+                {
+                    "finding_id": "finding_preheat_ductility",
+                    "claim_id": "claim_preheat_ductility",
+                    "label_status": "gold",
+                    "dataset_use_status": "training_ready",
+                    "system_prediction": {
+                        "statement": "Preheating the build platform to 150 C increases LPBF 316L ductility by about 14%.",
+                        "variables": ["build platform preheating temperature"],
+                        "mediators": ["microstructure", "GND density"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "scope_summary": "LPBF 316L stainless steel",
+                        "support_grade": "strong",
+                    },
+                    "expert_target": {
+                        "statement": "150 C preheating improves LPBF 316L ductility through microstructure/GND changes.",
+                        "variables": ["build platform preheating temperature"],
+                        "mediators": ["microstructure", "GND density"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "scope_summary": "LPBF 316L stainless steel",
+                        "support_grade": "strong",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_preheat_ductility",
+                            "document_id": "paper-preheat",
+                            "page": 7,
+                            "source_kind": "paragraph",
+                            "source_ref": "Results",
+                            "training_source_text": "The sample preheated at 150 C shows a 14% improvement in ductility.",
+                        }
+                    ],
+                },
+                {
+                    "finding_id": "finding_review_candidate",
+                    "label_status": "silver",
+                    "dataset_use_status": "review_candidate",
+                    "system_prediction": {
+                        "statement": "Review-only finding should not be used for protocol design.",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_review_candidate",
+                            "document_id": "paper-review",
+                            "training_source_text": "This text still needs review.",
+                        }
+                    ],
+                },
+            ],
+            "warnings": [],
+        }
+
+
 class _ObjectiveResearchService(_EmptyResearchObjectiveService):
     def list_objective_workspaces(self, collection_id: str) -> dict:
         return {
@@ -284,6 +361,7 @@ def _service(
     tmp_path,
     content: str = "draft answer",
     research_objective_service=None,
+    research_understanding_feedback_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
     collection_service = CollectionService(tmp_path / "collections")
     service = GoalSessionService(
@@ -294,6 +372,7 @@ def _service(
         paper_facts_service=_EmptyPaperFactsService(),
         research_objective_service=research_objective_service
         or _EmptyResearchObjectiveService(),
+        research_understanding_feedback_service=research_understanding_feedback_service,
         goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient(content),
         model="fake-model",
@@ -309,6 +388,7 @@ def test_goal_session_persists_explicit_context(tmp_path):
         collection_id=collection["collection_id"],
         focused_material_id="mat-316l",
         focused_objective_id="obj_lpbf_strength",
+        focused_goal_id="goal_lpbf_strength",
         goal_text="Compare strength and ductility.",
         answer_mode="hybrid",
     )
@@ -317,6 +397,7 @@ def test_goal_session_persists_explicit_context(tmp_path):
     assert loaded["collection_id"] == collection["collection_id"]
     assert loaded["focused_material_id"] == "mat-316l"
     assert loaded["focused_objective_id"] == "obj_lpbf_strength"
+    assert loaded["focused_goal_id"] == "goal_lpbf_strength"
     assert loaded["goal_text"] == "Compare strength and ductility."
     assert loaded["answer_mode"] == "hybrid"
 
@@ -349,6 +430,7 @@ def test_goal_session_update_can_clear_focus(tmp_path):
         focused_material_id="mat-316l",
         focused_paper_id="paper-a",
         focused_objective_id="obj_lpbf_strength",
+        focused_goal_id="goal_lpbf_strength",
     )
 
     updated = service.update_session(
@@ -356,11 +438,13 @@ def test_goal_session_update_can_clear_focus(tmp_path):
         focused_material_id=None,
         focused_paper_id=None,
         focused_objective_id=None,
+        focused_goal_id=None,
     )
 
     assert updated["focused_material_id"] is None
     assert updated["focused_paper_id"] is None
     assert updated["focused_objective_id"] is None
+    assert updated["focused_goal_id"] is None
 
 
 def test_grounded_message_returns_limited_when_collection_has_no_context(tmp_path):
@@ -476,3 +560,55 @@ def test_objective_context_is_available_to_grounded_chat(tmp_path):
     assert "objective_research_view" in prompt
     assert "LPBF energy density and scan strategy shape strength" in prompt
     assert "oeu_strength" in prompt
+
+
+def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
+    feedback_service = _TrainingReadyResearchUnderstandingFeedbackService()
+    service, collection_service = _service(
+        tmp_path,
+        content="Use the accepted preheating finding for the next protocol [Source 1].",
+        research_understanding_feedback_service=feedback_service,
+    )
+    collection = collection_service.create_collection("Goal Finding Collection")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_preheat",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Design the next experiment from reviewed findings.",
+        page_context={"goal_id": "goal_preheat"},
+    )
+    loaded = service.get_session(session["session_id"])
+
+    assert response["source_mode"] == "collection_grounded"
+    assert response["used_evidence_ids"] == ["ev_preheat_ductility"]
+    assert response["source_links"] == [
+        {
+            "kind": "evidence",
+            "label": "Source 1",
+            "href": (
+                f"/collections/{collection['collection_id']}/documents/"
+                "paper-preheat?evidence_id=ev_preheat_ductility"
+            ),
+        }
+    ]
+    assert loaded["focused_goal_id"] == "goal_preheat"
+    assert feedback_service.calls == [
+        {
+            "collection_id": collection["collection_id"],
+            "scope_type": "goal",
+            "scope_id": "goal_preheat",
+            "dataset_use_status": "training_ready",
+        }
+    ]
+    prompt_messages = service.llm_client.chat.completions.calls[0]["messages"]
+    assert "curated/training-ready findings first" in prompt_messages[0]["content"]
+    prompt = prompt_messages[1]["content"]
+    assert "curated_research_findings" in prompt
+    assert "150 C preheating improves LPBF 316L ductility" in prompt
+    assert "The sample preheated at 150 C shows a 14% improvement" in prompt
+    assert "ev_preheat_ductility" not in prompt
+    assert "finding_review_candidate" not in prompt

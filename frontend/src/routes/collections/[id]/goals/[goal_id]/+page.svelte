@@ -145,6 +145,14 @@
 			{/if}
 		</div>
 		<div class="goal-actions">
+			<a
+				class="btn btn--ghost btn--small"
+				href={`${resolve('/collections/[id]/assistant', {
+					id: collectionId
+				})}?goal_id=${encodeURIComponent(goalId)}`}
+			>
+				{$t('research.goalWorkspace.askCopilot')}
+			</a>
 			<button class="btn btn--ghost btn--small" type="button" on:click={loadAnalysis}>
 				{$t('research.objectives.refresh')}
 			</button>

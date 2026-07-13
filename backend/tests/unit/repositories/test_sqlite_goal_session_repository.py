@@ -11,6 +11,7 @@ def _session_record() -> dict:
         "focused_material_id": "mat-316l",
         "focused_paper_id": None,
         "focused_objective_id": "obj_lpbf",
+        "focused_goal_id": "goal_lpbf",
         "goal_text": "Compare strength and ductility.",
         "goal_brief_json": {"objective": "compare"},
         "answer_mode": "hybrid",

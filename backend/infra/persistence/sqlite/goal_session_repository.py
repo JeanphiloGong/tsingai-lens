@@ -31,6 +31,7 @@ class SqliteGoalSessionRepository:
                     focused_material_id,
                     focused_paper_id,
                     focused_objective_id,
+                    focused_goal_id,
                     goal_text,
                     goal_brief_json,
                     answer_mode,
@@ -62,6 +63,7 @@ class SqliteGoalSessionRepository:
                     focused_material_id,
                     focused_paper_id,
                     focused_objective_id,
+                    focused_goal_id,
                     goal_text,
                     goal_brief_json,
                     answer_mode,
@@ -72,13 +74,14 @@ class SqliteGoalSessionRepository:
                     collection_data_version,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     user_id = excluded.user_id,
                     collection_id = excluded.collection_id,
                     focused_material_id = excluded.focused_material_id,
                     focused_paper_id = excluded.focused_paper_id,
                     focused_objective_id = excluded.focused_objective_id,
+                    focused_goal_id = excluded.focused_goal_id,
                     goal_text = excluded.goal_text,
                     goal_brief_json = excluded.goal_brief_json,
                     answer_mode = excluded.answer_mode,
@@ -175,6 +178,7 @@ class SqliteGoalSessionRepository:
                     focused_material_id TEXT,
                     focused_paper_id TEXT,
                     focused_objective_id TEXT,
+                    focused_goal_id TEXT,
                     goal_text TEXT,
                     goal_brief_json TEXT NOT NULL,
                     answer_mode TEXT NOT NULL,
@@ -193,6 +197,16 @@ class SqliteGoalSessionRepository:
                     """
                     ALTER TABLE goal_sessions
                     ADD COLUMN focused_objective_id TEXT
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+            try:
+                connection.execute(
+                    """
+                    ALTER TABLE goal_sessions
+                    ADD COLUMN focused_goal_id TEXT
                     """
                 )
             except sqlite3.OperationalError as exc:
@@ -234,6 +248,7 @@ class SqliteGoalSessionRepository:
             _optional_text(payload.get("focused_material_id")),
             _optional_text(payload.get("focused_paper_id")),
             _optional_text(payload.get("focused_objective_id")),
+            _optional_text(payload.get("focused_goal_id")),
             _optional_text(payload.get("goal_text")),
             _dump_json_object(payload.get("goal_brief_json")),
             str(payload["answer_mode"]),
@@ -274,6 +289,7 @@ class SqliteGoalSessionRepository:
             "focused_material_id": row["focused_material_id"],
             "focused_paper_id": row["focused_paper_id"],
             "focused_objective_id": row["focused_objective_id"],
+            "focused_goal_id": row["focused_goal_id"],
             "goal_text": row["goal_text"],
             "goal_brief_json": _load_json_object(row["goal_brief_json"]),
             "answer_mode": row["answer_mode"],

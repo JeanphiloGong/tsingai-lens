@@ -210,6 +210,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect
+			.element(browserPage.getByRole('link', { name: 'Ask Copilot' }))
+			.toHaveAttribute('href', '/collections/col_123/assistant?goal_id=goal_1');
+		await expect
 			.element(browserPage.getByRole('heading', { name: 'How does heat treatment affect strength?' }))
 			.toBeInTheDocument();
 		await expect

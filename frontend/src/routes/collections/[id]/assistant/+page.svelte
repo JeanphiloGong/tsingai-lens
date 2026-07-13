@@ -57,7 +57,8 @@
 	$: queryMaterialId = $page.url.searchParams.get('material_id') ?? '';
 	$: queryPaperId = $page.url.searchParams.get('paper_id') ?? '';
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
-	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}`;
+	$: queryGoalId = $page.url.searchParams.get('goal_id') ?? '';
+	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}:${queryGoalId}`;
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (collectionId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
@@ -160,6 +161,7 @@
 					focused_material_id: queryMaterialId || null,
 					focused_paper_id: queryPaperId || null,
 					focused_objective_id: queryObjectiveId || null,
+					focused_goal_id: queryGoalId || null,
 					answer_mode: 'hybrid'
 				});
 				messages = [];
@@ -184,7 +186,8 @@
 		return (
 			(nextSession.focused_material_id ?? '') === queryMaterialId &&
 			(nextSession.focused_paper_id ?? '') === queryPaperId &&
-			(nextSession.focused_objective_id ?? '') === queryObjectiveId
+			(nextSession.focused_objective_id ?? '') === queryObjectiveId &&
+			(nextSession.focused_goal_id ?? '') === queryGoalId
 		);
 	}
 
@@ -198,6 +201,7 @@
 				focused_material_id: queryMaterialId || null,
 				focused_paper_id: queryPaperId || null,
 				focused_objective_id: queryObjectiveId || null,
+				focused_goal_id: queryGoalId || null,
 				answer_mode: 'hybrid'
 			});
 			messages = [];
@@ -237,7 +241,8 @@
 				route: 'collection_assistant',
 				material_id: queryMaterialId || null,
 				paper_id: queryPaperId || null,
-				objective_id: queryObjectiveId || null
+				objective_id: queryObjectiveId || null,
+				goal_id: queryGoalId || null
 			});
 			messages = [...messages, response];
 			session = await fetchGoalSession(session.session_id);

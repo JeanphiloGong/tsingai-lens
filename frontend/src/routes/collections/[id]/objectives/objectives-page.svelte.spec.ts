@@ -61,6 +61,83 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function researchUnderstandingDatasetResponse({
+	trainingReady = 0,
+	trainingMessages = 0,
+	reviewCandidate = 0
+} = {}) {
+	return {
+		schema_version: 'research_understanding_dataset.v1',
+		dataset_id: 'rud_goal',
+		collection_id: 'col_4c54ffe568ec',
+		scope_type: 'goal',
+		scope_id: 'goal_1',
+		task_type: 'research_understanding_finding',
+		metric_profile: 'finding_review',
+		item_count: trainingReady + reviewCandidate,
+		label_counts: {
+			candidate: reviewCandidate,
+			silver: 0,
+			gold: trainingReady,
+			rejected: 0
+		},
+		quality_summary: {
+			training_ready_sample_count: trainingReady,
+			training_message_sample_count: trainingMessages,
+			review_candidate_sample_count: reviewCandidate,
+			by_dataset_use_status: {
+				training_ready: trainingReady,
+				review_candidate: reviewCandidate,
+				rejected: 0
+			},
+			by_presentation_bucket: {},
+			by_error_category: {}
+		},
+		warnings: []
+	};
+}
+
+function confirmedGoalsResponse() {
+	return {
+		collection_id: 'col_4c54ffe568ec',
+		goals: [
+			{
+				goal_id: 'goal_heat_strength',
+				collection_id: 'col_4c54ffe568ec',
+				question: 'How does heat treatment affect strength?',
+				source_type: 'objective_candidate',
+				material_hints: ['316L stainless steel'],
+				process_hints: ['heat treatment'],
+				property_hints: ['yield strength'],
+				source_objective_id: 'obj_heat_strength',
+				status: 'ready',
+				analysis_error: null,
+				analysis_progress: null,
+				created_at: null,
+				updated_at: null
+			}
+		]
+	};
+}
+
+function goalReviewResponse(path: string) {
+	if (path === '/api/v1/collections/col_4c54ffe568ec/goals') {
+		return jsonResponse(confirmedGoalsResponse());
+	}
+	if (
+		path === '/api/v1/collections/col_4c54ffe568ec/research-understanding/dataset'
+	) {
+		return jsonResponse(
+			researchUnderstandingDatasetResponse({
+				trainingReady: 1,
+				trainingMessages: 1,
+				reviewCandidate: 2
+			})
+		);
+	}
+	return null;
+}
+
 describe('collections/[id]/objectives/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -88,7 +165,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				);
 			}
 
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+			return (
+				goalReviewResponse(path) ??
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
@@ -203,7 +283,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				});
 			}
 
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+			return (
+				goalReviewResponse(path) ??
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
@@ -231,6 +314,61 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				'/collections/col_4c54ffe568ec/goals/goal_heat_strength'
 			);
 		});
+	});
+
+	it('shows confirmed goal review progress for expert labeling', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+
+			if (path === '/api/v1/collections/col_4c54ffe568ec/objectives') {
+				return jsonResponse({
+					collection_id: 'col_4c54ffe568ec',
+					count: 1,
+					objectives: [
+						{
+							objective_id: 'obj_heat_strength',
+							question: 'How does heat treatment affect strength?',
+							material_scope: ['316L stainless steel'],
+							process_axes: ['heat treatment'],
+							property_axes: ['yield strength'],
+							comparison_intent: 'Compare treated and untreated samples.',
+							confidence: 0.82,
+							state: 'ready',
+							paper_frame_count: 2,
+							evidence_route_count: 2,
+							evidence_unit_count: 1,
+							logic_chain_count: 0,
+							links: {},
+							warnings: []
+						}
+					]
+				});
+			}
+
+			return (
+				goalReviewResponse(path) ??
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Confirmed goal review' }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 confirmed goal(s): 1 training-ready sample(s), 1 training message(s), 2 review candidate(s).'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: /How does heat treatment affect strength?/ }))
+			.toHaveAttribute(
+				'href',
+				'/collections/col_4c54ffe568ec/goals/goal_heat_strength'
+			);
 	});
 
 	it('confirms an objective without existing routed evidence and lets analysis build coverage', async () => {
@@ -328,7 +466,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				});
 			}
 
-			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
+			return (
+				goalReviewResponse(path) ??
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);

@@ -849,6 +849,27 @@ const translations: Record<Language, Translations> = {
 				objectiveCount: '{count} objective(s)',
 				paperFrameCount: '{count} paper frame(s)',
 				routeCount: '{count} evidence route(s)',
+				goalReviewTitle: 'Confirmed goal review',
+				goalReviewLoading: 'Checking confirmed goal review progress...',
+				goalReviewBody:
+					'{goals} confirmed goal(s): {training} training-ready sample(s), {messages} training message(s), {review} review candidate(s).',
+				goalReviewGoals: 'Confirmed goals',
+				refreshGoalReview: 'Refresh review status',
+				goalReviewEmpty:
+					'No confirmed goals yet. Confirm and analyze an objective before expert review can begin.',
+				goalReviewError: 'Goal review status is unavailable: {message}',
+				goalReviewDatasetPending: 'Dataset status is not available for this goal yet.',
+				goalReviewDatasetBody:
+					'{training} training-ready · {messages} messages · {review} needs review',
+				goalReviewStatuses: {
+					pending: 'Pending analysis',
+					running: 'Analyzing',
+					ready: 'Ready',
+					failed: 'Analysis failed',
+					dataset_pending: 'Dataset pending',
+					needs_review: 'Needs expert review',
+					training_ready: 'Training-ready'
+				},
 				paperFrames: 'Paper frames',
 				routes: 'Routes',
 				evidenceUnits: 'Evidence units',
@@ -3813,6 +3834,26 @@ const translations: Record<Language, Translations> = {
 				objectiveCount: '{count} 个目标',
 				paperFrameCount: '{count} 个文献框架',
 				routeCount: '{count} 条证据路由',
+				goalReviewTitle: '已确认目标复核',
+				goalReviewLoading: '正在检查已确认目标的复核进度...',
+				goalReviewBody:
+					'{goals} 个已确认目标：{training} 条可训练样本，{messages} 条训练 messages，{review} 条待复核样本。',
+				goalReviewGoals: '已确认目标',
+				refreshGoalReview: '刷新复核状态',
+				goalReviewEmpty: '还没有已确认目标。先确认并分析一个目标后，才能开始专家复核。',
+				goalReviewError: '目标复核状态不可用：{message}',
+				goalReviewDatasetPending: '该目标的数据集状态暂不可用。',
+				goalReviewDatasetBody:
+					'{training} 条可训练 · {messages} 条 messages · {review} 条待复核',
+				goalReviewStatuses: {
+					pending: '等待分析',
+					running: '分析中',
+					ready: '已就绪',
+					failed: '分析失败',
+					dataset_pending: '数据集待生成',
+					needs_review: '需要专家复核',
+					training_ready: '可用于训练'
+				},
 				paperFrames: '文献框架',
 				routes: '证据路由',
 				evidenceUnits: '证据单元',

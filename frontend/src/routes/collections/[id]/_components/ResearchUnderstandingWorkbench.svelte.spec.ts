@@ -1080,6 +1080,10 @@ function currentDatasetRegionText() {
 	);
 }
 
+function datasetSummaryLocator() {
+	return browserPage.getByText('Dataset', { exact: true });
+}
+
 function collectionDatasetGetRequestCount() {
 	return fetchMock.mock.calls.filter(([input, init]) => {
 		const method =
@@ -2068,7 +2072,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -2208,7 +2212,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -2326,7 +2330,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -2359,7 +2363,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -2426,7 +2430,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -2475,7 +2479,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -2842,7 +2846,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();
@@ -3056,7 +3060,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const datasetSummary = browserPage.getByText('Dataset');
+		const datasetSummary = datasetSummaryLocator();
 		await expect.element(datasetSummary).toBeInTheDocument();
 		const datasetRegion = datasetSummary.element().closest('details');
 		expect(datasetRegion).toBeTruthy();

@@ -17,6 +17,7 @@ const {
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
+	fetchConfirmedGoals,
 	fetchDocumentResearchView,
 	fetchGoalAnalysis,
 	fetchObjectiveResearchView,
@@ -173,6 +174,26 @@ describe('research view shared helpers', () => {
 		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/objectives');
 		expect(objectives.objectives[0].objective_id).toBe('obj_1');
 		expect(objectives.objectives[0].paper_frame_count).toBe(2);
+
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			goals: [
+				{
+					goal_id: 'goal_1',
+					collection_id: 'col_123',
+					question: 'How does heat treatment affect corrosion resistance?',
+					source_type: 'objective_candidate',
+					status: 'ready',
+					source_objective_id: 'obj_1'
+				}
+			]
+		});
+
+		const goals = await fetchConfirmedGoals('col_123');
+
+		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/goals');
+		expect(goals.goals[0].goal_id).toBe('goal_1');
+		expect(goals.goals[0].status).toBe('ready');
 
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',

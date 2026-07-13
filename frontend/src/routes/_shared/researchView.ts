@@ -681,6 +681,10 @@ export type ConfirmedGoal = {
 	created_at: string | null;
 	updated_at: string | null;
 };
+export type ConfirmedGoalList = {
+	collection_id: string;
+	goals: ConfirmedGoal[];
+};
 export type GoalAnalysis = {
 	collection_id: string;
 	goal: ConfirmedGoal;
@@ -2530,6 +2534,14 @@ function normalizeConfirmedGoalStatus(value: unknown): ConfirmedGoalStatus {
 	return ['pending', 'running', 'ready', 'failed'].includes(status) ? status : 'pending';
 }
 
+function normalizeConfirmedGoalList(value: unknown, collectionId: string): ConfirmedGoalList {
+	const record = asRecord(value) ?? {};
+	return {
+		collection_id: toText(record.collection_id, collectionId),
+		goals: normalizeObjectList(value, 'goals').map((item) => normalizeConfirmedGoal(item))
+	};
+}
+
 function normalizeGoalAnalysis(value: unknown, collectionId: string): GoalAnalysis {
 	const record = asRecord(value) ?? {};
 	return {
@@ -2568,6 +2580,12 @@ export async function createConfirmedGoalFromObjective(
 		})
 	});
 	return normalizeConfirmedGoal(data);
+}
+
+export async function fetchConfirmedGoals(collectionId: string): Promise<ConfirmedGoalList> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const data = await requestJson(`/collections/${encodedCollection}/goals`);
+	return normalizeConfirmedGoalList(data, collectionId);
 }
 
 export async function runGoalAnalysis(

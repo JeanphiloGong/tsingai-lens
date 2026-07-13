@@ -71,7 +71,8 @@ function researchUnderstandingDatasetResponse({
 	trainingReady = 0,
 	trainingMessages = 0,
 	reviewCandidate = 0,
-	scopeId = 'goal_1'
+	scopeId = 'goal_1',
+	errorCategories = {}
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -98,7 +99,7 @@ function researchUnderstandingDatasetResponse({
 				rejected: 0
 			},
 			by_presentation_bucket: {},
-			by_error_category: {}
+			by_error_category: errorCategories
 		},
 		warnings: []
 	};
@@ -174,7 +175,11 @@ function goalReviewResponse(input: string | URL | Request) {
 				trainingMessages: scopeId === 'goal_protocol_ready' ? 1 : 0,
 				reviewCandidate:
 					scopeId === 'goal_protocol_ready' || scopeId === 'goal_messages_pending' ? 0 : 2,
-				scopeId
+				scopeId,
+				errorCategories:
+					scopeId === 'goal_heat_strength'
+						? { variable_error: 2, direction_error: 1, none: 1 }
+						: {}
 			})
 		);
 	}
@@ -419,6 +424,11 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Review next goal' }))
 			.toHaveAttribute('href', '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue');
+		const correctionTypes = browserPage.getByLabelText('Common expert correction types');
+		await expect.element(correctionTypes.getByText('Variable error')).toBeInTheDocument();
+		await expect.element(correctionTypes.getByText('2')).toBeInTheDocument();
+		await expect.element(correctionTypes.getByText('Direction error')).toBeInTheDocument();
+		await expect.element(correctionTypes.getByText('1')).toBeInTheDocument();
 		const goalLinks = browserPage.getByRole('link').all();
 		const goalReviewLinks = await Promise.all(
 			goalLinks.map(async (link) => ({

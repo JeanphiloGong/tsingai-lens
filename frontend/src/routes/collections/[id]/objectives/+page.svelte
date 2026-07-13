@@ -44,6 +44,7 @@
 		0
 	);
 	$: goalReviewSummary = buildGoalReviewSummary(confirmedGoals, goalDatasetById);
+	$: goalReviewErrorCategories = buildGoalReviewErrorCategories(goalDatasetById);
 	$: goalReviewRows = buildGoalReviewRows(confirmedGoals, goalDatasetById);
 	$: goalReviewOpenGoalCount = goalReviewRows.filter(
 		(row) => row.status !== 'training_ready'
@@ -173,6 +174,19 @@
 		};
 	}
 
+	function buildGoalReviewErrorCategories(datasets: Map<string, ResearchUnderstandingDataset>) {
+		const counts = new Map<string, number>();
+		for (const dataset of datasets.values()) {
+			for (const [category, count] of Object.entries(dataset.quality_summary.by_error_category)) {
+				if (count <= 0 || category === 'none' || category === 'unreviewed') continue;
+				counts.set(category, (counts.get(category) ?? 0) + count);
+			}
+		}
+		return [...counts.entries()]
+			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+			.slice(0, 5);
+	}
+
 	function buildGoalReviewRows(
 		goals: ConfirmedGoal[],
 		datasets: Map<string, ResearchUnderstandingDataset>
@@ -227,6 +241,11 @@
 
 	function goalReviewStatusLabel(status: string) {
 		return $t(`research.objectives.goalReviewStatuses.${status}`);
+	}
+
+	function goalReviewErrorCategoryLabel(category: string) {
+		const label = $t(`research.understanding.datasetErrorCategories.${category}`);
+		return label.startsWith('research.') ? category.replace(/_/g, ' ') : label;
 	}
 
 	function goalReviewBody(dataset: ResearchUnderstandingDataset | null) {
@@ -437,6 +456,22 @@
 					>
 						<strong>{$t('research.objectives.goalReviewCompleteTitle')}</strong>
 						<span>{$t('research.objectives.goalReviewCompleteBody')}</span>
+					</div>
+				{/if}
+				{#if goalReviewErrorCategories.length}
+					<div
+						class="goal-review-panel__error-categories"
+						aria-label={$t('research.objectives.goalReviewErrorCategories')}
+					>
+						<strong>{$t('research.objectives.goalReviewErrorCategories')}</strong>
+						<div>
+							{#each goalReviewErrorCategories as [category, count] (category)}
+								<span>
+									{goalReviewErrorCategoryLabel(category)}
+									<strong>{count}</strong>
+								</span>
+							{/each}
+						</div>
 					</div>
 				{/if}
 				<div class="goal-review-list">
@@ -683,6 +718,49 @@
 	}
 
 	.goal-review-panel__metrics strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.goal-review-panel__error-categories {
+		display: grid;
+		gap: 8px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px 12px;
+		background: var(--bg-subtle);
+	}
+
+	.goal-review-panel__error-categories > strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.goal-review-panel__error-categories > div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.goal-review-panel__error-categories span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 26px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.goal-review-panel__error-categories span strong {
 		color: var(--text-primary);
 		font-size: 12px;
 		line-height: 18px;

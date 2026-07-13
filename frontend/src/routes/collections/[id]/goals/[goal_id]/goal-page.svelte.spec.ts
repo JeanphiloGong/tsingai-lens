@@ -408,10 +408,15 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('obj_1')).not.toBeInTheDocument();
 	});
 
-	it('accepts all visible findings for expert dataset review', async () => {
+	it('requires per-finding acceptance for expert dataset review', async () => {
 		render(Page);
 
-		await browserPage.getByRole('button', { name: 'Accept visible 2' }).click();
+		await expect
+			.element(browserPage.getByRole('button', { name: /Accept visible/ }))
+			.not.toBeInTheDocument();
+		const acceptButtons = browserPage.getByRole('button', { name: 'Accept' });
+		await acceptButtons.first().click();
+		await acceptButtons.nth(1).click();
 
 		await vi.waitFor(() => {
 			const feedbackPosts = fetchMock.mock.calls.filter(

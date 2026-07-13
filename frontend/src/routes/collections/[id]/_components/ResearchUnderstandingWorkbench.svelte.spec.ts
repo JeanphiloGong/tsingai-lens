@@ -41,6 +41,9 @@ function datasetResponse(overrides: {
 	itemCount?: number;
 	labelCounts?: Record<string, number>;
 	errorCategories?: Record<string, number>;
+	scopeType?: string;
+	scopeId?: string;
+	datasetId?: string;
 } = {}) {
 	const trainingReady = overrides.trainingReady ?? 2;
 	const reviewCandidate = overrides.reviewCandidate ?? 1;
@@ -52,10 +55,10 @@ function datasetResponse(overrides: {
 	};
 	return {
 		schema_version: 'research_understanding_dataset.v1',
-		dataset_id: 'rud_col_123_objective_obj_1',
+		dataset_id: overrides.datasetId ?? 'rud_col_123_objective_obj_1',
 		collection_id: 'col_123',
-		scope_type: 'objective',
-		scope_id: 'obj_1',
+		scope_type: overrides.scopeType ?? 'objective',
+		scope_id: overrides.scopeId ?? 'obj_1',
 		task_type: 'research_understanding_finding',
 		metric_profile: 'research_understanding_finding.v1',
 		label_status_filter: null,
@@ -1094,6 +1097,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
+			if (path.endsWith('/research-understanding/dataset/collection') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 15,
+							rejected: 0,
+							scopeType: 'collection',
+							scopeId: 'goal',
+							datasetId: 'rud_col_123_collection_goal'
+						})
+					)
+				);
+			}
 			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
 				return Promise.resolve(jsonResponse(datasetResponse()));
 			}
@@ -2012,6 +2029,39 @@ describe('ResearchUnderstandingWorkbench', () => {
 	});
 
 	it('exposes collection-level training export links on goal scopes', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset/collection') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 15,
+							rejected: 0,
+							errorCategories: {
+								variable_error: 3,
+								evidence_error: 2,
+								none: 1
+							},
+							scopeType: 'collection',
+							scopeId: 'goal',
+							datasetId: 'rud_col_123_collection_goal'
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
 		render(ResearchUnderstandingWorkbench, {
 			understanding: goalUnderstandingFixture(),
 			collectionId: 'col_123'
@@ -2025,6 +2075,15 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain(
 			'Collection training JSON'
 		);
+		const datasetText = datasetRegion?.textContent ?? '';
+		expect(datasetText).toContain('Collection dataset');
+		expect(datasetText).toContain(
+			'1 training-ready and 15 review-candidate goal sample(s) in this collection.'
+		);
+		expect(datasetText).toContain('Training ready 1');
+		expect(datasetText).toContain('Needs review 15');
+		expect(datasetText).toContain('Variable error 3');
+		expect(datasetText).toContain('Evidence error 2');
 
 		const collectionJsonUrl = new URL(
 			browserPage
@@ -2073,6 +2132,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset/collection') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 15,
+							rejected: 0,
+							scopeType: 'collection',
+							scopeId: 'goal',
+							datasetId: 'rud_col_123_collection_goal'
+						})
+					)
+				);
+			}
 			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
 				return Promise.resolve(
 					jsonResponse(datasetResponse({ trainingReady: 1, reviewCandidate: 0, rejected: 0 }))

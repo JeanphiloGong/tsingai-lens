@@ -2707,6 +2707,21 @@ export async function fetchResearchUnderstandingDataset(
 	return normalizeResearchUnderstandingDataset(data);
 }
 
+export async function fetchResearchUnderstandingCollectionDataset(
+	collectionId: string,
+	filters: ResearchUnderstandingCollectionDatasetFilters
+): Promise<ResearchUnderstandingDataset> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/research-understanding/dataset/collection?${params.toString()}`
+	);
+	return normalizeResearchUnderstandingDataset(data);
+}
+
 export async function fetchDocumentMaterials(
 	collectionId: string,
 	documentId: string

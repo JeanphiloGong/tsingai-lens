@@ -7,6 +7,7 @@
 	import {
 		createResearchUnderstandingCuration,
 		createResearchUnderstandingFeedback,
+		fetchResearchUnderstandingCollectionDataset,
 		fetchResearchUnderstandingDataset,
 		fetchResearchUnderstandingFeedback,
 		fetchResearchUnderstandingCurations,
@@ -161,6 +162,11 @@
 	let datasetLoading = false;
 	let datasetError = '';
 	let datasetRequestSequence = 0;
+	let collectionDatasetSummary: ResearchUnderstandingDataset | null = null;
+	let collectionDatasetScopeKey = '';
+	let collectionDatasetLoading = false;
+	let collectionDatasetError = '';
+	let collectionDatasetRequestSequence = 0;
 
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
@@ -243,6 +249,15 @@
 	};
 	$: datasetErrorCategories = datasetSummary
 		? Object.entries(datasetSummary.quality_summary.by_error_category)
+				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
+				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		: [];
+	$: collectionDatasetTrainingReadySampleCount =
+		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: collectionDatasetReviewCandidateSampleCount =
+		collectionDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: collectionDatasetErrorCategories = collectionDatasetSummary
+		? Object.entries(collectionDatasetSummary.quality_summary.by_error_category)
 				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 		: [];
@@ -418,8 +433,16 @@
 		understanding && collectionId && selectedScopeId
 			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
 			: '';
+	$: currentCollectionDatasetScopeKey =
+		understanding?.scope.scope_type === 'goal' && collectionId ? `${collectionId}:goal` : '';
 	$: if (currentDatasetScopeKey && currentDatasetScopeKey !== datasetScopeKey) {
 		void loadDatasetSummary(currentDatasetScopeKey);
+	}
+	$: if (
+		currentCollectionDatasetScopeKey &&
+		currentCollectionDatasetScopeKey !== collectionDatasetScopeKey
+	) {
+		void loadCollectionDatasetSummary(currentCollectionDatasetScopeKey);
 	}
 	$: if (curationScopeKey && curationScopeKey !== loadedCurationScopeKey) {
 		void loadCurationsForScope(curationScopeKey);
@@ -2180,9 +2203,44 @@
 		}
 	}
 
+	async function loadCollectionDatasetSummary(scopeKey: string, force = false) {
+		if (!collectionId || understanding?.scope.scope_type !== 'goal') return;
+		if (force) {
+			collectionDatasetScopeKey = '';
+		}
+		collectionDatasetScopeKey = scopeKey;
+		const requestSequence = ++collectionDatasetRequestSequence;
+		collectionDatasetLoading = true;
+		collectionDatasetError = '';
+		try {
+			const nextDatasetSummary = await fetchResearchUnderstandingCollectionDataset(collectionId, {
+				scope_type: 'goal'
+			});
+			if (requestSequence === collectionDatasetRequestSequence) {
+				collectionDatasetSummary = nextDatasetSummary;
+			}
+		} catch (error) {
+			if (requestSequence === collectionDatasetRequestSequence) {
+				collectionDatasetSummary = null;
+				collectionDatasetError = isHttpStatusError(error, 404)
+					? ''
+					: error instanceof Error
+						? error.message
+						: $t('error.unexpected');
+			}
+		} finally {
+			if (requestSequence === collectionDatasetRequestSequence) {
+				collectionDatasetLoading = false;
+			}
+		}
+	}
+
 	async function refreshDatasetSummaryForCurrentScope() {
 		if (!currentDatasetScopeKey) return;
 		await loadDatasetSummary(currentDatasetScopeKey, true);
+		if (currentCollectionDatasetScopeKey) {
+			await loadCollectionDatasetSummary(currentCollectionDatasetScopeKey, true);
+		}
 	}
 
 	async function submitClaimFeedback() {
@@ -2609,6 +2667,48 @@
 										</a>
 									{/if}
 								</div>
+								{#if understanding.scope.scope_type === 'goal'}
+									<div class="research-understanding-workbench__dataset-collection">
+										<strong>{$t('research.understanding.collectionDatasetSummary')}</strong>
+										{#if collectionDatasetLoading}
+											<p>{$t('research.understanding.datasetLoading')}</p>
+										{:else if collectionDatasetSummary}
+											<p>
+												{$t('research.understanding.collectionDatasetReady', {
+													training: collectionDatasetTrainingReadySampleCount,
+													review: collectionDatasetReviewCandidateSampleCount
+												})}
+											</p>
+											<div>
+												<span>
+													{$t('research.understanding.datasetTrainingReady')}
+													<strong>{collectionDatasetTrainingReadySampleCount}</strong>
+												</span>
+												<span>
+													{$t('research.understanding.datasetReviewCandidate')}
+													<strong>{collectionDatasetReviewCandidateSampleCount}</strong>
+												</span>
+												{#each collectionDatasetErrorCategories as [category, count] (category)}
+													<span>
+														{datasetErrorCategoryLabel(category)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+											</div>
+										{:else if collectionDatasetError}
+											<p
+												class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+												role="alert"
+											>
+												{$t('research.understanding.datasetError', {
+													message: collectionDatasetError
+												})}
+											</p>
+										{:else}
+											<p>{$t('research.understanding.datasetUnavailable')}</p>
+										{/if}
+									</div>
+								{/if}
 								{#if datasetErrorCategories.length}
 									<div class="research-understanding-workbench__dataset-errors">
 										<strong>{$t('research.understanding.datasetErrorCategoriesTitle')}</strong>
@@ -4089,13 +4189,31 @@
 		padding-top: 10px;
 	}
 
-	.research-understanding-workbench__dataset-errors > strong {
+	.research-understanding-workbench__dataset-collection {
+		display: grid;
+		flex-basis: 100%;
+		gap: 6px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-errors > strong,
+	.research-understanding-workbench__dataset-collection > strong {
 		color: var(--text-primary);
 		font-size: 12px;
 		line-height: 18px;
 	}
 
+	.research-understanding-workbench__dataset-collection > div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
 	.research-understanding-workbench__dataset-counts span,
+	.research-understanding-workbench__dataset-collection span,
 	.research-understanding-workbench__dataset-errors span {
 		display: inline-flex;
 		align-items: center;
@@ -4112,6 +4230,7 @@
 	}
 
 	.research-understanding-workbench__dataset-counts strong,
+	.research-understanding-workbench__dataset-collection span strong,
 	.research-understanding-workbench__dataset-errors span strong {
 		color: var(--text-primary);
 		font-size: 12px;

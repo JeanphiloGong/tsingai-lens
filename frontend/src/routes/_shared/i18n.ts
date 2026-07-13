@@ -321,6 +321,9 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadReviewJson: 'Review candidates JSON',
 				datasetNoTrainingReady: 'No training-ready samples',
 				datasetSummary: 'Dataset',
+				collectionDatasetSummary: 'Collection dataset',
+				collectionDatasetReady:
+					'{training} training-ready and {review} review-candidate goal sample(s) in this collection.',
 				datasetTrainingReady: 'Training ready',
 				datasetReviewCandidate: 'Needs review',
 				datasetErrorCategoriesTitle: 'Common error categories',
@@ -3238,6 +3241,9 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadReviewJson: '待复核 JSON',
 				datasetNoTrainingReady: '暂无可训练样本',
 				datasetSummary: '数据集',
+				collectionDatasetSummary: '全集合数据集',
+				collectionDatasetReady:
+					'当前集合有 {training} 条可训练 goal 样本，{review} 条待复核 goal 样本。',
 				datasetTrainingReady: '可用于训练',
 				datasetReviewCandidate: '待复核',
 				datasetErrorCategoriesTitle: '常见错误类型',

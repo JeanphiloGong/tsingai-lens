@@ -5,6 +5,12 @@
 	import { onDestroy } from 'svelte';
 	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
+	import {
+		fetchExperimentPlans,
+		updateExperimentPlan,
+		type ExperimentPlan,
+		type ExperimentPlanStatus
+	} from '../../../../_shared/experimentPlans';
 	import { t } from '../../../../_shared/i18n';
 	import {
 		fetchGoalAnalysis,
@@ -18,7 +24,15 @@
 	let analysis: GoalAnalysis | null = null;
 	let loading = false;
 	let running = false;
+	let plans: ExperimentPlan[] = [];
+	let selectedPlanId = '';
+	let planTitle = '';
+	let planContent = '';
+	let planStatus: ExperimentPlanStatus = 'draft';
+	let plansLoading = false;
+	let planSaving = false;
 	let error = '';
+	let planError = '';
 	let loadedKey = '';
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -38,6 +52,7 @@
 			(understanding?.presentation?.review_queue_findings?.length ?? 0) > 0);
 	$: progressPercent = progressPercentLabel(progress);
 	$: currentDocumentLabel = progressDocumentLabel(progress);
+	$: selectedPlan = plans.find((plan) => plan.plan_id === selectedPlanId) ?? null;
 	$: if (browser && collectionId && goalId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		clearPoll();
@@ -53,6 +68,7 @@
 		error = '';
 		try {
 			analysis = await fetchGoalAnalysis(collectionId, goalId);
+			void loadPlans();
 			schedulePollIfRunning();
 		} catch (err) {
 			analysis = null;
@@ -60,6 +76,49 @@
 			clearPoll();
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadPlans() {
+		plansLoading = true;
+		planError = '';
+		try {
+			const response = await fetchExperimentPlans(collectionId, goalId);
+			plans = response.items;
+			if (!selectedPlanId || !plans.some((plan) => plan.plan_id === selectedPlanId)) {
+				selectPlan(plans[0] ?? null);
+			}
+		} catch (err) {
+			plans = [];
+			planError = errorMessage(err);
+		} finally {
+			plansLoading = false;
+		}
+	}
+
+	function selectPlan(plan: ExperimentPlan | null) {
+		selectedPlanId = plan?.plan_id ?? '';
+		planTitle = plan?.title ?? '';
+		planContent = plan?.content ?? '';
+		planStatus = plan?.status ?? 'draft';
+	}
+
+	async function savePlanEdits() {
+		if (!selectedPlan || !planTitle.trim() || !planContent.trim()) return;
+		planSaving = true;
+		planError = '';
+		try {
+			const updated = await updateExperimentPlan(collectionId, goalId, selectedPlan.plan_id, {
+				title: planTitle.trim(),
+				content: planContent.trim(),
+				status: planStatus
+			});
+			plans = plans.map((plan) => (plan.plan_id === updated.plan_id ? updated : plan));
+			selectPlan(updated);
+		} catch (err) {
+			planError = errorMessage(err);
+		} finally {
+			planSaving = false;
 		}
 	}
 
@@ -237,6 +296,77 @@
 				titleId="goal-understanding-title"
 			/>
 		{/if}
+		<section class="experiment-plans" aria-labelledby="experiment-plans-title">
+			<div class="experiment-plans__header">
+				<div>
+					<p class="eyebrow">{$t('research.goalWorkspace.experimentPlansEyebrow')}</p>
+					<h3 id="experiment-plans-title">{$t('research.goalWorkspace.experimentPlansTitle')}</h3>
+				</div>
+				<button class="btn btn--ghost btn--small" type="button" on:click={loadPlans}>
+					{$t('research.objectives.refresh')}
+				</button>
+			</div>
+			{#if plansLoading}
+				<p class="experiment-plans__state">{$t('research.goalWorkspace.experimentPlansLoading')}</p>
+			{:else if planError}
+				<p class="experiment-plans__state experiment-plans__state--error">{planError}</p>
+			{:else if !plans.length}
+				<p class="experiment-plans__state">{$t('research.goalWorkspace.experimentPlansEmpty')}</p>
+			{:else}
+				<div class="experiment-plans__grid">
+					<div class="experiment-plans__list" aria-label={$t('research.goalWorkspace.experimentPlansList')}>
+						{#each plans as plan}
+							<button
+								type="button"
+								class:active={plan.plan_id === selectedPlanId}
+								on:click={() => selectPlan(plan)}
+							>
+								<strong>{plan.title}</strong>
+								<span>{statusLabel(plan.status)}</span>
+							</button>
+						{/each}
+					</div>
+					<form class="experiment-plans__editor" on:submit|preventDefault={savePlanEdits}>
+						<label>
+							<span>{$t('research.goalWorkspace.experimentPlanTitle')}</span>
+							<input bind:value={planTitle} />
+						</label>
+						<label>
+							<span>{$t('research.goalWorkspace.experimentPlanStatus')}</span>
+							<select bind:value={planStatus}>
+								<option value="draft">{$t('research.goalWorkspace.experimentPlanDraft')}</option>
+								<option value="ready_for_review">
+									{$t('research.goalWorkspace.experimentPlanReady')}
+								</option>
+								<option value="archived">{$t('research.goalWorkspace.experimentPlanArchived')}</option>
+							</select>
+						</label>
+						<label class="experiment-plans__content">
+							<span>{$t('research.goalWorkspace.experimentPlanContent')}</span>
+							<textarea rows="12" bind:value={planContent}></textarea>
+						</label>
+						<div class="experiment-plans__footer">
+							<div>
+								{#if selectedPlan?.source_links.length}
+									{#each selectedPlan.source_links as link}
+										<a href={link.href}>{link.label}</a>
+									{/each}
+								{/if}
+							</div>
+							<button
+								class="btn btn--primary btn--small"
+								type="submit"
+								disabled={planSaving || !selectedPlan || !planTitle.trim() || !planContent.trim()}
+							>
+								{planSaving
+									? $t('research.goalWorkspace.experimentPlanSaving')
+									: $t('research.goalWorkspace.experimentPlanSave')}
+							</button>
+						</div>
+					</form>
+				</div>
+			{/if}
+		</section>
 	{/if}
 </section>
 
@@ -265,7 +395,8 @@
 
 	.goal-header,
 	.goal-state,
-	.goal-progress {
+	.goal-progress,
+	.experiment-plans {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-lg);
 		background: var(--surface-card);
@@ -369,6 +500,125 @@
 		display: block;
 	}
 
+	.experiment-plans {
+		display: grid;
+		gap: 16px;
+		padding: 22px 24px;
+	}
+
+	.experiment-plans__header,
+	.experiment-plans__footer {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.experiment-plans h3 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 18px;
+		line-height: 26px;
+	}
+
+	.experiment-plans__state {
+		margin: 0;
+		color: var(--text-secondary);
+		line-height: 22px;
+	}
+
+	.experiment-plans__state--error {
+		color: var(--danger);
+	}
+
+	.experiment-plans__grid {
+		display: grid;
+		grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+		gap: 16px;
+	}
+
+	.experiment-plans__list {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+	}
+
+	.experiment-plans__list button {
+		display: grid;
+		gap: 4px;
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
+		padding: 12px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.experiment-plans__list button.active,
+	.experiment-plans__list button:hover {
+		border-color: var(--accent);
+		background: var(--bg-subtle);
+	}
+
+	.experiment-plans__list strong,
+	.experiment-plans__list span {
+		overflow-wrap: anywhere;
+	}
+
+	.experiment-plans__list strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 20px;
+	}
+
+	.experiment-plans__list span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: capitalize;
+	}
+
+	.experiment-plans__editor {
+		display: grid;
+		gap: 12px;
+	}
+
+	.experiment-plans__editor label {
+		display: grid;
+		gap: 6px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.experiment-plans__editor input,
+	.experiment-plans__editor select,
+	.experiment-plans__editor textarea {
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		line-height: 22px;
+		padding: 10px 12px;
+	}
+
+	.experiment-plans__editor textarea {
+		min-height: 220px;
+		resize: vertical;
+	}
+
+	.experiment-plans__footer a {
+		display: inline-flex;
+		margin: 0 8px 8px 0;
+		color: var(--accent);
+		font-size: 13px;
+		line-height: 20px;
+		text-decoration: none;
+	}
+
 	.goal-progress__grid span {
 		color: var(--text-secondary);
 		font-size: 12px;
@@ -399,6 +649,10 @@
 		}
 
 		.goal-progress__grid {
+			grid-template-columns: 1fr;
+		}
+
+		.experiment-plans__grid {
 			grid-template-columns: 1fr;
 		}
 	}

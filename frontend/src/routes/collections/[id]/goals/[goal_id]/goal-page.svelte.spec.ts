@@ -57,6 +57,10 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function requestMethod(input: string | URL | Request, init?: RequestInit) {
+	return input instanceof Request ? input.method : (init?.method ?? 'GET');
+}
+
 describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -64,13 +68,47 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/goals/goal_1')
 		});
 		fetchMock.mockReset();
-		fetchMock.mockImplementation((input: string | URL | Request) => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
+			const method = requestMethod(input, init);
 			if (path.endsWith('/research-understanding/curations')) {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
 			if (path.endsWith('/research-understanding/feedback')) {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (
+				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
+				method === 'GET'
+			) {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal_id: 'goal_1',
+						items: [
+							{
+								plan_id: 'exp_1',
+								collection_id: 'col_123',
+								goal_id: 'goal_1',
+								title: 'Preheating validation matrix',
+								content: 'Compare 25 C and 150 C preheated builds.',
+								status: 'draft',
+								source_message_id: 'msg_1',
+								source_links: [
+									{
+										kind: 'evidence',
+										label: 'Source 1',
+										href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
+									}
+								],
+								metadata: {},
+								created_by: 'expert-a',
+								created_at: '2026-07-13T00:00:00+00:00',
+								updated_at: '2026-07-13T00:00:00+00:00'
+							}
+						]
+					})
+				);
 			}
 			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
 				return Promise.resolve(
@@ -222,7 +260,123 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Preheating validation matrix').first())
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('obj_1')).not.toBeInTheDocument();
+	});
+
+	it('edits saved experiment plan drafts on the goal page', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path.endsWith('/research-understanding/curations')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback')) {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (
+				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
+				method === 'GET'
+			) {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal_id: 'goal_1',
+						items: [
+							{
+								plan_id: 'exp_1',
+								collection_id: 'col_123',
+								goal_id: 'goal_1',
+								title: 'Preheating validation matrix',
+								content: 'Compare 25 C and 150 C preheated builds.',
+								status: 'draft',
+								source_message_id: 'msg_1',
+								source_links: [],
+								metadata: {},
+								created_by: 'expert-a',
+								created_at: '2026-07-13T00:00:00+00:00',
+								updated_at: '2026-07-13T00:00:00+00:00'
+							}
+						]
+					})
+				);
+			}
+			if (
+				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
+				method === 'PATCH'
+			) {
+				return Promise.resolve(
+					jsonResponse({
+						plan_id: 'exp_1',
+						collection_id: 'col_123',
+						goal_id: 'goal_1',
+						title: 'Edited validation matrix',
+						content: 'Add a no-preheat control.',
+						status: 'ready_for_review',
+						source_message_id: 'msg_1',
+						source_links: [],
+						metadata: {},
+						created_by: 'expert-a',
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T01:00:00+00:00'
+					})
+				);
+			}
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						goal: {
+							goal_id: 'goal_1',
+							collection_id: 'col_123',
+							question: 'How does heat treatment affect strength?',
+							source_type: 'objective_candidate',
+							material_hints: [],
+							process_hints: [],
+							property_hints: [],
+							source_objective_id: null,
+							status: 'ready',
+							analysis_error: null,
+							analysis_progress: null,
+							created_at: null,
+							updated_at: null
+						},
+						understanding: null,
+						pipeline_nodes: {},
+						errors: [],
+						warnings: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+		});
+
+		render(Page);
+
+		const titleInput = browserPage.getByLabelText('Title');
+		await expect.element(titleInput).toHaveValue('Preheating validation matrix');
+		await titleInput.fill('Edited validation matrix');
+		await browserPage.getByLabelText('Plan content').fill('Add a no-preheat control.');
+		await browserPage.getByLabelText('Status').selectOptions('ready_for_review');
+		await browserPage.getByRole('button', { name: 'Save edits' }).click();
+
+		const patchCall = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input) ===
+					'/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
+				requestMethod(input, init) === 'PATCH'
+		);
+		expect(JSON.parse(patchCall?.[1]?.body as string)).toMatchObject({
+			title: 'Edited validation matrix',
+			content: 'Add a no-preheat control.',
+			status: 'ready_for_review'
+		});
+		await expect.element(browserPage.getByText('Edited validation matrix').first()).toBeInTheDocument();
 	});
 
 	it('shows analysis errors instead of an empty research understanding workspace', async () => {

@@ -1,6 +1,7 @@
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { authState } from '../../../../_shared/auth';
 
 type GoalPageState = {
 	params: {
@@ -63,6 +64,14 @@ function requestMethod(input: string | URL | Request, init?: RequestInit) {
 
 describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 	beforeEach(() => {
+		authState.set({
+			status: 'authenticated',
+			user: {
+				user_id: 'user_materials_expert',
+				email: 'materials-expert@example.com',
+				display_name: 'Materials Expert'
+			}
+		});
 		setPage({
 			params: { id: 'col_123', goal_id: 'goal_1' },
 			url: new URL('http://localhost/collections/col_123/goals/goal_1')
@@ -75,7 +84,60 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
 			if (path.endsWith('/research-understanding/feedback')) {
+				if (method === 'POST') {
+					return Promise.resolve(
+						jsonResponse({
+							feedback_id: 'ruf_accept_1',
+							collection_id: 'col_123',
+							scope_type: 'goal',
+							scope_id: 'goal_1',
+							finding_id: 'finding_claim_1',
+							claim_id: 'claim_1',
+							review_status: 'correct',
+							issue_type: 'none',
+							note: null,
+							reviewer: 'materials-expert@example.com',
+							created_at: '2026-07-13T00:02:00+00:00'
+						})
+					);
+				}
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset')) {
+				return Promise.resolve(
+					jsonResponse({
+						schema_version: 'research_understanding_dataset.v1',
+						dataset_id: 'dataset_col_123_goal_goal_1_research_understanding',
+						collection_id: 'col_123',
+						scope_type: 'goal',
+						scope_id: 'goal_1',
+						task_type: 'research_understanding_finding',
+						metric_profile: 'research_understanding_v1',
+						label_status_filter: null,
+						dataset_use_status_filter: null,
+						item_count: 1,
+						label_counts: {
+							candidate: 0,
+							silver: 0,
+							gold: 1,
+							rejected: 0
+						},
+						quality_summary: {
+							training_ready_sample_count: 1,
+							review_candidate_sample_count: 0,
+							by_dataset_use_status: {
+								training_ready: 1,
+								review_candidate: 0,
+								rejected: 0
+							},
+							by_error_category: {
+								none: 1
+							}
+						},
+						items: [],
+						warnings: []
+					})
+				);
 			}
 			if (
 				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
@@ -260,6 +322,21 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Accept' }).first().click();
+		const feedbackCall = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
+				requestMethod(input, init) === 'POST'
+		);
+		expect(JSON.parse(feedbackCall?.[1]?.body as string)).toMatchObject({
+			scope_type: 'goal',
+			scope_id: 'goal_1',
+			finding_id: 'finding_claim_1',
+			claim_id: 'claim_1',
+			review_status: 'correct',
+			issue_type: 'none'
+		});
+		await expect.element(browserPage.getByText('Gold').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
 			.toBeInTheDocument();

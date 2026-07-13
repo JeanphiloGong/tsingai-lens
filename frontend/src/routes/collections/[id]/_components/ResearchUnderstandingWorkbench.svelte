@@ -1248,11 +1248,40 @@
 	}
 
 	async function acceptSelectedFinding() {
-		feedbackStatus = 'correct';
-		feedbackIssue = 'none';
-		feedbackNote = '';
+		if (!selectedFinding) return;
 		activeReviewPanel = 'feedback';
-		await submitClaimFeedback();
+		await acceptFinding(selectedFinding);
+	}
+
+	async function acceptFinding(finding: ResearchUnderstandingPresentationFinding) {
+		if (!understanding || !collectionId || !selectedScopeId || !reviewerReady) return;
+		feedbackSubmitting = true;
+		feedbackMessage = '';
+		feedbackError = '';
+		try {
+			const feedback = await createResearchUnderstandingFeedback(collectionId, {
+				scope_type: understanding.scope.scope_type,
+				scope_id: selectedScopeId,
+				finding_id: finding.finding_id,
+				claim_id: finding.claim_id,
+				review_status: 'correct',
+				issue_type: 'none',
+				note: null
+			});
+			feedbackMessage = $t('research.understanding.feedbackSaved', {
+				id: formatShortIdentifier(feedback.feedback_id)
+			});
+			const targetId = reviewTargetKey(feedback);
+			feedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
+				feedback,
+				...(feedbackByTargetId.get(targetId) ?? [])
+			]);
+			await refreshDatasetSummaryForCurrentScope();
+		} catch (error) {
+			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
+		} finally {
+			feedbackSubmitting = false;
+		}
 	}
 
 	function rejectSelectedFinding() {
@@ -2671,6 +2700,15 @@
 																on:click={() => openFindingDetail(finding.finding_id)}
 															>
 																{$t('research.understanding.openFindingDetail')}
+															</button>
+															<button
+																type="button"
+																disabled={feedbackSubmitting || !reviewerReady || trust.datasetUseStatus === 'training_ready'}
+																on:click={() => acceptFinding(finding)}
+															>
+																{feedbackSubmitting
+																	? $t('research.understanding.quickAcceptSaving')
+																	: $t('research.understanding.quickAccept')}
 															</button>
 															<button
 																type="button"

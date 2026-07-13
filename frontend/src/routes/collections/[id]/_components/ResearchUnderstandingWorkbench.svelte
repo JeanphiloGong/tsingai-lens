@@ -287,6 +287,12 @@
 				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 		: [];
+	$: datasetReviewReasons = datasetSummary
+		? topPositiveCounts(datasetSummary.quality_summary.by_review_reason, 5)
+		: [];
+	$: datasetSystemWarnings = datasetSummary
+		? topPositiveCounts(datasetSummary.quality_summary.by_system_warning, 5)
+		: [];
 	$: collectionDatasetTrainingReadySampleCount =
 		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
 	$: collectionDatasetTrainingMessageSampleCount =
@@ -308,6 +314,12 @@
 		? Object.entries(collectionDatasetSummary.quality_summary.by_presentation_bucket)
 				.filter(([, count]) => count > 0)
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		: [];
+	$: collectionDatasetReviewReasons = collectionDatasetSummary
+		? topPositiveCounts(collectionDatasetSummary.quality_summary.by_review_reason, 5)
+		: [];
+	$: collectionDatasetSystemWarnings = collectionDatasetSummary
+		? topPositiveCounts(collectionDatasetSummary.quality_summary.by_system_warning, 5)
 		: [];
 	$: expertSummary = usesFindings
 		? expertReadinessSummary(
@@ -706,6 +718,14 @@
 		return translatedCatalogLabel('research.understanding.datasetErrorCategories', category);
 	}
 
+	function datasetReviewReasonLabel(reason: string) {
+		return translatedCatalogLabel('research.understanding.datasetReviewReasons', reason);
+	}
+
+	function datasetSystemWarningLabel(warning: string) {
+		return translatedCatalogLabel('research.understanding.datasetSystemWarnings', warning);
+	}
+
 	function datasetPresentationBucketLabel(bucket: string) {
 		return translatedCatalogLabel('research.understanding.datasetPresentationBuckets', bucket);
 	}
@@ -742,6 +762,13 @@
 				.join('; ');
 		}
 		return String(value);
+	}
+
+	function topPositiveCounts(counts: Record<string, number>, limit: number) {
+		return Object.entries(counts)
+			.filter(([, count]) => count > 0)
+			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+			.slice(0, limit);
 	}
 
 	function listLabel(values: string[]) {
@@ -3403,6 +3430,18 @@
 														<strong>{count}</strong>
 													</span>
 												{/each}
+												{#each collectionDatasetReviewReasons as [reason, count] (reason)}
+													<span>
+														{datasetReviewReasonLabel(reason)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetSystemWarnings as [warning, count] (warning)}
+													<span>
+														{datasetSystemWarningLabel(warning)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
 											</div>
 										{:else if collectionDatasetError}
 											<p
@@ -3425,6 +3464,32 @@
 											{#each datasetErrorCategories as [category, count] (category)}
 												<span>
 													{datasetErrorCategoryLabel(category)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if datasetReviewReasons.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetReviewReasonsTitle')}</strong>
+										<div>
+											{#each datasetReviewReasons as [reason, count] (reason)}
+												<span>
+													{datasetReviewReasonLabel(reason)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if datasetSystemWarnings.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetSystemWarningsTitle')}</strong>
+										<div>
+											{#each datasetSystemWarnings as [warning, count] (warning)}
+												<span>
+													{datasetSystemWarningLabel(warning)}
 													<strong>{count}</strong>
 												</span>
 											{/each}

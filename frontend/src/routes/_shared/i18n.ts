@@ -362,6 +362,8 @@ const translations: Record<Language, Translations> = {
 				datasetTrainingMessages: 'Training messages',
 				datasetReviewCandidate: 'Needs review',
 				datasetErrorCategoriesTitle: 'Common error categories',
+				datasetReviewReasonsTitle: 'Review priorities',
+				datasetSystemWarningsTitle: 'System warnings',
 				expertSummary: 'Expert readiness summary',
 				expertSummaryReady: 'Ready for expert use',
 				expertSummaryMixed: 'Mixed review and training set',
@@ -521,6 +523,25 @@ const translations: Record<Language, Translations> = {
 					other_error: 'Other error',
 					none: 'No issue',
 					unreviewed: 'Unreviewed'
+				},
+				datasetReviewReasons: {
+					single_paper_evidence: 'Single-paper evidence',
+					needs_cross_paper_confirmation: 'Needs cross-paper confirmation',
+					partial_support: 'Partial support',
+					needs_expert_review: 'Needs expert review',
+					has_unreviewed_comparable_candidates: 'Comparable candidates pending',
+					table_row_alignment_uncertain: 'Table row alignment uncertain',
+					missing_direct_result_evidence: 'Missing direct result evidence',
+					weak_evidence: 'Weak evidence'
+				},
+				datasetSystemWarnings: {
+					table_row_alignment_uncertain: 'Table row alignment uncertain',
+					weak_evidence: 'Weak evidence',
+					needs_expert_review: 'Needs expert review',
+					model_validation_finding: 'Model validation finding',
+					recovered_from_source_text: 'Recovered from source text',
+					deterministic_relation: 'Deterministic relation',
+					missing_evidence_ref: 'Missing evidence reference'
 				},
 				datasetPresentationBuckets: {
 					primary: 'Primary findings',
@@ -3475,6 +3496,8 @@ const translations: Record<Language, Translations> = {
 				datasetTrainingMessages: '可导出 messages',
 				datasetReviewCandidate: '待复核',
 				datasetErrorCategoriesTitle: '常见错误类型',
+				datasetReviewReasonsTitle: '复核优先原因',
+				datasetSystemWarningsTitle: '系统风险提示',
 				expertSummary: '专家可用性摘要',
 				expertSummaryReady: '可供专家使用',
 				expertSummaryMixed: '复核和训练样本混合状态',
@@ -3623,6 +3646,25 @@ const translations: Record<Language, Translations> = {
 					other_error: '其他错误',
 					none: '无问题',
 					unreviewed: '未复核'
+				},
+				datasetReviewReasons: {
+					single_paper_evidence: '单篇文献证据',
+					needs_cross_paper_confirmation: '需要跨文献确认',
+					partial_support: '部分支持',
+					needs_expert_review: '需要专家复核',
+					has_unreviewed_comparable_candidates: '存在待复核可比候选',
+					table_row_alignment_uncertain: '表格行对齐不确定',
+					missing_direct_result_evidence: '缺少直接结果证据',
+					weak_evidence: '弱证据'
+				},
+				datasetSystemWarnings: {
+					table_row_alignment_uncertain: '表格行对齐不确定',
+					weak_evidence: '弱证据',
+					needs_expert_review: '需要专家复核',
+					model_validation_finding: '模型验证发现',
+					recovered_from_source_text: '从原文恢复',
+					deterministic_relation: '确定性关系',
+					missing_evidence_ref: '缺少证据引用'
 				},
 				datasetPresentationBuckets: {
 					primary: '主研究发现',

@@ -43,6 +43,8 @@ function datasetResponse(overrides: {
 	labelCounts?: Record<string, number>;
 	errorCategories?: Record<string, number>;
 	presentationBuckets?: Record<string, number>;
+	reviewReasons?: Record<string, number>;
+	systemWarnings?: Record<string, number>;
 	scopeType?: string;
 	scopeId?: string;
 	datasetId?: string;
@@ -55,6 +57,13 @@ function datasetResponse(overrides: {
 		variable_error: 2,
 		direction_error: 1,
 		none: trainingReady
+	};
+	const reviewReasons = overrides.reviewReasons ?? {
+		single_paper_evidence: 2,
+		partial_support: 1
+	};
+	const systemWarnings = overrides.systemWarnings ?? {
+		table_row_alignment_uncertain: 1
 	};
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -86,7 +95,9 @@ function datasetResponse(overrides: {
 				primary: trainingReady,
 				review_queue: reviewCandidate
 			},
-			by_error_category: errorCategories
+			by_error_category: errorCategories,
+			by_review_reason: reviewReasons,
+			by_system_warning: systemWarnings
 		},
 		items: [],
 		warnings: []
@@ -2418,6 +2429,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Common error categories');
 		expect(datasetText).toContain('Variable error 2');
 		expect(datasetText).toContain('Direction error 1');
+		expect(datasetText).toContain('Review priorities');
+		expect(datasetText).toContain('Single-paper evidence 2');
+		expect(datasetText).toContain('Partial support 1');
+		expect(datasetText).toContain('System warnings');
+		expect(datasetText).toContain('Table row alignment uncertain 1');
 		expect(datasetText).not.toContain('No issue');
 
 		const jsonUrl = new URL(
@@ -2519,6 +2535,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 								primary: 5,
 								review_queue: 10
 							},
+							reviewReasons: {
+								single_paper_evidence: 9,
+								needs_cross_paper_confirmation: 7
+							},
+							systemWarnings: {
+								table_row_alignment_uncertain: 4
+							},
 							scopeType: 'collection',
 							scopeId: 'goal',
 							datasetId: 'rud_col_123_collection_goal'
@@ -2568,6 +2591,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Evidence error 2');
 		expect(datasetText).toContain('Primary findings 5');
 		expect(datasetText).toContain('Review queue 10');
+		expect(datasetText).toContain('Single-paper evidence 9');
+		expect(datasetText).toContain('Needs cross-paper confirmation 7');
+		expect(datasetText).toContain('Table row alignment uncertain 4');
 
 		const collectionJsonUrl = new URL(
 			browserPage

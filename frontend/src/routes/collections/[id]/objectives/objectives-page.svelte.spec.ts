@@ -443,18 +443,18 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue'
 		});
 		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
-		expect(reviewRows[0].text).toContain('Review findings');
+		expect(reviewRows[0].text).toContain('Review 2 finding(s)');
 		expect(reviewRows[1]).toMatchObject({
 			href: '/collections/col_4c54ffe568ec/goals/goal_messages_pending?review=training_ready'
 		});
 		expect(reviewRows[1].text).toContain('Which reviewed finding is missing training messages?');
 		expect(reviewRows[1].text).toContain('Messages pending');
-		expect(reviewRows[1].text).toContain('Check messages');
+		expect(reviewRows[1].text).toContain('Check 1 training sample(s)');
 		expect(reviewRows[2]).toMatchObject({
 			href: '/collections/col_4c54ffe568ec/goals/goal_protocol_ready'
 		});
 		expect(reviewRows[2].text).toContain('Which reviewed finding can support a protocol?');
-		expect(reviewRows[2].text).toContain('Draft protocol');
+		expect(reviewRows[2].text).toContain('Draft from 1 reviewed finding(s)');
 	});
 
 	it('confirms an objective without existing routed evidence and lets analysis build coverage', async () => {

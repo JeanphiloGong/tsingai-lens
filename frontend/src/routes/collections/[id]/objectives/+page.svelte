@@ -257,10 +257,22 @@
 		});
 	}
 
-	function goalReviewActionLabel(status: string) {
-		if (status === 'needs_review') return $t('research.objectives.goalReviewActionReview');
-		if (status === 'training_ready') return $t('research.objectives.goalReviewActionProtocol');
-		if (status === 'messages_pending') return $t('research.objectives.goalReviewActionMessages');
+	function goalReviewActionLabel(status: string, dataset: ResearchUnderstandingDataset | null) {
+		if (status === 'needs_review') {
+			return $t('research.objectives.goalReviewActionReviewCount', {
+				count: dataset?.quality_summary.review_candidate_sample_count ?? 0
+			});
+		}
+		if (status === 'training_ready') {
+			return $t('research.objectives.goalReviewActionProtocolCount', {
+				count: dataset?.quality_summary.training_ready_sample_count ?? 0
+			});
+		}
+		if (status === 'messages_pending') {
+			return $t('research.objectives.goalReviewActionMessagesCount', {
+				count: dataset?.quality_summary.training_ready_sample_count ?? 0
+			});
+		}
 		if (status === 'failed') return $t('research.objectives.goalReviewActionRepair');
 		if (status === 'running' || status === 'pending') {
 			return $t('research.objectives.goalReviewActionWait');
@@ -484,7 +496,7 @@
 							<small class={`goal-review-item__status goal-review-item__status--${row.status}`}>
 								{goalReviewStatusLabel(row.status)}
 							</small>
-							<small class="goal-review-item__action">{goalReviewActionLabel(row.status)}</small>
+							<small class="goal-review-item__action">{goalReviewActionLabel(row.status, row.dataset)}</small>
 						</a>
 					{/each}
 				</div>

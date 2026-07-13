@@ -273,6 +273,9 @@
 		datasetSummary?.quality_summary.training_message_sample_count ?? 0;
 	$: datasetReviewCandidateSampleCount =
 		datasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: expertReviewCandidateCount = datasetSummary
+		? datasetReviewCandidateSampleCount
+		: reviewQueueFindingCount;
 	$: datasetLabelCounts = datasetSummary?.label_counts ?? {
 		candidate: 0,
 		silver: 0,
@@ -309,7 +312,7 @@
 	$: expertSummary = usesFindings
 		? expertReadinessSummary(
 				primaryFindingRows,
-				reviewQueueFindingCount,
+				expertReviewCandidateCount,
 				datasetTrainingReadySampleCount,
 				datasetReviewCandidateSampleCount
 			)
@@ -2846,7 +2849,7 @@
 					<span>{$t('research.understanding.directEvidence')}</span>
 				</div>
 				<div>
-					<strong>{reviewQueueFindingCount}</strong>
+					<strong>{expertReviewCandidateCount}</strong>
 					<span>{$t('research.understanding.candidateQueue')}</span>
 				</div>
 			</div>

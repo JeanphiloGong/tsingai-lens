@@ -50,7 +50,9 @@ This node owns the collection workspace route family in the frontend.
   provenance, and remains clickable back to the document reader; internal
   finding/claim/evidence ids remain hidden binding data for feedback, curation,
   source navigation, audit details, and review-queue deep links that open a
-  specific finding for accept/reject/correct review
+  specific finding for accept/reject/correct review; expert review progress uses
+  dataset review-candidate counts as the canonical remaining-work number so
+  primary paper-level Findings that still need human confirmation are included
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

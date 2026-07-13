@@ -1520,6 +1520,45 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('uses dataset review-candidate count for expert review progress', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse({ reviewCandidate: 3 })));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const summary = browserPage.getByLabelText('Research understanding summary');
+		await expect.element(summary.getByText('Candidate queue')).toBeInTheDocument();
+		await expect.element(summary.getByText('3')).toBeInTheDocument();
+
+		const expertSummary = browserPage.getByLabelText('Expert readiness summary');
+		await expect
+			.element(
+				expertSummary.getByText(
+					'3 candidate finding(s) remain in the review queue; do not treat them as usable conclusions until curated.'
+				)
+			)
+			.toBeInTheDocument();
+	});
+
 	it('opens a specific review candidate finding from a deep link', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
@@ -2757,6 +2796,25 @@ describe('ResearchUnderstandingWorkbench', () => {
 	});
 
 	it('describes mixed readiness review items as candidates, not primary findings', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse({ reviewCandidate: 2 })));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'

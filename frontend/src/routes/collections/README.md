@@ -54,7 +54,9 @@ This node owns the collection workspace route family in the frontend.
   dataset review-candidate counts as the canonical remaining-work number so
   primary paper-level Findings that still need human confirmation are included,
   while the separate evidence-repair filter only narrows to Findings whose
-  evidence, support, or projection needs closer inspection
+  evidence, support, or projection needs closer inspection; Finding detail also
+  shows the selected candidate's position in the active review queue for
+  continuous accept/reject/correct review
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

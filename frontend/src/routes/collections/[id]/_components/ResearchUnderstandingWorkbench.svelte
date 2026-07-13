@@ -367,10 +367,11 @@
 				reviewQueueClaimIds.has(finding.claim_id))
 	);
 	$: visibleFindingRows = usesFindings ? filteredFindings : [];
+	$: reviewCandidateFindingRows = allDisplayFindingRows.filter(
+		(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
+	);
 	$: nextReviewCandidateFinding =
-		allDisplayFindingRows.find(
-			(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
-		) ?? null;
+		reviewCandidateFindingRows[0] ?? null;
 	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
 	$: selectableEffects = usesFindings
 		? filteredFindings
@@ -380,6 +381,18 @@
 	$: selectedFinding = detailMode && selectedFindingId
 		? (allDisplayFindingRows.find((finding) => finding.finding_id === selectedFindingId) ?? null)
 		: null;
+	$: selectedReviewCandidateIndex = selectedFinding
+		? reviewCandidateFindingRows.findIndex(
+				(finding) => finding.finding_id === selectedFinding.finding_id
+			)
+		: -1;
+	$: selectedReviewQueuePosition =
+		selectedReviewCandidateIndex >= 0
+			? $t('research.understanding.reviewQueuePosition', {
+					current: selectedReviewCandidateIndex + 1,
+					total: reviewCandidateFindingRows.length
+				})
+			: '';
 	$: claimTypeCounts = countEffectsBy(effectRows, 'claim_type');
 	$: claimStatusCounts = (() => {
 		if (!usesFindings) return countEffectsBy(effectRows, 'support_status');
@@ -3625,6 +3638,9 @@
 								<header class="research-understanding-workbench__claim-header">
 									<div class="research-understanding-workbench__meta">
 										{#if selectedFinding}
+											{#if selectedReviewQueuePosition}
+												<span>{selectedReviewQueuePosition}</span>
+											{/if}
 											{#if selectedFindingTrust}
 												<span
 													class={`research-understanding-workbench__trust-badge research-understanding-workbench__trust-badge--${selectedFindingTrust.labelStatus}`}

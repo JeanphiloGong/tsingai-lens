@@ -1571,6 +1571,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(browserPage.getByRole('button', { name: 'Review candidate 3' }))
 			.toHaveAttribute('aria-pressed', 'true');
 		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect.element(findingDetail.getByText('Review candidate 2 of 3')).toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())
 			.toBeInTheDocument();

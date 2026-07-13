@@ -259,6 +259,10 @@ traceable protocol drafting. Its `completion_status` can still be
 `incomplete`; use `remaining_work` to see how many review candidates and
 goal-level training/message gaps remain before calling the full expert loop
 finished.
+`remaining_work.pending_goals` is the human review queue for the next expert
+loop: each row includes the research question, review candidate count, the next
+action, and a frontend `href` that opens the goal review queue or
+training-ready export view.
 
 By default `check_goal_dataset_quality.py` is a reviewability gate: a goal may
 pass with only `review_candidate` samples. To require samples that can be used

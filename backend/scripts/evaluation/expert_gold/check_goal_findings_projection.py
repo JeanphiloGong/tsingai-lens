@@ -437,7 +437,9 @@ def evaluate_goal_analysis_payload(
     *,
     source_index: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    goal_id = str((payload.get("goal") or {}).get("goal_id") or "")
+    goal = payload.get("goal") if isinstance(payload.get("goal"), dict) else {}
+    goal_id = str(goal.get("goal_id") or "")
+    question = _source_page(goal.get("question"))
     understanding = payload.get("understanding") or {}
     presentation = understanding.get("presentation") or {}
     primary_findings = _dict_rows(presentation.get("primary_findings"))
@@ -981,6 +983,7 @@ def evaluate_goal_analysis_payload(
         )
     return {
         "goal_id": goal_id,
+        "question": question,
         "state": understanding.get("state"),
         "primary_finding_count": len(primary_findings),
         "review_queue_finding_count": len(review_findings),

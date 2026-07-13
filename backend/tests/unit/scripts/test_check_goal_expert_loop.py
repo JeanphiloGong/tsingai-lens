@@ -29,11 +29,13 @@ def _findings_payload(status: str = "pass"):
         "goals": [
             {
                 "goal_id": "goal-1",
+                "question": "How does preheating affect ductility?",
                 "primary_finding_count": 1,
                 "direct_evidence_count": 2,
             },
             {
                 "goal_id": "goal-2",
+                "question": "How does porosity affect corrosion?",
                 "primary_finding_count": 1,
                 "direct_evidence_count": 1,
             },
@@ -109,6 +111,17 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
         "review_candidate_count": 2,
         "goals_without_training_ready": ["goal-2"],
         "goals_without_training_messages": ["goal-2"],
+        "pending_goals": [
+            {
+                "goal_id": "goal-2",
+                "question": "How does porosity affect corrosion?",
+                "review_candidate_count": 2,
+                "training_ready_count": 0,
+                "training_message_ready_count": 0,
+                "next_action": "review_candidates",
+                "href": "/collections/col-1/goals/goal-2?review=queue",
+            }
+        ],
         "by_error_category": {"direction_error": 1, "variable_error": 1},
     }
 
@@ -143,6 +156,48 @@ def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeyp
     assert summary["status"] == "fail"
     assert summary["completion_status"] == "incomplete"
     assert summary["require_complete"] is True
+
+
+def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypatch):
+    check = _load_goal_expert_loop_module()
+    dataset = _completed_dataset_payload()
+    dataset["goals"][1]["training_message_ready_count"] = 0
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: dataset)},
+            )
+        ),
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        require_complete=True,
+    )
+
+    assert summary["remaining_work"]["pending_goals"] == [
+        {
+            "goal_id": "goal-2",
+            "question": "How does porosity affect corrosion?",
+            "review_candidate_count": 0,
+            "training_ready_count": 1,
+            "training_message_ready_count": 0,
+            "next_action": "inspect_training_messages",
+            "href": "/collections/col-1/goals/goal-2?review=training_ready",
+        }
+    ]
 
 
 def test_check_goal_expert_loop_require_complete_passes_when_no_work_remains(monkeypatch):

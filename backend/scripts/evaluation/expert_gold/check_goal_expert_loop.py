@@ -115,7 +115,7 @@ def check_goal_expert_loop(
         ),
         "experiment_design": _experiment_layer(dataset),
     }
-    goals = _goal_rollup(findings, dataset)
+    goals = _goal_rollup(findings, dataset, collection_id=collection_id)
     completion = _completion_summary(goals)
     status = (
         "fail"
@@ -215,6 +215,8 @@ def _experiment_layer(dataset: dict[str, Any]) -> dict[str, Any]:
 def _goal_rollup(
     findings: dict[str, Any],
     dataset: dict[str, Any],
+    *,
+    collection_id: str,
 ) -> list[dict[str, Any]]:
     dataset_by_goal = {
         str(goal.get("goal_id")): goal for goal in _mapping_list(dataset.get("goals"))
@@ -226,6 +228,9 @@ def _goal_rollup(
         rows.append(
             {
                 "goal_id": goal_id,
+                "question": _text(goal.get("question")),
+                "review_url": _goal_review_url(collection_id, goal_id),
+                "training_ready_url": _goal_training_ready_url(collection_id, goal_id),
                 "primary_finding_count": int(goal.get("primary_finding_count") or 0),
                 "direct_evidence_count": int(goal.get("direct_evidence_count") or 0),
                 "dataset_item_count": int(dataset_goal.get("item_count") or 0),
@@ -252,6 +257,25 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
         for goal in goals
         if int(goal.get("training_message_ready_count") or 0) == 0
     ]
+    pending_goals = [
+        {
+            "goal_id": str(goal.get("goal_id")),
+            "question": _text(goal.get("question")),
+            "review_candidate_count": int(goal.get("review_candidate_count") or 0),
+            "training_ready_count": int(goal.get("training_ready_count") or 0),
+            "training_message_ready_count": int(
+                goal.get("training_message_ready_count") or 0
+            ),
+            "next_action": _pending_goal_action(goal),
+            "href": _pending_goal_href(goal),
+        }
+        for goal in goals
+        if (
+            int(goal.get("review_candidate_count") or 0) > 0
+            or int(goal.get("training_ready_count") or 0) == 0
+            or int(goal.get("training_message_ready_count") or 0) == 0
+        )
+    ]
     review_candidate_count = sum(int(goal.get("review_candidate_count") or 0) for goal in goals)
     by_error_category: dict[str, int] = {}
     for goal in goals:
@@ -273,6 +297,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "review_candidate_count": review_candidate_count,
             "goals_without_training_ready": goals_without_training_ready,
             "goals_without_training_messages": goals_without_training_messages,
+            "pending_goals": pending_goals,
             "by_error_category": dict(
                 sorted(
                     by_error_category.items(),
@@ -285,6 +310,34 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _goal_review_url(collection_id: str, goal_id: str) -> str:
+    return f"/collections/{collection_id}/goals/{goal_id}?review=queue"
+
+
+def _goal_training_ready_url(collection_id: str, goal_id: str) -> str:
+    return f"/collections/{collection_id}/goals/{goal_id}?review=training_ready"
+
+
+def _pending_goal_action(goal: dict[str, Any]) -> str:
+    if int(goal.get("review_candidate_count") or 0) > 0:
+        return "review_candidates"
+    if int(goal.get("training_ready_count") or 0) == 0:
+        return "accept_reject_or_correct_findings"
+    if int(goal.get("training_message_ready_count") or 0) == 0:
+        return "inspect_training_messages"
+    return "open_goal"
+
+
+def _pending_goal_href(goal: dict[str, Any]) -> str:
+    if _pending_goal_action(goal) == "inspect_training_messages":
+        return _text(goal.get("training_ready_url"))
+    return _text(goal.get("review_url"))
+
+
+def _text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
 
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:

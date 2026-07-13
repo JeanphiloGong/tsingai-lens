@@ -713,6 +713,18 @@ describe('research view shared helpers', () => {
 					table_row_alignment_uncertain: 1
 				}
 			},
+			items: [
+				{
+					sample_id: 'sample_1',
+					finding_id: 'finding_1',
+					label_status: 'silver',
+					dataset_use_status: 'review_candidate',
+					review_action: {
+						code: 'verify_table_rows',
+						label: 'verify parsed table rows before accepting or correcting'
+					}
+				}
+			],
 			warnings: []
 		});
 
@@ -736,6 +748,16 @@ describe('research view shared helpers', () => {
 		});
 		expect(dataset.quality_summary.by_review_candidate_warning).toEqual({
 			table_row_alignment_uncertain: 1
+		});
+		expect(dataset.items[0]).toMatchObject({
+			sample_id: 'sample_1',
+			finding_id: 'finding_1',
+			label_status: 'silver',
+			dataset_use_status: 'review_candidate',
+			review_action: {
+				code: 'verify_table_rows',
+				label: 'verify parsed table rows before accepting or correcting'
+			}
 		});
 	});
 

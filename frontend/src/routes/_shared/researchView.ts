@@ -356,6 +356,17 @@ export type ResearchUnderstandingCollectionDatasetFilters = {
 	label_status?: ResearchUnderstandingDatasetLabelStatus;
 	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
 };
+export type ResearchUnderstandingDatasetReviewAction = {
+	code: string;
+	label: string;
+};
+export type ResearchUnderstandingDatasetSample = {
+	sample_id: string;
+	finding_id: string;
+	label_status: ResearchUnderstandingDatasetLabelStatus | null;
+	dataset_use_status: ResearchUnderstandingDatasetUseStatus | null;
+	review_action: ResearchUnderstandingDatasetReviewAction;
+};
 export type ResearchUnderstandingDataset = {
 	schema_version: string;
 	dataset_id: string;
@@ -381,6 +392,7 @@ export type ResearchUnderstandingDataset = {
 		by_review_candidate_reason: Record<string, number>;
 		by_review_candidate_warning: Record<string, number>;
 	};
+	items: ResearchUnderstandingDatasetSample[];
 	warnings: string[];
 };
 
@@ -1074,7 +1086,37 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 			by_review_candidate_reason: toNumberRecord(qualitySummary.by_review_candidate_reason),
 			by_review_candidate_warning: toNumberRecord(qualitySummary.by_review_candidate_warning)
 		},
+		items: asArray(record?.items)
+			.map((item) => normalizeResearchUnderstandingDatasetSample(item))
+			.filter((item): item is ResearchUnderstandingDatasetSample => item !== null),
 		warnings: toStringList(record?.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetSample(
+	value: unknown
+): ResearchUnderstandingDatasetSample | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const sampleId = toText(record.sample_id);
+	const findingId = toText(record.finding_id);
+	if (!sampleId && !findingId) return null;
+	return {
+		sample_id: sampleId,
+		finding_id: findingId,
+		label_status: normalizeResearchUnderstandingDatasetLabelStatus(record.label_status),
+		dataset_use_status: normalizeResearchUnderstandingDatasetUseStatus(record.dataset_use_status),
+		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetReviewAction(
+	value: unknown
+): ResearchUnderstandingDatasetReviewAction {
+	const record = asRecord(value);
+	return {
+		code: toText(record?.code),
+		label: toText(record?.label)
 	};
 }
 

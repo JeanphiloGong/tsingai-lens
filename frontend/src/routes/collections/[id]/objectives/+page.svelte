@@ -14,7 +14,8 @@
 		type ConfirmedGoal,
 		type ObjectiveList,
 		type ObjectiveListItem,
-		type ResearchUnderstandingDataset
+		type ResearchUnderstandingDataset,
+		type ResearchUnderstandingDatasetSample
 	} from '../../../_shared/researchView';
 
 	let objectiveList: ObjectiveList | null = null;
@@ -259,6 +260,11 @@
 
 	function goalReviewActionLabel(status: string, dataset: ResearchUnderstandingDataset | null) {
 		if (status === 'needs_review') {
+			const reviewAction = nextReviewSample(dataset)?.review_action;
+			if (reviewAction?.code) {
+				const localized = $t(`research.objectives.goalReviewRecommendedActions.${reviewAction.code}`);
+				return localized.startsWith('research.') ? reviewAction.label : localized;
+			}
 			return $t('research.objectives.goalReviewActionReviewCount', {
 				count: dataset?.quality_summary.review_candidate_sample_count ?? 0
 			});
@@ -278,6 +284,21 @@
 			return $t('research.objectives.goalReviewActionWait');
 		}
 		return $t('research.objectives.goalReviewActionOpen');
+	}
+
+	function nextReviewSample(
+		dataset: ResearchUnderstandingDataset | null
+	): ResearchUnderstandingDatasetSample | null {
+		if (!dataset) return null;
+		const nextFindingId = dataset.quality_summary.next_review_finding_id;
+		if (nextFindingId) {
+			const matched = dataset.items.find(
+				(item) =>
+					item.finding_id === nextFindingId && item.dataset_use_status === 'review_candidate'
+			);
+			if (matched) return matched;
+		}
+		return dataset.items.find((item) => item.dataset_use_status === 'review_candidate') ?? null;
 	}
 
 	function goalReviewHref(goal: ConfirmedGoal) {

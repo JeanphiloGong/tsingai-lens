@@ -73,7 +73,8 @@ function researchUnderstandingDatasetResponse({
 	reviewCandidate = 0,
 	scopeId = 'goal_1',
 	errorCategories = {},
-	nextReviewFindingId = ''
+	nextReviewFindingId = '',
+	reviewActionCode = ''
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -103,6 +104,22 @@ function researchUnderstandingDatasetResponse({
 			by_presentation_bucket: {},
 			by_error_category: errorCategories
 		},
+		items: reviewCandidate
+			? [
+					{
+						sample_id: `sample_${scopeId}`,
+						finding_id: nextReviewFindingId || `finding_${scopeId}`,
+						label_status: 'silver',
+						dataset_use_status: 'review_candidate',
+						review_action: reviewActionCode
+							? {
+									code: reviewActionCode,
+									label: 'review selected table rows before accepting or correcting'
+								}
+							: {}
+					}
+				]
+			: [],
 		warnings: []
 	};
 }
@@ -182,7 +199,8 @@ function goalReviewResponse(input: string | URL | Request) {
 					scopeId === 'goal_heat_strength'
 						? { variable_error: 2, direction_error: 1, none: 1 }
 						: {},
-				nextReviewFindingId: scopeId === 'goal_heat_strength' ? 'finding_heat_strength' : ''
+				nextReviewFindingId: scopeId === 'goal_heat_strength' ? 'finding_heat_strength' : '',
+				reviewActionCode: scopeId === 'goal_heat_strength' ? 'review_table_rows' : ''
 			})
 		);
 	}
@@ -449,7 +467,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			href: '/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue&finding_id=finding_heat_strength'
 		});
 		expect(reviewRows[0].text).toContain('How does heat treatment affect strength?');
-		expect(reviewRows[0].text).toContain('Review 2 finding(s)');
+		expect(reviewRows[0].text).toContain('Review selected table rows');
 		expect(reviewRows[1]).toMatchObject({
 			href: '/collections/col_4c54ffe568ec/goals/goal_messages_pending?review=training_ready'
 		});

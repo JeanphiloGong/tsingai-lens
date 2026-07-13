@@ -1002,6 +1002,17 @@ const translations: Record<Language, Translations> = {
 				goalReviewActionRepair: 'Open and repair',
 				goalReviewActionWait: 'View progress',
 				goalReviewActionOpen: 'Open goal',
+				goalReviewRecommendedActions: {
+					verify_table_rows: 'Verify source table rows',
+					review_table_variables: 'Check changed table variables',
+					review_table_rows: 'Review selected table rows',
+					resolve_conflict: 'Resolve conflicting evidence',
+					repair_evidence_binding: 'Repair evidence binding',
+					check_mechanism_requirement: 'Check mechanism evidence',
+					validate_model_evidence: 'Validate model evidence',
+					accept_as_paper_level: 'Accept as paper-level evidence',
+					review_evidence: 'Review evidence'
+				},
 				goalReviewStatuses: {
 					pending: 'Pending analysis',
 					running: 'Analyzing',
@@ -4113,6 +4124,17 @@ const translations: Record<Language, Translations> = {
 				goalReviewActionRepair: '打开并修复',
 				goalReviewActionWait: '查看进度',
 				goalReviewActionOpen: '打开目标',
+				goalReviewRecommendedActions: {
+					verify_table_rows: '核对原始表格行',
+					review_table_variables: '核对表格变量是否混杂',
+					review_table_rows: '复核选中表格行',
+					resolve_conflict: '处理冲突证据',
+					repair_evidence_binding: '修复证据绑定',
+					check_mechanism_requirement: '判断是否需要机制证据',
+					validate_model_evidence: '验证模型证据',
+					accept_as_paper_level: '按单篇证据接受',
+					review_evidence: '复核证据'
+				},
 				goalReviewStatuses: {
 					pending: '等待分析',
 					running: '分析中',

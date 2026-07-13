@@ -41,6 +41,7 @@ function datasetResponse(overrides: {
 	itemCount?: number;
 	labelCounts?: Record<string, number>;
 	errorCategories?: Record<string, number>;
+	presentationBuckets?: Record<string, number>;
 	scopeType?: string;
 	scopeId?: string;
 	datasetId?: string;
@@ -77,6 +78,10 @@ function datasetResponse(overrides: {
 				training_ready: trainingReady,
 				review_candidate: reviewCandidate,
 				rejected
+			},
+			by_presentation_bucket: overrides.presentationBuckets ?? {
+				primary: trainingReady,
+				review_queue: reviewCandidate
 			},
 			by_error_category: errorCategories
 		},
@@ -2044,6 +2049,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 								evidence_error: 2,
 								none: 1
 							},
+							presentationBuckets: {
+								primary: 5,
+								review_queue: 10
+							},
 							scopeType: 'collection',
 							scopeId: 'goal',
 							datasetId: 'rud_col_123_collection_goal'
@@ -2084,6 +2093,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Needs review 15');
 		expect(datasetText).toContain('Variable error 3');
 		expect(datasetText).toContain('Evidence error 2');
+		expect(datasetText).toContain('Primary findings 5');
+		expect(datasetText).toContain('Review queue 10');
 
 		const collectionJsonUrl = new URL(
 			browserPage

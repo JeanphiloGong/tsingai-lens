@@ -408,6 +408,11 @@ const translations: Record<Language, Translations> = {
 					none: 'No issue',
 					unreviewed: 'Unreviewed'
 				},
+				datasetPresentationBuckets: {
+					primary: 'Primary findings',
+					review_queue: 'Review queue',
+					unbucketed: 'Unbucketed'
+				},
 				findingTrustSources: {
 					human_curation: 'Human curation',
 					human_feedback: 'Human confirmed',
@@ -3324,6 +3329,11 @@ const translations: Record<Language, Translations> = {
 					other_error: '其他错误',
 					none: '无问题',
 					unreviewed: '未复核'
+				},
+				datasetPresentationBuckets: {
+					primary: '主研究发现',
+					review_queue: '复核队列',
+					unbucketed: '未分组'
 				},
 				findingTrustSources: {
 					human_curation: '人工校正',

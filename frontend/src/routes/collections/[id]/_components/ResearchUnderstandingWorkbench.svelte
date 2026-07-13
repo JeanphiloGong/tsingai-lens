@@ -261,6 +261,11 @@
 				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 		: [];
+	$: collectionDatasetBucketCounts = collectionDatasetSummary
+		? Object.entries(collectionDatasetSummary.quality_summary.by_presentation_bucket)
+				.filter(([, count]) => count > 0)
+				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		: [];
 	$: expertSummary = usesFindings
 		? expertReadinessSummary(
 				primaryFindingRows,
@@ -544,6 +549,10 @@
 
 	function datasetErrorCategoryLabel(category: string) {
 		return translatedCatalogLabel('research.understanding.datasetErrorCategories', category);
+	}
+
+	function datasetPresentationBucketLabel(bucket: string) {
+		return translatedCatalogLabel('research.understanding.datasetPresentationBuckets', bucket);
 	}
 
 	function findingTrustSourceLabel(source: FindingDatasetTrust['source']) {
@@ -2691,6 +2700,12 @@
 												{#each collectionDatasetErrorCategories as [category, count] (category)}
 													<span>
 														{datasetErrorCategoryLabel(category)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetBucketCounts as [bucket, count] (bucket)}
+													<span>
+														{datasetPresentationBucketLabel(bucket)}
 														<strong>{count}</strong>
 													</span>
 												{/each}

@@ -2157,6 +2157,51 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('accepts a selected finding without opening the full feedback form first', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Accept' }).click();
+
+		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
+		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+				(init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(feedbackPostCall).toBeTruthy();
+		expect(JSON.parse(String(feedbackPostCall![1].body))).toMatchObject({
+			finding_id: 'finding_mechanism_limited',
+			claim_id: 'claim_mechanism_limited',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: null
+		});
+	});
+
+	it('opens reject and correct review paths for a selected finding', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Reject' }).click();
+
+		await expect.element(claimDetail.getByLabelText('Review result')).toHaveValue('incorrect');
+		await expect.element(claimDetail.getByLabelText('Issue type')).toHaveValue('wrong_variable');
+
+		await claimDetail.getByRole('button', { name: 'Correct' }).click();
+
+		await expect.element(claimDetail.getByLabelText('Curated statement')).toHaveValue(
+			'Annealing may reduce cellular substructure.'
+		);
+	});
+
 	it('requires an authenticated reviewer before expert feedback can be saved', async () => {
 		authState.set({ status: 'anonymous', user: null });
 		render(ResearchUnderstandingWorkbench, {

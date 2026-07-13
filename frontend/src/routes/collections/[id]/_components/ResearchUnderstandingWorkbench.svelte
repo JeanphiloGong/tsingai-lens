@@ -1178,6 +1178,26 @@
 		activeReviewPanel = activeReviewPanel === panel ? '' : panel;
 	}
 
+	async function acceptSelectedFinding() {
+		feedbackStatus = 'correct';
+		feedbackIssue = 'none';
+		feedbackNote = '';
+		activeReviewPanel = 'feedback';
+		await submitClaimFeedback();
+	}
+
+	function rejectSelectedFinding() {
+		feedbackStatus = 'incorrect';
+		feedbackIssue = 'wrong_variable';
+		feedbackNote = '';
+		activeReviewPanel = 'feedback';
+	}
+
+	function correctSelectedFinding() {
+		resetCurationForm();
+		activeReviewPanel = 'curation';
+	}
+
 	function currentReviewerLabel(user: { email?: string | null; display_name?: string | null } | null) {
 		return user?.email?.trim() || user?.display_name?.trim() || '';
 	}
@@ -2676,6 +2696,40 @@
 									class="research-understanding-workbench__review-actions"
 									aria-label={$t('research.understanding.reviewActions')}
 								>
+									{#if selectedFinding}
+										<button
+											type="button"
+											class="research-understanding-workbench__review-action--accept"
+											disabled={feedbackSubmitting || !collectionId || !reviewerReady}
+											on:click={acceptSelectedFinding}
+										>
+											{feedbackSubmitting
+												? $t('research.understanding.quickAcceptSaving')
+												: $t('research.understanding.quickAccept')}
+										</button>
+										<button
+											type="button"
+											class:research-understanding-workbench__review-action--active={activeReviewPanel ===
+												'feedback' &&
+												feedbackStatus === 'incorrect' &&
+												feedbackIssue !== 'none'}
+											aria-pressed={activeReviewPanel === 'feedback' &&
+												feedbackStatus === 'incorrect' &&
+												feedbackIssue !== 'none'}
+											on:click={rejectSelectedFinding}
+										>
+											{$t('research.understanding.quickReject')}
+										</button>
+										<button
+											type="button"
+											class:research-understanding-workbench__review-action--active={activeReviewPanel ===
+												'curation'}
+											aria-pressed={activeReviewPanel === 'curation'}
+											on:click={correctSelectedFinding}
+										>
+											{$t('research.understanding.quickCorrect')}
+										</button>
+									{/if}
 									<button
 										type="button"
 										class:research-understanding-workbench__review-action--active={activeReviewPanel ===
@@ -4382,6 +4436,22 @@
 	.research-understanding-workbench__review-action--active {
 		border-color: var(--color-accent);
 		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__review-action--accept {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+		color: var(--color-on-accent, #fff);
+	}
+
+	.research-understanding-workbench__review-action--accept:hover,
+	.research-understanding-workbench__review-action--accept:focus-visible {
+		color: var(--color-on-accent, #fff);
+	}
+
+	.research-understanding-workbench__review-action--accept:disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
 	}
 
 	.research-understanding-workbench__detail-section {

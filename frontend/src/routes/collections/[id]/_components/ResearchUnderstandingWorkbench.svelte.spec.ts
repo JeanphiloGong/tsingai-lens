@@ -1818,6 +1818,71 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('does not ask for curation after a covered finding is training-ready', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({
+						collection_id: 'col_123',
+						items: [
+							{
+								curation_id: 'ruc_density_accepted',
+								collection_id: 'col_123',
+								scope_type: 'objective',
+								scope_id: 'obj_1',
+								finding_id: 'finding_relation_density',
+								claim_id: 'claim_relation_density',
+								curated_claim_type: 'finding',
+								curated_status: 'limited',
+								curated_statement:
+									"VED increased LPBF 316L density from 91.9% to 99.6% in the cited Archimedes measurements.",
+								curated_support_grade: 'partial',
+								curated_review_status: 'accepted',
+								curated_variables: ['VED'],
+								curated_mediators: ['porosity'],
+								curated_outcomes: ['density'],
+								curated_direction: 'increases',
+								curated_scope_summary: 'stainless steel 316L, VED, density',
+								curated_evidence_ref_ids: ['ev_density_quote'],
+								curated_context_ids: ['ctx_density_objective'],
+								note: 'Human expert accepted the source-grounded finding.',
+								reviewer: 'materials-expert@example.com',
+								updated_at: '2026-07-13T09:00:00+08:00'
+							}
+						]
+					})
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse({ trainingReady: 1, reviewCandidate: 0 })));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: fullyCoveredDraftAnswerFixture(),
+			collectionId: 'col_123'
+		});
+
+		const answerBoundary = browserPage.getByLabelText('Answer boundary');
+		await expect
+			.element(answerBoundary.getByText('The goal has expert-ready findings'))
+			.toBeInTheDocument();
+		await expect
+			.element(answerBoundary.getByText(/Needs expert curation before conclusion/))
+			.not.toBeInTheDocument();
+	});
+
 	it('does not present low-level effects as expert-ready findings when finding projection is missing', async () => {
 		const fixture = understandingFixture();
 		fixture.presentation.findings = [];

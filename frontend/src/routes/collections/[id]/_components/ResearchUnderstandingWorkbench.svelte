@@ -227,7 +227,9 @@
 	$: axisCoverage = presentationSummary?.axis_coverage ?? { variables: [], properties: [] };
 	$: hasAxisCoverage = Boolean(axisCoverage.variables.length || axisCoverage.properties.length);
 	$: axisCoverageGapGroups = hasAxisCoverage ? buildAxisCoverageGapGroups(axisCoverage) : [];
-	$: answerBoundary = hasAxisCoverage ? buildAnswerBoundary(axisCoverage, primaryFindingRows) : null;
+	$: answerBoundary = hasAxisCoverage
+		? buildAnswerBoundary(axisCoverage, primaryFindingRows, feedbackByTargetId, curationsByTargetId)
+		: null;
 	$: datasetTrainingReadySampleCount =
 		datasetSummary?.quality_summary.training_ready_sample_count ?? 0;
 	$: datasetReviewCandidateSampleCount =
@@ -853,17 +855,23 @@
 		openFindingDetail(findingId);
 	}
 
-	function findingFeedbackFor(finding: ResearchUnderstandingPresentationFinding) {
+	function findingFeedbackFor(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentFeedbackByTargetId = feedbackByTargetId
+	) {
 		return [
-			...(feedbackByTargetId.get(finding.finding_id) ?? []),
-			...(feedbackByTargetId.get(finding.claim_id) ?? [])
+			...(currentFeedbackByTargetId.get(finding.finding_id) ?? []),
+			...(currentFeedbackByTargetId.get(finding.claim_id) ?? [])
 		];
 	}
 
-	function findingCurationFor(finding: ResearchUnderstandingPresentationFinding) {
+	function findingCurationFor(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentCurationsByTargetId = curationsByTargetId
+	) {
 		return (
-			curationsByTargetId.get(finding.finding_id) ??
-			curationsByTargetId.get(finding.claim_id) ??
+			currentCurationsByTargetId.get(finding.finding_id) ??
+			currentCurationsByTargetId.get(finding.claim_id) ??
 			null
 		);
 	}
@@ -901,9 +909,13 @@
 		return Boolean(normalized) && !isAiReviewer(normalized);
 	}
 
-	function findingDatasetTrust(finding: ResearchUnderstandingPresentationFinding): FindingDatasetTrust {
-		const curation = findingCurationFor(finding);
-		const feedback = findingFeedbackFor(finding);
+	function findingDatasetTrust(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentFeedbackByTargetId = feedbackByTargetId,
+		currentCurationsByTargetId = curationsByTargetId
+	): FindingDatasetTrust {
+		const curation = findingCurationFor(finding, currentCurationsByTargetId);
+		const feedback = findingFeedbackFor(finding, currentFeedbackByTargetId);
 		const hasRejected = findingHasRejectingReview(feedback);
 		if (curation && isHumanReviewer(curation.reviewer)) {
 			return {
@@ -1898,7 +1910,9 @@
 
 	function buildAnswerBoundary(
 		currentAxisCoverage: typeof axisCoverage,
-		currentPrimaryFindings: ResearchUnderstandingPresentationFinding[]
+		currentPrimaryFindings: ResearchUnderstandingPresentationFinding[],
+		_currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		_currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration>
 	) {
 		const variableTotal = currentAxisCoverage.variables.length;
 		const propertyTotal = currentAxisCoverage.properties.length;
@@ -1917,7 +1931,14 @@
 		const draftFindingLabels: string[] = [];
 		for (const findingId of coveredPrimaryFindingIds) {
 			const finding = primaryFindingById.get(findingId);
-			if (finding && !findingIsExpertReady(finding)) {
+			const trust = finding
+				? findingDatasetTrust(finding, _currentFeedbackByTargetId, _currentCurationsByTargetId)
+				: null;
+			if (
+				finding &&
+				trust?.datasetUseStatus !== 'training_ready' &&
+				!findingIsExpertReady(finding)
+			) {
 				draftFindingLabels.push(findingBoundaryLabel(finding));
 			}
 		}

@@ -2904,6 +2904,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
 		await claimDetail.getByLabelText('Curated type').selectOptions('mechanism');
 		await claimDetail.getByLabelText('Curated support status').selectOptions('limited');
+		await claimDetail.getByLabelText('Curated evidence grade').selectOptions('partial');
 		await claimDetail
 			.getByLabelText('Curated statement')
 			.fill('Annealing may reduce cellular substructure, but the mechanism evidence is limited.');
@@ -2940,7 +2941,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			curated_status: 'limited',
 			curated_statement:
 				'Annealing may reduce cellular substructure, but the mechanism evidence is limited.',
-			curated_support_grade: 'weak',
+			curated_support_grade: 'partial',
 			curated_review_status: 'accepted',
 			curated_variables: ['preheating', 'annealing'],
 			curated_mediators: ['cellular substructure', 'GND density'],
@@ -3085,8 +3086,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const claimDetail = await openMechanismClaimDetail();
 		await claimDetail.getByRole('button', { name: 'Expert curation' }).click();
-		await expect.element(claimDetail.getByText('Curated evidence')).toBeInTheDocument();
-		await expect.element(claimDetail.getByText('Curated context')).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Curated evidence', { exact: true })).toBeInTheDocument();
+		await expect.element(claimDetail.getByText('Curated context', { exact: true })).toBeInTheDocument();
 		await claimDetail.getByLabelText(/P001 Section 3\.2/).click();
 		await claimDetail.getByLabelText(/Heat treatment scope/).click();
 		await claimDetail

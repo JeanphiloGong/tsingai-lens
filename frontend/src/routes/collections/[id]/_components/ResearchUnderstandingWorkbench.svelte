@@ -143,6 +143,7 @@
 	let activeReviewPanel: 'feedback' | 'curation' | '' = '';
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
+	let curationSupportGrade = 'partial';
 	let curationStatement = '';
 	let curationVariables = '';
 	let curationMediators = '';
@@ -2128,6 +2129,7 @@
 		const curation = selectedCuration;
 		curationClaimType = curation?.curated_claim_type ?? selectedClaim?.claim_type ?? 'finding';
 		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'supported';
+		curationSupportGrade = curation?.curated_support_grade ?? selectedFinding?.support_grade ?? 'partial';
 		curationStatement =
 			curation?.curated_statement ?? selectedFinding?.statement ?? selectedClaim?.statement ?? '';
 		curationVariables = listEditorValue(curation?.curated_variables ?? selectedFinding?.variables ?? []);
@@ -2358,7 +2360,7 @@
 				curated_claim_type: curationClaimType,
 				curated_status: curationStatus,
 				curated_statement: curationStatement.trim(),
-				curated_support_grade: selectedFinding?.support_grade ?? null,
+				curated_support_grade: curationSupportGrade || null,
 				curated_review_status: 'accepted',
 				curated_variables: listEditorItems(curationVariables),
 				curated_mediators: listEditorItems(curationMediators),
@@ -3415,6 +3417,19 @@
 										>
 											{#each CURATION_STATUS_OPTIONS as status (status)}
 												<option value={status}>{statusLabel(status)}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationSupportGrade')}</span>
+										<select
+											id={`${titleId}-curation-support-grade`}
+											name="curation_support_grade"
+											bind:value={curationSupportGrade}
+											disabled={curationSubmitting}
+										>
+											{#each SUPPORT_GRADE_ORDER.filter((grade) => grade !== 'all') as grade (grade)}
+												<option value={grade}>{supportGradeLabel(grade)}</option>
 											{/each}
 										</select>
 									</label>

@@ -266,6 +266,7 @@ const translations: Record<Language, Translations> = {
 				save: 'Save plan',
 				saving: 'Saving...',
 				saved: 'Saved',
+				open: 'Open plan',
 				defaultTitle: 'Experiment plan draft'
 			},
 			sourceMode: {
@@ -3173,6 +3174,7 @@ const translations: Record<Language, Translations> = {
 				save: '保存方案',
 				saving: '保存中...',
 				saved: '已保存',
+				open: '打开方案',
 				defaultTitle: '实验方案草稿'
 			},
 			sourceMode: {

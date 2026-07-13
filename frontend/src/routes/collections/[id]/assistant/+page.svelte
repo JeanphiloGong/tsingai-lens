@@ -367,6 +367,13 @@
 		return cleaned.length > 80 ? `${cleaned.slice(0, 80)}...` : cleaned;
 	}
 
+	function experimentPlanHref(planId: string) {
+		const anchor = planId ? `?plan_id=${encodeURIComponent(planId)}` : '';
+		return `/collections/${encodeURIComponent(collectionId)}/goals/${encodeURIComponent(
+			queryGoalId
+		)}${anchor}#experiment-plans-title`;
+	}
+
 	async function saveExperimentPlan(message: GoalSessionMessage) {
 		const content = messageText(message).trim();
 		if (!queryGoalId || !content || savingPlanMessageId) return;
@@ -568,20 +575,27 @@
 											<span aria-hidden="true">⧉</span>
 										</button>
 										{#if canSaveExperimentPlan(message)}
-											<button
-												class="action-button action-button--text"
-												type="button"
-												disabled={Boolean(savedPlanMessageIds[message.message_id]) || savingPlanMessageId === message.message_id}
-												on:click={() => saveExperimentPlan(message)}
-											>
-												{#if savedPlanMessageIds[message.message_id]}
-													{$t('goalCopilot.experimentPlan.saved')}
-												{:else if savingPlanMessageId === message.message_id}
-													{$t('goalCopilot.experimentPlan.saving')}
-												{:else}
-													{$t('goalCopilot.experimentPlan.save')}
-												{/if}
-											</button>
+											{#if savedPlanMessageIds[message.message_id]}
+												<a
+													class="action-button action-button--text"
+													href={experimentPlanHref(savedPlanMessageIds[message.message_id])}
+												>
+													{$t('goalCopilot.experimentPlan.open')}
+												</a>
+											{:else}
+												<button
+													class="action-button action-button--text"
+													type="button"
+													disabled={savingPlanMessageId === message.message_id}
+													on:click={() => saveExperimentPlan(message)}
+												>
+													{#if savingPlanMessageId === message.message_id}
+														{$t('goalCopilot.experimentPlan.saving')}
+													{:else}
+														{$t('goalCopilot.experimentPlan.save')}
+													{/if}
+												</button>
+											{/if}
 										{/if}
 									</div>
 								</div>

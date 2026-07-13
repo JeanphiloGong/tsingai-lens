@@ -357,6 +357,17 @@
 		return [...usedEvidenceIds].every((evidenceId) => linkedEvidenceIds.has(evidenceId));
 	}
 
+	function hasProtocolDraftStructure(message: GoalSessionMessage) {
+		const text = messageText(message).toLowerCase();
+		return [
+			['hypothesis', '假设'],
+			['variable matrix', '变量矩阵', '变量'],
+			['measurement', 'measurements', '表征', '测试指标', '测量'],
+			['control', 'controls', '对照'],
+			['risk', 'risks', 'limit', 'limits', '风险', '限制']
+		].every((terms) => terms.some((term) => text.includes(term)));
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -399,6 +410,7 @@
 				citesVisibleSourceLabel(message) &&
 				sourceLinksMatchEvidenceCitations(message) &&
 				allEvidenceCitationsHaveSourceLinks(message) &&
+				hasProtocolDraftStructure(message) &&
 				!needsCuratedFindings(message)
 		);
 	}
@@ -644,6 +656,18 @@
 										!allEvidenceCitationsHaveSourceLinks(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.sourceLinkRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										hasTrainingReadyReviewGate(message) &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										citesVisibleSourceLabel(message) &&
+										sourceLinksMatchEvidenceCitations(message) &&
+										allEvidenceCitationsHaveSourceLinks(message) &&
+										!hasProtocolDraftStructure(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.protocolStructureRequired')}
 										</p>
 									{/if}
 									<div class="message-actions">

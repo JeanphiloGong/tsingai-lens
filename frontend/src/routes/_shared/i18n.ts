@@ -277,7 +277,9 @@ const translations: Record<Language, Translations> = {
 				sourceLinkRequired:
 					'Save is disabled until every reviewed evidence citation has a visible source link.',
 				evidenceLinkMismatch:
-					'Save is disabled until source links match the reviewed evidence citations.'
+					'Save is disabled until source links match the reviewed evidence citations.',
+				protocolStructureRequired:
+					'Save is disabled until the answer includes a hypothesis, variable matrix, measurements, controls, and risks or limits.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -3223,7 +3225,9 @@ const translations: Record<Language, Translations> = {
 				sourceCitationRequired:
 					'该回答还没有写出可见来源标签，例如 [Source 1]，暂不能保存为实验方案。',
 				sourceLinkRequired: '每条已复核证据引用都需要可见来源链接，暂不能保存为实验方案。',
-				evidenceLinkMismatch: '来源链接和已复核证据引用不一致，暂不能保存为实验方案。'
+				evidenceLinkMismatch: '来源链接和已复核证据引用不一致，暂不能保存为实验方案。',
+				protocolStructureRequired:
+					'回答需要包含假设、变量矩阵、测试指标、对照和风险/限制后，才能保存为实验方案。'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

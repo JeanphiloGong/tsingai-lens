@@ -963,7 +963,15 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     )
     service, collection_service = _service(
         tmp_path,
-        content="Use the accepted preheating finding in the protocol [Source 1].",
+        content=(
+            "Hypothesis: 150 C preheating improves LPBF 316L ductility "
+            "through microstructure changes [Source 1].\n"
+            "Variable matrix: compare 25 C and 150 C build-platform "
+            "preheating.\n"
+            "Measurements: elongation and microstructure.\n"
+            "Controls: keep LPBF alloy, powder, and scan parameters fixed.\n"
+            "Risks or limits: current evidence is one LPBF 316L finding."
+        ),
         research_understanding_feedback_service=feedback_service,
         paper_facts_service=_EvidencePaperFactsService(),
     )

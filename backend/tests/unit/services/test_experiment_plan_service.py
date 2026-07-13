@@ -76,6 +76,13 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     _write_goal_message(
         goal_session_repository,
         review_gate="training_ready_findings",
+        content=(
+            "Hypothesis: 150 C preheating improves ductility [Source 1].\n"
+            "Variable matrix: compare 25 C and 150 C builds.\n"
+            "Measurements: elongation and microstructure.\n"
+            "Controls: same LPBF parameters except preheating.\n"
+            "Risks or limits: single-alloy validation."
+        ),
     )
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
@@ -86,7 +93,13 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
         collection_id="col_1",
         goal_id="goal_1",
         title="Preheating validation matrix",
-        content="Run 25 C and 150 C LPBF 316L builds, then compare ductility.",
+        content=(
+            "Hypothesis: 150 C preheating improves ductility [Source 1].\n"
+            "Variable matrix: compare 25 C and 150 C builds.\n"
+            "Measurements: elongation and microstructure.\n"
+            "Controls: same LPBF parameters except preheating.\n"
+            "Risks or limits: single-alloy validation."
+        ),
         source_message_id="msg_1",
         created_by="expert-a",
         source_links=[
@@ -115,6 +128,30 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     assert draft.metadata["used_evidence_ids"] == ["ev_1"]
     assert draft.metadata["review_gate"] == "training_ready_findings"
     assert [plan.plan_id for plan in plans] == [draft.plan_id]
+
+
+def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        content="Run 25 C and 150 C LPBF 316L builds [Source 1].",
+        review_gate="training_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+
+    with pytest.raises(ValueError, match="structured protocol draft"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="Preheating validation matrix",
+            content="Run 25 C and 150 C LPBF 316L builds [Source 1].",
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
 
 
 def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate(

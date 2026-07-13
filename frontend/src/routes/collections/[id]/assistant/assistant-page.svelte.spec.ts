@@ -100,8 +100,18 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						message_id: 'msg_assistant_1',
 						session_id: 'session_1',
 						role: 'assistant',
-						content: 'Use the accepted VED finding to plan a defect-fatigue validation [Source 1].',
-						answer: 'Use the accepted VED finding to plan a defect-fatigue validation [Source 1].',
+						content:
+							'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].\n' +
+							'Variable matrix: compare L-VED, M-VED, and H-VED builds.\n' +
+							'Measurements: defect fraction and fatigue strength.\n' +
+							'Controls: keep alloy, powder, and heat treatment fixed.\n' +
+							'Risks or limits: single-paper evidence should be validated.',
+						answer:
+							'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].\n' +
+							'Variable matrix: compare L-VED, M-VED, and H-VED builds.\n' +
+							'Measurements: defect fraction and fatigue strength.\n' +
+							'Controls: keep alloy, powder, and heat treatment fixed.\n' +
+							'Risks or limits: single-paper evidence should be validated.',
 						source_mode: 'collection_grounded',
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
@@ -124,8 +134,13 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						plan_id: 'plan_1',
 						collection_id: 'col_123',
 						goal_id: 'goal_1',
-						title: 'Use the accepted VED finding to plan a defect-fatigue validation [Source 1].',
-						content: 'Use the accepted VED finding to plan a defect-fatigue validation [Source 1].',
+						title: 'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].',
+						content:
+							'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].\n' +
+							'Variable matrix: compare L-VED, M-VED, and H-VED builds.\n' +
+							'Measurements: defect fraction and fatigue strength.\n' +
+							'Controls: keep alloy, powder, and heat treatment fixed.\n' +
+							'Risks or limits: single-paper evidence should be validated.',
 						status: 'draft',
 						source_message_id: 'msg_assistant_1',
 						source_links: [
@@ -153,7 +168,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText(/accepted VED finding/)).toBeInTheDocument();
+		await expect.element(browserPage.getByText(/VED changes defect fraction/)).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
@@ -171,6 +186,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			);
 		}) as [string | URL | Request, RequestInit];
 		const payload = JSON.parse(planInit.body as string);
+		expect(payload.title).toBe(
+			'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].'
+		);
 		expect(payload.source_message_id).toBe('msg_assistant_1');
 		expect(payload.source_links).toEqual([
 			{
@@ -246,6 +264,85 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
 		await expect.element(browserPage.getByText('This grounded draft has no source links.')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
+					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+				);
+			})
+		).toBe(false);
+	});
+
+	it('does not save unstructured grounded answers as experiment plans', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						message_id: 'msg_assistant_unstructured_protocol',
+						session_id: 'session_1',
+						role: 'assistant',
+						content: 'Run 25 C and 150 C LPBF 316L builds [Source 1].',
+						answer: 'Run 25 C and 150 C LPBF 316L builds [Source 1].',
+						source_mode: 'collection_grounded',
+						used_evidence_ids: ['ev_1'],
+						warnings: [],
+						links: {},
+						review_gate: 'training_ready_findings',
+						source_links: [
+							{
+								kind: 'evidence',
+								label: 'Source 1',
+								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
+							}
+						],
+						created_at: '2026-07-13T00:01:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect.element(browserPage.getByText('Run 25 C and 150 C LPBF 316L builds')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Save is disabled until the answer includes a hypothesis, variable matrix, measurements, controls, and risks or limits.'
+				)
+			)
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {

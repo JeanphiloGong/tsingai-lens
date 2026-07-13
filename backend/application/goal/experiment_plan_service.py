@@ -55,6 +55,7 @@ class ExperimentPlanService:
         validated_source = self._validate_goal_copilot_source(
             collection_id=collection_id,
             goal_id=goal_id,
+            content=content,
             source_message_id=source_message_id,
             source_links=source_links,
             metadata=metadata,
@@ -102,6 +103,7 @@ class ExperimentPlanService:
         *,
         collection_id: str,
         goal_id: str,
+        content: str,
         source_message_id: str | None,
         source_links: list[Mapping[str, Any]] | None,
         metadata: Mapping[str, Any] | None,
@@ -170,6 +172,10 @@ class ExperimentPlanService:
         message_hrefs = {link.href for link in message.source_links}
         if requested_hrefs and not requested_hrefs.issubset(message_hrefs):
             raise ValueError("source_links must come from the saved goal message")
+        if not _has_protocol_draft_structure(content):
+            raise ValueError(
+                "goal copilot answer is not a structured protocol draft"
+            )
         return session, message
 
     def list_plans(
@@ -214,3 +220,15 @@ def _evidence_id_from_href(href: str) -> str:
     parsed = urlparse(href)
     values = parse_qs(parsed.query).get("evidence_id") or []
     return str(values[0]).strip() if values else ""
+
+
+def _has_protocol_draft_structure(content: str) -> bool:
+    normalized = content.lower()
+    required_terms = (
+        ("hypothesis", "假设"),
+        ("variable matrix", "变量矩阵", "变量"),
+        ("measurement", "measurements", "表征", "测试指标", "测量"),
+        ("control", "controls", "对照"),
+        ("risk", "risks", "limit", "limits", "风险", "限制"),
+    )
+    return all(any(term in normalized for term in terms) for terms in required_terms)

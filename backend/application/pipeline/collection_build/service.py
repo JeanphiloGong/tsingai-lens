@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from config import CONFIG_DIR
+from config import DATA_DIR, SOURCE_DEFAULT_CONFIG_FILE
 from infra.source.config.pipeline_mode import IndexingMethod
 
 from application.core.semantic_build.document_profile_service import DocumentProfileService
@@ -107,14 +107,14 @@ class CollectionBuildPipelineService:
         return build_source_artifacts
 
     def _load_collection_config(self, collection_id: str) -> tuple[Any, Path]:
-        default_config = CONFIG_DIR / "default.yaml"
+        default_config = SOURCE_DEFAULT_CONFIG_FILE
         if not default_config.is_file():
             raise FileNotFoundError(
-                "默认配置不存在，请在 backend/data/configs 下提供 default.yaml"
+                "默认 Source 配置不存在，请提供 backend/infra/source/config/default.yaml"
             )
 
         resolved_load_config = self._resolve_load_config()
-        config = resolved_load_config(default_config.parent, config_filepath=default_config)
+        config = resolved_load_config(DATA_DIR, config_filepath=default_config)
         paths = self.collection_service.get_paths(collection_id)
         config.input.storage.base_dir = str(paths.input_dir)
         config.output.base_dir = str(paths.output_dir)

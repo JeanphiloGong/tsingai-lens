@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 ROOT_DIR = Path(__file__).resolve().parent
 DATA_DIR = ROOT_DIR / "data"
 LOG_DIR = DATA_DIR / "logs"
+SOURCE_DEFAULT_CONFIG_FILE = (
+    ROOT_DIR / "infra" / "source" / "config" / "default.yaml"
+)
 
 # 环境变量文件
 ENV_FILE_PATH = ROOT_DIR / ".env"
@@ -25,7 +28,6 @@ DOCUMENTS_DIR = DATA_DIR / "documents"
 IMAGES_DIR = DATA_DIR / "images"
 INDEX_FILE = DOCUMENTS_DIR / "index.json"
 GRAPH_STORE_FILE = DATA_DIR / "graph_store.json"
-CONFIG_DIR = DATA_DIR / "configs"
 
 STATIC_IMAGE_URL = "/statc/images"
 

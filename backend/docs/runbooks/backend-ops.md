@@ -47,6 +47,9 @@ python3 ../scripts/check_docs_governance.py
 ## Operational Notes
 
 - Backend data persists under `backend/data`.
+- The Source runtime default config is packaged at
+  `backend/infra/source/config/default.yaml`; do not require
+  `backend/data/configs/default.yaml` in Docker volumes.
 - Public HTTP paths are split between `/api/*` for docs and static assets and
   `/api/v1/*` for business APIs.
 - Collection artifact readiness should be checked before calling graph

@@ -119,6 +119,52 @@ def _write_source_artifact_outputs(
     )
 
 
+def test_build_pipeline_service_uses_source_default_config_not_runtime_data(
+    monkeypatch,
+    tmp_path,
+):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    collection_service = CollectionService(tmp_path / "collections")
+    task_service = TaskService(tmp_path / "tasks")
+    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    runner = CollectionBuildPipelineService(
+        collection_service,
+        task_service,
+        artifact_registry,
+    )
+
+    collection = collection_service.create_collection("Packaged Config Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+
+    runtime_data_dir = tmp_path / "data"
+    (runtime_data_dir / "configs").mkdir(parents=True)
+    packaged_config = tmp_path / "source-config" / "default.yaml"
+    packaged_config.parent.mkdir(parents=True)
+    packaged_config.write_text("dummy: true\n", encoding="utf-8")
+
+    captured: dict[str, Path] = {}
+
+    def fake_load_config(root_dir, config_filepath=None):  # noqa: ANN001
+        captured["root_dir"] = Path(root_dir)
+        captured["config_filepath"] = Path(config_filepath)
+        return _build_config(Path("placeholder-output"), Path("placeholder-input"))
+
+    monkeypatch.setattr(task_runner_module, "DATA_DIR", runtime_data_dir)
+    monkeypatch.setattr(task_runner_module, "SOURCE_DEFAULT_CONFIG_FILE", packaged_config)
+    monkeypatch.setattr(task_runner_module, "load_config", fake_load_config)
+
+    config, output_dir = runner._load_collection_config(collection["collection_id"])
+
+    assert not (runtime_data_dir / "configs" / "default.yaml").exists()
+    assert captured["root_dir"] == runtime_data_dir
+    assert captured["config_filepath"] == packaged_config
+    assert config.input.storage.base_dir == str(paths.input_dir)
+    assert config.output.base_dir == str(paths.output_dir)
+    assert config.root_dir == str(paths.collection_dir)
+    assert output_dir == paths.output_dir
+
+
 def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
     import application.pipeline.collection_build.service as task_runner_module
 
@@ -134,10 +180,6 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     paths = collection_service.get_paths(collection["collection_id"])
     collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
 
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
     captured: dict[str, object] = {}
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
@@ -148,7 +190,6 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
         )
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(paths.output_dir, paths.input_dir))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
@@ -213,14 +254,9 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
     collection = collection_service.create_collection("Empty Collection")
     paths = collection_service.get_paths(collection["collection_id"])
 
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
     async def fail_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
         raise AssertionError("source artifacts should not run for an empty collection")
 
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(
         task_runner_module,
         "load_config",
@@ -250,14 +286,9 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(monkeypatch,
     paths = collection_service.get_paths(collection["collection_id"])
     collection_service.add_file(collection["collection_id"], "paper.txt", b"bad pdf")
 
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
         return [DummyWorkflowOutput(errors=["docling import failed"])]
 
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(
         task_runner_module,
         "load_config",
@@ -287,15 +318,10 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
     paths = collection_service.get_paths(collection["collection_id"])
     collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
 
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
         _write_source_artifact_outputs(paths.output_dir)
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(
         task_runner_module,
         "load_config",

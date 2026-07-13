@@ -657,10 +657,6 @@ def app_client(monkeypatch, tmp_path):
     )
     goal_service = GoalService(collection_service)
 
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
-
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
         _write_source_artifact_outputs(
@@ -682,7 +678,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(tasks_controller, "build_pipeline_service", runner)
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
     monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
     monkeypatch.setattr(graph_service_module, "collection_service", collection_service)

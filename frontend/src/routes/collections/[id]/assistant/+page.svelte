@@ -332,6 +332,10 @@
 		void sendMessage(text);
 	}
 
+	function draftProtocolFromReviewedFindings() {
+		void sendMessage($t('goalCopilot.experimentReadiness.protocolPrompt'));
+	}
+
 	function messageText(message: GoalSessionMessage) {
 		return message.answer ?? message.content ?? '';
 	}
@@ -604,9 +608,16 @@
 					<span>{$t('goalCopilot.experimentReadiness.title')}</span>
 					<strong>{readinessText}</strong>
 				</div>
-				<a href={`/collections/${collectionId}/goals/${queryGoalId}`}>
-					{$t('goalCopilot.experimentReadiness.openGoal')}
-				</a>
+				<div class="experiment-readiness__actions">
+					{#if goalProtocolReady}
+						<button type="button" on:click={draftProtocolFromReviewedFindings} disabled={sending}>
+							{$t('goalCopilot.experimentReadiness.draftProtocol')}
+						</button>
+					{/if}
+					<a href={`/collections/${collectionId}/goals/${queryGoalId}`}>
+						{$t('goalCopilot.experimentReadiness.openGoal')}
+					</a>
+				</div>
 			</section>
 		{/if}
 
@@ -1167,6 +1178,30 @@
 		font-size: 14px;
 		line-height: 21px;
 		font-weight: 650;
+	}
+
+	.experiment-readiness__actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex: 0 0 auto;
+	}
+
+	.experiment-readiness__actions button {
+		border: 1px solid #16a34a;
+		border-radius: 6px;
+		padding: 7px 10px;
+		background: #16a34a;
+		color: #ffffff;
+		font-size: 13px;
+		line-height: 18px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.experiment-readiness__actions button:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
 
 	.experiment-readiness a {

@@ -218,6 +218,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
 			.toHaveAttribute('href', '/collections/col_123/goals/goal_1');
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
+			.toBeInTheDocument();
 	});
 
 	it('shows review backlog before protocol drafts are ready', async () => {
@@ -270,6 +273,28 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
+	});
+
+	it('starts a protocol draft from reviewed goal findings', async () => {
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Draft protocol' }).click();
+
+		const [, messageInit] = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request) === '/api/v1/goal-sessions/session_1/messages' &&
+				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit];
+		const payload = JSON.parse(messageInit.body as string);
+		expect(payload.message).toContain('training-ready findings');
+		expect(payload.message).toContain('Hypothesis');
+		expect(payload.message).toContain('Variable matrix');
+		expect(payload.message).toContain('Measurements');
+		expect(payload.message).toContain('Controls');
+		expect(payload.message).toContain('Risks or limits');
+		expect(payload.message).toContain('visible source labels');
 	});
 
 	it('saves grounded copilot answers as traceable experiment plans', async () => {

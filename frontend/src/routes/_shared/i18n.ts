@@ -291,7 +291,10 @@ const translations: Record<Language, Translations> = {
 					'{review} finding(s) still need expert review before protocol drafts can be saved.',
 				empty: 'No training-ready findings are available for this goal yet.',
 				error: 'Readiness is unavailable: {message}',
-				openGoal: 'Open goal review'
+				openGoal: 'Open goal review',
+				draftProtocol: 'Draft protocol',
+				protocolPrompt:
+					'Draft a traceable next-step experiment protocol from the training-ready findings for this goal. Include these exact sections: Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. Cite every evidence-backed recommendation with the visible source labels.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -3316,7 +3319,10 @@ const translations: Record<Language, Translations> = {
 				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
 				empty: '该目标还没有可用于实验方案的 training-ready Findings。',
 				error: '就绪度不可用：{message}',
-				openGoal: '打开目标复核'
+				openGoal: '打开目标复核',
+				draftProtocol: '生成实验方案',
+				protocolPrompt:
+					'请基于该研究目标下 training-ready Findings 生成一个可追溯的下一步实验方案，并包含这些固定小节：Hypothesis、Variable matrix、Measurements、Controls、Risks or limits。每个有证据支撑的建议都必须引用可见的 source label。'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

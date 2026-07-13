@@ -353,7 +353,8 @@
 			queryGoalId &&
 				message.role === 'assistant' &&
 				message.source_mode === 'collection_grounded' &&
-				messageText(message).trim()
+				messageText(message).trim() &&
+				visibleSourceLinks(message).length > 0
 		);
 	}
 

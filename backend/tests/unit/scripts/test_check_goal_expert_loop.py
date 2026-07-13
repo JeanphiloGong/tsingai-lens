@@ -158,6 +158,42 @@ def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeyp
     assert summary["require_complete"] is True
 
 
+def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
+    check = _load_goal_expert_loop_module()
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: _dataset_payload())},
+            )
+        ),
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        require_complete=True,
+    )
+    text = check.render_text_summary(summary)
+
+    assert "Lens expert loop: fail (incomplete)" in text
+    assert "review candidates: 2" in text
+    assert "How does porosity affect corrosion?" in text
+    assert "open: /collections/col-1/goals/goal-2?review=queue" in text
+    assert "direction_error: 1" in text
+    assert "variable_error: 1" in text
+
+
 def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypatch):
     check = _load_goal_expert_loop_module()
     dataset = _completed_dataset_payload()

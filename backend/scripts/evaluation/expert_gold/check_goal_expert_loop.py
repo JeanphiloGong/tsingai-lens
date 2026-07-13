@@ -63,6 +63,12 @@ def parse_args() -> argparse.Namespace:
             "review candidates remain."
         ),
     )
+    parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default="json",
+        help="Output format. JSON is stable for automation; text is for human review loops.",
+    )
     return parser.parse_args()
 
 
@@ -75,7 +81,10 @@ def main() -> None:
         require_all_training_ready=args.require_all_training_ready,
         require_complete=args.require_complete,
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.format == "text":
+        print(render_text_summary(summary))
+    else:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
         raise SystemExit(1)
 
@@ -310,6 +319,55 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def render_text_summary(summary: dict[str, Any]) -> str:
+    remaining_work = _mapping(summary.get("remaining_work"))
+    lines = [
+        f"Lens expert loop: {summary.get('status')} ({summary.get('completion_status')})",
+        f"Collection: {summary.get('collection_id')}",
+        "",
+        "Layers:",
+    ]
+    for key, layer in _mapping(summary.get("layers")).items():
+        layer_mapping = _mapping(layer)
+        lines.append(f"- {key}: {layer_mapping.get('status')}")
+    lines.extend(
+        [
+            "",
+            "Remaining work:",
+            f"- review candidates: {int(remaining_work.get('review_candidate_count') or 0)}",
+            f"- goals without training-ready samples: {len(_list(remaining_work.get('goals_without_training_ready')))}",
+            f"- goals without training messages: {len(_list(remaining_work.get('goals_without_training_messages')))}",
+        ]
+    )
+    error_categories = _mapping(remaining_work.get("by_error_category"))
+    if error_categories:
+        lines.append("- error categories:")
+        for category, count in error_categories.items():
+            lines.append(f"  - {category}: {count}")
+    pending_goals = _mapping_list(remaining_work.get("pending_goals"))
+    if pending_goals:
+        lines.extend(["", "Pending goals:"])
+        for index, goal in enumerate(pending_goals, start=1):
+            lines.extend(
+                [
+                    f"{index}. {_text(goal.get('question')) or _text(goal.get('goal_id'))}",
+                    f"   action: {_text(goal.get('next_action'))}",
+                    (
+                        "   counts: "
+                        f"review={int(goal.get('review_candidate_count') or 0)}, "
+                        f"training_ready={int(goal.get('training_ready_count') or 0)}, "
+                        f"messages={int(goal.get('training_message_ready_count') or 0)}"
+                    ),
+                    f"   open: {_text(goal.get('href'))}",
+                ]
+            )
+    return "\n".join(lines)
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _goal_review_url(collection_id: str, goal_id: str) -> str:

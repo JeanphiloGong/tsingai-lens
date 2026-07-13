@@ -263,6 +263,13 @@ finished.
 loop: each row includes the research question, review candidate count, the next
 action, and a frontend `href` that opens the goal review queue or
 training-ready export view.
+For a human-readable queue instead of the full JSON payload, run:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --require-complete \
+  --format text
+```
 
 By default `check_goal_dataset_quality.py` is a reviewability gate: a goal may
 pass with only `review_candidate` samples. To require samples that can be used

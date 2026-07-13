@@ -38,6 +38,7 @@ function datasetResponse(overrides: {
 	trainingReady?: number;
 	reviewCandidate?: number;
 	rejected?: number;
+	trainingMessages?: number;
 	itemCount?: number;
 	labelCounts?: Record<string, number>;
 	errorCategories?: Record<string, number>;
@@ -47,6 +48,7 @@ function datasetResponse(overrides: {
 	datasetId?: string;
 } = {}) {
 	const trainingReady = overrides.trainingReady ?? 2;
+	const trainingMessages = overrides.trainingMessages ?? trainingReady;
 	const reviewCandidate = overrides.reviewCandidate ?? 1;
 	const rejected = overrides.rejected ?? 1;
 	const errorCategories = overrides.errorCategories ?? {
@@ -73,6 +75,7 @@ function datasetResponse(overrides: {
 		},
 		quality_summary: {
 			training_ready_sample_count: trainingReady,
+			training_message_sample_count: trainingMessages,
 			review_candidate_sample_count: reviewCandidate,
 			by_dataset_use_status: {
 				training_ready: trainingReady,
@@ -2054,6 +2057,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Candidate 1');
 		expect(datasetText).toContain('Training ready 2');
+		expect(datasetText).toContain('Training messages 2');
 		expect(datasetText).toContain('Needs review 1');
 		expect(datasetText).toContain(
 			'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.'
@@ -2193,9 +2197,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Collection dataset');
 		expect(datasetText).toContain(
-			'1 training-ready and 15 review-candidate goal sample(s) in this collection.'
+			'1 training-ready, 1 message-exportable, and 15 review-candidate goal sample(s) in this collection.'
 		);
 		expect(datasetText).toContain('Training ready 1');
+		expect(datasetText).toContain('Training messages 1');
 		expect(datasetText).toContain('Needs review 15');
 		expect(datasetText).toContain('Variable error 3');
 		expect(datasetText).toContain('Evidence error 2');

@@ -249,6 +249,8 @@
 		: null;
 	$: datasetTrainingReadySampleCount =
 		datasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: datasetTrainingMessageSampleCount =
+		datasetSummary?.quality_summary.training_message_sample_count ?? 0;
 	$: datasetReviewCandidateSampleCount =
 		datasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
 	$: datasetLabelCounts = datasetSummary?.label_counts ?? {
@@ -264,6 +266,8 @@
 		: [];
 	$: collectionDatasetTrainingReadySampleCount =
 		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: collectionDatasetTrainingMessageSampleCount =
+		collectionDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
 	$: collectionDatasetReviewCandidateSampleCount =
 		collectionDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
 	$: collectionDatasetErrorCategories = collectionDatasetSummary
@@ -2677,6 +2681,10 @@
 										<strong>{datasetTrainingReadySampleCount}</strong>
 									</span>
 									<span>
+										{$t('research.understanding.datasetTrainingMessages')}
+										<strong>{datasetTrainingMessageSampleCount}</strong>
+									</span>
+									<span>
 										{$t('research.understanding.datasetReviewCandidate')}
 										<strong>{datasetReviewCandidateSampleCount}</strong>
 									</span>
@@ -2744,6 +2752,7 @@
 											<p>
 												{$t('research.understanding.collectionDatasetReady', {
 													training: collectionDatasetTrainingReadySampleCount,
+													messages: collectionDatasetTrainingMessageSampleCount,
 													review: collectionDatasetReviewCandidateSampleCount
 												})}
 											</p>
@@ -2751,6 +2760,10 @@
 												<span>
 													{$t('research.understanding.datasetTrainingReady')}
 													<strong>{collectionDatasetTrainingReadySampleCount}</strong>
+												</span>
+												<span>
+													{$t('research.understanding.datasetTrainingMessages')}
+													<strong>{collectionDatasetTrainingMessageSampleCount}</strong>
 												</span>
 												<span>
 													{$t('research.understanding.datasetReviewCandidate')}

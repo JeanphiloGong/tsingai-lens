@@ -32,5 +32,8 @@ artifacts.
 - `research_understanding_feedback_service.py`
   Persists finding-level expert feedback and curation records, exports
   curation-derived `research_understanding_findings` gold drafts, and exports
-  read-only research-understanding dataset samples for evaluation or
-  fine-tuning preparation.
+  read-only research-understanding dataset samples plus quality summaries for
+  evaluation or fine-tuning preparation. The summary separates
+  `training_ready_sample_count` from `training_message_sample_count` so review
+  UIs can show whether confirmed findings actually have message rows available
+  for export.

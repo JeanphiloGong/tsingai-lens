@@ -650,6 +650,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "total_samples": 4,
         "usable_sample_count": 2,
         "training_ready_sample_count": 1,
+        "training_message_sample_count": 1,
         "review_candidate_sample_count": 2,
         "needs_review_count": 2,
         "rejected_count": 1,

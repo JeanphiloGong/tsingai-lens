@@ -369,6 +369,7 @@ export type ResearchUnderstandingDataset = {
 	label_counts: Record<ResearchUnderstandingDatasetLabelStatus, number>;
 	quality_summary: {
 		training_ready_sample_count: number;
+		training_message_sample_count: number;
 		review_candidate_sample_count: number;
 		by_dataset_use_status: Record<ResearchUnderstandingDatasetUseStatus, number>;
 		by_presentation_bucket: Record<string, number>;
@@ -1048,6 +1049,7 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 		},
 		quality_summary: {
 			training_ready_sample_count: toNumber(qualitySummary.training_ready_sample_count),
+			training_message_sample_count: toNumber(qualitySummary.training_message_sample_count),
 			review_candidate_sample_count: toNumber(qualitySummary.review_candidate_sample_count),
 			by_dataset_use_status: {
 				training_ready: toNumber(rawUseCounts.training_ready),

@@ -1037,6 +1037,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     by_dataset_use_status = {status: 0 for status in DATASET_USE_STATUSES}
     usable_sample_count = 0
     training_ready_sample_count = 0
+    training_message_sample_count = 0
     review_candidate_sample_count = 0
     needs_review_count = 0
     rejected_count = 0
@@ -1064,6 +1065,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
             usable_sample_count += 1
         if dataset_use_status == "training_ready":
             training_ready_sample_count += 1
+            if _mapping_list(item.get("training_messages")):
+                training_message_sample_count += 1
         elif dataset_use_status == "review_candidate":
             review_candidate_sample_count += 1
         if label_status != "candidate":
@@ -1191,6 +1194,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "total_samples": len(items),
         "usable_sample_count": usable_sample_count,
         "training_ready_sample_count": training_ready_sample_count,
+        "training_message_sample_count": training_message_sample_count,
         "review_candidate_sample_count": review_candidate_sample_count,
         "needs_review_count": needs_review_count,
         "rejected_count": rejected_count,

@@ -334,8 +334,9 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: 'Dataset',
 				collectionDatasetSummary: 'Collection dataset',
 				collectionDatasetReady:
-					'{training} training-ready and {review} review-candidate goal sample(s) in this collection.',
+					'{training} training-ready, {messages} message-exportable, and {review} review-candidate goal sample(s) in this collection.',
 				datasetTrainingReady: 'Training ready',
+				datasetTrainingMessages: 'Training messages',
 				datasetReviewCandidate: 'Needs review',
 				datasetErrorCategoriesTitle: 'Common error categories',
 				expertSummary: 'Expert readiness summary',
@@ -3271,8 +3272,9 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: '数据集',
 				collectionDatasetSummary: '全集合数据集',
 				collectionDatasetReady:
-					'当前集合有 {training} 条可训练 goal 样本，{review} 条待复核 goal 样本。',
+					'当前集合有 {training} 条可训练 goal 样本，{messages} 条可导出 messages，{review} 条待复核 goal 样本。',
 				datasetTrainingReady: '可用于训练',
+				datasetTrainingMessages: '可导出 messages',
 				datasetReviewCandidate: '待复核',
 				datasetErrorCategoriesTitle: '常见错误类型',
 				expertSummary: '专家可用性摘要',

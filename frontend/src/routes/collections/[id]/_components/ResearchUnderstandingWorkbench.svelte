@@ -170,7 +170,6 @@
 	let feedbackIssue: ResearchUnderstandingFeedbackIssueType = 'none';
 	let feedbackNote = '';
 	let feedbackSubmitting = false;
-	let batchAcceptSubmitting = false;
 	let feedbackMessage = '';
 	let feedbackError = '';
 	let lastFeedbackTargetId = '';
@@ -363,9 +362,6 @@
 				reviewQueueClaimIds.has(finding.claim_id))
 	);
 	$: visibleFindingRows = usesFindings ? filteredFindings : [];
-	$: visibleReviewCandidateFindings = visibleFindingRows.filter(
-		(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
-	);
 	$: nextReviewCandidateFinding =
 		allDisplayFindingRows.find(
 			(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
@@ -1500,54 +1496,6 @@
 					'review_candidate'
 		);
 		return candidates[0] ?? null;
-	}
-
-	async function acceptVisibleReviewCandidates() {
-		if (
-			!understanding ||
-			!collectionId ||
-			!selectedScopeId ||
-			!reviewerReady ||
-			!visibleReviewCandidateFindings.length ||
-			batchAcceptSubmitting
-		) {
-			return;
-		}
-		batchAcceptSubmitting = true;
-		feedbackMessage = '';
-		feedbackError = '';
-		try {
-			const acceptedFeedback = await Promise.all(
-				visibleReviewCandidateFindings.map((finding) =>
-					createResearchUnderstandingFeedback(collectionId, {
-						scope_type: understanding.scope.scope_type,
-						scope_id: selectedScopeId,
-						finding_id: finding.finding_id,
-						claim_id: finding.claim_id,
-						review_status: 'correct',
-						issue_type: 'none',
-						note: null
-					})
-				)
-			);
-			const nextFeedbackByTargetId = new Map(feedbackByTargetId);
-			for (const feedback of acceptedFeedback) {
-				const targetId = reviewTargetKey(feedback);
-				nextFeedbackByTargetId.set(targetId, [
-					feedback,
-					...(nextFeedbackByTargetId.get(targetId) ?? [])
-				]);
-			}
-			feedbackByTargetId = nextFeedbackByTargetId;
-			feedbackMessage = $t('research.understanding.batchAcceptSaved', {
-				count: acceptedFeedback.length
-			});
-			await refreshDatasetSummaryForCurrentScope();
-		} catch (error) {
-			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
-		} finally {
-			batchAcceptSubmitting = false;
-		}
 	}
 
 	function rejectSelectedFinding() {
@@ -2887,17 +2835,6 @@
 						</span>
 					</div>
 					<div class="research-understanding-workbench__review-loop-actions">
-						<button
-							type="button"
-							disabled={!reviewerReady || !visibleReviewCandidateFindings.length || batchAcceptSubmitting}
-							on:click={acceptVisibleReviewCandidates}
-						>
-							{batchAcceptSubmitting
-								? $t('research.understanding.batchAcceptSaving')
-								: $t('research.understanding.batchAcceptVisible', {
-										count: visibleReviewCandidateFindings.length
-									})}
-						</button>
 						<button
 							type="button"
 							disabled={datasetReviewCandidateSampleCount === 0}

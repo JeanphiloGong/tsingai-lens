@@ -267,7 +267,9 @@ const translations: Record<Language, Translations> = {
 				saving: 'Saving...',
 				saved: 'Saved',
 				open: 'Open plan',
-				defaultTitle: 'Experiment plan draft'
+				defaultTitle: 'Experiment plan draft',
+				reviewRequired:
+					'Save is disabled until this goal has expert-reviewed training-ready findings.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -3175,7 +3177,8 @@ const translations: Record<Language, Translations> = {
 				saving: '保存中...',
 				saved: '已保存',
 				open: '打开方案',
-				defaultTitle: '实验方案草稿'
+				defaultTitle: '实验方案草稿',
+				reviewRequired: '该研究目标还没有专家复核后的可训练 Findings，暂不能保存为实验方案。'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',

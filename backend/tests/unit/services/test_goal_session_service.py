@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from openai import APIConnectionError
+
 from application.goal.session_service import GoalSessionService
 from application.source.collection_service import CollectionService
 from infra.persistence.factory import build_goal_session_repository
@@ -38,6 +40,25 @@ class _FakeChat:
 class _FakeLLMClient:
     def __init__(self, content: str) -> None:
         self.chat = _FakeChat(content)
+
+
+class _FailingCompletions:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(kwargs)
+        raise APIConnectionError(request=None)
+
+
+class _FailingChat:
+    def __init__(self) -> None:
+        self.completions = _FailingCompletions()
+
+
+class _FailingLLMClient:
+    def __init__(self) -> None:
+        self.chat = _FailingChat()
 
 
 class _FakeWorkspaceService:
@@ -238,6 +259,23 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
         }
 
 
+class _EmptyTrainingReadyResearchUnderstandingFeedbackService:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(dict(kwargs))
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "dataset_use_status_filter": kwargs["dataset_use_status"],
+            "item_count": 0,
+            "items": [],
+            "warnings": [],
+        }
+
+
 class _ObjectiveResearchService(_EmptyResearchObjectiveService):
     def list_objective_workspaces(self, collection_id: str) -> dict:
         return {
@@ -392,6 +430,30 @@ def _service(
         research_understanding_feedback_service=research_understanding_feedback_service,
         goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient(content),
+        model="fake-model",
+    )
+    return service, collection_service
+
+
+def _service_with_llm_client(
+    tmp_path,
+    llm_client,
+    research_objective_service=None,
+    research_understanding_feedback_service=None,
+    paper_facts_service=None,
+) -> tuple[GoalSessionService, CollectionService]:
+    collection_service = CollectionService(tmp_path / "collections")
+    service = GoalSessionService(
+        collection_service=collection_service,
+        research_view_service=_MaterialResearchViewService(),
+        workspace_service=_FakeWorkspaceService(),
+        comparison_service=_EmptyComparisonService(),
+        paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
+        research_objective_service=research_objective_service
+        or _EmptyResearchObjectiveService(),
+        research_understanding_feedback_service=research_understanding_feedback_service,
+        goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
+        llm_client=llm_client,
         model="fake-model",
     )
     return service, collection_service
@@ -636,3 +698,65 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt
     assert "finding_review_candidate" not in prompt
+
+
+def test_goal_chat_warns_when_focused_scope_has_no_training_ready_findings(tmp_path):
+    feedback_service = _EmptyTrainingReadyResearchUnderstandingFeedbackService()
+    service, collection_service = _service(
+        tmp_path,
+        content="Use the collection evidence cautiously [Source 1].",
+        research_objective_service=_ObjectiveResearchService(),
+        research_understanding_feedback_service=feedback_service,
+    )
+    collection = collection_service.create_collection("Unreviewed Goal Collection")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_unreviewed",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Draft an experiment plan.",
+        page_context={"goal_id": "goal_unreviewed"},
+    )
+
+    assert response["source_mode"] == "collection_grounded"
+    assert "curated_research_findings_empty" in response["warnings"]
+    assert feedback_service.calls == [
+        {
+            "collection_id": collection["collection_id"],
+            "scope_type": "goal",
+            "scope_id": "goal_unreviewed",
+            "dataset_use_status": "training_ready",
+        }
+    ]
+
+
+def test_goal_chat_returns_limited_response_when_llm_is_unavailable(tmp_path):
+    llm_client = _FailingLLMClient()
+    service, collection_service = _service_with_llm_client(
+        tmp_path,
+        llm_client,
+        research_objective_service=_ObjectiveResearchService(),
+    )
+    collection = collection_service.create_collection("Unavailable Model Collection")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_objective_id="obj_lpbf_strength",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Draft an experiment plan.",
+        page_context={"objective_id": "obj_lpbf_strength"},
+    )
+
+    assert response["source_mode"] == "collection_limited"
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
+    assert "goal_copilot_model_unavailable" in response["warnings"]
+    assert "curated_research_findings_empty" in response["warnings"]
+    assert "model is currently unavailable" in response["answer"]
+    assert len(llm_client.chat.completions.calls) == 1

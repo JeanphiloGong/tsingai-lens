@@ -318,6 +318,10 @@
 			.slice(0, 12);
 	}
 
+	function needsCuratedFindings(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('curated_research_findings_empty');
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -354,7 +358,8 @@
 				message.role === 'assistant' &&
 				message.source_mode === 'collection_grounded' &&
 				messageText(message).trim() &&
-				visibleSourceLinks(message).length > 0
+				visibleSourceLinks(message).length > 0 &&
+				!needsCuratedFindings(message)
 		);
 	}
 
@@ -551,6 +556,11 @@
 												</a>
 											{/each}
 										</nav>
+									{/if}
+									{#if needsCuratedFindings(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.reviewRequired')}
+										</p>
 									{/if}
 									<div class="message-actions">
 										<button
@@ -1166,6 +1176,17 @@
 	.source-link:hover {
 		border-color: #2563eb;
 		background: #f8fbff;
+	}
+
+	.review-required-note {
+		margin: 10px 0 0;
+		padding: 9px 11px;
+		border-radius: 8px;
+		border: 1px solid #fde68a;
+		background: #fffbeb;
+		color: #92400e;
+		font-size: 13px;
+		line-height: 19px;
 	}
 
 	.message-actions {

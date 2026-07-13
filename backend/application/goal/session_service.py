@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
@@ -353,30 +353,39 @@ class GoalSessionService:
             warnings.append("no_collection_evidence_found")
         elif mode == "general":
             source_mode = "general_only"
-            answer = self._generate_llm_answer(
+            answer, failed_warning = self._try_generate_llm_answer(
                 session=session,
                 user_message=message,
                 source_mode=source_mode,
                 context={},
             )
+            if failed_warning:
+                warnings.append(failed_warning)
             used_evidence_ids = []
         elif has_collection_context:
             source_mode = "collection_grounded"
-            answer = self._generate_llm_answer(
+            answer, failed_warning = self._try_generate_llm_answer(
                 session=session,
                 user_message=message,
                 source_mode=source_mode,
                 context=context,
             )
+            if failed_warning:
+                source_mode = "collection_limited"
+                warnings.append(failed_warning)
+                used_evidence_ids = []
+                source_links = []
         else:
             source_mode = "general_fallback"
             warnings.append("no_collection_evidence_found")
-            generated = self._generate_llm_answer(
+            generated, failed_warning = self._try_generate_llm_answer(
                 session=session,
                 user_message=message,
                 source_mode=source_mode,
                 context={},
             )
+            if failed_warning:
+                warnings.append(failed_warning)
             answer = self._ensure_general_fallback_boundary(generated)
             used_evidence_ids = []
 
@@ -554,6 +563,8 @@ class GoalSessionService:
             focused_objective_id=focused_objective_id,
             warnings=warnings,
         )
+        if (focused_goal_id or focused_objective_id) and not curated_research_findings:
+            warnings.append("curated_research_findings_empty")
 
         context_payload = {
             "collection": collection,
@@ -837,6 +848,33 @@ class GoalSessionService:
         if not answer:
             raise RuntimeError("goal copilot returned empty answer")
         return answer
+
+    def _try_generate_llm_answer(
+        self,
+        *,
+        session: GoalSessionRecord,
+        user_message: str,
+        source_mode: SourceMode,
+        context: dict[str, Any],
+    ) -> tuple[str, str | None]:
+        try:
+            return (
+                self._generate_llm_answer(
+                    session=session,
+                    user_message=user_message,
+                    source_mode=source_mode,
+                    context=context,
+                ),
+                None,
+            )
+        except OpenAIError:
+            return (
+                "The goal copilot model is currently unavailable, so Lens cannot "
+                "draft a reliable answer from the collection in this turn. Review "
+                "the findings and evidence directly, then retry after the model "
+                "endpoint is available.",
+                "goal_copilot_model_unavailable",
+            )
 
     def _build_prompt(
         self,

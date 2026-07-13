@@ -19,6 +19,7 @@ def _write_goal_message(
     source_mode: str = "collection_grounded",
     warnings: list[str] | None = None,
     used_evidence_ids: list[str] | None = None,
+    content: str = "Run a traceable validation matrix [Source 1].",
 ) -> None:
     repository.write_session(
         {
@@ -48,8 +49,8 @@ def _write_goal_message(
                 "message_id": message_id,
                 "session_id": "session_1",
                 "role": "assistant",
-                "content": "Run a traceable validation matrix [Source 1].",
-                "answer": "Run a traceable validation matrix [Source 1].",
+                "content": content,
+                "answer": content,
                 "source_mode": source_mode,
                 "used_evidence_ids": used_evidence_ids or ["ev_1"],
                 "warnings": warnings or [],
@@ -122,6 +123,29 @@ def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path
     )
 
     with pytest.raises(ValueError, match="not eligible"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="Preheating validation matrix",
+            content="Run 25 C and 150 C LPBF 316L builds.",
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
+def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        content="Run a traceable validation matrix based on the accepted evidence.",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+
+    with pytest.raises(ValueError, match="does not cite a visible source label"):
         service.create_plan(
             collection_id="col_1",
             goal_id="goal_1",

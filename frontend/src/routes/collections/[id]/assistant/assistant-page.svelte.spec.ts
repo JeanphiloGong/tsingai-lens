@@ -333,6 +333,87 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		).toBe(false);
 	});
 
+	it('does not save grounded answers without source label citations as experiment plans', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						message_id: 'msg_assistant_unlabeled',
+						session_id: 'session_1',
+						role: 'assistant',
+						content: 'Use the accepted finding to plan a validation build.',
+						answer: 'Use the accepted finding to plan a validation build.',
+						source_mode: 'collection_grounded',
+						used_evidence_ids: ['ev_1'],
+						warnings: [],
+						links: {},
+						source_links: [
+							{
+								kind: 'evidence',
+								label: 'Source 1',
+								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
+							}
+						],
+						created_at: '2026-07-13T00:01:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Save is disabled until the answer names the visible source label, such as [Source 1].'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Source 1' }))
+			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
+		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
+					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+				);
+			})
+		).toBe(false);
+	});
+
 	it('does not save grounded answers before focused findings are expert-reviewed', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

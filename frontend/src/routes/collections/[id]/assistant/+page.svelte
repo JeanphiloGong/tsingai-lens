@@ -326,6 +326,11 @@
 		return (message.used_evidence_ids ?? []).length > 0;
 	}
 
+	function citesVisibleSourceLabel(message: GoalSessionMessage) {
+		const text = messageText(message);
+		return visibleSourceLinks(message).some((link) => text.includes(link.label));
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -364,6 +369,7 @@
 				messageText(message).trim() &&
 				visibleSourceLinks(message).length > 0 &&
 				hasEvidenceCitations(message) &&
+				citesVisibleSourceLabel(message) &&
 				!needsCuratedFindings(message)
 		);
 	}
@@ -572,6 +578,14 @@
 										!hasEvidenceCitations(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.evidenceRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										!citesVisibleSourceLabel(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceCitationRequired')}
 										</p>
 									{/if}
 									<div class="message-actions">

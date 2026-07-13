@@ -132,6 +132,15 @@ class ExperimentPlanService:
             raise ValueError("goal copilot answer has no auditable source links")
         if not message.used_evidence_ids:
             raise ValueError("goal copilot answer has no evidence citations")
+        visible_source_labels = [
+            link.label for link in message.source_links if link.label.strip()
+        ]
+        if visible_source_labels and not any(
+            label in message.content for label in visible_source_labels
+        ):
+            raise ValueError(
+                "goal copilot answer does not cite a visible source label"
+            )
         requested_hrefs = {
             str(link.get("href"))
             for link in source_links or []

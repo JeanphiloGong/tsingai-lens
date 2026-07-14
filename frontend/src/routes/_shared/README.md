@@ -38,6 +38,8 @@ This node owns browser-side helpers that are shared across frontend routes.
   answer source modes, and evidence references
 - `experimentPlans.ts`
   Goal-scoped experiment plan draft API helper for saving and editing
-  human-reviewable protocol suggestions produced from grounded copilot answers
+  human-reviewable protocol suggestions produced from grounded copilot answers;
+  Goal Copilot saves also carry source mode, review gate, used evidence ids,
+  and source-link counts in metadata so protocol drafts remain auditable
 - `i18n.ts`
   Shared translations and labels

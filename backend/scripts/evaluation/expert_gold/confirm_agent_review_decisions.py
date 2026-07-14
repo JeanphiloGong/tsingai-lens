@@ -7,9 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from application.evaluation.research_understanding_review_import_service import (
-    confirm_agent_review_rows,
-)
+DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,6 +40,13 @@ def main() -> None:
 def confirm_agent_review_decisions(
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    backend_root = str(DEFAULT_BACKEND_ROOT)
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+    from application.evaluation.research_understanding_review_import_service import (  # noqa: PLC0415
+        confirm_agent_review_rows,
+    )
+
     confirmed = confirm_agent_review_rows(rows)
     for row in confirmed:
         if row.get("action") == "__agent_review_error__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -150,5 +151,38 @@ def test_confirm_agent_review_decisions_reads_jsonl(tmp_path):
 
     rows = module.confirm_agent_review_decisions(module.read_jsonl(input_path))
 
+    assert rows[0]["finding_id"] == "finding-1"
+    assert rows[0]["action"] == "accept"
+
+
+def test_confirm_agent_review_decisions_cli_runs_outside_backend_root(tmp_path):
+    backend_root = Path(__file__).resolve().parents[3]
+    script_path = (
+        backend_root
+        / "scripts"
+        / "evaluation"
+        / "expert_gold"
+        / "confirm_agent_review_decisions.py"
+    )
+    input_path = tmp_path / "agent-reviewed-findings.jsonl"
+    output_path = tmp_path / "human-confirmed-findings.jsonl"
+    input_path.write_text(json.dumps(_row()) + "\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            str(input_path),
+            "--output-path",
+            str(output_path),
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
     assert rows[0]["finding_id"] == "finding-1"
     assert rows[0]["action"] == "accept"

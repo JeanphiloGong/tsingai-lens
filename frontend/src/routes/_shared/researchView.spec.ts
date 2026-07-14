@@ -636,7 +636,8 @@ describe('research view shared helpers', () => {
 			warnings: [],
 			review_progress: { ready_to_write: true },
 			decision_progress_by_goal: [],
-			affected_goals: []
+			affected_goals: [],
+			readiness_summary: {}
 		});
 
 		const payload = {

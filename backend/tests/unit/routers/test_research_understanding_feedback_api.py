@@ -432,6 +432,7 @@ class FakeResearchUnderstandingReviewImportService:
                 }
             ],
             "affected_goals": [],
+            "readiness_summary": {},
         }
 
 

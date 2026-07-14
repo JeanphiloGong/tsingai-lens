@@ -100,10 +100,15 @@ class ResearchUnderstandingReviewImportService:
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
                 affected_goals=[],
+                readiness_summary={},
             )
         warnings = _review_warnings(valid_decisions)
         warnings.extend(_actionable_decision_warnings(valid_decisions))
         if fail_on_warnings and warnings:
+            affected_goals = _affected_goal_summaries(
+                self.feedback_service,
+                valid_decisions,
+            )
             return _summary(
                 status="fail",
                 dry_run=dry_run,
@@ -124,12 +129,14 @@ class ResearchUnderstandingReviewImportService:
                 warnings=warnings,
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=_affected_goal_summaries(
-                    self.feedback_service,
-                    valid_decisions,
-                ),
+                affected_goals=affected_goals,
+                readiness_summary=_readiness_summary(affected_goals),
             )
         if dry_run:
+            affected_goals = _affected_goal_summaries(
+                self.feedback_service,
+                valid_decisions,
+            )
             return _summary(
                 status="pass",
                 dry_run=True,
@@ -143,10 +150,8 @@ class ResearchUnderstandingReviewImportService:
                 warnings=warnings,
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=_affected_goal_summaries(
-                    self.feedback_service,
-                    valid_decisions,
-                ),
+                affected_goals=affected_goals,
+                readiness_summary=_readiness_summary(affected_goals),
             )
 
         written = 0
@@ -177,6 +182,7 @@ class ResearchUnderstandingReviewImportService:
             review_progress=review_progress,
             decision_progress_by_goal=decision_progress_by_goal,
             affected_goals=affected_goals,
+            readiness_summary=_readiness_summary(affected_goals),
         )
 
     def import_jsonl_file(
@@ -1027,6 +1033,49 @@ def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
     return bool(statement and variables and outcomes and (direction or scope) and evidence)
 
 
+def _readiness_summary(affected_goals: list[dict[str, Any]]) -> dict[str, Any]:
+    goal_count = len(affected_goals)
+    projected_review_candidate_count = sum(
+        int(goal.get("projected_review_candidate_count") or 0)
+        for goal in affected_goals
+    )
+    projected_rejected_count = sum(
+        int(goal.get("projected_rejected_count") or 0) for goal in affected_goals
+    )
+    training_ready_goals = sum(
+        1
+        for goal in affected_goals
+        if int(goal.get("projected_training_ready_count") or 0) > 0
+    )
+    training_message_goals = sum(
+        1
+        for goal in affected_goals
+        if int(goal.get("projected_training_message_count") or 0) > 0
+    )
+    protocol_ready_goals = sum(
+        1
+        for goal in affected_goals
+        if int(goal.get("projected_protocol_ready_count") or 0) > 0
+    )
+    return {
+        "goal_count": goal_count,
+        "projected_training_ready_goal_count": training_ready_goals,
+        "projected_training_message_goal_count": training_message_goals,
+        "projected_protocol_ready_goal_count": protocol_ready_goals,
+        "projected_review_candidate_count": projected_review_candidate_count,
+        "projected_rejected_count": projected_rejected_count,
+        "ready_for_training_export": goal_count > 0 and training_message_goals == goal_count,
+        "ready_for_protocol_drafting": goal_count > 0 and protocol_ready_goals == goal_count,
+        "goals_still_needing_review_count": sum(
+            1
+            for goal in affected_goals
+            if int(goal.get("projected_review_candidate_count") or 0) > 0
+        ),
+        "goals_missing_training_messages_count": goal_count - training_message_goals,
+        "goals_missing_protocol_ready_count": goal_count - protocol_ready_goals,
+    }
+
+
 def _summary(
     *,
     status: str,
@@ -1040,6 +1089,7 @@ def _summary(
     review_progress: dict[str, Any],
     decision_progress_by_goal: list[dict[str, Any]],
     affected_goals: list[dict[str, Any]],
+    readiness_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "status": status,
@@ -1053,6 +1103,7 @@ def _summary(
         "review_progress": review_progress,
         "decision_progress_by_goal": decision_progress_by_goal,
         "affected_goals": affected_goals,
+        "readiness_summary": readiness_summary,
     }
 
 

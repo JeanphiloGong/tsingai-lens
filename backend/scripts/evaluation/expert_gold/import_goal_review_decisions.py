@@ -142,7 +142,33 @@ def render_text_summary(summary: dict) -> str:
                 lines.extend(_render_goal_summary(goal))
     else:
         lines.append("Affected goals: none")
+    readiness = summary.get("readiness_summary")
+    if isinstance(readiness, dict) and readiness:
+        lines.extend(_render_readiness_summary(readiness))
     return "\n".join(lines)
+
+
+def _render_readiness_summary(readiness: dict) -> list[str]:
+    return [
+        "Readiness after import:",
+        (
+            "- "
+            f"goals={readiness.get('goal_count', 0)} "
+            f"training_ready_goals={readiness.get('projected_training_ready_goal_count', 0)} "
+            f"message_ready_goals={readiness.get('projected_training_message_goal_count', 0)} "
+            f"protocol_ready_goals={readiness.get('projected_protocol_ready_goal_count', 0)}"
+        ),
+        (
+            "- "
+            f"remaining_review_candidates={readiness.get('projected_review_candidate_count', 0)} "
+            f"rejected={readiness.get('projected_rejected_count', 0)}"
+        ),
+        (
+            "- "
+            f"ready_for_training_export={bool(readiness.get('ready_for_training_export'))} "
+            f"ready_for_protocol_drafting={bool(readiness.get('ready_for_protocol_drafting'))}"
+        ),
+    ]
 
 
 def _render_goal_summary(goal: dict) -> list[str]:

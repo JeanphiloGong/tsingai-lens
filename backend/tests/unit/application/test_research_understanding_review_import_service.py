@@ -194,6 +194,19 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
 
     assert summary["status"] == "pass"
     assert summary["written_count"] == 0
+    assert summary["readiness_summary"] == {
+        "goal_count": 1,
+        "projected_training_ready_goal_count": 1,
+        "projected_training_message_goal_count": 1,
+        "projected_protocol_ready_goal_count": 1,
+        "projected_review_candidate_count": 0,
+        "projected_rejected_count": 0,
+        "ready_for_training_export": True,
+        "ready_for_protocol_drafting": True,
+        "goals_still_needing_review_count": 0,
+        "goals_missing_training_messages_count": 0,
+        "goals_missing_protocol_ready_count": 0,
+    }
     assert summary["affected_goals"] == [
         {
             "collection_id": "col-1",

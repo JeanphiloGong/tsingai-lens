@@ -259,6 +259,19 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 "projected_rejected_count": 1,
             }
         ],
+        "readiness_summary": {
+            "goal_count": 1,
+            "projected_training_ready_goal_count": 1,
+            "projected_training_message_goal_count": 1,
+            "projected_protocol_ready_goal_count": 1,
+            "projected_review_candidate_count": 1,
+            "projected_rejected_count": 1,
+            "ready_for_training_export": True,
+            "ready_for_protocol_drafting": True,
+            "goals_still_needing_review_count": 1,
+            "goals_missing_training_messages_count": 0,
+            "goals_missing_protocol_ready_count": 0,
+        },
     }
     assert service.dataset_exports == [
         {
@@ -378,6 +391,19 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
             "projected_rejected_count": 1,
         }
     ]
+    assert summary["readiness_summary"] == {
+        "goal_count": 1,
+        "projected_training_ready_goal_count": 1,
+        "projected_training_message_goal_count": 1,
+        "projected_protocol_ready_goal_count": 1,
+        "projected_review_candidate_count": 0,
+        "projected_rejected_count": 1,
+        "ready_for_training_export": True,
+        "ready_for_protocol_drafting": True,
+        "goals_still_needing_review_count": 0,
+        "goals_missing_training_messages_count": 0,
+        "goals_missing_protocol_ready_count": 0,
+    }
     assert service.feedback == []
     assert service.curations == []
 
@@ -416,6 +442,9 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
         "after import: training_ready=3 training_messages=2 protocol_ready=2 "
         "review_candidates=0 rejected=1"
     ) in text
+    assert "Readiness after import:" in text
+    assert "goals=1 training_ready_goals=1 message_ready_goals=1 protocol_ready_goals=1" in text
+    assert "ready_for_training_export=True ready_for_protocol_drafting=True" in text
     assert "finding-accept: training=message_pair; protocol=training_messages" in text
 
 

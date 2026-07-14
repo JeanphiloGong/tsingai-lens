@@ -3839,10 +3839,22 @@ describe('ResearchUnderstandingWorkbench', () => {
 								pending_reject_count: 0,
 								pending_correct_count: 0,
 								projected_training_ready_count: 2,
+								projected_training_message_count: 2,
+								projected_protocol_ready_count: 2,
 								projected_review_candidate_count: 13,
 								projected_rejected_count: 0
 							}
-						]
+						],
+						readiness_summary: {
+							goal_count: 1,
+							projected_training_ready_goal_count: 1,
+							projected_training_message_goal_count: 1,
+							projected_protocol_ready_goal_count: 1,
+							projected_review_candidate_count: 13,
+							projected_rejected_count: 0,
+							ready_for_training_export: true,
+							ready_for_protocol_drafting: true
+						}
 					})
 				);
 			}
@@ -4032,7 +4044,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 						warnings: [],
 						review_progress: { actionable_count: 1, skipped_count: 0 },
 						decision_progress_by_goal: [],
-						affected_goals: []
+						affected_goals: [],
+						readiness_summary: {}
 					})
 				);
 			}
@@ -4171,7 +4184,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 							next_steps: []
 						},
 						decision_progress_by_goal: [],
-						affected_goals: [{ goal_id: 'obj_1', written_count: 1 }]
+						affected_goals: [{ goal_id: 'obj_1', written_count: 1 }],
+						readiness_summary: {}
 					})
 				);
 			}

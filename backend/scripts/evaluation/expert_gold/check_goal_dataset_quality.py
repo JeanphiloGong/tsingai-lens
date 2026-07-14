@@ -398,6 +398,10 @@ def evaluate_goal_dataset_payload(
         "by_review_candidate_warning": dict(
             _mapping(quality.get("by_review_candidate_warning"))
         ),
+        "top_error_categories": _mapping_list(quality.get("top_error_categories")),
+        "top_issue_types": _mapping_list(quality.get("top_issue_types")),
+        "top_review_reasons": _mapping_list(quality.get("top_review_reasons")),
+        "top_system_warnings": _mapping_list(quality.get("top_system_warnings")),
         "by_trace_status": dict(_mapping(quality.get("by_trace_status"))),
         "warning_counts": dict(warning_counts),
         "checks": checks,

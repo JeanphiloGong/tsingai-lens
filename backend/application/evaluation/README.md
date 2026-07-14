@@ -38,4 +38,7 @@ artifacts.
   UIs can show whether confirmed findings actually have message rows available
   for export. Dataset export also exposes editable review JSONL templates for
   human accept/reject/correct review; training message exports remain limited
-  to `training_ready` samples.
+  to `training_ready` samples. Quality summaries include sorted top diagnostics
+  for error categories, issue types, review reasons, and system warnings so
+  expert labels can directly guide evaluation, prompt repair, or fine-tuning
+  data selection.

@@ -771,6 +771,10 @@ chat-style 训练行。
 `by_issue_type`、`by_error_category`、`by_support_grade`、`by_trace_status`、
 `by_evidence_role`、`by_evidence_traceability_status`、`by_quality_decision`、
 `by_presentation_bucket` 和 `by_bucket_quality_decision`。
+同时提供按数量降序排序的前 5 项诊断列表：
+`top_error_categories`、`top_issue_types`、`top_review_reasons` 和
+`top_system_warnings`，用于在专家标注后直接看到最常见的系统错误类别、
+原始标注问题、复核原因和系统风险提示。
 `by_issue_type` 保留专家标注的原始错误类型；`by_error_category` 把原始错误聚合为
 `variable_error`、`outcome_error`、`direction_error`、`context_error`、
 `relation_error`、`evidence_error`、`claim_scope_error`、`statement_error`、

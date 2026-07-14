@@ -83,6 +83,15 @@ def _dataset_payload(**overrides):
         "by_trace_status": {"evidence_derived": 1},
         "by_review_reason": {"single_paper_evidence": 1},
         "by_system_warning": {"table_row_alignment_uncertain": 1},
+        "top_error_categories": [
+            {"name": "evidence_error", "count": 1},
+            {"name": "variable_error", "count": 1},
+        ],
+        "top_issue_types": [{"name": "wrong_variable", "count": 1}],
+        "top_review_reasons": [{"name": "single_paper_evidence", "count": 1}],
+        "top_system_warnings": [
+            {"name": "table_row_alignment_uncertain", "count": 1}
+        ],
         "by_review_candidate_reason": {},
         "by_review_candidate_warning": {},
         "warning_counts": {
@@ -117,6 +126,17 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
         "variable_error": 1,
         "evidence_error": 1,
     }
+    assert summary["top_error_categories"] == [
+        {"name": "evidence_error", "count": 1},
+        {"name": "variable_error", "count": 1},
+    ]
+    assert summary["top_issue_types"] == [{"name": "wrong_variable", "count": 1}]
+    assert summary["top_review_reasons"] == [
+        {"name": "single_paper_evidence", "count": 1}
+    ]
+    assert summary["top_system_warnings"] == [
+        {"name": "table_row_alignment_uncertain", "count": 1}
+    ]
     assert summary["by_review_reason"] == {"single_paper_evidence": 1}
     assert summary["by_system_warning"] == {"table_row_alignment_uncertain": 1}
     assert summary["by_review_candidate_reason"] == {}

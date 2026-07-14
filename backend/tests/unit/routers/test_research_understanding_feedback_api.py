@@ -205,6 +205,10 @@ class FakeResearchUnderstandingFeedbackService:
                 "by_bucket_quality_decision": {
                     "primary": {"accepted_after_curation_match": 1}
                 },
+                "top_error_categories": [{"name": "none", "count": 1}],
+                "top_issue_types": [{"name": "none", "count": 1}],
+                "top_review_reasons": [],
+                "top_system_warnings": [],
                 "warning_counts": {
                     "missing_evidence": 0,
                     "missing_source_text": 0,

@@ -1254,12 +1254,24 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "by_system_warning": by_system_warning,
         "by_review_candidate_reason": by_review_candidate_reason,
         "by_review_candidate_warning": by_review_candidate_warning,
+        "top_error_categories": _top_counts(by_error_category),
+        "top_issue_types": _top_counts(by_issue_type),
+        "top_review_reasons": _top_counts(by_review_reason),
+        "top_system_warnings": _top_counts(by_system_warning),
         "warning_counts": warning_counts,
     }
 
 
 def _increment_count(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
+
+
+def _top_counts(counts: dict[str, int], *, limit: int = 5) -> list[dict[str, object]]:
+    return [
+        {"name": key, "count": value}
+        for key, value in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        if value
+    ][:limit]
 
 
 def _issue_error_category(issue_type: str) -> str:

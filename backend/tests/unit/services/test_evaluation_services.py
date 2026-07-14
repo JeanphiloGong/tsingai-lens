@@ -724,6 +724,18 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "by_system_warning": {},
         "by_review_candidate_reason": {},
         "by_review_candidate_warning": {},
+        "top_error_categories": [
+            {"name": "none", "count": 2},
+            {"name": "evidence_error", "count": 1},
+            {"name": "unreviewed", "count": 1},
+        ],
+        "top_issue_types": [
+            {"name": "none", "count": 2},
+            {"name": "evidence_not_grounded", "count": 1},
+            {"name": "unreviewed", "count": 1},
+        ],
+        "top_review_reasons": [],
+        "top_system_warnings": [],
         "warning_counts": {
             "missing_evidence": 0,
             "missing_source_text": 0,
@@ -1954,6 +1966,18 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
         "direction_error": 1,
         "evidence_error": 1,
     }
+    assert dataset["quality_summary"]["top_error_categories"] == [
+        {"name": "direction_error", "count": 1},
+        {"name": "evidence_error", "count": 1},
+        {"name": "outcome_error", "count": 1},
+        {"name": "variable_error", "count": 1},
+    ]
+    assert dataset["quality_summary"]["top_issue_types"] == [
+        {"name": "insufficient_evidence", "count": 1},
+        {"name": "wrong_direction", "count": 1},
+        {"name": "wrong_outcome", "count": 1},
+        {"name": "wrong_variable", "count": 1},
+    ]
     assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 4
 
 

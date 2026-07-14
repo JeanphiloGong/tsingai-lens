@@ -421,6 +421,10 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert rows[0]["allowed_actions"] == ["accept", "reject", "correct", "skip"]
     assert "wrong_direction" in rows[0]["reject_issue_options"]
     assert rows[0]["expert_note"] == ""
+    assert rows[0]["expert_note_required"] is True
+    assert rows[0]["expert_note_prompt"] == (
+        "Required: explain that the label is accepted only as paper-level evidence."
+    )
     assert rows[0]["suggested_target"]["review_status"] == "correct"
     assert (
         rows[0]["evidence"][0]["href"]
@@ -589,6 +593,10 @@ def test_render_decision_template_exports_editable_import_rows():
         "action": "skip",
         "issue_type": "",
         "expert_note": "",
+        "expert_note_required": True,
+        "expert_note_prompt": (
+            "Required: explain that the label is accepted only as paper-level evidence."
+        ),
         "statement": "Preheating increased ductility by 14%.",
         "variables": ["preheating"],
         "outcomes": ["ductility"],

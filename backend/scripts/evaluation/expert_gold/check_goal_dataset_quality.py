@@ -44,6 +44,14 @@ REVIEW_RISK_FLAGS = {
 TABLE_ROW_REVIEW_PROMPT = (
     "Expert review is required before treating this as a material effect."
 )
+EXPERT_NOTE_PROMPTS = {
+    "accept_as_paper_level": "Required: explain that the label is accepted only as paper-level evidence.",
+    "review_table_rows": "Required: explain which table rows, variable column, and outcome values were checked.",
+    "verify_table_rows": "Required: explain how parsed table-row alignment was verified.",
+    "review_table_variables": "Required: explain why the selected variable can be interpreted despite other table variables.",
+    "check_mechanism_requirement": "Required: explain whether mechanism evidence is required for this label.",
+    "resolve_conflict": "Required: explain how the conflicting evidence was resolved.",
+}
 ACCEPTANCE_REVIEW_CHECKS = {
     "accept_as_paper_level": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
     "needs_cross_paper_confirmation": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
@@ -808,6 +816,12 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
                     "issue_type": "",
                     "reject_issue_options": list(REJECT_ISSUE_OPTIONS),
                     "expert_note": "",
+                    "expert_note_required": _expert_note_required(
+                        _text(candidate.get("recommended_action_code"))
+                    ),
+                    "expert_note_prompt": _expert_note_prompt(
+                        _text(candidate.get("recommended_action_code"))
+                    ),
                     "suggested_target": dict(
                         _mapping(candidate.get("suggested_target"))
                     ),
@@ -841,6 +855,12 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                     "action": "skip",
                     "issue_type": "",
                     "expert_note": "",
+                    "expert_note_required": _expert_note_required(
+                        _text(candidate.get("recommended_action_code"))
+                    ),
+                    "expert_note_prompt": _expert_note_prompt(
+                        _text(candidate.get("recommended_action_code"))
+                    ),
                     "statement": _text(candidate.get("statement")),
                     "variables": _text_list(candidate.get("variables")),
                     "outcomes": _text_list(candidate.get("outcomes")),
@@ -897,6 +917,14 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                 }
             )
     return _jsonl(rows)
+
+
+def _expert_note_required(action_code: str) -> bool:
+    return action_code in REVIEW_RISK_FLAGS
+
+
+def _expert_note_prompt(action_code: str) -> str:
+    return EXPERT_NOTE_PROMPTS.get(action_code, "")
 
 
 def _training_target_statement(value: Any) -> str:

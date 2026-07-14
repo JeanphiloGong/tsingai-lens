@@ -278,6 +278,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "accept_allowed": True,
         "requires_correction": False,
         "blocking_missing": [],
+        "accept_blockers": [],
         "review_checks": [
             "Verify the selected table rows, variable columns, and outcome values.",
             "Confirm the finding is only paper-level unless cross-paper evidence is present.",
@@ -609,6 +610,7 @@ def test_render_decision_template_exports_editable_import_rows():
             "accept_allowed": True,
             "requires_correction": False,
             "blocking_missing": [],
+            "accept_blockers": [],
             "review_checks": [
                 "Confirm the finding is only paper-level unless cross-paper evidence is present."
             ],
@@ -906,6 +908,7 @@ def test_build_goal_review_packet_marks_protocol_blocking_gaps():
         "variables",
         "direction_or_scope",
     ]
+    assert candidate["acceptance_gate"]["accept_blockers"] == []
     assert (
         "protocol readiness gaps: variables, direction_or_scope"
         in text

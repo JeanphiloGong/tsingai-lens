@@ -41,6 +41,12 @@ _ACCEPTANCE_REVIEW_CHECKS = {
     "validate_model_evidence": "Validate the model-prediction or validation evidence before accepting.",
     "model_validation_finding": "Validate the model-prediction or validation evidence before accepting.",
 }
+_ACCEPT_BLOCKING_REVIEW_CODES = frozenset(
+    {
+        "table_row_alignment_uncertain",
+        "verify_table_rows",
+    }
+)
 _REJECTING_ISSUE_TYPES = frozenset(
     {
         "evidence_not_grounded",
@@ -1780,6 +1786,10 @@ def _acceptance_gate_for_sample(
     protocol_readiness: Mapping[str, Any],
 ) -> dict[str, Any]:
     blocking_missing = list(_strings(protocol_readiness.get("blocking_missing")))
+    accept_blockers = _accept_blockers(
+        system_prediction=system_prediction,
+        review_action=review_action,
+    )
     review_checks = _acceptance_review_checks(
         system_prediction=system_prediction,
         review_action=review_action,
@@ -1789,6 +1799,11 @@ def _acceptance_gate_for_sample(
         accept_allowed = False
         requires_correction = False
         guidance = "Already accepted for training use."
+    elif accept_blockers:
+        status = "correction_required"
+        accept_allowed = False
+        requires_correction = True
+        guidance = "Do not accept directly; correct or reject the table alignment risk first."
     elif blocking_missing:
         status = "correction_required"
         accept_allowed = False
@@ -1804,10 +1819,27 @@ def _acceptance_gate_for_sample(
         "accept_allowed": accept_allowed,
         "requires_correction": requires_correction,
         "blocking_missing": blocking_missing,
+        "accept_blockers": accept_blockers,
         "review_checks": review_checks,
         "recommended_action_code": _text(review_action.get("code")),
         "guidance": guidance,
     }
+
+
+def _accept_blockers(
+    *,
+    system_prediction: Mapping[str, Any],
+    review_action: Mapping[str, str],
+) -> list[str]:
+    blockers: list[str] = []
+    for value in [
+        _text(review_action.get("code")),
+        *_strings(system_prediction.get("review_reasons")),
+        *_strings(system_prediction.get("warnings")),
+    ]:
+        if value in _ACCEPT_BLOCKING_REVIEW_CODES and value not in blockers:
+            blockers.append(value)
+    return blockers
 
 
 def _acceptance_review_checks(

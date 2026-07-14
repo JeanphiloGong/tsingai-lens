@@ -766,6 +766,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "accept_allowed": False,
         "requires_correction": False,
         "blocking_missing": [],
+        "accept_blockers": [],
         "review_checks": [],
         "recommended_action_code": "review_evidence",
         "guidance": "Already accepted for training use.",
@@ -1208,16 +1209,17 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
         "label": "verify parsed table rows before accepting or correcting",
     }
     assert by_finding["finding-1"]["acceptance_gate"] == {
-        "status": "review_required",
-        "accept_allowed": True,
-        "requires_correction": False,
+        "status": "correction_required",
+        "accept_allowed": False,
+        "requires_correction": True,
         "blocking_missing": [],
+        "accept_blockers": ["verify_table_rows", "table_row_alignment_uncertain"],
         "review_checks": [
             "Verify parsed table-row alignment against the source table.",
             "Confirm the finding is only paper-level unless cross-paper evidence is present.",
         ],
         "recommended_action_code": "verify_table_rows",
-        "guidance": "Accept only after the listed checks and source evidence match.",
+        "guidance": "Do not accept directly; correct or reject the table alignment risk first.",
     }
     assert by_finding["finding-2"]["review_action"] == {
         "code": "review_table_rows",

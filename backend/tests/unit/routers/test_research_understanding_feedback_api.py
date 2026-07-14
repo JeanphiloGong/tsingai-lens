@@ -1072,6 +1072,7 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
             "accept_allowed": True,
             "requires_correction": False,
             "blocking_missing": [],
+            "accept_blockers": [],
             "review_checks": [
                 "Confirm the finding is only paper-level unless cross-paper evidence is present."
             ],
@@ -1256,6 +1257,7 @@ def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
         "variables",
         "direction_or_scope",
     ]
+    assert row["acceptance_gate"]["accept_blockers"] == []
 
 
 def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):
@@ -1466,6 +1468,7 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     assert line["curated_evidence_ref_ids"] == ["ev-1"]
     assert line["acceptance_gate"]["status"] == "review_required"
     assert line["acceptance_gate"]["accept_allowed"] is True
+    assert line["acceptance_gate"]["accept_blockers"] == []
     assert line["evidence"][0] == {
         "evidence_ref_id": "ev-1",
         "label": "P001 Section 3.2",

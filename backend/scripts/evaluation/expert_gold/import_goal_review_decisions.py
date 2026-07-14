@@ -102,6 +102,7 @@ def import_review_decisions(
     decisions = [_decision_from_row(row, line_number=index + 1) for index, row in enumerate(rows)]
     errors = [decision for decision in decisions if decision["status"] == "error"]
     valid_decisions = [decision for decision in decisions if decision["status"] == "ready"]
+    review_progress = _review_progress(valid_decisions)
     service = None
     if not errors:
         service = feedback_service or _build_feedback_service()
@@ -116,6 +117,7 @@ def import_review_decisions(
             counts={},
             errors=errors,
             warnings=[],
+            review_progress=review_progress,
             affected_goals=[],
         )
     warnings = _review_warnings(valid_decisions)
@@ -137,6 +139,7 @@ def import_review_decisions(
                 for warning in warnings
             ],
             warnings=warnings,
+            review_progress=review_progress,
             affected_goals=[],
         )
     if dry_run:
@@ -149,6 +152,7 @@ def import_review_decisions(
             counts=_counts(valid_decisions),
             errors=[],
             warnings=warnings,
+            review_progress=review_progress,
             affected_goals=[],
         )
 
@@ -175,6 +179,7 @@ def import_review_decisions(
         counts=_counts(valid_decisions),
         errors=[],
         warnings=warnings,
+        review_progress=review_progress,
         affected_goals=affected_goals,
     )
 
@@ -397,6 +402,30 @@ def _counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
     for decision in decisions:
         counts[decision["action"]] += 1
     return {key: value for key, value in counts.items() if value}
+
+
+def _review_progress(decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = _counts(decisions)
+    actionable_count = sum(
+        counts.get(action, 0) for action in ("accept", "reject", "correct")
+    )
+    skipped_count = counts.get("skip", 0)
+    next_steps = []
+    if actionable_count == 0:
+        next_steps.append(
+            "change at least one reviewed row from skip to accept, reject, or correct"
+        )
+    if skipped_count:
+        next_steps.append("leave unchecked rows as skip or review them later")
+    if counts.get("accept", 0):
+        next_steps.append("rerun dry-run with --fail-on-warnings before import")
+    return {
+        "actionable_count": actionable_count,
+        "skipped_count": skipped_count,
+        "needs_review_count": skipped_count,
+        "ready_to_write": actionable_count > 0,
+        "next_steps": next_steps,
+    }
 
 
 def _dataset_validation_errors(
@@ -645,6 +674,7 @@ def _summary(
     counts: dict[str, int],
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
+    review_progress: dict[str, Any],
     affected_goals: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -656,6 +686,7 @@ def _summary(
         "counts": counts,
         "errors": errors,
         "warnings": warnings,
+        "review_progress": review_progress,
         "affected_goals": affected_goals,
     }
 

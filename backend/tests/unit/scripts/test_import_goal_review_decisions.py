@@ -186,6 +186,16 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
         "counts": {"accept": 1, "correct": 1, "reject": 1, "skip": 1},
         "errors": [],
         "warnings": [],
+        "review_progress": {
+            "actionable_count": 3,
+            "skipped_count": 1,
+            "needs_review_count": 1,
+            "ready_to_write": True,
+            "next_steps": [
+                "leave unchecked rows as skip or review them later",
+                "rerun dry-run with --fail-on-warnings before import",
+            ],
+        },
         "affected_goals": [
             {
                 "collection_id": "col-1",
@@ -286,6 +296,13 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
     assert summary["written_count"] == 0
     assert summary["counts"] == {"accept": 1}
     assert summary["warnings"] == []
+    assert summary["review_progress"] == {
+        "actionable_count": 1,
+        "skipped_count": 0,
+        "needs_review_count": 0,
+        "ready_to_write": True,
+        "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
+    }
     assert summary["affected_goals"] == []
     assert service.feedback == []
     assert service.curations == []
@@ -318,6 +335,16 @@ def test_import_review_decisions_warns_when_all_rows_are_skipped(tmp_path):
             ),
         }
     ]
+    assert summary["review_progress"] == {
+        "actionable_count": 0,
+        "skipped_count": 2,
+        "needs_review_count": 2,
+        "ready_to_write": False,
+        "next_steps": [
+            "change at least one reviewed row from skip to accept, reject, or correct",
+            "leave unchecked rows as skip or review them later",
+        ],
+    }
     assert service.feedback == []
     assert service.curations == []
 
@@ -349,12 +376,54 @@ def test_import_review_decisions_fail_on_warnings_rejects_all_skip_import(tmp_pa
             ),
         }
     ]
+    assert summary["review_progress"] == {
+        "actionable_count": 0,
+        "skipped_count": 1,
+        "needs_review_count": 1,
+        "ready_to_write": False,
+        "next_steps": [
+            "change at least one reviewed row from skip to accept, reject, or correct",
+            "leave unchecked rows as skip or review them later",
+        ],
+    }
     assert [error["message"] for error in summary["errors"]] == [
         (
             "review warning requires resolution: no_actionable_decisions: all "
             "rows are skip; no expert labels will be written"
         )
     ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
+def test_import_review_decisions_reports_review_progress_for_partial_template(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [_base_row(action="accept", finding_id="finding-accept"), _base_row(action="skip")],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["counts"] == {"accept": 1, "skip": 1}
+    assert summary["review_progress"] == {
+        "actionable_count": 1,
+        "skipped_count": 1,
+        "needs_review_count": 1,
+        "ready_to_write": True,
+        "next_steps": [
+            "leave unchecked rows as skip or review them later",
+            "rerun dry-run with --fail-on-warnings before import",
+        ],
+    }
     assert service.feedback == []
     assert service.curations == []
 

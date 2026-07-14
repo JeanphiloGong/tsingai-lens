@@ -263,14 +263,19 @@ candidate per line:
 ```bash
 python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format review-jsonl
+
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format decision-template \
+  > reviewed-findings.jsonl
 ```
 
-Each exported JSONL row defaults to `"action": "skip"` and includes
-`allowed_actions`, `reject_issue_options`, `review_instructions`, and
-`review_risk_flags`. The reviewer changes only rows they have checked to
-`accept`, `reject`, or `correct`; unchanged rows stay skipped and are not
-written as labels. `reject` rows need an `issue_type` such as `wrong_variable`,
-`wrong_direction`, or `insufficient_evidence`. `correct` rows need a corrected
+Use `review-jsonl` when the reviewer needs the full candidate payload and
+evidence records. Use `decision-template` when the reviewer needs a compact
+editable import file. Each exported row defaults to `"action": "skip"`. The
+reviewer changes only rows they have checked to `accept`, `reject`, or
+`correct`; unchanged rows stay skipped and are not written as labels. `reject`
+rows need an `issue_type` such as `wrong_variable`, `wrong_direction`, or
+`insufficient_evidence`. `correct` rows need a corrected
 `suggested_target.statement` and at least one `evidence_ref_id`. Rows with
 `protocol_readiness.blocking_missing` cannot be imported as `accept`; change
 them to `correct` after filling the missing fields/evidence, `reject`, or
@@ -303,6 +308,9 @@ expert changes the row to `correct`, `reject`, or leaves it as `skip`.
 If every row is still `skip`, dry-run reports a `no_actionable_decisions`
 warning because no expert labels will be written; with `--fail-on-warnings`,
 that unchanged template fails validation.
+Every dry-run and import summary includes `review_progress`, which reports how
+many rows are actionable, how many remain skipped, whether the file is ready to
+write, and the next steps needed before import.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

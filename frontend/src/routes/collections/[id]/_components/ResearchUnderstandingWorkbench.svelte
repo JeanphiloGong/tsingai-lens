@@ -4309,19 +4309,6 @@
 															<button
 																type="button"
 																aria-describedby={findingSummaryId(displayFinding)}
-																disabled={feedbackSubmitting ||
-																	!reviewerReady ||
-																	trust.datasetUseStatus === 'training_ready' ||
-																	!findingCanAccept(finding)}
-																on:click={() => acceptFinding(finding)}
-															>
-																{feedbackSubmitting
-																	? $t('research.understanding.quickAcceptSaving')
-																	: findingAcceptLabel(finding)}
-															</button>
-															<button
-																type="button"
-																aria-describedby={findingSummaryId(displayFinding)}
 																on:click={() => openFindingReject(finding.finding_id)}
 															>
 																{$t('research.understanding.quickReject')}

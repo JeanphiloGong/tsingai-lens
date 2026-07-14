@@ -2090,6 +2090,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(findingsTable.getByRole('button', { name: 'Accept paper-level' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(findingsTable.getByRole('button', { name: 'Review evidence' }))
 			.toBeInTheDocument();
 		await expect.element(findingsTable.getByText('Verify 1 direct evidence link(s) against the parsed source text.')).not.toBeInTheDocument();
 	});

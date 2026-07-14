@@ -712,7 +712,14 @@ describe('research view shared helpers', () => {
 				},
 				by_review_candidate_warning: {
 					table_row_alignment_uncertain: 1
-				}
+				},
+				top_error_categories: [{ name: 'unreviewed', count: 2 }],
+				top_issue_types: [{ name: 'unreviewed', count: 2 }],
+				top_review_reasons: [
+					{ name: 'single_paper_evidence', count: 2 },
+					{ name: 'partial_support', count: 1 }
+				],
+				top_system_warnings: [{ name: 'table_row_alignment_uncertain', count: 1 }]
 			},
 			items: [
 				{
@@ -751,6 +758,13 @@ describe('research view shared helpers', () => {
 		expect(dataset.quality_summary.by_review_candidate_warning).toEqual({
 			table_row_alignment_uncertain: 1
 		});
+		expect(dataset.quality_summary.top_review_reasons).toEqual([
+			{ name: 'single_paper_evidence', count: 2 },
+			{ name: 'partial_support', count: 1 }
+		]);
+		expect(dataset.quality_summary.top_system_warnings).toEqual([
+			{ name: 'table_row_alignment_uncertain', count: 1 }
+		]);
 		expect(dataset.items[0]).toMatchObject({
 			sample_id: 'sample_1',
 			finding_id: 'finding_1',

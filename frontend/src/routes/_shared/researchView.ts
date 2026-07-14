@@ -364,6 +364,10 @@ export type ResearchUnderstandingDatasetReviewAction = {
 	code: string;
 	label: string;
 };
+export type ResearchUnderstandingDatasetCountEntry = {
+	name: string;
+	count: number;
+};
 export type ResearchUnderstandingDatasetSample = {
 	sample_id: string;
 	finding_id: string;
@@ -396,6 +400,10 @@ export type ResearchUnderstandingDataset = {
 		by_system_warning: Record<string, number>;
 		by_review_candidate_reason: Record<string, number>;
 		by_review_candidate_warning: Record<string, number>;
+		top_error_categories: ResearchUnderstandingDatasetCountEntry[];
+		top_issue_types: ResearchUnderstandingDatasetCountEntry[];
+		top_review_reasons: ResearchUnderstandingDatasetCountEntry[];
+		top_system_warnings: ResearchUnderstandingDatasetCountEntry[];
 	};
 	items: ResearchUnderstandingDatasetSample[];
 	warnings: string[];
@@ -902,6 +910,18 @@ function toNumberRecord(value: unknown): Record<string, number> {
 	);
 }
 
+function toCountEntries(value: unknown): ResearchUnderstandingDatasetCountEntry[] {
+	return asArray(value)
+		.map((item) => {
+			const record = asRecord(item);
+			if (!record) return null;
+			const name = toText(record.name);
+			const count = toNumber(record.count);
+			return name && count > 0 ? { name, count } : null;
+		})
+		.filter((item): item is ResearchUnderstandingDatasetCountEntry => item !== null);
+}
+
 function toOptionalNumber(value: unknown): number | null {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string' && value.trim() !== '') {
@@ -1090,7 +1110,11 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 			by_review_reason: toNumberRecord(qualitySummary.by_review_reason),
 			by_system_warning: toNumberRecord(qualitySummary.by_system_warning),
 			by_review_candidate_reason: toNumberRecord(qualitySummary.by_review_candidate_reason),
-			by_review_candidate_warning: toNumberRecord(qualitySummary.by_review_candidate_warning)
+			by_review_candidate_warning: toNumberRecord(qualitySummary.by_review_candidate_warning),
+			top_error_categories: toCountEntries(qualitySummary.top_error_categories),
+			top_issue_types: toCountEntries(qualitySummary.top_issue_types),
+			top_review_reasons: toCountEntries(qualitySummary.top_review_reasons),
+			top_system_warnings: toCountEntries(qualitySummary.top_system_warnings)
 		},
 		items: asArray(record?.items)
 			.map((item) => normalizeResearchUnderstandingDatasetSample(item))

@@ -286,28 +286,29 @@
 		rejected: 0
 	};
 	$: datasetErrorCategories = datasetSummary
-		? Object.entries(datasetSummary.quality_summary.by_error_category)
-				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
-				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_error_categories,
+				datasetSummary.quality_summary.by_error_category
+			).filter(([category]) => !['none', 'unreviewed'].includes(category))
 		: [];
 	$: datasetReviewReasons = datasetSummary
-		? topPositiveCounts(
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_review_reasons,
 				preferredReviewRiskCounts(
 					datasetSummary.quality_summary.by_review_candidate_reason,
 					datasetSummary.quality_summary.by_review_reason,
 					datasetReviewCandidateSampleCount
-				),
-				5
+				)
 			)
 		: [];
 	$: datasetSystemWarnings = datasetSummary
-		? topPositiveCounts(
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_system_warnings,
 				preferredReviewRiskCounts(
 					datasetSummary.quality_summary.by_review_candidate_warning,
 					datasetSummary.quality_summary.by_system_warning,
 					datasetReviewCandidateSampleCount
-				),
-				5
+				)
 			)
 		: [];
 	$: collectionDatasetTrainingReadySampleCount =
@@ -325,9 +326,10 @@
 		rejected: 0
 	};
 	$: collectionDatasetErrorCategories = collectionDatasetSummary
-		? Object.entries(collectionDatasetSummary.quality_summary.by_error_category)
-				.filter(([category, count]) => count > 0 && !['none', 'unreviewed'].includes(category))
-				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_error_categories,
+				collectionDatasetSummary.quality_summary.by_error_category
+			).filter(([category]) => !['none', 'unreviewed'].includes(category))
 		: [];
 	$: collectionDatasetBucketCounts = collectionDatasetSummary
 		? Object.entries(collectionDatasetSummary.quality_summary.by_presentation_bucket)
@@ -335,23 +337,23 @@
 				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 		: [];
 	$: collectionDatasetReviewReasons = collectionDatasetSummary
-		? topPositiveCounts(
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_review_reasons,
 				preferredReviewRiskCounts(
 					collectionDatasetSummary.quality_summary.by_review_candidate_reason,
 					collectionDatasetSummary.quality_summary.by_review_reason,
 					collectionDatasetReviewCandidateSampleCount
-				),
-				5
+				)
 			)
 		: [];
 	$: collectionDatasetSystemWarnings = collectionDatasetSummary
-		? topPositiveCounts(
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_system_warnings,
 				preferredReviewRiskCounts(
 					collectionDatasetSummary.quality_summary.by_review_candidate_warning,
 					collectionDatasetSummary.quality_summary.by_system_warning,
 					collectionDatasetReviewCandidateSampleCount
-				),
-				5
+				)
 			)
 		: [];
 	$: expertSummary = usesFindings
@@ -819,6 +821,18 @@
 			.filter(([, count]) => count > 0)
 			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 			.slice(0, limit);
+	}
+
+	function preferredTopDiagnostics(
+		topEntries: Array<{ name: string; count: number }>,
+		fallbackCounts: Record<string, number>
+	) {
+		if (topEntries.length) {
+			return topEntries
+				.filter((entry) => entry.name && entry.count > 0)
+				.map((entry) => [entry.name, entry.count] as [string, number]);
+		}
+		return topPositiveCounts(fallbackCounts, 5);
 	}
 
 	function preferredReviewRiskCounts(

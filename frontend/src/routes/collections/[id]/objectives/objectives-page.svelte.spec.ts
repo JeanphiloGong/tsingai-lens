@@ -74,6 +74,7 @@ function researchUnderstandingDatasetResponse({
 	reviewCandidate = 0,
 	scopeId = 'goal_1',
 	errorCategories = {},
+	reviewReasons = {},
 	nextReviewFindingId = '',
 	reviewActionCode = ''
 }: {
@@ -83,6 +84,7 @@ function researchUnderstandingDatasetResponse({
 	reviewCandidate?: number;
 	scopeId?: string;
 	errorCategories?: Record<string, number>;
+	reviewReasons?: Record<string, number>;
 	nextReviewFindingId?: string;
 	reviewActionCode?: string;
 } = {}) {
@@ -113,7 +115,21 @@ function researchUnderstandingDatasetResponse({
 				rejected: 0
 			},
 			by_presentation_bucket: {},
-			by_error_category: errorCategories
+			by_error_category: errorCategories,
+			by_review_reason: reviewReasons,
+			by_system_warning: {},
+			by_review_candidate_reason: reviewReasons,
+			by_review_candidate_warning: {},
+			top_error_categories: Object.entries(errorCategories).map(([name, count]) => ({
+				name,
+				count
+			})),
+			top_issue_types: [],
+			top_review_reasons: Object.entries(reviewReasons).map(([name, count]) => ({
+				name,
+				count
+			})),
+			top_system_warnings: []
 		},
 		items: reviewCandidate
 			? [
@@ -236,6 +252,10 @@ function goalReviewResponse(input: string | URL | Request) {
 				errorCategories:
 					scopeId === 'goal_heat_strength'
 						? { variable_error: 2, direction_error: 1, none: 1 }
+						: {},
+				reviewReasons:
+					scopeId === 'goal_heat_strength'
+						? { single_paper_evidence: 2, missing_mechanism_evidence: 1 }
 						: {},
 				nextReviewFindingId: scopeId === 'goal_heat_strength' ? 'finding_heat_strength' : '',
 				reviewActionCode: scopeId === 'goal_heat_strength' ? 'review_table_rows' : ''
@@ -486,11 +506,13 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				'href',
 				'/collections/col_4c54ffe568ec/goals/goal_heat_strength?review=queue&finding_id=finding_heat_strength'
 			);
-		const correctionTypes = browserPage.getByLabelText('Common expert correction types');
-		await expect.element(correctionTypes.getByText('Variable error')).toBeInTheDocument();
-		await expect.element(correctionTypes.getByText('2')).toBeInTheDocument();
-		await expect.element(correctionTypes.getByText('Direction error')).toBeInTheDocument();
-		await expect.element(correctionTypes.getByText('1')).toBeInTheDocument();
+		const reviewPriorities = browserPage.getByLabelText('Review priorities');
+		await expect.element(reviewPriorities.getByText('Single-paper evidence')).toBeInTheDocument();
+		await expect.element(reviewPriorities.getByText('2')).toBeInTheDocument();
+		await expect
+			.element(reviewPriorities.getByText('Missing mechanism evidence'))
+			.toBeInTheDocument();
+		await expect.element(reviewPriorities.getByText('1')).toBeInTheDocument();
 		const goalLinks = browserPage.getByRole('link').all();
 		const goalReviewLinks = await Promise.all(
 			goalLinks.map(async (link) => ({

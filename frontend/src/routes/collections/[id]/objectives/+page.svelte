@@ -45,7 +45,7 @@
 		0
 	);
 	$: goalReviewSummary = buildGoalReviewSummary(confirmedGoals, goalDatasetById);
-	$: goalReviewErrorCategories = buildGoalReviewErrorCategories(goalDatasetById);
+	$: goalReviewDiagnostics = buildGoalReviewDiagnostics(goalDatasetById);
 	$: goalReviewRows = buildGoalReviewRows(confirmedGoals, goalDatasetById);
 	$: goalReviewOpenGoalCount = goalReviewRows.filter(
 		(row) => row.status !== 'protocol_ready'
@@ -181,12 +181,19 @@
 		};
 	}
 
-	function buildGoalReviewErrorCategories(datasets: Map<string, ResearchUnderstandingDataset>) {
+	function buildGoalReviewDiagnostics(datasets: Map<string, ResearchUnderstandingDataset>) {
 		const counts = new Map<string, number>();
 		for (const dataset of datasets.values()) {
-			for (const [category, count] of Object.entries(dataset.quality_summary.by_error_category)) {
-				if (count <= 0 || category === 'none' || category === 'unreviewed') continue;
-				counts.set(category, (counts.get(category) ?? 0) + count);
+			const summary = dataset.quality_summary;
+			const entries = summary.top_review_reasons.length
+				? summary.top_review_reasons
+				: Object.entries(summary.by_review_candidate_reason).map(([name, count]) => ({
+						name,
+						count
+					}));
+			for (const { name, count } of entries) {
+				if (count <= 0 || name === 'none' || name === 'unreviewed') continue;
+				counts.set(name, (counts.get(name) ?? 0) + count);
 			}
 		}
 		return [...counts.entries()]
@@ -254,9 +261,9 @@
 		return $t(`research.objectives.goalReviewStatuses.${status}`);
 	}
 
-	function goalReviewErrorCategoryLabel(category: string) {
-		const label = $t(`research.understanding.datasetErrorCategories.${category}`);
-		return label.startsWith('research.') ? category.replace(/_/g, ' ') : label;
+	function goalReviewDiagnosticLabel(reason: string) {
+		const label = $t(`research.understanding.datasetReviewReasons.${reason}`);
+		return label.startsWith('research.') ? reason.replace(/_/g, ' ') : label;
 	}
 
 	function goalReviewBody(dataset: ResearchUnderstandingDataset | null) {
@@ -523,16 +530,16 @@
 						<span>{$t('research.objectives.goalReviewCompleteBody')}</span>
 					</div>
 				{/if}
-				{#if goalReviewErrorCategories.length}
+				{#if goalReviewDiagnostics.length}
 					<div
 						class="goal-review-panel__error-categories"
-						aria-label={$t('research.objectives.goalReviewErrorCategories')}
+						aria-label={$t('research.objectives.goalReviewDiagnostics')}
 					>
-						<strong>{$t('research.objectives.goalReviewErrorCategories')}</strong>
+						<strong>{$t('research.objectives.goalReviewDiagnostics')}</strong>
 						<div>
-							{#each goalReviewErrorCategories as [category, count] (category)}
+							{#each goalReviewDiagnostics as [reason, count] (reason)}
 								<span>
-									{goalReviewErrorCategoryLabel(category)}
+									{goalReviewDiagnosticLabel(reason)}
 									<strong>{count}</strong>
 								</span>
 							{/each}

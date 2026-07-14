@@ -547,6 +547,9 @@ const translations: Record<Language, Translations> = {
 					has_unreviewed_comparable_candidates: 'Comparable candidates pending',
 					table_row_alignment_uncertain: 'Table row alignment uncertain',
 					missing_direct_result_evidence: 'Missing direct result evidence',
+					missing_mechanism_evidence: 'Missing mechanism evidence',
+					table_row_needs_expert_review: 'Table row needs expert review',
+					non_single_variable_table_comparison: 'Multiple table variables changed',
 					weak_evidence: 'Weak evidence'
 				},
 				datasetSystemWarnings: {
@@ -1009,6 +1012,7 @@ const translations: Record<Language, Translations> = {
 				goalReviewDatasetPending: 'Dataset status is not available for this goal yet.',
 				goalReviewDatasetBody:
 					'{training} training-ready · {messages} messages · {protocol} protocol-ready · {review} needs review',
+				goalReviewDiagnostics: 'Review priorities',
 				goalReviewErrorCategories: 'Common expert correction types',
 				goalReviewActionReview: 'Review findings',
 				goalReviewActionReviewCount: 'Review {count} finding(s)',
@@ -3722,6 +3726,9 @@ const translations: Record<Language, Translations> = {
 					has_unreviewed_comparable_candidates: '存在待复核可比候选',
 					table_row_alignment_uncertain: '表格行对齐不确定',
 					missing_direct_result_evidence: '缺少直接结果证据',
+					missing_mechanism_evidence: '缺少机制证据',
+					table_row_needs_expert_review: '表格行需要专家复核',
+					non_single_variable_table_comparison: '表格中多个变量同时变化',
 					weak_evidence: '弱证据'
 				},
 				datasetSystemWarnings: {
@@ -4153,6 +4160,7 @@ const translations: Record<Language, Translations> = {
 				goalReviewDatasetPending: '该目标的数据集状态暂不可用。',
 				goalReviewDatasetBody:
 					'{training} 条可训练 · {messages} 条 messages · {protocol} 条可生成方案 · {review} 条待复核',
+				goalReviewDiagnostics: '复核重点',
 				goalReviewErrorCategories: '常见专家纠错类型',
 				goalReviewActionReview: '复核发现',
 				goalReviewActionReviewCount: '复核 {count} 条发现',

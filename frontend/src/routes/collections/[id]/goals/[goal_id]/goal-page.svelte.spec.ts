@@ -145,7 +145,15 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 							},
 							by_error_category: {
 								none: 1
-							}
+							},
+							by_review_reason: {},
+							by_system_warning: {},
+							by_review_candidate_reason: {},
+							by_review_candidate_warning: {},
+							top_error_categories: [{ name: 'none', count: 1 }],
+							top_issue_types: [{ name: 'none', count: 1 }],
+							top_review_reasons: [],
+							top_system_warnings: []
 						},
 						items: [],
 						warnings: []

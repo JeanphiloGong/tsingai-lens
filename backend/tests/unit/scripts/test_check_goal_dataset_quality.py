@@ -113,6 +113,29 @@ def _failed_check_names(summary):
     return {item["name"] for item in summary["checks"] if item["status"] == "fail"}
 
 
+def test_write_stdout_exits_cleanly_on_broken_pipe(monkeypatch):
+    check = _load_goal_dataset_check_module()
+
+    class BrokenStdout:
+        def write(self, _output):
+            raise BrokenPipeError()
+
+        def fileno(self):
+            return 1
+
+    monkeypatch.setattr(check.sys, "stdout", BrokenStdout())
+    monkeypatch.setattr(check.os, "open", lambda *_args, **_kwargs: 3)
+    monkeypatch.setattr(check.os, "dup2", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(check.os, "close", lambda *_args, **_kwargs: None)
+
+    try:
+        check.write_stdout("row\n")
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("write_stdout should exit cleanly on BrokenPipeError")
+
+
 def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
     check = _load_goal_dataset_check_module()
 

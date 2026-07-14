@@ -116,15 +116,27 @@ def main() -> None:
         include_training_export=args.format == "messages-jsonl",
     )
     if args.format == "review-packet":
-        print(render_review_packet_summary(summary))
+        output = render_review_packet_summary(summary) + "\n"
     elif args.format == "review-jsonl":
-        sys.stdout.write(render_review_jsonl_summary(summary))
+        output = render_review_jsonl_summary(summary)
     elif args.format == "messages-jsonl":
-        sys.stdout.write(render_messages_jsonl_summary(summary))
+        output = render_messages_jsonl_summary(summary)
     else:
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        output = json.dumps(summary, ensure_ascii=False, indent=2) + "\n"
+    write_stdout(output)
     if summary["status"] == "fail":
         raise SystemExit(1)
+
+
+def write_stdout(output: str) -> None:
+    try:
+        sys.stdout.write(output)
+    except BrokenPipeError as exc:
+        with contextlib.suppress(OSError):
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+        raise SystemExit(0) from exc
 
 
 def check_goal_dataset_quality(

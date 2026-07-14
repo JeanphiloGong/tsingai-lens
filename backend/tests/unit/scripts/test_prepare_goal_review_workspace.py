@@ -258,6 +258,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     commands = (workspace / "review-commands.sh").read_text(encoding="utf-8")
     assert "set -euo pipefail" in commands
     assert 'REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}' in commands
+    assert "API_BASE_URL=${API_BASE_URL:-}" in commands
     assert '"$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE"' in commands
     assert "--dry-run --fail-on-warnings --format text" in commands
     assert '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE"' in commands
@@ -265,6 +266,10 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         '"$SCRIPTS/check_goal_expert_loop.py" --collection-id '
         "'col-1' --goal-id 'goal-1' --format text"
     ) in commands
+    assert "if [ -n \"$API_BASE_URL\" ]; then" in commands
+    assert "--api-base-url \"$API_BASE_URL\" --format text" in commands
+    assert "# Optional write smoke after expert approval" in commands
+    assert "--runtime-write-check --format text" in commands
     assert (
         '"$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
         "'col-1' --goal-id 'goal-1' --format training-jsonl "

@@ -342,10 +342,12 @@ def render_review_commands(summary: dict[str, Any]) -> str:
             'SCRIPTS="$BACKEND_DIR/scripts/evaluation/expert_gold"',
             "REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}",
             "REVIEWER=${REVIEWER:-materials-expert@example.com}",
+            "API_BASE_URL=${API_BASE_URL:-}",
             "",
             "# Run with this review workspace as the current directory.",
             "# Example:",
             "#   (cd /tmp/lens-goal-review-... && bash review-commands.sh)",
+            "# Set API_BASE_URL=http://localhost:5173 to check the running app contract.",
             "",
             "echo '1. Validate human-reviewed decisions without writing labels'",
             (
@@ -364,6 +366,14 @@ def render_review_commands(summary: dict[str, Any]) -> str:
                 '"$PYTHON" "$SCRIPTS/check_goal_expert_loop.py" --collection-id '
                 f"{_shell_quote(collection_id)}{prepare_goal_args} --format text"
             ),
+            "if [ -n \"$API_BASE_URL\" ]; then",
+            "  echo '3b. Check running API experiment-plan routes without writing data'",
+            (
+                '  "$PYTHON" "$SCRIPTS/check_goal_expert_loop.py" --collection-id '
+                f"{_shell_quote(collection_id)}{prepare_goal_args} "
+                '--api-base-url "$API_BASE_URL" --format text'
+            ),
+            "fi",
             "",
             "echo '4. Export training messages once labels are training-ready'",
             (
@@ -377,6 +387,14 @@ def render_review_commands(summary: dict[str, Any]) -> str:
                 '"$PYTHON" "$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
                 f"{_shell_quote(collection_id)}{prepare_goal_args} "
                 "--format training-jsonl --require-training-ready"
+            ),
+            "",
+            "# Optional write smoke after expert approval; creates and archives one test plan.",
+            (
+                '# API_BASE_URL=http://localhost:5173 "$PYTHON" '
+                '"$SCRIPTS/check_goal_expert_loop.py" --collection-id '
+                f"{_shell_quote(collection_id)}{prepare_goal_args} "
+                '--api-base-url "$API_BASE_URL" --runtime-write-check --format text'
             ),
             "",
         ]

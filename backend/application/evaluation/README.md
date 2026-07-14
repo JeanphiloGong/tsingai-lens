@@ -39,10 +39,13 @@ artifacts.
   for export, and from `protocol_ready_sample_count` so Goal Copilot only
   drafts experiments from actionable, traceable reviewed findings. Dataset
   export also exposes editable review JSONL templates for human accept/reject/
-  correct review; training message exports remain limited to `training_ready`
-  samples. Quality summaries include sorted top diagnostics for error
-  categories, issue types, review reasons, and system warnings so expert labels
-  can directly guide evaluation, prompt repair, or fine-tuning data selection.
+  correct review. Each dataset sample carries an `acceptance_gate` and
+  `review_decision_hint` so API, UI, and review-packet exports share the same
+  accept/reject/correct guidance; training message exports remain limited to
+  `training_ready` samples. Quality summaries include sorted top diagnostics
+  for error categories, issue types, review reasons, and system warnings so
+  expert labels can directly guide evaluation, prompt repair, or fine-tuning
+  data selection.
 - `research_understanding_review_import_service.py`
   Validates and imports expert review decision rows into feedback or curation
   records. CLI and future API entry points should call this service so

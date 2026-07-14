@@ -897,9 +897,9 @@ describe('research view shared helpers', () => {
 						},
 						guidance: 'accept or correct before protocol use'
 					},
-						acceptance_gate: {
-							status: 'review_required',
-							accept_allowed: true,
+							acceptance_gate: {
+								status: 'review_required',
+								accept_allowed: true,
 							requires_correction: false,
 							blocking_missing: [],
 							accept_blockers: [
@@ -907,11 +907,20 @@ describe('research view shared helpers', () => {
 								'table_row_alignment_uncertain'
 							],
 							review_checks: ['Confirm paper-level scope.'],
-							recommended_action_code: 'verify_table_rows',
-							guidance: 'Accept only after checking source evidence.'
-					},
-					metadata: {
-						training_message_diagnostic: ['missing_message_pair']
+								recommended_action_code: 'verify_table_rows',
+								guidance: 'Accept only after checking source evidence.'
+						},
+						review_decision_hint: {
+							summary: 'Verify parsed table rows before accepting.',
+							preferred_next_action: 'verify_then_accept_or_correct',
+							allowed_actions: ['accept', 'reject', 'correct', 'skip'],
+							blocked_actions: [],
+							why_accept_blocked: [],
+							required_checks: ['Confirm paper-level scope.'],
+							import_note: 'accept imports only after the reviewer changes action from skip'
+						},
+						metadata: {
+							training_message_diagnostic: ['missing_message_pair']
 					}
 				}
 			],
@@ -969,18 +978,27 @@ describe('research view shared helpers', () => {
 				},
 				guidance: 'accept or correct before protocol use'
 			},
-				acceptance_gate: {
-					status: 'review_required',
-					accept_allowed: true,
+					acceptance_gate: {
+						status: 'review_required',
+						accept_allowed: true,
 					requires_correction: false,
 					blocking_missing: [],
 					accept_blockers: ['verify_table_rows', 'table_row_alignment_uncertain'],
-					review_checks: ['Confirm paper-level scope.'],
-					recommended_action_code: 'verify_table_rows',
-					guidance: 'Accept only after checking source evidence.'
-			},
-			metadata: {
-				training_message_diagnostic: ['missing_message_pair']
+						review_checks: ['Confirm paper-level scope.'],
+						recommended_action_code: 'verify_table_rows',
+						guidance: 'Accept only after checking source evidence.'
+				},
+				review_decision_hint: {
+					summary: 'Verify parsed table rows before accepting.',
+					preferred_next_action: 'verify_then_accept_or_correct',
+					allowed_actions: ['accept', 'reject', 'correct', 'skip'],
+					blocked_actions: [],
+					why_accept_blocked: [],
+					required_checks: ['Confirm paper-level scope.'],
+					import_note: 'accept imports only after the reviewer changes action from skip'
+				},
+				metadata: {
+					training_message_diagnostic: ['missing_message_pair']
 			}
 		});
 	});

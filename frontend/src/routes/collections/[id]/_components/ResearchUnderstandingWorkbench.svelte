@@ -23,6 +23,7 @@
 		type ResearchUnderstandingDatasetLabelStatus,
 		type ResearchUnderstandingAcceptanceGate,
 		type ResearchUnderstandingProtocolReadiness,
+		type ResearchUnderstandingReviewDecisionHint,
 		type ResearchUnderstandingDatasetSample,
 		type ResearchUnderstandingDatasetUseStatus,
 		type ResearchUnderstandingAxisCoverageItem,
@@ -579,6 +580,10 @@
 		: [];
 	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
 	$: selectedFindingAcceptanceGate = selectedFindingDatasetSample?.acceptance_gate ?? null;
+	$: selectedFindingReviewDecisionHint =
+		selectedFindingDatasetSample?.dataset_use_status === 'review_candidate'
+			? (selectedFindingDatasetSample.review_decision_hint ?? null)
+			: null;
 	$: selectedFindingCanAccept = findingAcceptanceGateAllowsAccept(selectedFindingAcceptanceGate);
 	$: selectedFindingProtocolReadinessUnavailable = Boolean(
 		selectedFindingDatasetSample && !selectedFindingProtocolReadiness
@@ -1279,6 +1284,45 @@
 			...gate.review_checks,
 			...gate.blocking_missing.map(protocolReadinessGapLabel)
 		];
+	}
+
+	function reviewDecisionHintStatusLabel(hint: ResearchUnderstandingReviewDecisionHint) {
+		if (hint.blocked_actions.includes('accept')) {
+			return $t('research.understanding.reviewDecisionHintAcceptBlocked');
+		}
+		if (hint.preferred_next_action === 'verify_then_accept_or_correct') {
+			return $t('research.understanding.reviewDecisionHintVerifyFirst');
+		}
+		if (hint.preferred_next_action === 'correct_or_reject') {
+			return $t('research.understanding.reviewDecisionHintCorrectOrReject');
+		}
+		return $t('research.understanding.reviewDecisionHintAcceptAfterChecks');
+	}
+
+	function reviewDecisionBlockedActionLabel(action: string) {
+		return translatedCatalogLabel('research.understanding.reviewDecisionActions', action);
+	}
+
+	function reviewDecisionBlockedReasonLabel(reason: string) {
+		const [kind, values = ''] = reason.split('=', 2);
+		const valueLabels = values
+			.split(',')
+			.map((value) => value.trim())
+			.filter(Boolean)
+			.map((value) =>
+				kind === 'blocking_missing' ? protocolReadinessGapLabel(value) : acceptanceGateBlockerLabel(value)
+			);
+		if (kind === 'blocking_missing' && valueLabels.length) {
+			return $t('research.understanding.reviewDecisionBlockedMissing', {
+				items: valueLabels.join(', ')
+			});
+		}
+		if (kind === 'accept_blockers' && valueLabels.length) {
+			return $t('research.understanding.reviewDecisionBlockedRisks', {
+				items: valueLabels.join(', ')
+			});
+		}
+		return reason;
 	}
 
 	function expertNotePromptForAction(code: string) {
@@ -4696,12 +4740,56 @@
 										</div>
 										<div>
 											<span>{$t('research.understanding.findingUsageUpgrade')}</span>
-											<ul>
-												{#each selectedFindingUsagePath.checklist as item}
-													<li>{item}</li>
-												{/each}
-											</ul>
+												<ul>
+													{#each selectedFindingUsagePath.checklist as item}
+														<li>{item}</li>
+													{/each}
+												</ul>
+											</div>
+										</section>
+								{/if}
+								{#if selectedFindingReviewDecisionHint}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-decision"
+										aria-label={$t('research.understanding.reviewDecisionHint')}
+									>
+										<div>
+											<strong>{$t('research.understanding.reviewDecisionHint')}</strong>
+											<span>{reviewDecisionHintStatusLabel(selectedFindingReviewDecisionHint)}</span>
 										</div>
+										{#if selectedFindingReviewDecisionHint.summary}
+											<p>{selectedFindingReviewDecisionHint.summary}</p>
+										{/if}
+										{#if selectedFindingReviewDecisionHint.blocked_actions.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.reviewDecisionBlockedActions')}</span>
+												<ul>
+													{#each selectedFindingReviewDecisionHint.blocked_actions as action (action)}
+														<li>{reviewDecisionBlockedActionLabel(action)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFindingReviewDecisionHint.why_accept_blocked.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.reviewDecisionWhyAcceptBlocked')}</span>
+												<ul>
+													{#each selectedFindingReviewDecisionHint.why_accept_blocked as reason (reason)}
+														<li>{reviewDecisionBlockedReasonLabel(reason)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFindingReviewDecisionHint.required_checks.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.reviewDecisionRequiredChecks')}</span>
+												<ul>
+													{#each selectedFindingReviewDecisionHint.required_checks as check (check)}
+														<li>{check}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
 									</section>
 								{/if}
 								{#if selectedFindingDatasetSample}
@@ -7012,6 +7100,33 @@
 
 	.research-understanding-workbench__basis-panel--review-reasons span {
 		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision {
+		border-color: var(--accent-border);
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision p {
+		margin: 0;
+		color: var(--text-primary);
 		font-size: 13px;
 		line-height: 20px;
 	}

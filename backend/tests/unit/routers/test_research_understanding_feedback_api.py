@@ -341,6 +341,35 @@ class FakeResearchUnderstandingFeedbackService:
                         },
                         "guidance": "Ready for traceable protocol drafting.",
                     },
+                    "acceptance_gate": {
+                        "status": "review_required",
+                        "accept_allowed": True,
+                        "requires_correction": False,
+                        "blocking_missing": [],
+                        "accept_blockers": [],
+                        "review_checks": [
+                            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+                        ],
+                        "recommended_action_code": "accept_as_paper_level",
+                        "guidance": "Accept only after the listed checks and source evidence match.",
+                    },
+                    "review_decision_hint": {
+                        "summary": (
+                            "Accept only as paper-level evidence after checking the "
+                            "quote; correct if the scope should be narrower."
+                        ),
+                        "preferred_next_action": "accept_after_checks",
+                        "allowed_actions": ["accept", "reject", "correct", "skip"],
+                        "blocked_actions": [],
+                        "why_accept_blocked": [],
+                        "required_checks": [
+                            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+                        ],
+                        "import_note": (
+                            "accept imports only after the reviewer changes action "
+                            "from skip"
+                        ),
+                    },
                     "context_refs": [],
                     "feedback_refs": [],
                     "metadata": {"curation_id": "ruc-existing"},
@@ -820,6 +849,11 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.items[0].training_messages[0]["role"] == "user"
     assert response.items[0].training_messages[1]["role"] == "assistant"
     assert response.items[0].protocol_readiness["status"] == "protocol_ready"
+    assert response.items[0].review_decision_hint["summary"] == (
+        "Accept only as paper-level evidence after checking the quote; correct if "
+        "the scope should be narrower."
+    )
+    assert response.items[0].review_decision_hint["blocked_actions"] == []
     assert service.dataset_exported == {
         "collection_id": "col-1",
         "scope_type": "goal",
@@ -1005,6 +1039,20 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
         },
         "guidance": "Accept only after expert review confirms the finding and evidence.",
     }
+    assert line["review_decision_hint"] == {
+        "summary": (
+            "Accept only as paper-level evidence after checking the quote; correct if "
+            "the scope should be narrower."
+        ),
+        "preferred_next_action": "accept_after_checks",
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "blocked_actions": [],
+        "why_accept_blocked": [],
+        "required_checks": [
+            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+        ],
+        "import_note": "accept imports only after the reviewer changes action from skip",
+    }
     assert line["action"] == "skip"
     assert "accept" in line["allowed_actions"]
     assert "wrong_direction" in line["reject_issue_options"]
@@ -1079,6 +1127,20 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
             "recommended_action_code": "accept_as_paper_level",
             "guidance": "Accept only after the listed checks and source evidence match.",
         },
+        "review_decision_hint": {
+            "summary": (
+                "Accept only as paper-level evidence after checking the quote; correct if "
+                "the scope should be narrower."
+            ),
+            "preferred_next_action": "accept_after_checks",
+            "allowed_actions": ["accept", "reject", "correct", "skip"],
+            "blocked_actions": [],
+            "why_accept_blocked": [],
+            "required_checks": [
+                "Confirm the finding is only paper-level unless cross-paper evidence is present."
+            ],
+            "import_note": "accept imports only after the reviewer changes action from skip",
+        },
         "protocol_blocking_missing": [],
         "curated_evidence_ref_ids": ["ev-1"],
         "evidence": [
@@ -1147,6 +1209,10 @@ def test_research_understanding_dataset_route_exports_agent_review_prompt(monkey
     assert "action" not in line
     assert line["finding"]["statement"] == "Preheating improves ductility."
     assert line["acceptance_gate"]["status"] == "review_required"
+    assert line["review_decision_hint"]["summary"] == (
+        "Accept only as paper-level evidence after checking the quote; correct if "
+        "the scope should be narrower."
+    )
     assert line["protocol_readiness"]["status"] == "ready_after_review"
     assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
     assert line["output_schema"]["agent_review"]["human_confirmed"] is False
@@ -1193,6 +1259,10 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
     assert "acceptance gate: review_required; accept_allowed=true" in body
     assert (
         "expert checks: Confirm the finding is only paper-level unless cross-paper evidence is present."
+        in body
+    )
+    assert (
+        "decision hint: Accept only as paper-level evidence after checking the quote; correct if the scope should be narrower."
         in body
     )
     assert "review reasons: single_paper_evidence" in body
@@ -1258,6 +1328,7 @@ def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
         "direction_or_scope",
     ]
     assert row["acceptance_gate"]["accept_blockers"] == []
+    assert row["review_decision_hint"] == {}
 
 
 def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):

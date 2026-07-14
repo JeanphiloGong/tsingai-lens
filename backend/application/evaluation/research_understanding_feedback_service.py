@@ -701,6 +701,12 @@ class ResearchUnderstandingFeedbackService:
             training_evidence_records=training_evidence_records,
             training_messages=training_messages,
         )
+        acceptance_gate = _acceptance_gate_for_sample(
+            dataset_use_status=dataset_use_status,
+            system_prediction=system_prediction,
+            review_action=review_action,
+            protocol_readiness=protocol_readiness,
+        )
         return {
             "sample_id": _sample_id(
                 "rus",
@@ -732,11 +738,11 @@ class ResearchUnderstandingFeedbackService:
             "training_evidence_refs": training_evidence_records,
             "training_messages": training_messages,
             "protocol_readiness": protocol_readiness,
-            "acceptance_gate": _acceptance_gate_for_sample(
-                dataset_use_status=dataset_use_status,
-                system_prediction=system_prediction,
-                review_action=review_action,
+            "acceptance_gate": acceptance_gate,
+            "review_decision_hint": _review_decision_hint_for_sample(
+                acceptance_gate=acceptance_gate,
                 protocol_readiness=protocol_readiness,
+                review_action=review_action,
             ),
             "context_refs": context_records,
             "feedback_refs": [item.to_record() for item in feedback],
@@ -1997,6 +2003,77 @@ def _acceptance_gate_for_sample(
         "review_checks": review_checks,
         "recommended_action_code": _text(review_action.get("code")),
         "guidance": guidance,
+    }
+
+
+def _review_decision_hint_for_sample(
+    *,
+    acceptance_gate: Mapping[str, Any],
+    protocol_readiness: Mapping[str, Any],
+    review_action: Mapping[str, str],
+) -> dict[str, Any]:
+    accept_allowed = bool(acceptance_gate.get("accept_allowed"))
+    review_checks = list(_strings(acceptance_gate.get("review_checks")))
+    accept_blockers = list(_strings(acceptance_gate.get("accept_blockers")))
+    blocking_missing = list(_strings(acceptance_gate.get("blocking_missing"))) or list(
+        _strings(protocol_readiness.get("blocking_missing"))
+    )
+    if not accept_allowed:
+        blocked_reasons: list[str] = []
+        if accept_blockers:
+            blocked_reasons.append(f"accept_blockers={', '.join(accept_blockers)}")
+        if blocking_missing:
+            blocked_reasons.append(f"blocking_missing={', '.join(blocking_missing)}")
+        if not blocked_reasons:
+            blocked_reasons.append("acceptance_gate blocks direct accept")
+        return {
+            "summary": (
+                "Do not accept directly; correct the row or reject it after "
+                "source review."
+            ),
+            "preferred_next_action": "correct_or_reject",
+            "allowed_actions": ["reject", "correct", "skip"],
+            "blocked_actions": ["accept"],
+            "why_accept_blocked": blocked_reasons,
+            "required_checks": review_checks,
+            "import_note": "accept is rejected while acceptance_gate.accept_allowed=false",
+        }
+    action_summaries = {
+        "accept_as_paper_level": (
+            "Accept only as paper-level evidence after checking the quote; "
+            "correct if the scope should be narrower."
+        ),
+        "review_table_rows": (
+            "Verify the selected table rows and then accept or correct the finding."
+        ),
+        "review_table_variables": (
+            "Check whether other table variables changed; correct if this is not "
+            "a single-variable effect."
+        ),
+        "check_mechanism_requirement": (
+            "Decide whether mechanism evidence is required; accept only if the "
+            "final scope matches that decision."
+        ),
+        "resolve_conflict": "Resolve the conflicting evidence direction before accepting.",
+    }
+    action_code = _text(review_action.get("code"))
+    preferred_next_action = (
+        "verify_then_accept_or_correct"
+        if action_code
+        in {"review_table_rows", "review_table_variables", "check_mechanism_requirement"}
+        else "accept_after_checks"
+    )
+    return {
+        "summary": action_summaries.get(
+            action_code,
+            "Accept, reject, or correct after checking the cited evidence.",
+        ),
+        "preferred_next_action": preferred_next_action,
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "blocked_actions": [],
+        "why_accept_blocked": [],
+        "required_checks": review_checks,
+        "import_note": "accept imports only after the reviewer changes action from skip",
     }
 
 

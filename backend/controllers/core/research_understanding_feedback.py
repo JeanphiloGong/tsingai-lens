@@ -233,6 +233,7 @@ def _agent_review_prompt_row(row: dict[str, Any]) -> dict[str, Any]:
             "recommended_action": row["recommended_action"],
         },
         "acceptance_gate": row["acceptance_gate"],
+        "review_decision_hint": row["review_decision_hint"],
         "protocol_readiness": row["protocol_readiness"],
         "evidence": row["evidence"],
         "suggested_target": row["suggested_target"],
@@ -279,6 +280,7 @@ def _decision_template_row(row: dict[str, Any]) -> dict[str, Any]:
         "recommended_action_code": row["recommended_action_code"],
         "review_reasons": row["review_reasons"],
         "acceptance_gate": dict(row["acceptance_gate"]),
+        "review_decision_hint": dict(row["review_decision_hint"]),
         "protocol_blocking_missing": _strings(
             row["protocol_readiness"].get("blocking_missing")
         ),
@@ -349,6 +351,12 @@ def _dataset_review_packet_response(
         review_checks = _strings(acceptance_gate.get("review_checks"))
         if review_checks:
             lines.append(f"   expert checks: {_join(review_checks)}")
+        decision_hint = row["review_decision_hint"]
+        if isinstance(decision_hint, dict) and _text(decision_hint.get("summary")):
+            lines.append(f"   decision hint: {_text(decision_hint.get('summary'))}")
+            blocked = _strings(decision_hint.get("why_accept_blocked"))
+            if blocked:
+                lines.append(f"   why accept blocked: {_join(blocked)}")
         blocking_missing = _strings(protocol_readiness.get("blocking_missing"))
         if blocking_missing:
             lines.append(f"   protocol gaps: {_join(blocking_missing)}")
@@ -395,6 +403,9 @@ def _review_jsonl_row(
         review_action=review_action,
         protocol_readiness=protocol_readiness,
     )
+    decision_hint = getattr(item, "review_decision_hint", None)
+    if not isinstance(decision_hint, dict):
+        decision_hint = {}
     return {
         "collection_id": collection_id,
         "goal_id": item.scope_id if item.scope_type == "goal" else "",
@@ -426,6 +437,7 @@ def _review_jsonl_row(
         ),
         "protocol_readiness": protocol_readiness,
         "acceptance_gate": acceptance_gate,
+        "review_decision_hint": decision_hint,
         "action": "skip",
         "allowed_actions": list(REVIEW_ACTION_OPTIONS),
         "issue_type": "",

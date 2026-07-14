@@ -68,6 +68,9 @@ This node owns the collection workspace route family in the frontend.
   whether correction is required first, and the expert checks that must be
   completed before the finding becomes training-ready; hard `accept_blockers`
   disable direct accept even when a stale or edited row says accept is allowed;
+  when the dataset sample provides a `review_decision_hint`, the detail view
+  surfaces the next review decision, blocked actions, and accept-blocking
+  reasons without showing raw JSON or internal identifiers;
   the batch decision
   import panel treats unconfirmed `agent_review` rows as review drafts and
   sends human-confirmed agent review rows to the backend import service, which

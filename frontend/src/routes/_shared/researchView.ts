@@ -405,6 +405,15 @@ export type ResearchUnderstandingAcceptanceGate = {
 	recommended_action_code: string;
 	guidance: string;
 };
+export type ResearchUnderstandingReviewDecisionHint = {
+	summary: string;
+	preferred_next_action: string;
+	allowed_actions: string[];
+	blocked_actions: string[];
+	why_accept_blocked: string[];
+	required_checks: string[];
+	import_note: string;
+};
 export type ResearchUnderstandingDatasetCountEntry = {
 	name: string;
 	count: number;
@@ -418,6 +427,7 @@ export type ResearchUnderstandingDatasetSample = {
 	review_action: ResearchUnderstandingDatasetReviewAction;
 	protocol_readiness: ResearchUnderstandingProtocolReadiness | null;
 	acceptance_gate: ResearchUnderstandingAcceptanceGate | null;
+	review_decision_hint: ResearchUnderstandingReviewDecisionHint | null;
 	metadata: {
 		training_message_diagnostic: string[];
 	};
@@ -1188,6 +1198,9 @@ function normalizeResearchUnderstandingDatasetSample(
 		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action),
 		protocol_readiness: normalizeResearchUnderstandingProtocolReadiness(record.protocol_readiness),
 		acceptance_gate: normalizeResearchUnderstandingAcceptanceGate(record.acceptance_gate),
+		review_decision_hint: normalizeResearchUnderstandingReviewDecisionHint(
+			record.review_decision_hint
+		),
 		metadata: normalizeResearchUnderstandingDatasetSampleMetadata(record.metadata)
 	};
 }
@@ -1228,6 +1241,40 @@ function normalizeResearchUnderstandingAcceptanceGate(
 		review_checks: toStringList(record.review_checks),
 		recommended_action_code: toText(record.recommended_action_code),
 		guidance: toText(record.guidance)
+	};
+}
+
+function normalizeResearchUnderstandingReviewDecisionHint(
+	value: unknown
+): ResearchUnderstandingReviewDecisionHint | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const summary = toText(record.summary);
+	const preferredNextAction = toText(record.preferred_next_action);
+	const allowedActions = toStringList(record.allowed_actions);
+	const blockedActions = toStringList(record.blocked_actions);
+	const whyAcceptBlocked = toStringList(record.why_accept_blocked);
+	const requiredChecks = toStringList(record.required_checks);
+	const importNote = toText(record.import_note);
+	if (
+		!summary &&
+		!preferredNextAction &&
+		!allowedActions.length &&
+		!blockedActions.length &&
+		!whyAcceptBlocked.length &&
+		!requiredChecks.length &&
+		!importNote
+	) {
+		return null;
+	}
+	return {
+		summary,
+		preferred_next_action: preferredNextAction,
+		allowed_actions: allowedActions,
+		blocked_actions: blockedActions,
+		why_accept_blocked: whyAcceptBlocked,
+		required_checks: requiredChecks,
+		import_note: importNote
 	};
 }
 

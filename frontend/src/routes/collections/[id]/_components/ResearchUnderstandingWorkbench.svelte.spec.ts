@@ -21,9 +21,9 @@ type DatasetSampleFixture = {
 		code: string;
 		label: string;
 	};
-	protocol_readiness?: {
-		status: string;
-		ready_after_review: boolean;
+		protocol_readiness?: {
+			status: string;
+			ready_after_review: boolean;
 		missing: string[];
 		blocking_missing: string[];
 		checks: Record<string, boolean>;
@@ -38,8 +38,17 @@ type DatasetSampleFixture = {
 			review_checks: string[];
 			recommended_action_code: string;
 			guidance: string;
+		};
+		review_decision_hint?: {
+			summary: string;
+			preferred_next_action: string;
+			allowed_actions: string[];
+			blocked_actions: string[];
+			why_accept_blocked: string[];
+			required_checks: string[];
+			import_note: string;
+		};
 	};
-};
 
 function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	return new Response(JSON.stringify(body), {
@@ -1735,19 +1744,31 @@ describe('ResearchUnderstandingWorkbench', () => {
 										code: 'review_table_rows',
 										label: 'Review selected table rows'
 									},
-									acceptance_gate: {
-										status: 'review_required',
-										accept_allowed: true,
+										acceptance_gate: {
+											status: 'review_required',
+											accept_allowed: true,
 										requires_correction: false,
 										blocking_missing: [],
 										review_checks: [
 											'Verify the selected table rows, variable columns, and outcome values.'
 										],
-										recommended_action_code: 'review_table_rows',
-										guidance: 'Accept only after checking the source table rows.'
+											recommended_action_code: 'review_table_rows',
+											guidance: 'Accept only after checking the source table rows.'
+										},
+										review_decision_hint: {
+											summary: 'Verify the selected table rows and then accept or correct the finding.',
+											preferred_next_action: 'verify_then_accept_or_correct',
+											allowed_actions: ['accept', 'reject', 'correct', 'skip'],
+											blocked_actions: [],
+											why_accept_blocked: [],
+											required_checks: [
+												'Verify the selected table rows, variable columns, and outcome values.'
+											],
+											import_note:
+												'accept imports only after the reviewer changes action from skip'
+										}
 									}
-								}
-							]
+								]
 						})
 					)
 				);
@@ -1766,10 +1787,27 @@ describe('ResearchUnderstandingWorkbench', () => {
 			collectionId: 'col_123'
 		});
 
-		const findingDetail = await openMechanismClaimDetail();
-		await expect.element(findingDetail.getByText('Review selected table rows')).toBeInTheDocument();
-		const gatePanel = findingDetail.getByLabelText('Acceptance gate');
-		await expect.element(gatePanel.getByText('Accept after review')).toBeInTheDocument();
+			const findingDetail = await openMechanismClaimDetail();
+			await expect.element(findingDetail.getByText('Review selected table rows')).toBeInTheDocument();
+			const decisionPanel = findingDetail.getByLabelText('Review decision');
+			await expect.element(decisionPanel.getByText('Verify before accepting')).toBeInTheDocument();
+			await expect
+				.element(
+					decisionPanel.getByText(
+						'Verify the selected table rows and then accept or correct the finding.'
+					)
+				)
+				.toBeInTheDocument();
+			await expect.element(decisionPanel.getByText('Required checks')).toBeInTheDocument();
+			await expect
+				.element(
+					decisionPanel.getByText(
+						'Verify the selected table rows, variable columns, and outcome values.'
+					)
+				)
+				.toBeInTheDocument();
+			const gatePanel = findingDetail.getByLabelText('Acceptance gate');
+			await expect.element(gatePanel.getByText('Accept after review')).toBeInTheDocument();
 		await expect
 			.element(gatePanel.getByText('Accept only after checking the source table rows.'))
 			.toBeInTheDocument();
@@ -1961,21 +1999,33 @@ describe('ResearchUnderstandingWorkbench', () => {
 										},
 										guidance: 'Correct variables, direction, and evidence before accepting.'
 									},
-									acceptance_gate: {
-										status: 'correction_required',
-										accept_allowed: false,
+										acceptance_gate: {
+											status: 'correction_required',
+											accept_allowed: false,
 										requires_correction: true,
 										blocking_missing: [
 											'variables',
 											'direction_or_scope',
 											'traceable_training_evidence'
 										],
-										review_checks: [],
-										recommended_action_code: 'correct_protocol_fields',
-										guidance: 'Do not accept directly; correct or reject the blocking gaps first.'
+											review_checks: [],
+											recommended_action_code: 'correct_protocol_fields',
+											guidance: 'Do not accept directly; correct or reject the blocking gaps first.'
+										},
+										review_decision_hint: {
+											summary: 'Do not accept directly; correct the row or reject it after source review.',
+											preferred_next_action: 'correct_or_reject',
+											allowed_actions: ['reject', 'correct', 'skip'],
+											blocked_actions: ['accept'],
+											why_accept_blocked: [
+												'blocking_missing=variables, direction_or_scope, traceable_training_evidence'
+											],
+											required_checks: [],
+											import_note:
+												'accept is rejected while acceptance_gate.accept_allowed=false'
+										}
 									}
-								}
-							]
+								]
 						})
 					)
 				);
@@ -2001,11 +2051,23 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const protocolPanel = browserPage
 			.getByLabelText('Finding detail')
 			.getByLabelText('Protocol readiness');
-		const gatePanel = browserPage.getByLabelText('Finding detail').getByLabelText('Acceptance gate');
-		const findingDetail = browserPage.getByLabelText('Finding detail');
-		await expect.element(gatePanel.getByText('Correct before accept')).toBeInTheDocument();
-		await expect
-			.element(
+			const gatePanel = browserPage.getByLabelText('Finding detail').getByLabelText('Acceptance gate');
+			const findingDetail = browserPage.getByLabelText('Finding detail');
+			const decisionPanel = findingDetail.getByLabelText('Review decision');
+			await expect.element(decisionPanel.getByText('Accept blocked')).toBeInTheDocument();
+			await expect.element(decisionPanel.getByText('Blocked actions')).toBeInTheDocument();
+			await expect.element(decisionPanel.getByText('Accept', { exact: true })).toBeInTheDocument();
+			await expect.element(decisionPanel.getByText('Why accept is blocked')).toBeInTheDocument();
+			await expect
+				.element(
+					decisionPanel.getByText(
+						'Missing required fields: variables, direction or scope, traceable source evidence'
+					)
+				)
+				.toBeInTheDocument();
+			await expect.element(gatePanel.getByText('Correct before accept')).toBeInTheDocument();
+			await expect
+				.element(
 				gatePanel.getByText('Do not accept directly; correct or reject the blocking gaps first.')
 			)
 			.toBeInTheDocument();
@@ -2061,9 +2123,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 										code: 'verify_table_rows',
 										label: 'Verify parsed table rows'
 									},
-									acceptance_gate: {
-										status: 'review_required',
-										accept_allowed: true,
+										acceptance_gate: {
+											status: 'review_required',
+											accept_allowed: true,
 										requires_correction: false,
 										blocking_missing: [],
 										accept_blockers: [
@@ -2073,12 +2135,26 @@ describe('ResearchUnderstandingWorkbench', () => {
 										review_checks: [
 											'Verify parsed table-row alignment against the source table.'
 										],
-										recommended_action_code: 'verify_table_rows',
-										guidance:
-											'Do not accept directly; correct or reject the table alignment risk first.'
+											recommended_action_code: 'verify_table_rows',
+											guidance:
+												'Do not accept directly; correct or reject the table alignment risk first.'
+										},
+										review_decision_hint: {
+											summary: 'Do not accept directly; correct the row or reject it after source review.',
+											preferred_next_action: 'correct_or_reject',
+											allowed_actions: ['reject', 'correct', 'skip'],
+											blocked_actions: ['accept'],
+											why_accept_blocked: [
+												'accept_blockers=verify_table_rows, table_row_alignment_uncertain'
+											],
+											required_checks: [
+												'Verify parsed table-row alignment against the source table.'
+											],
+											import_note:
+												'accept is rejected while acceptance_gate.accept_allowed=false'
+										}
 									}
-								}
-							]
+								]
 						})
 					)
 				);
@@ -2101,11 +2177,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
 			.click();
 
-		const findingDetail = browserPage.getByLabelText('Finding detail');
-		const gatePanel = findingDetail.getByLabelText('Acceptance gate');
-		await expect
-			.element(
-				gatePanel.getByText(
+			const findingDetail = browserPage.getByLabelText('Finding detail');
+			const gatePanel = findingDetail.getByLabelText('Acceptance gate');
+			const decisionPanel = findingDetail.getByLabelText('Review decision');
+			await expect.element(decisionPanel.getByText('Accept blocked')).toBeInTheDocument();
+			await expect
+				.element(
+					decisionPanel.getByText(
+						'Resolve review risks first: Verify source table rows, Table row alignment uncertain'
+					)
+				)
+				.toBeInTheDocument();
+			await expect
+				.element(
+					gatePanel.getByText(
 					'Do not accept directly; correct or reject the table alignment risk first.'
 				)
 			)

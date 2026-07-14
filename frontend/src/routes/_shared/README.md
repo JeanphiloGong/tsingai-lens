@@ -30,7 +30,9 @@ This node owns browser-side helpers that are shared across frontend routes.
   research-understanding claims. Claim feedback and curations are read back by
   scope so the workbench can show saved expert review history and expert
   corrections after refresh. The same helper also reads curation-derived gold
-  drafts and finding-centered dataset exports for evaluation handoff.
+  drafts and finding-centered dataset exports for evaluation handoff, including
+  review-decision hints that tell the workbench which accept/reject/correct
+  actions are allowed or blocked for a review candidate.
 - `goalSessions.ts`
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references

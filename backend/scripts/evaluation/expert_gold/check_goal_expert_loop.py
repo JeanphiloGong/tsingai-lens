@@ -23,6 +23,13 @@ DEFAULT_GOAL_IDS = (
     "goal_6bf7d2c1030e",
     "goal_3037e425673a",
 )
+PLAN_LIST_PATH = "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+PLAN_DETAIL_PATH = f"{PLAN_LIST_PATH}/{{plan_id}}"
+PLAN_ROUTE_SPECS = (
+    ("list experiment plans", PLAN_LIST_PATH, "get"),
+    ("create experiment plan", PLAN_LIST_PATH, "post"),
+    ("update experiment plan", PLAN_DETAIL_PATH, "patch"),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -280,36 +287,12 @@ def _runtime_contract_layer(
             "error": str(exc),
             "requirement": "Running API exposes goal experiment-plan routes.",
         }
-    plan_list_path = (
-        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    checks = _experiment_plan_route_checks(paths)
+    diagnostic = (
+        _source_experiment_plan_route_diagnostic()
+        if any(check["status"] == "fail" for check in checks)
+        else {}
     )
-    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
-    checks = [
-        {
-            "name": "list experiment plans",
-            "path": plan_list_path,
-            "method": "get",
-            "status": "pass"
-            if "get" in _mapping(paths.get(plan_list_path))
-            else "fail",
-        },
-        {
-            "name": "create experiment plan",
-            "path": plan_list_path,
-            "method": "post",
-            "status": "pass"
-            if "post" in _mapping(paths.get(plan_list_path))
-            else "fail",
-        },
-        {
-            "name": "update experiment plan",
-            "path": plan_detail_path,
-            "method": "patch",
-            "status": "pass"
-            if "patch" in _mapping(paths.get(plan_detail_path))
-            else "fail",
-        },
-    ]
     if runtime_write_check and all(check["status"] == "pass" for check in checks):
         checks.extend(
             _experiment_plan_write_checks(
@@ -323,13 +306,13 @@ def _runtime_contract_layer(
         checks.append(
             {
                 "name": "write smoke experiment plan",
-                "path": plan_list_path,
+                "path": PLAN_LIST_PATH,
                 "method": "post/patch",
                 "status": "skipped",
                 "detail": "route checks failed; smoke write was not attempted",
             }
         )
-    return {
+    result = {
         "status": "pass"
         if all(check["status"] in {"pass", "skipped"} for check in checks)
         and not any(check["status"] == "fail" for check in checks)
@@ -342,6 +325,59 @@ def _runtime_contract_layer(
             "--runtime-write-check is set, accepts create/update smoke writes."
         ),
     }
+    if diagnostic:
+        result["diagnostic"] = diagnostic
+    return result
+
+
+def _experiment_plan_route_checks(paths: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "name": name,
+            "path": path,
+            "method": method,
+            "status": "pass" if method in _mapping(paths.get(path)) else "fail",
+        }
+        for name, path, method in PLAN_ROUTE_SPECS
+    ]
+
+
+def _source_experiment_plan_route_diagnostic() -> dict[str, Any]:
+    try:
+        source_paths = _local_openapi_paths()
+    except Exception as exc:  # pragma: no cover - defensive runtime diagnostic
+        return {
+            "code": "source_route_check_unavailable",
+            "detail": f"Could not inspect local source app routes: {exc}",
+        }
+    source_checks = _experiment_plan_route_checks(source_paths)
+    if all(check["status"] == "pass" for check in source_checks):
+        return {
+            "code": "running_api_not_current_backend",
+            "detail": (
+                "Local source app exposes experiment-plan routes, but the "
+                "running API does not. Restart or update the backend process, "
+                "or point --api-base-url to the current Lens app."
+            ),
+            "source_checks": source_checks,
+        }
+    return {
+        "code": "source_routes_missing",
+        "detail": (
+            "Local source app also does not expose all experiment-plan routes; "
+            "fix source route registration before checking runtime writes."
+        ),
+        "source_checks": source_checks,
+    }
+
+
+def _local_openapi_paths() -> dict[str, Any]:
+    backend_root = str(DEFAULT_BACKEND_ROOT)
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+    from main import app  # noqa: PLC0415
+
+    return _mapping(app.openapi().get("paths"))
 
 
 def _api_login_cookie(base_url: str) -> str:
@@ -686,6 +722,12 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                 runtime_error = _text(runtime_contract.get("error"))
                 if runtime_error:
                     lines.append(f"  runtime error: {runtime_error}")
+                diagnostic = _mapping(runtime_contract.get("diagnostic"))
+                if diagnostic:
+                    lines.append(
+                        "  runtime diagnostic: "
+                        f"{_text(diagnostic.get('code'))}: {_text(diagnostic.get('detail'))}"
+                    )
                 failed_checks = [
                     check
                     for check in _mapping_list(runtime_contract.get("checks"))

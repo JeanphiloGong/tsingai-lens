@@ -460,6 +460,10 @@ def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
 
 def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monkeypatch):
     check = _load_goal_expert_loop_module()
+    plan_list_path = (
+        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
     monkeypatch.setattr(
         check,
@@ -491,6 +495,14 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
             }
         },
     )
+    monkeypatch.setattr(
+        check,
+        "_local_openapi_paths",
+        lambda: {
+            plan_list_path: {"get": {}, "post": {}},
+            plan_detail_path: {"patch": {}},
+        },
+    )
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
@@ -504,7 +516,11 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
     assert summary["completion_status"] == "complete"
     assert summary["layers"]["experiment_design"]["status"] == "fail"
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == "fail"
+    diagnostic = summary["layers"]["experiment_design"]["runtime_contract"]["diagnostic"]
+    assert diagnostic["code"] == "running_api_not_current_backend"
+    assert "Local source app exposes experiment-plan routes" in diagnostic["detail"]
     assert "runtime contract: fail" in text
+    assert "runtime diagnostic: running_api_not_current_backend" in text
     assert (
         "missing route: GET /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
         in text

@@ -1365,9 +1365,14 @@
 
 	function findingNeedsManualAcceptNote(finding: ResearchUnderstandingPresentationFinding) {
 		const sample = findingDatasetSampleFor(finding);
-		if (!sample) return false;
-		if (expertNotePromptForAction(sample.review_action.code)) return true;
-		return Boolean(sample.acceptance_gate?.review_checks.length);
+		if (sample) {
+			if (expertNotePromptForAction(sample.review_action.code)) return true;
+			if (sample.acceptance_gate?.review_checks.length) return true;
+		}
+		return (
+			findingDatasetTrust(finding).datasetUseStatus === 'review_candidate' &&
+			findingReviewReasonValues(finding).length > 0
+		);
 	}
 
 	function findingReviewReasonActionLabel(

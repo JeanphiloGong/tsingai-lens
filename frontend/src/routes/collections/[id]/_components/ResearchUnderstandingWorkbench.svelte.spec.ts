@@ -1700,7 +1700,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())
 			.toBeInTheDocument();
 		await expect
-			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.element(findingDetail.getByRole('button', { name: 'Review accept', exact: true }))
 			.toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByRole('button', { name: 'Reject', exact: true }))
@@ -2021,10 +2021,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(protocolPanel.getByText('traceable source evidence', { exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.element(findingDetail.getByRole('button', { name: 'Review accept', exact: true }))
 			.toBeDisabled();
 		await expect
-			.element(findingDetail.getByRole('button', { name: 'Accept paper-level and next' }))
+			.element(findingDetail.getByRole('button', { name: 'Review accept and next' }))
 			.toBeDisabled();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
@@ -2227,7 +2227,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.not.toBeInTheDocument();
 	});
 
-	it('falls back to paper-level accept labels for single-paper findings without dataset actions', async () => {
+	it('requires review confirmation for review candidates without dataset actions', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
@@ -2235,8 +2235,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const findingDetail = await openMechanismClaimDetail();
 		await expect
-			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.element(findingDetail.getByRole('button', { name: 'Review accept', exact: true }))
 			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.not.toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByRole('button', { name: 'Accept', exact: true }))
 			.not.toBeInTheDocument();
@@ -2340,7 +2343,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(findingDetail.getByText('Heat treatment changes LPBF 316L tensile response.').first())
 			.toBeInTheDocument();
 		await expect
-			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.element(findingDetail.getByRole('button', { name: 'Review accept', exact: true }))
 			.toBeInTheDocument();
 		await expect.element(findingDetail.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect.element(findingDetail.getByRole('button', { name: 'Correct' })).toBeInTheDocument();
@@ -2389,7 +2392,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(checklist.getByText('Protocol drafting is safe')).toBeInTheDocument();
 	});
 
-	it('accepts the selected finding and advances to the next review candidate', async () => {
+	it('opens the feedback form before accepting and advancing a review candidate', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -2434,7 +2437,17 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		await browserPage.getByRole('button', { name: 'Review next finding' }).click();
-		await browserPage.getByRole('button', { name: 'Accept paper-level and next' }).click();
+		await browserPage.getByRole('button', { name: 'Review accept and next' }).click();
+
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect.element(findingDetail.getByLabelText('Review result')).toHaveValue('correct');
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Save feedback and next' }))
+			.toBeDisabled();
+		await findingDetail
+			.getByLabelText('Feedback note')
+			.fill('Reviewed the source evidence and accepted this paper-level finding.');
+		await findingDetail.getByRole('button', { name: 'Save feedback and next' }).click();
 
 		const feedbackPayloads = fetchMock.mock.calls
 			.filter(([input, init]) => {
@@ -2449,7 +2462,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			finding_id: 'finding_strength_supported',
 			review_status: 'correct',
 			issue_type: 'none',
-			note: 'Human expert accepted the source-backed paper-level finding.'
+			note: 'Reviewed the source evidence and accepted this paper-level finding.'
 		});
 		await expect
 			.element(
@@ -2459,7 +2472,6 @@ describe('ResearchUnderstandingWorkbench', () => {
 				)
 			)
 			.toBeInTheDocument();
-		const findingDetail = browserPage.getByLabelText('Finding detail');
 		await expect
 			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())
 			.toBeInTheDocument();
@@ -4746,30 +4758,27 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('accepts a selected finding without opening the full feedback form first', async () => {
+	it('does not accept a review candidate without the feedback form', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
 		});
 
 		const claimDetail = await openMechanismClaimDetail();
-		await claimDetail.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
+		await claimDetail.getByRole('button', { name: 'Review accept', exact: true }).click();
 
-		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();
-		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
-			return (
-				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
-				(init as RequestInit | undefined)?.method === 'POST'
-			);
-		}) as [string | URL | Request, RequestInit] | undefined;
-		expect(feedbackPostCall).toBeTruthy();
-		expect(JSON.parse(String(feedbackPostCall![1].body))).toMatchObject({
-			finding_id: 'finding_mechanism_limited',
-			claim_id: 'claim_mechanism_limited',
-			review_status: 'correct',
-			issue_type: 'none',
-			note: 'Human expert accepted the source-backed paper-level finding.'
-		});
+		await expect.element(claimDetail.getByLabelText('Review result')).toHaveValue('correct');
+		await expect
+			.element(claimDetail.getByRole('button', { name: 'Save feedback', exact: true }))
+			.toBeDisabled();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+					(init as RequestInit | undefined)?.method === 'POST'
+				);
+			})
+		).toBe(false);
 	});
 
 	it('opens reject and correct review paths for a selected finding', async () => {
@@ -4981,7 +4990,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				browserPage.getByRole('button', {
-					name: 'Accept paper-level',
+					name: 'Review accept',
 					exact: true
 				})
 			)

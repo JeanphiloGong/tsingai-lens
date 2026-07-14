@@ -4208,6 +4208,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const draftLink = browserPage.getByRole('link', { name: 'Draft protocol with Copilot' });
 		await expect.element(draftLink).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Next review candidate')).not.toBeInTheDocument();
 		const draftUrl = new URL(draftLink.element().getAttribute('href') ?? '', 'http://localhost');
 		expect(draftUrl.pathname).toBe('/collections/col_123/assistant');
 		expect(draftUrl.searchParams.get('goal_id')).toBe('goal_1');

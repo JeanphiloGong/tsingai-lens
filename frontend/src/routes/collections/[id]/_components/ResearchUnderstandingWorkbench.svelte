@@ -427,9 +427,7 @@
 				reviewQueueClaimIds.has(finding.claim_id))
 	);
 	$: visibleFindingRows = usesFindings ? filteredFindings : [];
-	$: reviewCandidateFindingRows = allDisplayFindingRows.filter(
-		(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
-	);
+	$: reviewCandidateFindingRows = reviewCandidateFindings(datasetSummary);
 	$: nextReviewCandidateFinding =
 		(datasetSummary?.quality_summary.next_review_finding_id
 			? reviewCandidateFindingRows.find(
@@ -874,6 +872,27 @@
 	) {
 		if (reviewCandidateCount <= 0) return {};
 		return Object.keys(candidateCounts).length ? candidateCounts : allCounts;
+	}
+
+	function reviewCandidateFindings(currentDatasetSummary: ResearchUnderstandingDataset | null) {
+		if (!currentDatasetSummary) {
+			return allDisplayFindingRows.filter(
+				(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
+			);
+		}
+		if (currentDatasetSummary.quality_summary.review_candidate_sample_count <= 0) return [];
+		const ids = new Set(
+			currentDatasetSummary.items
+				.filter((sample) => sample.dataset_use_status === 'review_candidate')
+				.map((sample) => sample.finding_id)
+				.filter(Boolean)
+		);
+		if (ids.size) {
+			return allDisplayFindingRows.filter((finding) => ids.has(finding.finding_id));
+		}
+		return allDisplayFindingRows.filter(
+			(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
+		);
 	}
 
 	function listLabel(values: string[]) {
@@ -1983,12 +2002,19 @@
 		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]> = feedbackByTargetId,
 		currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration> = curationsByTargetId
 	) {
-		const candidates = allDisplayFindingRows.filter(
-			(finding) =>
-				finding.finding_id !== currentFindingId &&
-				findingDatasetTrust(finding, currentFeedbackByTargetId, currentCurationsByTargetId).datasetUseStatus ===
-					'review_candidate'
-		);
+		const candidates = datasetSummary
+			? reviewCandidateFindings(datasetSummary).filter(
+					(finding) => finding.finding_id !== currentFindingId
+				)
+			: allDisplayFindingRows.filter(
+					(finding) =>
+						finding.finding_id !== currentFindingId &&
+						findingDatasetTrust(
+							finding,
+							currentFeedbackByTargetId,
+							currentCurationsByTargetId
+						).datasetUseStatus === 'review_candidate'
+				);
 		return candidates[0] ?? null;
 	}
 

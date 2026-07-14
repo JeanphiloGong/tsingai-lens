@@ -397,6 +397,72 @@ def test_render_review_jsonl_exports_candidate_rows():
     )
 
 
+def test_render_decision_template_exports_editable_import_rows():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "presentation_bucket": "review_queue",
+            "trace_status": "evidence_derived",
+            "system_prediction": {
+                "statement": "Preheating increased ductility by 14%.",
+                "variables": ["preheating"],
+                "mediators": ["grain refinement"],
+                "outcomes": ["ductility"],
+                "direction": "increase",
+                "scope_summary": "LPBF 316L at 150 C",
+                "support_grade": "strong",
+                "review_status": "needs_review",
+                "review_reasons": ["single_paper_evidence"],
+            },
+            "review_action": {
+                "code": "accept_as_paper_level",
+                "label": "accept only as paper-level evidence unless another paper confirms it",
+            },
+            "expert_target": {},
+        }
+    )
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+
+    body = check.render_decision_template_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+    rows = [json.loads(line) for line in body.splitlines()]
+
+    assert len(rows) == 1
+    assert rows[0] == {
+        "collection_id": "col-1",
+        "goal_id": "goal-1",
+        "finding_id": "finding-1",
+        "claim_id": "claim-1",
+        "action": "skip",
+        "issue_type": "",
+        "expert_note": "",
+        "statement": "Preheating increased ductility by 14%.",
+        "variables": ["preheating"],
+        "outcomes": ["ductility"],
+        "direction": "increase",
+        "support_grade": "strong",
+        "recommended_action_code": "accept_as_paper_level",
+        "review_reasons": ["single_paper_evidence"],
+        "protocol_blocking_missing": [],
+        "curated_evidence_ref_ids": ["ev-1"],
+        "suggested_target": {
+            "statement": "Preheating increased ductility by 14%.",
+            "status": "limited",
+            "support_grade": "strong",
+            "review_status": "accepted",
+            "variables": ["preheating"],
+            "mediators": ["grain refinement"],
+            "outcomes": ["ductility"],
+            "direction": "increase",
+            "scope_summary": "LPBF 316L at 150 C",
+            "evidence_ref_ids": ["ev-1"],
+        },
+    }
+
+
 def test_render_messages_jsonl_exports_training_ready_messages():
     check = _load_goal_dataset_check_module()
 

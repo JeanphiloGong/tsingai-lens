@@ -98,6 +98,7 @@ def parse_args() -> argparse.Namespace:
             "json",
             "review-packet",
             "review-jsonl",
+            "decision-template",
             "messages-jsonl",
             "training-jsonl",
         ),
@@ -105,9 +106,10 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Output format. JSON is stable for automation; review-packet is a "
             "human-readable queue of candidate findings, evidence, and links; "
-            "review-jsonl emits one candidate per line; messages-jsonl emits "
-            "fine-tuning-compatible rows for training-ready samples; "
-            "training-jsonl keeps messages plus traceable sample metadata."
+            "review-jsonl emits one candidate per line; decision-template emits "
+            "a compact editable import template; messages-jsonl emits fine-tuning-"
+            "compatible rows for training-ready samples; training-jsonl keeps "
+            "messages plus traceable sample metadata."
         ),
     )
     return parser.parse_args()
@@ -120,7 +122,8 @@ def main() -> None:
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
         require_training_ready=args.require_training_ready,
-        include_review_packet=args.format in {"review-packet", "review-jsonl"},
+        include_review_packet=args.format
+        in {"review-packet", "review-jsonl", "decision-template"},
         include_training_export=args.format in {"messages-jsonl", "training-jsonl"},
         include_training_metadata=args.format == "training-jsonl",
     )
@@ -128,6 +131,8 @@ def main() -> None:
         output = render_review_packet_summary(summary) + "\n"
     elif args.format == "review-jsonl":
         output = render_review_jsonl_summary(summary)
+    elif args.format == "decision-template":
+        output = render_decision_template_summary(summary)
     elif args.format == "messages-jsonl":
         output = render_messages_jsonl_summary(summary)
     elif args.format == "training-jsonl":
@@ -740,6 +745,83 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
                         _mapping(candidate.get("suggested_target"))
                     ),
                     "evidence": _mapping_list(candidate.get("evidence")),
+                }
+            )
+    return _jsonl(rows)
+
+
+def render_decision_template_summary(summary: dict[str, Any]) -> str:
+    rows = []
+    collection_id = _text(summary.get("collection_id"))
+    for goal in _mapping_list(summary.get("goals")):
+        packet = _mapping(goal.get("review_packet"))
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        for candidate in _mapping_list(packet.get("candidates")):
+            evidence = _mapping_list(candidate.get("evidence"))
+            suggested = _mapping(candidate.get("suggested_target"))
+            evidence_ref_ids = [
+                ref_id
+                for record in evidence
+                if (ref_id := _text(record.get("evidence_ref_id")))
+            ]
+            rows.append(
+                {
+                    "collection_id": collection_id,
+                    "goal_id": goal_id,
+                    "finding_id": _text(candidate.get("finding_id")),
+                    "claim_id": _text(candidate.get("claim_id")),
+                    "action": "skip",
+                    "issue_type": "",
+                    "expert_note": "",
+                    "statement": _text(candidate.get("statement")),
+                    "variables": _text_list(candidate.get("variables")),
+                    "outcomes": _text_list(candidate.get("outcomes")),
+                    "direction": _text(candidate.get("direction")),
+                    "support_grade": _text(candidate.get("support_grade")),
+                    "recommended_action_code": _text(
+                        candidate.get("recommended_action_code")
+                    ),
+                    "review_reasons": _text_list(candidate.get("review_reasons")),
+                    "protocol_blocking_missing": _text_list(
+                        _mapping(candidate.get("protocol_readiness")).get(
+                            "blocking_missing"
+                        )
+                    ),
+                    "curated_evidence_ref_ids": evidence_ref_ids,
+                    "suggested_target": {
+                        "statement": _text(
+                            suggested.get("statement")
+                            or candidate.get("statement")
+                        ),
+                        "status": _text(suggested.get("status")) or "limited",
+                        "support_grade": _text(
+                            suggested.get("support_grade")
+                            or candidate.get("support_grade")
+                        ),
+                        "review_status": _text(suggested.get("review_status"))
+                        or "accepted",
+                        "variables": _text_list(
+                            suggested.get("variables")
+                            or candidate.get("variables")
+                        ),
+                        "mediators": _text_list(
+                            suggested.get("mediators")
+                            or candidate.get("mediators")
+                        ),
+                        "outcomes": _text_list(
+                            suggested.get("outcomes")
+                            or candidate.get("outcomes")
+                        ),
+                        "direction": _text(
+                            suggested.get("direction")
+                            or candidate.get("direction")
+                        ),
+                        "scope_summary": _text(
+                            suggested.get("scope_summary")
+                            or candidate.get("scope_summary")
+                        ),
+                        "evidence_ref_ids": evidence_ref_ids,
+                    },
                 }
             )
     return _jsonl(rows)

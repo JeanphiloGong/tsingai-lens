@@ -170,9 +170,9 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "README.txt",
         "manifest.json",
     ]
-    assert json.loads((workspace / "manifest.json").read_text(encoding="utf-8"))[
-        "next_steps"
-    ] == [
+    manifest = json.loads((workspace / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["training_message_ready_count"] == 0
+    assert manifest["next_steps"] == [
         "review review-packet.txt and source links",
         "fill reviewed-findings.template.jsonl with human-confirmed decisions",
         "dry-run import_goal_review_decisions.py before writing labels",
@@ -226,6 +226,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         (workspace / "reviewed-findings.template.jsonl").read_text(encoding="utf-8")
     ) == {"finding_id": "finding-1", "action": "skip"}
     readme = (workspace / "README.txt").read_text(encoding="utf-8")
+    assert "Expert satisfaction: blocked" in readme
     assert "This workspace has not written expert labels." in readme
     assert "training_ready is created only by explicit human expert decisions." in readme
 
@@ -282,6 +283,7 @@ def test_render_text_summary_lists_next_review_steps(tmp_path):
     )
 
     assert "Review candidates: 2" in text
+    assert "Expert satisfaction: blocked" in text
     assert "- review-packet.txt (10 lines)" in text
     assert "- Dry-run import_goal_review_decisions.py before writing labels." in text
 

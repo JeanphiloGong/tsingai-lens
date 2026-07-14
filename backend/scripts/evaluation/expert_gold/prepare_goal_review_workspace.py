@@ -239,6 +239,7 @@ def render_workspace_readme(
         "",
         f"Collection: {collection_id or 'n/a'}",
         f"Status: {_text(summary.get('status')) or 'n/a'}",
+        f"Expert satisfaction: {_expert_satisfaction_status(summary)}",
         f"Goal count: {int(summary.get('goal_count') or 0)}",
         f"Review candidates: {candidate_count}",
         "",
@@ -608,6 +609,7 @@ def render_text_summary(result: dict[str, Any]) -> str:
     lines = [
         f"Prepared Lens goal review workspace: {result['output_dir']}",
         f"Status: {result['status']}",
+        f"Expert satisfaction: {_expert_satisfaction_status(result)}",
         f"Collection: {result['collection_id']}",
         f"Goals: {result['goal_count']}",
         f"Review candidates: {result['review_candidate_count']}",
@@ -626,6 +628,28 @@ def render_text_summary(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _expert_satisfaction_status(summary: dict[str, Any]) -> str:
+    goals = _mapping_list(summary.get("goals"))
+    if _candidate_count(summary) or int(summary.get("review_candidate_count") or 0):
+        return "blocked"
+    if goals:
+        if any(int(goal.get("training_ready_count") or 0) == 0 for goal in goals):
+            return "blocked"
+        if any(int(goal.get("training_message_ready_count") or 0) == 0 for goal in goals):
+            return "blocked"
+        if any(int(goal.get("protocol_ready_count") or 0) == 0 for goal in goals):
+            return "blocked"
+    goal_count = int(summary.get("goal_count") or 0)
+    if goal_count:
+        if int(summary.get("training_ready_count") or 0) < goal_count:
+            return "blocked"
+        if int(summary.get("training_message_ready_count") or 0) < goal_count:
+            return "blocked"
+        if int(summary.get("protocol_ready_count") or 0) < goal_count:
+            return "blocked"
+    return "satisfied"
+
+
 def _workspace_manifest(
     summary: dict[str, Any],
     *,
@@ -638,6 +662,10 @@ def _workspace_manifest(
         "goal_count": int(summary.get("goal_count") or 0),
         "review_candidate_count": _candidate_count(summary),
         "training_ready_count": _sum_goal_int(summary, "training_ready_count"),
+        "training_message_ready_count": _sum_goal_int(
+            summary,
+            "training_message_ready_count",
+        ),
         "protocol_ready_count": _sum_goal_int(summary, "protocol_ready_count"),
         "output_dir": str(output_dir),
         "files": files,

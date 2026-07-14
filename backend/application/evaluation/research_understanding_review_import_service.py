@@ -4,10 +4,6 @@ from pathlib import Path
 import json
 from typing import Any
 
-from application.evaluation.research_understanding_feedback_service import (
-    ResearchUnderstandingFeedbackService,
-)
-
 
 ACTION_VALUES = frozenset({"accept", "reject", "correct", "skip"})
 AGENT_RECOMMENDATION_VALUES = frozenset(
@@ -53,9 +49,15 @@ REJECT_ISSUES = frozenset(
 class ResearchUnderstandingReviewImportService:
     def __init__(
         self,
-        feedback_service: ResearchUnderstandingFeedbackService | Any | None = None,
+        feedback_service: Any | None = None,
     ) -> None:
-        self.feedback_service = feedback_service or ResearchUnderstandingFeedbackService()
+        if feedback_service is None:
+            from application.evaluation.research_understanding_feedback_service import (  # noqa: PLC0415
+                ResearchUnderstandingFeedbackService,
+            )
+
+            feedback_service = ResearchUnderstandingFeedbackService()
+        self.feedback_service = feedback_service
 
     def import_rows(
         self,

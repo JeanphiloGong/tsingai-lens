@@ -163,6 +163,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "review-dashboard.md",
         "review-checklist.md",
         "dataset-readiness.md",
+        "expert-satisfaction.md",
         "training-ready.messages.jsonl",
         "training-ready.dataset.jsonl",
         "optimization-summary.md",
@@ -203,6 +204,13 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "| How does preheating affect ductility? (goal-1) | 0 | 0 | 0 | 1 | "
         "accept as paper-level |"
     ) in readiness
+    satisfaction = (workspace / "expert-satisfaction.md").read_text(encoding="utf-8")
+    assert "# Lens Expert Satisfaction Gate" in satisfaction
+    assert "Overall: blocked" in satisfaction
+    assert "| Expert review usable | blocked | 1 review candidate(s) remain." in satisfaction
+    assert "| Dataset accumulation usable | blocked | 1 goal(s) lack training-ready samples;" in satisfaction
+    assert "| Experiment design usable | blocked | 1 goal(s) lack protocol-ready inputs." in satisfaction
+    assert "the code path is usable but real expert labels are still missing" in satisfaction
     assert json.loads(
         (workspace / "training-ready.messages.jsonl").read_text(encoding="utf-8")
     ) == {"messages": [{"role": "user", "content": "extract"}]}
@@ -340,6 +348,20 @@ def test_render_dataset_readiness_report_explains_partial_exports():
         "Existing training-ready rows may still be emitted while the overall command fails"
         in report
     )
+
+
+def test_render_expert_satisfaction_report_maps_three_layers():
+    module = _load_workspace_module()
+
+    report = module.render_expert_satisfaction_report(_summary())
+
+    assert "# Lens Expert Satisfaction Gate" in report
+    assert "Overall: blocked" in report
+    assert "| Expert review usable | blocked | 1 review candidate(s) remain." in report
+    assert "| Dataset accumulation usable | blocked | 1 goal(s) lack training-ready samples;" in report
+    assert "| Experiment design usable | blocked | 1 goal(s) lack protocol-ready inputs." in report
+    assert "review-checklist.md" in report
+    assert "pass (incomplete)" in report
 
 
 def test_render_optimization_summary_lists_error_and_risk_stats():

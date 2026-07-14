@@ -179,6 +179,11 @@ def _write_workspace_files(
             "Training export and protocol readiness by goal.",
         ),
         (
+            "expert-satisfaction.md",
+            render_expert_satisfaction_report(summary),
+            "Three-layer expert satisfaction gate status and next actions.",
+        ),
+        (
             "training-ready.messages.jsonl",
             dataset_module.render_messages_jsonl_summary(summary),
             "Fine-tuning-compatible messages for current training-ready findings.",
@@ -459,6 +464,98 @@ def render_dataset_readiness_report(summary: dict[str, Any]) -> str:
                 "- Existing training-ready rows may still be emitted while the "
                 "overall command fails for unreviewed goals; use this report to "
                 "find the remaining goals."
+            ),
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_expert_satisfaction_report(summary: dict[str, Any]) -> str:
+    goals = _mapping_list(summary.get("goals"))
+    review_candidate_count = _sum_goal_int(summary, "review_candidate_count")
+    missing_training = [
+        _text(goal.get("goal_id"))
+        for goal in goals
+        if int(goal.get("training_ready_count") or 0) == 0
+    ]
+    missing_messages = [
+        _text(goal.get("goal_id"))
+        for goal in goals
+        if int(goal.get("training_message_ready_count") or 0) == 0
+    ]
+    missing_protocol = [
+        _text(goal.get("goal_id"))
+        for goal in goals
+        if int(goal.get("protocol_ready_count") or 0) == 0
+    ]
+    criteria = [
+        {
+            "title": "Expert review usable",
+            "status": "blocked" if review_candidate_count else "satisfied",
+            "evidence": f"{review_candidate_count} review candidate(s) remain.",
+            "next": (
+                "Review candidates in review-checklist.md, then fill accept/reject/correct decisions."
+                if review_candidate_count
+                else "No review candidates remain."
+            ),
+        },
+        {
+            "title": "Dataset accumulation usable",
+            "status": "blocked" if missing_training or missing_messages else "satisfied",
+            "evidence": (
+                f"{len(missing_training)} goal(s) lack training-ready samples; "
+                f"{len(missing_messages)} goal(s) lack training messages."
+            ),
+            "next": (
+                "Dry-run and import human-confirmed decisions, then export messages/training JSONL."
+                if missing_training or missing_messages
+                else "Training-ready exports are available."
+            ),
+        },
+        {
+            "title": "Experiment design usable",
+            "status": "blocked" if missing_protocol else "satisfied",
+            "evidence": f"{len(missing_protocol)} goal(s) lack protocol-ready inputs.",
+            "next": (
+                "Correct variables, outcomes, direction, scope, or evidence refs until protocol inputs are ready."
+                if missing_protocol
+                else "Goal Copilot has protocol-ready curated Findings."
+            ),
+        },
+    ]
+    overall = "satisfied" if all(item["status"] == "satisfied" for item in criteria) else "blocked"
+    lines = [
+        "# Lens Expert Satisfaction Gate",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        f"Overall: {overall}",
+        "",
+        "| Layer | Status | Evidence | Next action |",
+        "|---|---|---|---|",
+    ]
+    for item in criteria:
+        lines.append(
+            "| "
+            f"{_markdown_cell(item['title'], 80)} | "
+            f"{item['status']} | "
+            f"{_markdown_cell(item['evidence'], 120)} | "
+            f"{_markdown_cell(item['next'], 140)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Gate Rule",
+            "",
+            (
+                "- This gate is satisfied only when expert review is clear, every "
+                "target goal has exportable training-ready samples, and protocol "
+                "inputs are available for experiment design."
+            ),
+            (
+                "- If this report is blocked while the CLI says `pass "
+                "(incomplete)`, the code path is usable but real expert labels "
+                "are still missing."
             ),
             "",
         ]

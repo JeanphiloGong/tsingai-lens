@@ -496,6 +496,7 @@ class ResearchUnderstandingReviewDecisionImportResponse(BaseModel):
     decision_progress_by_goal: list[dict[str, Any]] = Field(default_factory=list)
     affected_goals: list[dict[str, Any]] = Field(default_factory=list)
     readiness_summary: dict[str, Any] = Field(default_factory=dict)
+    review_scope_gate: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):

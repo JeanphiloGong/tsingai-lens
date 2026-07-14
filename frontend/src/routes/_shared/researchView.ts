@@ -335,6 +335,7 @@ export type ResearchUnderstandingReviewDecisionImportResponse = {
 	decision_progress_by_goal: Record<string, unknown>[];
 	affected_goals: Record<string, unknown>[];
 	readiness_summary: Record<string, unknown>;
+	review_scope_gate: Record<string, unknown>;
 };
 export type ResearchUnderstandingGoldDraftItem = {
 	gold_item_id: string;

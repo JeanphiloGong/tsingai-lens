@@ -145,6 +145,9 @@ def render_text_summary(summary: dict) -> str:
     readiness = summary.get("readiness_summary")
     if isinstance(readiness, dict) and readiness:
         lines.extend(_render_readiness_summary(readiness))
+    gate = summary.get("review_scope_gate")
+    if isinstance(gate, dict) and gate:
+        lines.extend(_render_review_scope_gate(gate))
     return "\n".join(lines)
 
 
@@ -169,6 +172,28 @@ def _render_readiness_summary(readiness: dict) -> list[str]:
             f"ready_for_protocol_drafting={bool(readiness.get('ready_for_protocol_drafting'))}"
         ),
     ]
+
+
+def _render_review_scope_gate(gate: dict) -> list[str]:
+    lines = [
+        "Review scope gate:",
+        (
+            "- "
+            f"status={gate.get('status', 'unknown')} "
+            f"ready_for_expert_satisfaction_gate={bool(gate.get('ready_for_expert_satisfaction_gate'))}"
+        ),
+        (
+            "- "
+            f"actionable={gate.get('actionable_count', 0)} "
+            f"skipped={gate.get('skipped_count', 0)} "
+            f"training_ready={bool(gate.get('ready_for_training_export'))} "
+            f"protocol_ready={bool(gate.get('ready_for_protocol_drafting'))}"
+        ),
+    ]
+    reasons = gate.get("blocking_reasons")
+    if isinstance(reasons, list) and reasons:
+        lines.append("- blocking_reasons=" + ", ".join(str(reason) for reason in reasons))
+    return lines
 
 
 def _render_goal_summary(goal: dict) -> list[str]:

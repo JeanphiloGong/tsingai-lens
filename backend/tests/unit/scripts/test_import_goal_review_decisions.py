@@ -272,6 +272,21 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
             "goals_missing_training_messages_count": 0,
             "goals_missing_protocol_ready_count": 0,
         },
+        "review_scope_gate": {
+            "status": "blocked",
+            "ready_for_expert_satisfaction_gate": False,
+            "blocking_reasons": [
+                "unchecked_rows_remain",
+                "review_candidates_remain",
+            ],
+            "actionable_count": 3,
+            "skipped_count": 1,
+            "ready_for_training_export": True,
+            "ready_for_protocol_drafting": True,
+            "goals_still_needing_review_count": 1,
+            "goals_missing_training_messages_count": 0,
+            "goals_missing_protocol_ready_count": 0,
+        },
     }
     assert service.dataset_exports == [
         {
@@ -445,6 +460,9 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     assert "Readiness after import:" in text
     assert "goals=1 training_ready_goals=1 message_ready_goals=1 protocol_ready_goals=1" in text
     assert "ready_for_training_export=True ready_for_protocol_drafting=True" in text
+    assert "Review scope gate:" in text
+    assert "status=blocked ready_for_expert_satisfaction_gate=False" in text
+    assert "blocking_reasons=unchecked_rows_remain" in text
     assert "finding-accept: training=message_pair; protocol=training_messages" in text
 
 

@@ -130,6 +130,21 @@ def test_review_import_service_writes_feedback_and_curation():
             "next_review_finding_id": "finding-skip",
         }
     ]
+    assert summary["review_scope_gate"] == {
+        "status": "blocked",
+        "ready_for_expert_satisfaction_gate": False,
+        "blocking_reasons": [
+            "unchecked_rows_remain",
+            "review_candidates_remain",
+        ],
+        "actionable_count": 2,
+        "skipped_count": 1,
+        "ready_for_training_export": True,
+        "ready_for_protocol_drafting": True,
+        "goals_still_needing_review_count": 1,
+        "goals_missing_training_messages_count": 0,
+        "goals_missing_protocol_ready_count": 0,
+    }
     assert feedback_service.feedback == [
         {
             "collection_id": "col-1",
@@ -181,6 +196,23 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
             "next_review_finding_id": "finding-accept",
         }
     ]
+    assert summary["review_scope_gate"] == {
+        "status": "blocked",
+        "ready_for_expert_satisfaction_gate": False,
+        "blocking_reasons": [
+            "no_actionable_decisions",
+            "unchecked_rows_remain",
+            "training_export_not_ready",
+            "protocol_drafting_not_ready",
+        ],
+        "actionable_count": 0,
+        "skipped_count": 1,
+        "ready_for_training_export": False,
+        "ready_for_protocol_drafting": False,
+        "goals_still_needing_review_count": 0,
+        "goals_missing_training_messages_count": 0,
+        "goals_missing_protocol_ready_count": 0,
+    }
 
 
 def test_review_import_service_dry_run_reports_affected_goal_readiness():
@@ -201,6 +233,18 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
         "projected_protocol_ready_goal_count": 1,
         "projected_review_candidate_count": 0,
         "projected_rejected_count": 0,
+        "ready_for_training_export": True,
+        "ready_for_protocol_drafting": True,
+        "goals_still_needing_review_count": 0,
+        "goals_missing_training_messages_count": 0,
+        "goals_missing_protocol_ready_count": 0,
+    }
+    assert summary["review_scope_gate"] == {
+        "status": "ready",
+        "ready_for_expert_satisfaction_gate": True,
+        "blocking_reasons": [],
+        "actionable_count": 1,
+        "skipped_count": 0,
         "ready_for_training_export": True,
         "ready_for_protocol_drafting": True,
         "goals_still_needing_review_count": 0,
@@ -233,7 +277,6 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
             "readiness_issues": [],
         }
     ]
-
 
 def test_review_import_service_post_import_reports_current_readiness_not_pending():
     service = ResearchUnderstandingReviewImportService(FakeFeedbackService())

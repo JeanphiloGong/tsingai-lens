@@ -109,6 +109,7 @@ class ResearchUnderstandingReviewImportService:
                 self.feedback_service,
                 valid_decisions,
             )
+            readiness_summary = _readiness_summary(affected_goals)
             return _summary(
                 status="fail",
                 dry_run=dry_run,
@@ -130,13 +131,18 @@ class ResearchUnderstandingReviewImportService:
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
                 affected_goals=affected_goals,
-                readiness_summary=_readiness_summary(affected_goals),
+                readiness_summary=readiness_summary,
+                review_scope_gate=_review_scope_gate(
+                    review_progress,
+                    readiness_summary,
+                ),
             )
         if dry_run:
             affected_goals = _affected_goal_summaries(
                 self.feedback_service,
                 valid_decisions,
             )
+            readiness_summary = _readiness_summary(affected_goals)
             return _summary(
                 status="pass",
                 dry_run=True,
@@ -151,7 +157,11 @@ class ResearchUnderstandingReviewImportService:
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
                 affected_goals=affected_goals,
-                readiness_summary=_readiness_summary(affected_goals),
+                readiness_summary=readiness_summary,
+                review_scope_gate=_review_scope_gate(
+                    review_progress,
+                    readiness_summary,
+                ),
             )
 
         written = 0
@@ -170,6 +180,7 @@ class ResearchUnderstandingReviewImportService:
             valid_decisions,
             include_pending=False,
         )
+        readiness_summary = _readiness_summary(affected_goals)
         return _summary(
             status="pass",
             dry_run=False,
@@ -182,7 +193,11 @@ class ResearchUnderstandingReviewImportService:
             review_progress=review_progress,
             decision_progress_by_goal=decision_progress_by_goal,
             affected_goals=affected_goals,
-            readiness_summary=_readiness_summary(affected_goals),
+            readiness_summary=readiness_summary,
+            review_scope_gate=_review_scope_gate(
+                review_progress,
+                readiness_summary,
+            ),
         )
 
     def import_jsonl_file(
@@ -1076,6 +1091,48 @@ def _readiness_summary(affected_goals: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _review_scope_gate(
+    review_progress: dict[str, Any],
+    readiness_summary: dict[str, Any],
+) -> dict[str, Any]:
+    skipped = int(review_progress.get("skipped_count") or 0)
+    actionable = int(review_progress.get("actionable_count") or 0)
+    ready_for_training = bool(readiness_summary.get("ready_for_training_export"))
+    ready_for_protocol = bool(readiness_summary.get("ready_for_protocol_drafting"))
+    still_needing_review = int(
+        readiness_summary.get("goals_still_needing_review_count") or 0
+    )
+    training_gaps = int(
+        readiness_summary.get("goals_missing_training_messages_count") or 0
+    )
+    protocol_gaps = int(
+        readiness_summary.get("goals_missing_protocol_ready_count") or 0
+    )
+    blocking_reasons = []
+    if actionable == 0:
+        blocking_reasons.append("no_actionable_decisions")
+    if skipped:
+        blocking_reasons.append("unchecked_rows_remain")
+    if still_needing_review:
+        blocking_reasons.append("review_candidates_remain")
+    if training_gaps or not ready_for_training:
+        blocking_reasons.append("training_export_not_ready")
+    if protocol_gaps or not ready_for_protocol:
+        blocking_reasons.append("protocol_drafting_not_ready")
+    return {
+        "status": "ready" if not blocking_reasons else "blocked",
+        "ready_for_expert_satisfaction_gate": not blocking_reasons,
+        "blocking_reasons": blocking_reasons,
+        "actionable_count": actionable,
+        "skipped_count": skipped,
+        "ready_for_training_export": ready_for_training,
+        "ready_for_protocol_drafting": ready_for_protocol,
+        "goals_still_needing_review_count": still_needing_review,
+        "goals_missing_training_messages_count": training_gaps,
+        "goals_missing_protocol_ready_count": protocol_gaps,
+    }
+
+
 def _summary(
     *,
     status: str,
@@ -1090,6 +1147,7 @@ def _summary(
     decision_progress_by_goal: list[dict[str, Any]],
     affected_goals: list[dict[str, Any]],
     readiness_summary: dict[str, Any],
+    review_scope_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "status": status,
@@ -1104,6 +1162,7 @@ def _summary(
         "decision_progress_by_goal": decision_progress_by_goal,
         "affected_goals": affected_goals,
         "readiness_summary": readiness_summary,
+        "review_scope_gate": review_scope_gate or {},
     }
 
 

@@ -431,7 +431,7 @@
 		reviewCandidateFindingRows[0] ??
 		null;
 	$: nextReviewCandidateSample = nextReviewCandidateFinding
-		? findingDatasetSampleFor(nextReviewCandidateFinding)
+		? findingDatasetSampleFor(nextReviewCandidateFinding, datasetSummary)
 		: null;
 	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
 	$: selectableEffects = usesFindings
@@ -557,7 +557,12 @@
 		? findingUsagePath(selectedDisplayFinding, selectedFeedback, selectedCuration)
 		: null;
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
-	$: selectedFindingDatasetSample = selectedFinding ? findingDatasetSampleFor(selectedFinding) : null;
+	$: selectedFindingDatasetSample = selectedFinding
+		? findingDatasetSampleFor(selectedFinding, datasetSummary)
+		: null;
+	$: selectedTrainingMessageDiagnostics = selectedFindingDatasetSample
+		? trainingMessageDiagnosticsForSample(selectedFindingDatasetSample)
+		: [];
 	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
 	$: selectedFindingProtocolReadinessUnavailable = Boolean(
 		selectedFindingDatasetSample && !selectedFindingProtocolReadiness
@@ -785,6 +790,10 @@
 
 	function datasetPresentationBucketLabel(bucket: string) {
 		return translatedCatalogLabel('research.understanding.datasetPresentationBuckets', bucket);
+	}
+
+	function trainingMessageDiagnosticLabel(diagnostic: string) {
+		return translatedCatalogLabel('research.understanding.trainingMessageDiagnostics', diagnostic);
 	}
 
 	function findingTrustSourceLabel(source: FindingDatasetTrust['source']) {
@@ -1142,9 +1151,14 @@
 	}
 
 	function findingDatasetSampleFor(
-		finding: ResearchUnderstandingPresentationFinding
+		finding: ResearchUnderstandingPresentationFinding,
+		currentDatasetSummary: ResearchUnderstandingDataset | null = datasetSummary
 	): ResearchUnderstandingDatasetSample | null {
-		return datasetSummary?.items.find((item) => item.finding_id === finding.finding_id) ?? null;
+		return (
+			currentDatasetSummary?.items.find((item) => item.finding_id === finding.finding_id) ??
+			currentDatasetSummary?.items.find((item) => item.claim_id === finding.claim_id) ??
+			null
+		);
 	}
 
 	function datasetReviewActionLabel(sample: ResearchUnderstandingDatasetSample | null) {
@@ -1153,6 +1167,26 @@
 		const code = sample?.review_action.code.trim() ?? '';
 		if (!code) return '';
 		return translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', code);
+	}
+
+	function trainingMessageDiagnosticsForSample(sample: ResearchUnderstandingDatasetSample) {
+		const diagnostics = [...new Set(sample.metadata.training_message_diagnostic)];
+		if (sample.dataset_use_status !== 'training_ready') {
+			return diagnostics.filter((diagnostic) => diagnostic !== 'missing_message_pair');
+		}
+		return diagnostics;
+	}
+
+	function trainingMessageReadinessBody(
+		sample: ResearchUnderstandingDatasetSample,
+		diagnostics: string[]
+	) {
+		if (sample.dataset_use_status !== 'training_ready') {
+			return $t('research.understanding.trainingMessageReadinessNeedsReviewBody');
+		}
+		return diagnostics.length
+			? $t('research.understanding.trainingMessageReadinessBlockedBody')
+			: $t('research.understanding.trainingMessageReadinessReadyBody');
 	}
 
 	function protocolReadinessStatusLabel(readiness: ResearchUnderstandingProtocolReadiness) {
@@ -1434,7 +1468,10 @@
 		const usagePath = findingUsagePathForDisplay(finding);
 		return {
 			...usagePath,
-			nextAction: datasetReviewActionLabel(findingDatasetSampleFor(finding)) || usagePath.checklist[0] || ''
+			nextAction:
+				datasetReviewActionLabel(findingDatasetSampleFor(finding, datasetSummary)) ||
+				usagePath.checklist[0] ||
+				''
 		};
 	}
 
@@ -4173,6 +4210,37 @@
 										</div>
 									</section>
 								{/if}
+								{#if selectedFindingDatasetSample}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--training-messages"
+										aria-label={$t('research.understanding.trainingMessageReadiness')}
+									>
+										<div>
+											<strong>{$t('research.understanding.trainingMessageReadiness')}</strong>
+											<span>
+												{selectedTrainingMessageDiagnostics.length
+													? $t('research.understanding.trainingMessageReadinessBlocked')
+													: $t('research.understanding.trainingMessageReadinessReady')}
+											</span>
+										</div>
+										<p>
+											{trainingMessageReadinessBody(
+												selectedFindingDatasetSample,
+												selectedTrainingMessageDiagnostics
+											)}
+										</p>
+										{#if selectedTrainingMessageDiagnostics.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.trainingMessageDiagnosticTitle')}</span>
+												<ul>
+													{#each selectedTrainingMessageDiagnostics as diagnostic (diagnostic)}
+														<li>{trainingMessageDiagnosticLabel(diagnostic)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</section>
+								{/if}
 								{#if selectedFindingProtocolReadiness}
 									<section
 										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--protocol"
@@ -6235,6 +6303,33 @@
 
 	.research-understanding-workbench__basis-panel--protocol {
 		border-color: var(--accent-border);
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages {
+		border-color: var(--border-default);
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.research-understanding-workbench__basis-panel--protocol > div:first-child {

@@ -722,11 +722,12 @@ describe('research view shared helpers', () => {
 				top_system_warnings: [{ name: 'table_row_alignment_uncertain', count: 1 }]
 			},
 			items: [
-				{
-					sample_id: 'sample_1',
-					finding_id: 'finding_1',
-					label_status: 'silver',
-					dataset_use_status: 'review_candidate',
+					{
+						sample_id: 'sample_1',
+						finding_id: 'finding_1',
+						claim_id: 'claim_1',
+						label_status: 'silver',
+						dataset_use_status: 'review_candidate',
 					review_action: {
 						code: 'verify_table_rows',
 						label: 'verify parsed table rows before accepting or correcting'
@@ -742,6 +743,9 @@ describe('research view shared helpers', () => {
 							variables: true
 						},
 						guidance: 'accept or correct before protocol use'
+					},
+					metadata: {
+						training_message_diagnostic: ['missing_message_pair']
 					}
 				}
 			],
@@ -780,6 +784,7 @@ describe('research view shared helpers', () => {
 		expect(dataset.items[0]).toMatchObject({
 			sample_id: 'sample_1',
 			finding_id: 'finding_1',
+			claim_id: 'claim_1',
 			label_status: 'silver',
 			dataset_use_status: 'review_candidate',
 			review_action: {
@@ -797,6 +802,9 @@ describe('research view shared helpers', () => {
 					variables: true
 				},
 				guidance: 'accept or correct before protocol use'
+			},
+			metadata: {
+				training_message_diagnostic: ['missing_message_pair']
 			}
 		});
 	});

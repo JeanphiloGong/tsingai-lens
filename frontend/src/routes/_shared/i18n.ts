@@ -715,6 +715,41 @@ const translations: Record<Language, Translations> = {
 					support_grade: 'support grade',
 					traceable_training_evidence: 'traceable source evidence'
 				},
+				trainingMessageReadiness: 'Training message readiness',
+				trainingMessageReadinessReady: 'Message ready',
+				trainingMessageReadinessBlocked: 'Message blocked',
+				trainingMessageReadinessReadyBody:
+					'This reviewed finding has structured user/assistant messages aligned with the expert target and source evidence.',
+				trainingMessageReadinessNeedsReviewBody:
+					'Training messages are generated only after expert accept or correction. Finish the review decision first.',
+				trainingMessageReadinessBlockedBody:
+					'This reviewed finding is not message-exportable yet. Correct the listed fields before using it for evaluation or fine-tuning.',
+				trainingMessageDiagnosticTitle: 'Message diagnostics',
+				trainingMessageDiagnostics: {
+					missing_expected_statement: 'missing expected finding statement',
+					missing_expected_variables: 'missing expected variables',
+					missing_expected_outcomes: 'missing expected outcomes',
+					missing_expected_direction_or_scope: 'missing expected direction or scope',
+					missing_expected_support_grade: 'missing expected support grade',
+					missing_expected_generalization_status: 'missing expected generalization status',
+					missing_expected_evidence_ref_ids: 'missing expected evidence references',
+					missing_message_pair: 'missing user/assistant message pair',
+					invalid_user_message: 'invalid user message',
+					missing_assistant_message: 'missing assistant message',
+					missing_assistant_content: 'missing assistant content',
+					invalid_assistant_json: 'assistant message is not valid JSON',
+					invalid_assistant_json_object: 'assistant JSON is not an object',
+					mismatched_assistant_statement: 'assistant statement differs from the expert target',
+					mismatched_assistant_variables: 'assistant variables differ from the expert target',
+					mismatched_assistant_outcomes: 'assistant outcomes differ from the expert target',
+					mismatched_assistant_direction: 'assistant direction differs from the expert target',
+					mismatched_assistant_scope_summary: 'assistant scope differs from the expert target',
+					mismatched_assistant_support_grade: 'assistant support grade differs from the expert target',
+					mismatched_assistant_generalization_status:
+						'assistant generalization status differs from the expert target',
+					mismatched_assistant_evidence_ref_ids:
+						'assistant evidence references differ from the traceable evidence'
+				},
 				findingReviewReasonPanel: 'Review priorities',
 				findingReviewReasonActionReady:
 					'Already expert-labeled. Keep these notes for audit, not queue priority.',
@@ -3913,6 +3948,41 @@ const translations: Record<Language, Translations> = {
 					support_status: '证据支持状态',
 					support_grade: '证据等级',
 					traceable_training_evidence: '可追溯原文证据'
+				},
+				trainingMessageReadiness: '训练 messages 可用性',
+				trainingMessageReadinessReady: 'messages 可导出',
+				trainingMessageReadinessBlocked: 'messages 阻塞',
+				trainingMessageReadinessReadyBody:
+					'该已复核研究发现已经具备与专家目标和原文证据一致的结构化 user/assistant messages。',
+				trainingMessageReadinessNeedsReviewBody:
+					'训练 messages 只会在专家接受或校正后生成。请先完成该研究发现的复核结论。',
+				trainingMessageReadinessBlockedBody:
+					'该已复核研究发现暂不能导出 messages。用于评价或微调前，需要先校正下面这些字段。',
+				trainingMessageDiagnosticTitle: 'messages 诊断',
+				trainingMessageDiagnostics: {
+					missing_expected_statement: '缺少预期研究发现表述',
+					missing_expected_variables: '缺少预期变量',
+					missing_expected_outcomes: '缺少预期结果',
+					missing_expected_direction_or_scope: '缺少预期方向或适用范围',
+					missing_expected_support_grade: '缺少预期证据等级',
+					missing_expected_generalization_status: '缺少预期泛化范围',
+					missing_expected_evidence_ref_ids: '缺少预期证据引用',
+					missing_message_pair: '缺少 user/assistant message 对',
+					invalid_user_message: 'user message 无效',
+					missing_assistant_message: '缺少 assistant message',
+					missing_assistant_content: '缺少 assistant 内容',
+					invalid_assistant_json: 'assistant message 不是有效 JSON',
+					invalid_assistant_json_object: 'assistant JSON 不是对象',
+					mismatched_assistant_statement: 'assistant 的研究发现表述与专家目标不一致',
+					mismatched_assistant_variables: 'assistant 的变量与专家目标不一致',
+					mismatched_assistant_outcomes: 'assistant 的结果与专家目标不一致',
+					mismatched_assistant_direction: 'assistant 的方向与专家目标不一致',
+					mismatched_assistant_scope_summary: 'assistant 的适用范围与专家目标不一致',
+					mismatched_assistant_support_grade: 'assistant 的证据等级与专家目标不一致',
+					mismatched_assistant_generalization_status:
+						'assistant 的泛化范围与专家目标不一致',
+					mismatched_assistant_evidence_ref_ids:
+						'assistant 的证据引用与可追溯证据不一致'
 				},
 				findingReviewReasonPanel: '复核优先原因',
 				findingReviewReasonActionReady: '已有人类专家标注。这些原因只用于审计，不再作为队列优先级。',

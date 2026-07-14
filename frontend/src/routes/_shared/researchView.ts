@@ -379,10 +379,14 @@ export type ResearchUnderstandingDatasetCountEntry = {
 export type ResearchUnderstandingDatasetSample = {
 	sample_id: string;
 	finding_id: string;
+	claim_id: string;
 	label_status: ResearchUnderstandingDatasetLabelStatus | null;
 	dataset_use_status: ResearchUnderstandingDatasetUseStatus | null;
 	review_action: ResearchUnderstandingDatasetReviewAction;
 	protocol_readiness: ResearchUnderstandingProtocolReadiness | null;
+	metadata: {
+		training_message_diagnostic: string[];
+	};
 };
 export type ResearchUnderstandingDataset = {
 	schema_version: string;
@@ -1139,14 +1143,24 @@ function normalizeResearchUnderstandingDatasetSample(
 	if (!record) return null;
 	const sampleId = toText(record.sample_id);
 	const findingId = toText(record.finding_id);
-	if (!sampleId && !findingId) return null;
+	const claimId = toText(record.claim_id);
+	if (!sampleId && !findingId && !claimId) return null;
 	return {
 		sample_id: sampleId,
 		finding_id: findingId,
+		claim_id: claimId,
 		label_status: normalizeResearchUnderstandingDatasetLabelStatus(record.label_status),
 		dataset_use_status: normalizeResearchUnderstandingDatasetUseStatus(record.dataset_use_status),
 		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action),
-		protocol_readiness: normalizeResearchUnderstandingProtocolReadiness(record.protocol_readiness)
+		protocol_readiness: normalizeResearchUnderstandingProtocolReadiness(record.protocol_readiness),
+		metadata: normalizeResearchUnderstandingDatasetSampleMetadata(record.metadata)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetSampleMetadata(value: unknown) {
+	const record = asRecord(value);
+	return {
+		training_message_diagnostic: toStringList(record?.training_message_diagnostic)
 	};
 }
 

@@ -64,9 +64,13 @@ def _summary():
                         {
                             "finding_id": "finding-1",
                             "statement": "Preheating increased ductility.",
+                            "recommended_action_code": "accept_as_paper_level",
                             "recommended_action": "accept as paper-level",
                             "open_url": "/collections/col-1/goals/goal-1?finding_id=finding-1",
                             "acceptance_gate": {"accept_allowed": False},
+                            "review_decision_hint": {
+                                "why_accept_blocked": ["table row alignment"]
+                            },
                             "evidence": [
                                 {
                                     "label": "Paper A / p. 4",
@@ -177,6 +181,9 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     dashboard = (workspace / "review-dashboard.md").read_text(encoding="utf-8")
     assert "### How does preheating affect ductility? (goal-1)" in dashboard
     assert "Direct accept blocked: 1" in dashboard
+    assert "| Finding | Gate | Action | Note required | Evidence | Open |" in dashboard
+    assert "accept blocked: table row alignment" in dashboard
+    assert "Required: explain accepted paper-level scope." in dashboard
     readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
     assert "pending review candidates: 1" in readiness
     assert (
@@ -274,7 +281,8 @@ def test_render_review_dashboard_summarizes_goal_risks():
         "warning:table_row_alignment_uncertain=1"
     ) in dashboard
     assert (
-        "| Preheating increased ductility. | accept as paper-level | "
+        "| Preheating increased ductility. | accept blocked: table row alignment | "
+        "accept as paper-level | Required: explain accepted paper-level scope. | "
         "Paper A / p. 4 | [open](/collections/col-1/goals/goal-1?finding_id=finding-1) |"
     ) in dashboard
 

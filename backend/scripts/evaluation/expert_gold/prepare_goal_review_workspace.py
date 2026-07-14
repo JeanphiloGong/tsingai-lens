@@ -20,6 +20,14 @@ DEFAULT_GOAL_IDS = (
     "goal_6bf7d2c1030e",
     "goal_3037e425673a",
 )
+EXPERT_NOTE_PROMPTS = {
+    "accept_as_paper_level": "Required: explain accepted paper-level scope.",
+    "review_table_rows": "Required: explain checked table rows and values.",
+    "verify_table_rows": "Required: explain parsed table-row alignment.",
+    "review_table_variables": "Required: explain why selected variable is valid.",
+    "check_mechanism_requirement": "Required: explain mechanism requirement.",
+    "resolve_conflict": "Required: explain conflict resolution.",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -315,12 +323,20 @@ def render_review_dashboard(summary: dict[str, Any]) -> str:
         )
         if blocked_count:
             lines.append(f"- Direct accept blocked: {blocked_count}")
-        lines.extend(["", "| Finding | Action | Evidence | Open |", "|---|---|---|---|"])
+        lines.extend(
+            [
+                "",
+                "| Finding | Gate | Action | Note required | Evidence | Open |",
+                "|---|---|---|---|---|---|",
+            ]
+        )
         for candidate in candidates:
             lines.append(
                 "| "
                 f"{_markdown_cell(_text(candidate.get('statement')), 140)} | "
+                f"{_markdown_cell(_candidate_gate_text(candidate), 70)} | "
                 f"{_markdown_cell(_text(candidate.get('recommended_action')), 90)} | "
+                f"{_markdown_cell(_candidate_note_prompt(candidate), 80)} | "
                 f"{_markdown_cell(_evidence_label(candidate), 100)} | "
                 f"{_markdown_link('open', _text(candidate.get('open_url')) or review_url)} |"
             )
@@ -580,6 +596,30 @@ def _evidence_label(candidate: dict[str, Any]) -> str:
     return label
 
 
+def _candidate_gate_text(candidate: dict[str, Any]) -> str:
+    gate = _mapping(candidate.get("acceptance_gate"))
+    hint = _mapping(candidate.get("review_decision_hint"))
+    accept_allowed = bool(gate.get("accept_allowed"))
+    if not accept_allowed:
+        blockers = _text_list(hint.get("why_accept_blocked")) or _text_list(
+            gate.get("blocking_missing")
+        )
+        suffix = f": {', '.join(blockers)}" if blockers else ""
+        return f"accept blocked{suffix}"
+    status = _text(gate.get("status"))
+    if status:
+        return status
+    return "accept after checks"
+
+
+def _candidate_note_prompt(candidate: dict[str, Any]) -> str:
+    if not bool(candidate.get("expert_note_required")):
+        action_code = _text(candidate.get("recommended_action_code"))
+        prompt = EXPERT_NOTE_PROMPTS.get(action_code)
+        return prompt or "optional"
+    return _text(candidate.get("expert_note_prompt")) or "required"
+
+
 def _goal_heading(goal_id: str, question: str) -> str:
     if question:
         return f"{question} ({goal_id})"
@@ -700,6 +740,14 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _text_list(value: Any) -> list[str]:
+    return (
+        [_text(item) for item in value if _text(item)]
+        if isinstance(value, list)
+        else []
+    )
 
 
 if __name__ == "__main__":

@@ -930,6 +930,7 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                     "review_decision_hint": dict(
                         _mapping(candidate.get("review_decision_hint"))
                     ),
+                    "review_work_order": _decision_template_work_order(candidate),
                     "protocol_blocking_missing": _text_list(
                         _mapping(candidate.get("protocol_readiness")).get(
                             "blocking_missing"
@@ -1662,6 +1663,44 @@ def _decision_template_evidence(record: dict[str, Any]) -> dict[str, Any]:
         "table_audit": _mapping(record.get("table_audit")) or None,
         "quote": _text(record.get("quote")),
         "open": _short_review_href(record.get("href")),
+    }
+
+
+def _decision_template_work_order(candidate: dict[str, Any]) -> dict[str, Any]:
+    hint = _mapping(candidate.get("review_decision_hint"))
+    gate = _mapping(candidate.get("acceptance_gate"))
+    protocol = _mapping(candidate.get("protocol_readiness"))
+    blocking_missing = _text_list(protocol.get("blocking_missing"))
+    accept_allowed = bool(gate.get("accept_allowed"))
+    required_checks = _text_list(hint.get("required_checks")) or _text_list(
+        gate.get("review_checks")
+    )
+    if not accept_allowed or blocking_missing:
+        recommended_decision = "correct_or_reject"
+    elif required_checks:
+        recommended_decision = "accept_or_correct_after_checks"
+    else:
+        recommended_decision = "accept_reject_or_correct_after_source_review"
+    if blocking_missing:
+        protocol_unlock = "correct required fields before protocol use"
+    elif bool(protocol.get("ready_after_review")):
+        protocol_unlock = "accept or correct can unlock protocol input"
+    else:
+        protocol_unlock = "not protocol-ready from this row"
+    return {
+        "recommended_decision": recommended_decision,
+        "next_action": _text(hint.get("preferred_next_action"))
+        or _text(candidate.get("recommended_action")),
+        "accept_allowed": accept_allowed,
+        "allowed_actions": _text_list(hint.get("allowed_actions"))
+        or list(REVIEW_ACTION_OPTIONS),
+        "blocked_actions": _text_list(hint.get("blocked_actions")),
+        "required_checks": required_checks,
+        "why_accept_blocked": _text_list(hint.get("why_accept_blocked")),
+        "training_unlock": "accept or correct creates a training-ready target",
+        "protocol_unlock": protocol_unlock,
+        "protocol_blocking_missing": blocking_missing,
+        "import_note": _text(hint.get("import_note")),
     }
 
 

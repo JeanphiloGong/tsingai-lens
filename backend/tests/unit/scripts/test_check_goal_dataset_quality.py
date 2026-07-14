@@ -707,7 +707,25 @@ def test_render_decision_template_exports_editable_import_rows():
             "accept imports only after the reviewer changes action from skip"
         ),
     }
+    assert rows[0]["review_work_order"] == {
+        "recommended_decision": "accept_or_correct_after_checks",
+        "next_action": "accept_after_checks",
+        "accept_allowed": True,
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "blocked_actions": [],
+        "required_checks": [
+            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+        ],
+        "why_accept_blocked": [],
+        "training_unlock": "accept or correct creates a training-ready target",
+        "protocol_unlock": "accept or correct can unlock protocol input",
+        "protocol_blocking_missing": [],
+        "import_note": (
+            "accept imports only after the reviewer changes action from skip"
+        ),
+    }
     del rows[0]["review_decision_hint"]
+    del rows[0]["review_work_order"]
     assert rows[0] == {
         "collection_id": "col-1",
         "goal_id": "goal-1",
@@ -829,6 +847,54 @@ def test_review_exports_keep_table_review_prompt_out_of_training_target():
     assert decision_rows[0]["suggested_target"]["statement"] == review_rows[0][
         "suggested_target"
     ]["statement"]
+
+
+def test_decision_template_work_order_explains_accept_blockers():
+    check = _load_goal_dataset_check_module()
+
+    order = check._decision_template_work_order(
+        {
+            "recommended_action": "verify parsed table rows before accepting",
+            "acceptance_gate": {
+                "accept_allowed": False,
+                "review_checks": ["Verify parsed table-row alignment against the source table."],
+            },
+            "protocol_readiness": {
+                "ready_after_review": False,
+                "blocking_missing": ["variables", "direction_or_scope"],
+            },
+            "review_decision_hint": {
+                "preferred_next_action": "correct_or_reject",
+                "allowed_actions": ["reject", "correct", "skip"],
+                "blocked_actions": ["accept"],
+                "why_accept_blocked": [
+                    "blocking_missing=variables, direction_or_scope"
+                ],
+                "required_checks": [
+                    "Verify parsed table-row alignment against the source table."
+                ],
+                "import_note": (
+                    "accept is rejected while acceptance_gate.accept_allowed=false"
+                ),
+            },
+        }
+    )
+
+    assert order == {
+        "recommended_decision": "correct_or_reject",
+        "next_action": "correct_or_reject",
+        "accept_allowed": False,
+        "allowed_actions": ["reject", "correct", "skip"],
+        "blocked_actions": ["accept"],
+        "required_checks": [
+            "Verify parsed table-row alignment against the source table."
+        ],
+        "why_accept_blocked": ["blocking_missing=variables, direction_or_scope"],
+        "training_unlock": "accept or correct creates a training-ready target",
+        "protocol_unlock": "correct required fields before protocol use",
+        "protocol_blocking_missing": ["variables", "direction_or_scope"],
+        "import_note": "accept is rejected while acceptance_gate.accept_allowed=false",
+    }
 
 
 def test_render_agent_review_prompt_jsonl_exports_independent_review_tasks():

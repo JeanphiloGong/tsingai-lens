@@ -4513,6 +4513,102 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('requires a note before accepting a review candidate from the feedback form', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_mechanism_limited',
+									finding_id: 'finding_mechanism_limited',
+									label_status: 'silver',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'review_table_rows',
+										label: 'Review selected table rows'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'POST') {
+				const body = JSON.parse(String(init?.body ?? '{}'));
+				return Promise.resolve(
+					jsonResponse({
+						feedback_id: `ruf_${body.finding_id}`,
+						collection_id: 'col_123',
+						scope_type: body.scope_type,
+						scope_id: body.scope_id,
+						finding_id: body.finding_id,
+						claim_id: body.claim_id,
+						review_status: body.review_status,
+						issue_type: body.issue_type,
+						note: body.note,
+						reviewer: 'materials-expert@example.com',
+						created_at: '2026-07-13T09:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const claimDetail = await openMechanismClaimDetail();
+		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
+
+		await expect
+			.element(
+				claimDetail.getByText(
+					'Expert note required: confirm the selected table rows, variable column, and outcome values were checked.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(claimDetail.getByRole('button', { name: 'Save feedback', exact: true }))
+			.toBeDisabled();
+
+		await claimDetail
+			.getByLabelText('Feedback note')
+			.fill('Checked the cited table rows and confirmed the variable/outcome values.');
+		await claimDetail.getByRole('button', { name: 'Save feedback', exact: true }).click();
+
+		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+				(init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(feedbackPostCall).toBeTruthy();
+		expect(JSON.parse(String(feedbackPostCall![1].body))).toMatchObject({
+			finding_id: 'finding_mechanism_limited',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'Checked the cited table rows and confirmed the variable/outcome values.'
+		});
+	});
+
 	it('saves feedback and advances to the next review candidate', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
@@ -4742,7 +4838,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 					claim_id: 'claim_mechanism_limited',
 					review_status: 'correct',
 					issue_type: 'none',
-					note: null,
+					note: 'Checked source evidence before accepting.',
 					reviewer: 'materials-expert@example.com',
 					created_at: '2026-06-18T09:00:00+00:00'
 				})
@@ -4767,6 +4863,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail.getByRole('button', { name: 'Expert feedback' }).click();
 		await claimDetail.getByLabelText('Review result').selectOptions('correct');
 		await claimDetail.getByLabelText('Issue type').selectOptions('none');
+		await claimDetail.getByLabelText('Feedback note').fill('Checked source evidence before accepting.');
 		await claimDetail.getByRole('button', { name: 'Save feedback', exact: true }).click();
 
 		await expect.element(claimDetail.getByText(/Feedback saved:/)).toBeInTheDocument();

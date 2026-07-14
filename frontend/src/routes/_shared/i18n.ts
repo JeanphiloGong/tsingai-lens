@@ -921,6 +921,8 @@ const translations: Record<Language, Translations> = {
 				expertNotePromptConflict:
 					'Expert note required: explain how the conflicting evidence was resolved.',
 				expertNotePromptChecks: 'Expert note required: confirm these checks: {checks}.',
+				feedbackNoteRequiredError:
+					'Add the required expert note before accepting this finding.',
 				feedbackReviewer: 'Reviewer',
 				reviewerUnavailable: 'Sign in required',
 				feedbackSubmit: 'Save feedback',
@@ -4191,6 +4193,7 @@ const translations: Record<Language, Translations> = {
 				expertNotePromptConflict:
 					'需要专家备注：说明如何处理冲突证据。',
 				expertNotePromptChecks: '需要专家备注：确认这些检查项：{checks}。',
+				feedbackNoteRequiredError: '接受该 Finding 前需要填写专家备注。',
 				feedbackReviewer: '复核人',
 				reviewerUnavailable: '需要登录',
 				feedbackSubmit: '保存反馈',

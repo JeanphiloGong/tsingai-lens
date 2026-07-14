@@ -569,6 +569,13 @@
 	$: selectedFindingDatasetSample = selectedFinding
 		? findingDatasetSampleFor(selectedFinding, datasetSummary)
 		: null;
+	$: selectedFindingExpertNotePrompt = selectedFinding
+		? findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)
+		: '';
+	$: feedbackNoteRequired = Boolean(
+		selectedFindingExpertNotePrompt && feedbackStatus === 'correct'
+	);
+	$: feedbackNoteMissing = feedbackNoteRequired && !feedbackNote.trim();
 	$: selectedTrainingMessageDiagnostics = selectedFindingDatasetSample
 		? trainingMessageDiagnosticsForSample(selectedFindingDatasetSample)
 		: [];
@@ -3265,6 +3272,10 @@
 	async function submitClaimFeedback(options: { openNext?: boolean } = {}) {
 		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
 		if (!reviewerReady) return;
+		if (feedbackNoteMissing) {
+			feedbackError = $t('research.understanding.feedbackNoteRequiredError');
+			return;
+		}
 		const currentFindingId = selectedFinding?.finding_id ?? '';
 		feedbackSubmitting = true;
 		feedbackMessage = '';
@@ -4669,9 +4680,9 @@
 												</ul>
 											</div>
 										{/if}
-										{#if selectedFinding && findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)}
+										{#if selectedFindingExpertNotePrompt}
 											<p class="research-understanding-workbench__readiness-note">
-												{findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)}
+												{selectedFindingExpertNotePrompt}
 											</p>
 										{/if}
 									</section>
@@ -4895,8 +4906,14 @@
 											bind:value={feedbackNote}
 											disabled={feedbackSubmitting}
 											maxlength="2000"
+											required={feedbackNoteRequired}
 											rows="3"
 										></textarea>
+										{#if feedbackNoteRequired}
+											<small class="research-understanding-workbench__feedback-guidance">
+												{selectedFindingExpertNotePrompt}
+											</small>
+										{/if}
 									</label>
 									<div class="research-understanding-workbench__reviewer-chip">
 										<span>{$t('research.understanding.feedbackReviewer')}</span>
@@ -4904,7 +4921,7 @@
 									</div>
 									<button
 										type="submit"
-										disabled={feedbackSubmitting || !collectionId || !reviewerReady}
+										disabled={feedbackSubmitting || !collectionId || !reviewerReady || feedbackNoteMissing}
 									>
 										{feedbackSubmitting
 											? $t('research.understanding.feedbackSaving')
@@ -4912,7 +4929,7 @@
 									</button>
 									<button
 										type="button"
-										disabled={feedbackSubmitting || !collectionId || !reviewerReady || !selectedFinding || !nextReviewCandidateAfter(selectedFinding.finding_id)}
+										disabled={feedbackSubmitting || !collectionId || !reviewerReady || feedbackNoteMissing || !selectedFinding || !nextReviewCandidateAfter(selectedFinding.finding_id)}
 										on:click={() => submitClaimFeedback({ openNext: true })}
 									>
 										{feedbackSubmitting

@@ -29,6 +29,16 @@ EXPERT_NOTE_PROMPTS = {
     "check_mechanism_requirement": "Required: explain mechanism requirement.",
     "resolve_conflict": "Required: explain conflict resolution.",
 }
+REVIEW_LABELS = {
+    "accept_blockers": "accept blockers",
+    "direction_or_scope": "direction or scope",
+    "expert_review_decision": "expert review decision",
+    "missing_mechanism_evidence": "missing mechanism evidence",
+    "needs_cross_paper_confirmation": "needs cross-paper confirmation",
+    "non_single_variable_table_comparison": "multiple table variables changed",
+    "table_row_alignment_uncertain": "table row alignment uncertain",
+    "verify_table_rows": "verify parsed table rows",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -180,6 +190,11 @@ def _write_workspace_files(
             "Expert checklist for deciding accept, reject, correct, or skip.",
         ),
         (
+            "review-unlock-plan.md",
+            render_review_unlock_plan(summary),
+            "Candidate-by-candidate actions that unlock training and protocol readiness.",
+        ),
+        (
             "dataset-readiness.md",
             render_dataset_readiness_report(summary),
             "Training export and protocol readiness by goal.",
@@ -271,6 +286,7 @@ def render_workspace_readme(
             "------------",
             "1. Read review-packet.txt and open the source links for each finding.",
             "   Use review-priority.md first when many candidates remain.",
+            "   Use review-unlock-plan.md to see what each decision unlocks.",
             (
                 "2. Edit reviewed-findings.template.jsonl only for rows a human "
                 "expert has checked."
@@ -519,6 +535,69 @@ def render_review_checklist(summary: dict[str, Any]) -> str:
     if not has_candidates:
         lines.append("No review candidates found.")
     return "\n".join(lines) + "\n"
+
+
+def render_review_unlock_plan(summary: dict[str, Any]) -> str:
+    rows = _review_unlock_rows(summary)
+    lines = [
+        "# Lens Review Unlock Plan",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        f"Review candidates: {len(rows)}",
+        "",
+        "## How To Use",
+        "",
+        (
+            "- Start with rows where `Accept allowed` is `no`; those must be "
+            "corrected, rejected, or left skipped."
+        ),
+        (
+            "- For `ready_after_review` rows, one human `accept` or valid "
+            "`correct` decision can unlock training export and protocol input "
+            "for that finding."
+        ),
+        "- Do not promote rows that still have unresolved source or table checks.",
+        "",
+        "## Candidate Unlocks",
+        "",
+        (
+            "| Goal | Finding | Recommended decision | Accept allowed | "
+            "Training unlock | Protocol unlock | Required checks | Evidence | Open |"
+        ),
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    if not rows:
+        lines.append("| n/a | No candidates found. | n/a | n/a | n/a | n/a | n/a | n/a | n/a |")
+        return "\n".join(lines) + "\n"
+    for row in rows:
+        lines.append(
+            "| "
+            f"{_markdown_cell(row['goal'], 90)} | "
+            f"{_markdown_cell(row['finding'], 130)} | "
+            f"{_markdown_cell(row['decision'], 110)} | "
+            f"{row['accept_allowed']} | "
+            f"{_markdown_cell(row['training_unlock'], 90)} | "
+            f"{_markdown_cell(row['protocol_unlock'], 90)} | "
+            f"{_markdown_cell(row['checks'], 130)} | "
+            f"{_markdown_cell(row['evidence'], 100)} | "
+            f"{_markdown_link('open', row['open_url'])} |"
+        )
+    lines.extend(["", "## Decision Notes", ""])
+    for row in rows:
+        lines.extend(
+            [
+                f"### {_markdown_cell(row['finding'], 160)}",
+                "",
+                f"- Goal: {_markdown_cell(row['goal'], 180)}",
+                f"- Decision hint: {_markdown_cell(row['hint'], 260)}",
+                f"- Import note: {_markdown_cell(row['import_note'], 220)}",
+                f"- Missing for protocol: {row['protocol_missing']}",
+                f"- Evidence: {row['evidence']}",
+                f"- Open: {_markdown_link('open finding', row['open_url'])}",
+                "",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def render_dataset_readiness_report(summary: dict[str, Any]) -> str:
@@ -939,6 +1018,64 @@ def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, str]]:
     return rows
 
 
+def _review_unlock_rows(summary: dict[str, Any]) -> list[dict[str, str]]:
+    rows = []
+    for goal in _mapping_list(summary.get("goals")):
+        packet = _mapping(goal.get("review_packet"))
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        question = _text(goal.get("question"))
+        review_url = _text(packet.get("review_url"))
+        for candidate in _mapping_list(packet.get("candidates")):
+            gate = _mapping(candidate.get("acceptance_gate"))
+            hint = _mapping(candidate.get("review_decision_hint"))
+            readiness = _mapping(candidate.get("protocol_readiness"))
+            accept_allowed = bool(gate.get("accept_allowed"))
+            blocking_missing = _text_list(readiness.get("blocking_missing"))
+            missing = _text_list(readiness.get("missing"))
+            accept_blockers = (
+                _text_list(hint.get("why_accept_blocked"))
+                or _text_list(gate.get("accept_blockers"))
+                or _text_list(gate.get("blocking_missing"))
+                or blocking_missing
+            )
+            checks = (
+                _text_list(hint.get("required_checks"))
+                or _text_list(gate.get("review_checks"))
+                or _text_list(readiness.get("blocking_missing"))
+                or accept_blockers
+            )
+            open_url = _text(candidate.get("open_url")) or review_url
+            rows.append(
+                {
+                    "goal": _goal_heading(goal_id, question),
+                    "finding": _text(candidate.get("statement")),
+                    "decision": _text(candidate.get("recommended_action")) or "review",
+                    "accept_allowed": "yes" if accept_allowed else "no",
+                    "training_unlock": _training_unlock_text(candidate),
+                    "protocol_unlock": _protocol_unlock_text(
+                        readiness,
+                        accept_allowed=accept_allowed,
+                        accept_blockers=accept_blockers,
+                    ),
+                    "checks": _join_values(checks),
+                    "evidence": _evidence_label(candidate),
+                    "open_url": open_url,
+                    "hint": _text(hint.get("summary")) or _candidate_gate_text(candidate),
+                    "import_note": _unlock_import_note(hint, accept_allowed),
+                    "protocol_missing": _join_values(blocking_missing or missing),
+                }
+            )
+    rows.sort(
+        key=lambda row: (
+            row["accept_allowed"] == "yes",
+            row["protocol_unlock"] != "ready after review",
+            row["goal"],
+            row["finding"],
+        )
+    )
+    return rows
+
+
 def _review_priority(candidate: dict[str, Any]) -> tuple[int, str]:
     action_code = _text(candidate.get("recommended_action_code"))
     gate = _mapping(candidate.get("acceptance_gate"))
@@ -1043,6 +1180,46 @@ def _candidate_evidence_audit_lines(candidate: dict[str, Any]) -> list[str]:
                     f"{_markdown_cell(row_text, 260)}"
                 )
     return lines
+
+
+def _training_unlock_text(candidate: dict[str, Any]) -> str:
+    gate = _mapping(candidate.get("acceptance_gate"))
+    if not bool(gate.get("accept_allowed")):
+        return "correct/reject first"
+    readiness = _mapping(candidate.get("protocol_readiness"))
+    if bool(readiness.get("ready_after_review")):
+        return "accept/correct"
+    return "needs repair"
+
+
+def _protocol_unlock_text(
+    readiness: dict[str, Any],
+    *,
+    accept_allowed: bool = True,
+    accept_blockers: list[str] | None = None,
+) -> str:
+    if not accept_allowed:
+        blockers = accept_blockers or []
+        suffix = f": {_join_values(blockers)}" if blockers else ""
+        return "blocked" + suffix
+    status = _text(readiness.get("status"))
+    if status == "protocol_ready":
+        return "ready"
+    if bool(readiness.get("ready_after_review")):
+        return "ready after review"
+    blocking_missing = _text_list(readiness.get("blocking_missing"))
+    if blocking_missing:
+        return "blocked: " + _join_values(blocking_missing)
+    return status or "unknown"
+
+
+def _unlock_import_note(hint: dict[str, Any], accept_allowed: bool) -> str:
+    import_note = _text(hint.get("import_note"))
+    if import_note:
+        return import_note
+    if not accept_allowed:
+        return "accept is rejected while acceptance_gate.accept_allowed=false"
+    return "accept imports only after the reviewer changes action from skip"
 
 
 def _table_row_text(row: dict[str, Any], columns: list[str]) -> str:
@@ -1206,6 +1383,22 @@ def _text_list(value: Any) -> list[str]:
 def _join_text_list(value: Any) -> str:
     values = _text_list(value)
     return ", ".join(values) if values else "n/a"
+
+
+def _join_values(values: list[str]) -> str:
+    return ", ".join(_format_review_label(value) for value in values) if values else "n/a"
+
+
+def _format_review_label(value: str) -> str:
+    if "=" in value:
+        key, raw_items = value.split("=", 1)
+        items = [
+            _format_review_label(item.strip())
+            for item in raw_items.split(",")
+            if item.strip()
+        ]
+        return f"{REVIEW_LABELS.get(key, key.replace('_', ' '))}: {', '.join(items)}"
+    return REVIEW_LABELS.get(value, value.replace("_", " "))
 
 
 if __name__ == "__main__":

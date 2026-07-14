@@ -177,6 +177,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "review-dashboard.md",
         "review-priority.md",
         "review-checklist.md",
+        "review-unlock-plan.md",
         "dataset-readiness.md",
         "expert-satisfaction.md",
         "training-ready.messages.jsonl",
@@ -220,6 +221,13 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "[open finding](/collections/col-1/goals/goal-1?finding_id=finding-1)" in checklist
     assert "- [ ] Source link opens the cited paper/table/block." in checklist
     assert "- [ ] Direction matches the cited result." in checklist
+    unlock_plan = (workspace / "review-unlock-plan.md").read_text(encoding="utf-8")
+    assert "# Lens Review Unlock Plan" in unlock_plan
+    assert "Preheating increased ductility." in unlock_plan
+    assert "accept as paper-level" in unlock_plan
+    assert "correct/reject first" in unlock_plan
+    assert "blocked: table row alignment" in unlock_plan
+    assert "accept is rejected while acceptance_gate.accept_allowed=false" in unlock_plan
     readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
     assert "pending review candidates: 1" in readiness
     assert (
@@ -268,6 +276,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "training_ready is created only by explicit human expert decisions." in readme
     assert "Or run the matching command from review-commands.sh." in readme
     assert "review-commands.sh leaves the real import command commented out." in readme
+    assert "Use review-unlock-plan.md to see what each decision unlocks." in readme
 
 
 def test_prepare_goal_review_workspace_refuses_non_empty_output_dir(tmp_path):
@@ -414,6 +423,36 @@ def test_render_review_checklist_gives_expert_decision_steps():
     ) in checklist
     assert "- [ ] Evidence quote directly supports the finding." in checklist
     assert "- [ ] Scope/context is narrow enough for downstream experiment design." in checklist
+
+
+def test_render_review_unlock_plan_explains_decision_effects():
+    module = _load_workspace_module()
+    summary = _summary()
+    summary["goals"][0]["question"] = "How does preheating affect ductility?"
+    candidate = summary["goals"][0]["review_packet"]["candidates"][0]
+    candidate["acceptance_gate"] = {
+        "accept_allowed": False,
+        "review_checks": ["Correct the direction or scope before import."],
+    }
+    candidate["review_decision_hint"] = {
+        "summary": "Accept is blocked until direction or scope is corrected.",
+        "required_checks": ["Correct the direction or scope before import."],
+    }
+    candidate["protocol_readiness"] = {
+        "status": "missing_protocol_inputs",
+        "ready_after_review": False,
+        "missing": ["expert_review_decision", "direction_or_scope"],
+        "blocking_missing": ["direction_or_scope"],
+    }
+
+    report = module.render_review_unlock_plan(summary)
+
+    assert "# Lens Review Unlock Plan" in report
+    assert "| How does preheating affect ductility? (goal-1) |" in report
+    assert "correct/reject first" in report
+    assert "blocked: direction or scope" in report
+    assert "Correct the direction or scope before import." in report
+    assert "accept is rejected while acceptance_gate.accept_allowed=false" in report
 
 
 def test_render_dataset_readiness_report_explains_partial_exports():

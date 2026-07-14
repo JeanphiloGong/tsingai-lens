@@ -751,6 +751,11 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["label_status"] == "gold"
     assert by_finding["finding-1"]["dataset_use_status"] == "training_ready"
     assert by_finding["finding-1"]["presentation_bucket"] == "unbucketed"
+    assert by_finding["finding-1"]["protocol_readiness"]["status"] == "protocol_ready"
+    assert by_finding["finding-1"]["protocol_readiness"]["missing"] == []
+    assert by_finding["finding-1"]["protocol_readiness"]["checks"][
+        "traceable_training_evidence"
+    ] is True
     assert by_finding["finding-1"]["system_prediction"]["presentation_bucket"] == (
         "unbucketed"
     )
@@ -2127,6 +2132,10 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
 
     assert dataset["item_count"] == 1
     assert dataset["items"][0]["training_messages"]
+    assert dataset["items"][0]["protocol_readiness"]["status"] == "needs_correction"
+    assert "training_messages" in dataset["items"][0]["protocol_readiness"][
+        "blocking_missing"
+    ]
     assert dataset["quality_summary"]["training_ready_sample_count"] == 1
     assert dataset["quality_summary"]["training_message_sample_count"] == 0
     assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0
@@ -2168,6 +2177,16 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
 
     assert dataset["item_count"] == 1
     assert dataset["items"][0]["training_messages"]
+    assert dataset["items"][0]["protocol_readiness"]["status"] == "needs_correction"
+    assert dataset["items"][0]["protocol_readiness"]["blocking_missing"] == [
+        "support_grade"
+    ]
+    assert dataset["items"][0]["protocol_readiness"]["checks"]["variables"] is True
+    assert dataset["items"][0]["protocol_readiness"]["checks"]["outcomes"] is True
+    assert (
+        dataset["items"][0]["protocol_readiness"]["checks"]["direction_or_scope"]
+        is True
+    )
     assert dataset["quality_summary"]["training_ready_sample_count"] == 1
     assert dataset["quality_summary"]["training_message_sample_count"] == 1
     assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0

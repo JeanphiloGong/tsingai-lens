@@ -308,6 +308,24 @@ class FakeResearchUnderstandingFeedbackService:
                             ),
                         },
                     ],
+                    "protocol_readiness": {
+                        "status": "protocol_ready",
+                        "ready_after_review": True,
+                        "missing": [],
+                        "blocking_missing": [],
+                        "checks": {
+                            "expert_review_decision": True,
+                            "training_messages": True,
+                            "statement": True,
+                            "variables": True,
+                            "outcomes": True,
+                            "direction_or_scope": True,
+                            "support_status": True,
+                            "support_grade": True,
+                            "traceable_training_evidence": True,
+                        },
+                        "guidance": "Ready for traceable protocol drafting.",
+                    },
                     "context_refs": [],
                     "feedback_refs": [],
                     "metadata": {"curation_id": "ruc-existing"},
@@ -668,6 +686,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     )
     assert response.items[0].training_messages[0]["role"] == "user"
     assert response.items[0].training_messages[1]["role"] == "assistant"
+    assert response.items[0].protocol_readiness["status"] == "protocol_ready"
     assert service.dataset_exported == {
         "collection_id": "col-1",
         "scope_type": "goal",

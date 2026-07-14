@@ -812,7 +812,7 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 `label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、
 `input_blocks`、`prompt_version`、`model_output`、`system_prediction`、
 `review_action`、`expert_target`、`evidence_refs`、`training_evidence_refs`、
-`training_messages`、`context_refs`、
+`training_messages`、`protocol_readiness`、`context_refs`、
 `feedback_refs` 和 `metadata`。`evidence_refs` 保留完整审计证据链，包含
 direct、mechanism、condition context、background 等角色；`training_evidence_refs`
 只保留应作为监督输入的 direct/mechanism 证据，若旧样本没有角色分桶则回退到
@@ -827,6 +827,9 @@ direct、mechanism、condition context、background 等角色；`training_eviden
 `format=review_jsonl` 使用同一套 `protocol_readiness` 语义：`ready_after_review`
 表示只缺人工复核决定，`needs_correction` 表示还缺会阻断实验方案生成的字段或证据，
 `protocol_ready` 表示已满足复核、训练 messages 和方案输入要求。
+普通 `json` / `jsonl` dataset sample 也包含 `protocol_readiness`，前端可以用它在
+Finding 复核界面提示专家是否只差复核决定，还是还需要补变量、结果、方向/范围、
+support 或可追溯证据。
 离线训练或微调准备应优先消费
 `training_evidence_refs[*].training_source_text`，不要把 condition/background
 证据当作结论监督文本。`training_messages` 是从

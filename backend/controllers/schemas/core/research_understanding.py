@@ -528,6 +528,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     training_evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     training_messages: list[dict[str, Any]] = Field(default_factory=list)
+    protocol_readiness: dict[str, Any] = Field(default_factory=dict)
     context_refs: list[dict[str, Any]] = Field(default_factory=list)
     feedback_refs: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

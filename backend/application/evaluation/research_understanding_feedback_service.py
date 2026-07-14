@@ -634,6 +634,16 @@ class ResearchUnderstandingFeedbackService:
             _context_record(context_id, contexts, context_summaries)
             for context_id in context_ids
         ]
+        training_messages = (
+            _training_messages(
+                system_prediction=system_prediction,
+                expert_target=_mapping(expert_target),
+                evidence_records=training_evidence_records,
+                context_records=context_records,
+            )
+            if dataset_use_status == "training_ready"
+            else []
+        )
         matched_trace = _matched_trace_for_finding(
             finding,
             evidence_ref_ids=evidence_ref_ids,
@@ -682,15 +692,13 @@ class ResearchUnderstandingFeedbackService:
             "expert_target": expert_target,
             "evidence_refs": evidence_records,
             "training_evidence_refs": training_evidence_records,
-            "training_messages": (
-                _training_messages(
-                    system_prediction=system_prediction,
-                    expert_target=_mapping(expert_target),
-                    evidence_records=training_evidence_records,
-                    context_records=context_records,
-                )
-                if dataset_use_status == "training_ready"
-                else []
+            "training_messages": training_messages,
+            "protocol_readiness": _protocol_readiness_for_sample(
+                dataset_use_status=dataset_use_status,
+                system_prediction=system_prediction,
+                expert_target=_mapping(expert_target),
+                training_evidence_records=training_evidence_records,
+                training_messages=training_messages,
             ),
             "context_refs": context_records,
             "feedback_refs": [item.to_record() for item in feedback],
@@ -1608,6 +1616,9 @@ def _has_training_messages_for_expert_target(item: Mapping[str, Any]) -> bool:
 
 
 def _has_protocol_design_inputs_for_expert_target(item: Mapping[str, Any]) -> bool:
+    readiness = _mapping(item.get("protocol_readiness"))
+    if readiness:
+        return _text(readiness.get("status")) == "protocol_ready"
     if not _has_training_messages_for_expert_target(item):
         return False
     target = _mapping(item.get("expert_target"))
@@ -1634,6 +1645,126 @@ def _has_protocol_design_inputs_for_expert_target(item: Mapping[str, Any]) -> bo
         and outcomes
         and (direction or scope)
         and any(_text(ref.get("evidence_ref_id")) and _text(ref.get("quote")) for ref in evidence)
+    )
+
+
+def _protocol_readiness_for_sample(
+    *,
+    dataset_use_status: str,
+    system_prediction: Mapping[str, Any],
+    expert_target: Mapping[str, Any],
+    training_evidence_records: list[dict[str, Any]],
+    training_messages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    status = (
+        _text(expert_target.get("status") or system_prediction.get("status")) or ""
+    ).lower()
+    support_grade = (
+        _text(
+            expert_target.get("support_grade")
+            or system_prediction.get("support_grade")
+        )
+        or ""
+    ).lower()
+    checks = {
+        "expert_review_decision": dataset_use_status == "training_ready",
+        "training_messages": (
+            _training_messages_match_target(
+                expert_target,
+                training_messages,
+            )
+            if dataset_use_status == "training_ready"
+            else True
+        ),
+        "statement": bool(
+            _text(expert_target.get("statement") or system_prediction.get("statement"))
+        ),
+        "variables": bool(
+            _strings(expert_target.get("variables") or system_prediction.get("variables"))
+        ),
+        "outcomes": bool(
+            _strings(expert_target.get("outcomes") or system_prediction.get("outcomes"))
+        ),
+        "direction_or_scope": bool(
+            _text(expert_target.get("direction") or system_prediction.get("direction"))
+            or _text(
+                expert_target.get("scope_summary")
+                or system_prediction.get("scope_summary")
+            )
+        ),
+        "support_status": status not in {"unsupported", "conflicted"},
+        "support_grade": support_grade
+        not in {"insufficient", "conflict", "conflicted", "weak"},
+        "traceable_training_evidence": any(
+            _text(ref.get("evidence_ref_id")) and _text(ref.get("quote"))
+            for ref in training_evidence_records
+        ),
+    }
+    blocking_keys = (
+        (
+            "training_messages",
+        )
+        if dataset_use_status == "training_ready"
+        else ()
+    ) + (
+        "statement",
+        "variables",
+        "outcomes",
+        "direction_or_scope",
+        "support_status",
+        "support_grade",
+        "traceable_training_evidence",
+    )
+    blocking_missing = [key for key in blocking_keys if not checks[key]]
+    missing_keys = ("expert_review_decision", "training_messages", *blocking_keys)
+    missing = [
+        key
+        for index, key in enumerate(missing_keys)
+        if key not in missing_keys[:index]
+        if not checks[key]
+    ]
+    if not missing:
+        status_label = "protocol_ready"
+        guidance = "Ready for traceable protocol drafting."
+    elif blocking_missing:
+        status_label = "needs_correction"
+        guidance = "Correct the missing fields or evidence before importing this row."
+    else:
+        status_label = "ready_after_review"
+        guidance = "Accept only after expert review confirms the finding and evidence."
+    return {
+        "status": status_label,
+        "ready_after_review": not blocking_missing,
+        "missing": missing,
+        "blocking_missing": blocking_missing,
+        "checks": checks,
+        "guidance": guidance,
+    }
+
+
+def _training_messages_match_target(
+    expert_target: Mapping[str, Any],
+    messages: list[dict[str, Any]],
+) -> bool:
+    target_statement = _text(expert_target.get("statement"))
+    if not target_statement:
+        return False
+    if len(messages) < 2:
+        return False
+    if _text(messages[0].get("role")) != "user" or not _text(
+        messages[0].get("content")
+    ):
+        return False
+    if _text(messages[-1].get("role")) != "assistant":
+        return False
+    try:
+        assistant_payload = json.loads(_text(messages[-1].get("content")))
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(assistant_payload, Mapping):
+        return False
+    return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
+        target_statement
     )
 
 

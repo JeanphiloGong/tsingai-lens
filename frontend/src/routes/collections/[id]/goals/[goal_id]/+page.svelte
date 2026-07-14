@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
 	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
-	import { errorMessage } from '../../../../_shared/api';
+	import { errorMessage, isHttpStatusError } from '../../../../_shared/api';
 	import {
 		fetchExperimentPlans,
 		updateExperimentPlan,
@@ -110,10 +110,17 @@
 		} catch (err) {
 			plans = [];
 			selectPlan(null);
-			planError = errorMessage(err);
+			planError = experimentPlanLoadError(err);
 		} finally {
 			plansLoading = false;
 		}
+	}
+
+	function experimentPlanLoadError(err: unknown) {
+		if (isHttpStatusError(err, 404)) {
+			return $t('research.goalWorkspace.experimentPlansUnavailable');
+		}
+		return errorMessage(err);
 	}
 
 	function selectPlan(plan: ExperimentPlan | null) {

@@ -1391,6 +1391,8 @@ const translations: Record<Language, Translations> = {
 				experimentPlansTitle: 'Experiment plans',
 				experimentPlansLoading: 'Loading saved experiment plans...',
 				experimentPlansEmpty: 'No experiment plans saved yet.',
+				experimentPlansUnavailable:
+					'Experiment plan storage is unavailable in the running backend. Restart or update the backend before saving protocol drafts.',
 				experimentPlansList: 'Saved experiment plans',
 				experimentPlanTitle: 'Title',
 				experimentPlanStatus: 'Status',
@@ -4499,6 +4501,8 @@ const translations: Record<Language, Translations> = {
 				experimentPlansTitle: '实验方案',
 				experimentPlansLoading: '正在加载已保存实验方案...',
 				experimentPlansEmpty: '暂无已保存实验方案。',
+				experimentPlansUnavailable:
+					'当前后端不可用实验方案存储接口。请先重启或更新后端，再保存 protocol 草稿。',
 				experimentPlansList: '已保存实验方案',
 				experimentPlanTitle: '标题',
 				experimentPlanStatus: '状态',

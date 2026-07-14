@@ -679,7 +679,14 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('404 Not Found - Not Found')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Experiment plan storage is unavailable in the running backend. Restart or update the backend before saving protocol drafts.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('404 Not Found - Not Found')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('No experiment plans saved yet.')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Plan content')).not.toBeInTheDocument();
 	});

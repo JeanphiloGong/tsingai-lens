@@ -1777,6 +1777,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 				gatePanel.getByText('Verify the selected table rows, variable columns, and outcome values.')
 			)
 			.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Expert note required: confirm the selected table rows, variable column, and outcome values were checked.'
+				)
+			)
+			.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Repair evidence binding')).not.toBeInTheDocument();
 	});
 
@@ -2453,6 +2460,86 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())
 			.toBeInTheDocument();
+	});
+
+	it('submits a confirmed expert note when quickly accepting a dataset review action', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_strength_supported',
+									finding_id: 'finding_strength_supported',
+									label_status: 'silver',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'review_table_rows',
+										label: 'Review selected table rows'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'POST') {
+				const body = JSON.parse(String(init?.body ?? '{}'));
+				return Promise.resolve(
+					jsonResponse({
+						feedback_id: `ruf_${body.finding_id}`,
+						collection_id: 'col_123',
+						scope_type: body.scope_type,
+						scope_id: body.scope_id,
+						finding_id: body.finding_id,
+						claim_id: body.claim_id,
+						review_status: body.review_status,
+						issue_type: body.issue_type,
+						note: body.note,
+						reviewer: 'materials-expert@example.com',
+						created_at: '2026-07-13T09:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: 'Review next finding' }).click();
+		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
+
+		const feedbackPostCall = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+				(init as RequestInit | undefined)?.method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(feedbackPostCall).toBeTruthy();
+		expect(JSON.parse(String(feedbackPostCall![1].body))).toMatchObject({
+			finding_id: 'finding_strength_supported',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'Confirmed selected table rows, variable column, and outcome values were checked.'
+		});
 	});
 
 	it('filters claim rows by type and opens the selected claim detail', async () => {

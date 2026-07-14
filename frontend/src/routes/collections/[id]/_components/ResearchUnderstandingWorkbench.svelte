@@ -1246,6 +1246,68 @@
 			: gate.blocking_missing.map(protocolReadinessGapLabel);
 	}
 
+	function expertNotePromptForAction(code: string) {
+		if (code === 'accept_as_paper_level') {
+			return $t('research.understanding.expertNotePromptPaperLevel');
+		}
+		if (code === 'review_table_rows') {
+			return $t('research.understanding.expertNotePromptTableRows');
+		}
+		if (code === 'verify_table_rows') {
+			return $t('research.understanding.expertNotePromptVerifyTableRows');
+		}
+		if (code === 'review_table_variables') {
+			return $t('research.understanding.expertNotePromptTableVariables');
+		}
+		if (code === 'check_mechanism_requirement') {
+			return $t('research.understanding.expertNotePromptMechanism');
+		}
+		if (code === 'resolve_conflict') {
+			return $t('research.understanding.expertNotePromptConflict');
+		}
+		return '';
+	}
+
+	function expertAcceptNoteForAction(code: string) {
+		if (code === 'accept_as_paper_level') {
+			return 'Confirmed as paper-level evidence only; not accepted as a cross-paper conclusion.';
+		}
+		if (code === 'review_table_rows') {
+			return 'Confirmed selected table rows, variable column, and outcome values were checked.';
+		}
+		if (code === 'verify_table_rows') {
+			return 'Confirmed parsed table-row alignment was checked against the source table.';
+		}
+		if (code === 'review_table_variables') {
+			return 'Confirmed the variable interpretation remains valid despite other changing table variables.';
+		}
+		if (code === 'check_mechanism_requirement') {
+			return 'Confirmed the mechanism-evidence requirement for this label.';
+		}
+		if (code === 'resolve_conflict') {
+			return 'Confirmed conflicting evidence was reviewed and resolved for this label.';
+		}
+		return '';
+	}
+
+	function findingExpertNotePrompt(
+		finding: ResearchUnderstandingPresentationFinding,
+		sample: ResearchUnderstandingDatasetSample | null = findingDatasetSampleFor(finding)
+	) {
+		const actionPrompt = expertNotePromptForAction(sample?.review_action.code ?? '');
+		if (actionPrompt) return actionPrompt;
+		const gate = sample?.acceptance_gate ?? null;
+		if (gate?.review_checks.length) {
+			return $t('research.understanding.expertNotePromptChecks', {
+				checks: gate.review_checks.join('; ')
+			});
+		}
+		if (isPaperLevelAccept(finding)) {
+			return $t('research.understanding.expertNotePromptPaperLevel');
+		}
+		return '';
+	}
+
 	function isPaperLevelAccept(finding: ResearchUnderstandingPresentationFinding) {
 		const actionCode = findingDatasetSampleFor(finding)?.review_action.code.trim() ?? '';
 		const reviewReasons = new Set(findingReviewReasonValues(finding));
@@ -1258,6 +1320,13 @@
 	}
 
 	function findingAcceptNote(finding: ResearchUnderstandingPresentationFinding) {
+		const sample = findingDatasetSampleFor(finding);
+		const actionNote = expertAcceptNoteForAction(sample?.review_action.code ?? '');
+		if (actionNote) return actionNote;
+		const gate = sample?.acceptance_gate ?? null;
+		if (gate?.review_checks.length) {
+			return `Confirmed acceptance checks: ${gate.review_checks.join('; ')}`;
+		}
 		return isPaperLevelAccept(finding)
 			? 'Human expert accepted the source-backed paper-level finding.'
 			: 'Human expert accepted the source-grounded finding.';
@@ -4600,6 +4669,11 @@
 												</ul>
 											</div>
 										{/if}
+										{#if selectedFinding && findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)}
+											<p class="research-understanding-workbench__readiness-note">
+												{findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)}
+											</p>
+										{/if}
 									</section>
 								{/if}
 								{#if selectedFindingProtocolReadiness}
@@ -6877,6 +6951,16 @@
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
+	}
+
+	.research-understanding-workbench__readiness-note {
+		margin: 0;
+		border-left: 3px solid var(--color-accent);
+		padding: 6px 9px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__basis-panel--protocol > div:first-child {

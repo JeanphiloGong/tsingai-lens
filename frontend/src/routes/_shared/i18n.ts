@@ -908,6 +908,19 @@ const translations: Record<Language, Translations> = {
 				feedbackStatus: 'Review result',
 				feedbackIssue: 'Issue type',
 				feedbackNote: 'Feedback note',
+				expertNotePromptPaperLevel:
+					'Expert note required: confirm this is accepted only as paper-level evidence, not a cross-paper conclusion.',
+				expertNotePromptTableRows:
+					'Expert note required: confirm the selected table rows, variable column, and outcome values were checked.',
+				expertNotePromptVerifyTableRows:
+					'Expert note required: confirm the parsed table-row alignment was checked against the source table.',
+				expertNotePromptTableVariables:
+					'Expert note required: explain why this variable can be interpreted despite other table variables.',
+				expertNotePromptMechanism:
+					'Expert note required: state whether mechanism evidence is required for this label.',
+				expertNotePromptConflict:
+					'Expert note required: explain how the conflicting evidence was resolved.',
+				expertNotePromptChecks: 'Expert note required: confirm these checks: {checks}.',
 				feedbackReviewer: 'Reviewer',
 				reviewerUnavailable: 'Sign in required',
 				feedbackSubmit: 'Save feedback',
@@ -4165,6 +4178,19 @@ const translations: Record<Language, Translations> = {
 				feedbackStatus: '复核结果',
 				feedbackIssue: '问题类型',
 				feedbackNote: '反馈备注',
+				expertNotePromptPaperLevel:
+					'需要专家备注：确认该标签只按单篇证据接受，不作为跨论文结论。',
+				expertNotePromptTableRows:
+					'需要专家备注：确认已检查所选表格行、变量列和结果数值。',
+				expertNotePromptVerifyTableRows:
+					'需要专家备注：确认已对照原表检查解析后的表格行。',
+				expertNotePromptTableVariables:
+					'需要专家备注：说明为什么在其他表格变量存在变化时仍可解释该变量。',
+				expertNotePromptMechanism:
+					'需要专家备注：说明该标签是否需要机制证据。',
+				expertNotePromptConflict:
+					'需要专家备注：说明如何处理冲突证据。',
+				expertNotePromptChecks: '需要专家备注：确认这些检查项：{checks}。',
 				feedbackReviewer: '复核人',
 				reviewerUnavailable: '需要登录',
 				feedbackSubmit: '保存反馈',

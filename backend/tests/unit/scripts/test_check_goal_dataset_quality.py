@@ -51,6 +51,13 @@ def _dataset_payload(**overrides):
                 "page": "4",
                 "href": "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text",
                 "quote": "Preheating increased ductility by 14%.",
+                "value_summary": "ductility +14%",
+                "table_audit": {
+                    "columns": ["Preheat", "Ductility"],
+                    "relevant_rows": [
+                        {"cells": {"Preheat": "150 C", "Ductility": "+14%"}}
+                    ],
+                },
             }
         ],
         "expert_target": {
@@ -308,6 +315,11 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     )
     assert candidate["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
     assert candidate["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert candidate["evidence"][0]["value_summary"] == "ductility +14%"
+    assert candidate["evidence"][0]["table_audit"] == {
+        "columns": ["Preheat", "Ductility"],
+        "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+    }
     assert (
         candidate["evidence"][0]["href"]
         == "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text"
@@ -337,6 +349,8 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     assert "AI suggestion; human review still required." in text
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text
     assert "quote=long-text" not in text
+    assert "table columns: Preheat, Ductility" in text
+    assert "table row 1: Preheat: 150 C; Ductility: +14%" in text
 
     summary = check.evaluate_goal_dataset_payload(dataset)
     assert summary["next_review_finding_id"] == "finding-1"
@@ -411,6 +425,64 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert (
         rows[0]["evidence"][0]["href"]
         == "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text"
+    )
+    assert rows[0]["evidence"][0]["value_summary"] == "ductility +14%"
+    assert rows[0]["evidence"][0]["table_audit"] == {
+        "columns": ["Preheat", "Ductility"],
+        "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+    }
+
+
+def test_render_review_packet_pairs_table_cell_lists_with_columns():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "training_evidence_refs": [
+                {
+                    "evidence_ref_id": "ev-table",
+                    "label": "Paper A Table 1",
+                    "source_ref": "tbl-1",
+                    "page": "2",
+                    "href": "/collections/col-1/documents/doc-1?source_ref=tbl-1",
+                    "quote": "Relevant rows: A | 0.175 | 93.9 / A | 0.239 | 96.8",
+                    "table_audit": {
+                        "columns": ["Scan strategy", "Scan speed", "Relative density"],
+                        "relevant_rows": [
+                            {"row_index": 4, "cells": ["A", "0.175", "93.9"], "aligned": True},
+                            {"row_index": 8, "cells": ["A", "0.239", "96.8"], "aligned": True},
+                        ],
+                    },
+                }
+            ],
+            "system_prediction": {
+                "statement": "Scan speed 0.239 increased density from 93.9 to 96.8.",
+                "variables": ["scan speed"],
+                "outcomes": ["density"],
+                "direction": "increases",
+                "scope_summary": "SLM 316L",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "review_reasons": ["table_row_needs_expert_review"],
+                "warnings": [],
+            },
+        }
+    )
+
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+    text = check.render_review_packet_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+
+    assert "table columns: Scan strategy, Scan speed, Relative density" in text
+    assert (
+        "table row 1: Scan strategy: A; Scan speed: 0.175; Relative density: 93.9"
+        in text
+    )
+    assert (
+        "table row 2: Scan strategy: A; Scan speed: 0.239; Relative density: 96.8"
+        in text
     )
 
 

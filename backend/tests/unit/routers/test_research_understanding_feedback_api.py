@@ -272,6 +272,13 @@ class FakeResearchUnderstandingFeedbackService:
                                 "Preheating increased ductility by 14% in LPBF 316L."
                             ),
                             "training_source_text": "Preheating increased ductility by 14%.",
+                            "value_summary": "ductility +14%",
+                            "table_audit": {
+                                "columns": ["Preheat", "Ductility"],
+                                "relevant_rows": [
+                                    {"cells": {"Preheat": "150 C", "Ductility": "+14%"}}
+                                ],
+                            },
                         }
                     ],
                     "training_evidence_refs": [
@@ -286,6 +293,13 @@ class FakeResearchUnderstandingFeedbackService:
                                 "Preheating increased ductility by 14% in LPBF 316L."
                             ),
                             "training_source_text": "Preheating increased ductility by 14%.",
+                            "value_summary": "ductility +14%",
+                            "table_audit": {
+                                "columns": ["Preheat", "Ductility"],
+                                "relevant_rows": [
+                                    {"cells": {"Preheat": "150 C", "Ductility": "+14%"}}
+                                ],
+                            },
                         }
                     ],
                     "training_messages": [
@@ -997,6 +1011,11 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     assert line["issue_type"] == ""
     assert line["expert_note"] == ""
     assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert line["evidence"][0]["value_summary"] == "ductility +14%"
+    assert line["evidence"][0]["table_audit"] == {
+        "columns": ["Preheat", "Ductility"],
+        "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+    }
     assert "source_ref=blk_1" in line["evidence"][0]["href"]
     assert line["suggested_target"]["statement"] == (
         "Preheating improves ductility by 14%."

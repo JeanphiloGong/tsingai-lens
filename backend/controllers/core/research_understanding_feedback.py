@@ -505,7 +505,8 @@ def _acceptance_review_checks(
     return checks
 
 
-def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
+def _review_evidence_record(record: dict[str, Any]) -> dict[str, Any]:
+    table_audit = record.get("table_audit")
     return {
         "evidence_ref_id": _text(record.get("evidence_ref_id")),
         "label": _text(record.get("label"))
@@ -514,6 +515,8 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
         "source_ref": _text(record.get("source_ref")),
         "page": _text(record.get("page")),
         "href": _text(record.get("href")),
+        "value_summary": _text(record.get("value_summary")),
+        "table_audit": table_audit if isinstance(table_audit, dict) else None,
         "quote": _text(record.get("quote"))
         or _text(record.get("source_text"))
         or _text(record.get("training_source_text"))

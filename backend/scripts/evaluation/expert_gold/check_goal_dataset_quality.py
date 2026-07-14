@@ -728,6 +728,20 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                             f"          open: {_short_review_href(record.get('href'))}",
                         ]
                     )
+                    table_audit = _mapping(record.get("table_audit"))
+                    if table_audit:
+                        columns = _text_list(table_audit.get("columns"))
+                        if columns:
+                            lines.append(f"          table columns: {_join(columns)}")
+                        for row_index, table_row in enumerate(
+                            _mapping_list(table_audit.get("relevant_rows")),
+                            start=1,
+                        ):
+                            row_text = _table_row_text(table_row, columns)
+                            if row_text:
+                                lines.append(
+                                    f"          table row {row_index}: {_clip(row_text, 260)}"
+                                )
     if len(lines) == 4:
         lines.append("")
         lines.append("No review candidates found.")
@@ -1392,7 +1406,7 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
+def _review_evidence_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "evidence_ref_id": _text(record.get("evidence_ref_id")),
         "label": _text(record.get("label"))
@@ -1401,11 +1415,37 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
         "source_ref": _text(record.get("source_ref")),
         "page": _text(record.get("page")),
         "href": _text(record.get("href")),
+        "value_summary": _text(record.get("value_summary")),
+        "table_audit": _mapping(record.get("table_audit")) or None,
         "quote": _text(record.get("quote"))
         or _text(record.get("source_text"))
         or _text(record.get("training_source_text"))
         or _text(record.get("text")),
     }
+
+
+def _table_row_text(row: dict[str, Any], columns: list[str]) -> str:
+    cells_value = row.get("cells")
+    cells = _mapping(cells_value)
+    if cells:
+        return "; ".join(
+            f"{key}: {value}"
+            for key, value in cells.items()
+            if _text(key) and _text(value)
+        )
+    if isinstance(cells_value, list):
+        values = _text_list(cells_value)
+        if values:
+            return "; ".join(
+                f"{columns[index] if index < len(columns) else f'cell {index + 1}'}: {value}"
+                for index, value in enumerate(values)
+                if value
+            )
+    return "; ".join(
+        f"{key}: {value}"
+        for key, value in row.items()
+        if key != "cells" and _text(key) and _text(value)
+    )
 
 
 def _decision_template_evidence(record: dict[str, Any]) -> dict[str, str]:

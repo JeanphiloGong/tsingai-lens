@@ -2160,6 +2160,7 @@ def _evidence_record(
         "source_text": source_text,
         "training_source_text": quote or source_text,
         "value_summary": _text(item.get("value_summary")),
+        "table_audit": _mapping(item.get("table_audit")) or None,
         "locator": locator,
         "fact_ids": list(_strings(ref.get("fact_ids"))),
         "anchor_ids": list(_strings(ref.get("anchor_ids"))),

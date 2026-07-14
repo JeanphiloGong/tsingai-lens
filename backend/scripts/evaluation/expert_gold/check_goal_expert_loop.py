@@ -175,6 +175,11 @@ def check_goal_expert_loop(
     }
     goals = _goal_rollup(findings, dataset, collection_id=collection_id)
     completion = _completion_summary(goals)
+    expert_satisfaction = _expert_satisfaction_summary(
+        layers,
+        completion["remaining_work"],
+        expert_satisfaction_gate=expert_satisfaction_gate,
+    )
     status = (
         "fail"
         if any(layer["status"] == "fail" for layer in layers.values())
@@ -190,6 +195,7 @@ def check_goal_expert_loop(
         "require_all_training_ready": effective_require_all_training_ready,
         "require_complete": effective_require_complete,
         "layers": layers,
+        "expert_satisfaction": expert_satisfaction,
         "remaining_work": completion["remaining_work"],
         "findings_status": findings["status"],
         "dataset_status": dataset["status"],
@@ -722,6 +728,102 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _expert_satisfaction_summary(
+    layers: dict[str, dict[str, Any]],
+    remaining_work: dict[str, Any],
+    *,
+    expert_satisfaction_gate: bool,
+) -> dict[str, Any]:
+    review_candidates = int(remaining_work.get("review_candidate_count") or 0)
+    missing_training = len(_list(remaining_work.get("goals_without_training_ready")))
+    missing_messages = len(_list(remaining_work.get("goals_without_training_messages")))
+    missing_protocol = len(_list(remaining_work.get("goals_without_protocol_ready")))
+    criteria = [
+        _criterion(
+            "expert_review",
+            "Expert review usable",
+            "Findings are clear, evidence is jumpable, and rows can be accepted, rejected, or corrected.",
+            _mapping(layers.get("expert_review")).get("status") == "pass"
+            and review_candidates == 0,
+            (
+                "Finish human decisions for all review candidates."
+                if review_candidates
+                else "Expert review queue is clear."
+            ),
+        ),
+        _criterion(
+            "dataset_accumulation",
+            "Dataset accumulation usable",
+            "Human labels enter training_ready and exportable messages for every checked goal.",
+            _mapping(layers.get("dataset_accumulation")).get("status") == "pass"
+            and missing_training == 0
+            and missing_messages == 0,
+            (
+                "Import human-confirmed accept, reject, or correct decisions, then rerun dataset export checks."
+                if missing_training or missing_messages
+                else "Training-ready dataset exports are available."
+            ),
+        ),
+        _criterion(
+            "experiment_design",
+            "Experiment design usable",
+            "Goal Copilot can consume curated Findings and save traceable protocol drafts.",
+            _mapping(layers.get("experiment_design")).get("status") == "pass"
+            and missing_protocol == 0
+            and (not expert_satisfaction_gate or _runtime_write_verified(layers)),
+            _experiment_design_next_step(
+                layers,
+                missing_protocol=missing_protocol,
+                expert_satisfaction_gate=expert_satisfaction_gate,
+            ),
+        ),
+    ]
+    return {
+        "status": "satisfied" if all(item["satisfied"] for item in criteria) else "blocked",
+        "criteria": criteria,
+    }
+
+
+def _criterion(
+    key: str,
+    title: str,
+    requirement: str,
+    satisfied: bool,
+    next_step: str,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "title": title,
+        "requirement": requirement,
+        "satisfied": satisfied,
+        "status": "satisfied" if satisfied else "blocked",
+        "next_step": next_step,
+    }
+
+
+def _runtime_write_verified(layers: dict[str, dict[str, Any]]) -> bool:
+    experiment = _mapping(layers.get("experiment_design"))
+    runtime_contract = _mapping(experiment.get("runtime_contract"))
+    return (
+        bool(experiment.get("requires_runtime_write"))
+        and bool(runtime_contract.get("runtime_write_check"))
+        and _text(runtime_contract.get("status")) == "pass"
+    )
+
+
+def _experiment_design_next_step(
+    layers: dict[str, dict[str, Any]],
+    *,
+    missing_protocol: int,
+    expert_satisfaction_gate: bool,
+) -> str:
+    if missing_protocol:
+        return "Review or correct findings until every checked goal has protocol-ready inputs."
+    if expert_satisfaction_gate and not _runtime_write_verified(layers):
+        return "Run the expert gate with --api-base-url against the current backend so experiment-plan saving is smoke-tested."
+    return "Protocol-ready curated Findings and experiment-plan saving are available."
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -813,6 +915,23 @@ def render_text_summary(summary: dict[str, Any]) -> str:
     if diagnosis:
         lines.extend(["", "Gate diagnosis:"])
         lines.extend(f"- {item}" for item in diagnosis)
+    expert_satisfaction = _mapping(summary.get("expert_satisfaction"))
+    criteria = _mapping_list(expert_satisfaction.get("criteria"))
+    if criteria:
+        lines.extend(
+            [
+                "",
+                f"Expert satisfaction: {_text(expert_satisfaction.get('status'))}",
+            ]
+        )
+        for item in criteria:
+            lines.extend(
+                [
+                    f"- {_text(item.get('title'))}: {_text(item.get('status'))}",
+                    f"  requirement: {_text(item.get('requirement'))}",
+                    f"  next: {_text(item.get('next_step'))}",
+                ]
+            )
     pending_goals = _mapping_list(remaining_work.get("pending_goals"))
     if pending_goals:
         lines.extend(["", "Pending goals:"])

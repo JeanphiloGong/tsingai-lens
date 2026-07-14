@@ -135,6 +135,50 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == (
         "not_checked"
     )
+    assert summary["expert_satisfaction"] == {
+        "status": "blocked",
+        "criteria": [
+            {
+                "key": "expert_review",
+                "title": "Expert review usable",
+                "requirement": (
+                    "Findings are clear, evidence is jumpable, and rows can be "
+                    "accepted, rejected, or corrected."
+                ),
+                "satisfied": False,
+                "status": "blocked",
+                "next_step": "Finish human decisions for all review candidates.",
+            },
+            {
+                "key": "dataset_accumulation",
+                "title": "Dataset accumulation usable",
+                "requirement": (
+                    "Human labels enter training_ready and exportable messages "
+                    "for every checked goal."
+                ),
+                "satisfied": False,
+                "status": "blocked",
+                "next_step": (
+                    "Import human-confirmed accept, reject, or correct decisions, "
+                    "then rerun dataset export checks."
+                ),
+            },
+            {
+                "key": "experiment_design",
+                "title": "Experiment design usable",
+                "requirement": (
+                    "Goal Copilot can consume curated Findings and save traceable "
+                    "protocol drafts."
+                ),
+                "satisfied": False,
+                "status": "blocked",
+                "next_step": (
+                    "Review or correct findings until every checked goal has "
+                    "protocol-ready inputs."
+                ),
+            },
+        ],
+    }
     assert summary["remaining_work"] == {
         "review_candidate_count": 2,
         "goals_without_training_ready": ["goal-2"],
@@ -289,6 +333,15 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         "Do not rerun goal analysis for this state; export the decision template, review it, then dry-run and import human-confirmed decisions."
         in text
     )
+    assert "Expert satisfaction: blocked" in text
+    assert "- Expert review usable: blocked" in text
+    assert "next: Finish human decisions for all review candidates." in text
+    assert "- Dataset accumulation usable: blocked" in text
+    assert (
+        "next: Import human-confirmed accept, reject, or correct decisions, then rerun dataset export checks."
+        in text
+    )
+    assert "- Experiment design usable: blocked" in text
     assert "Next commands:" in text
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
@@ -853,6 +906,47 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
     assert summary["status"] == "pass"
     assert summary["completion_status"] == "complete"
     assert summary["expert_satisfaction_gate"] is True
+    assert summary["expert_satisfaction"] == {
+        "status": "satisfied",
+        "criteria": [
+            {
+                "key": "expert_review",
+                "title": "Expert review usable",
+                "requirement": (
+                    "Findings are clear, evidence is jumpable, and rows can be "
+                    "accepted, rejected, or corrected."
+                ),
+                "satisfied": True,
+                "status": "satisfied",
+                "next_step": "Expert review queue is clear.",
+            },
+            {
+                "key": "dataset_accumulation",
+                "title": "Dataset accumulation usable",
+                "requirement": (
+                    "Human labels enter training_ready and exportable messages "
+                    "for every checked goal."
+                ),
+                "satisfied": True,
+                "status": "satisfied",
+                "next_step": "Training-ready dataset exports are available.",
+            },
+            {
+                "key": "experiment_design",
+                "title": "Experiment design usable",
+                "requirement": (
+                    "Goal Copilot can consume curated Findings and save traceable "
+                    "protocol drafts."
+                ),
+                "satisfied": True,
+                "status": "satisfied",
+                "next_step": (
+                    "Protocol-ready curated Findings and experiment-plan saving "
+                    "are available."
+                ),
+            },
+        ],
+    }
     assert summary["layers"]["experiment_design"][
         "requires_all_goals_protocol_ready"
     ] is True

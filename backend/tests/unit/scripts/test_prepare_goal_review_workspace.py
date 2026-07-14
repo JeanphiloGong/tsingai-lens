@@ -44,8 +44,22 @@ def _summary():
                         {
                             "finding_id": "finding-1",
                             "statement": "Preheating increased ductility.",
+                            "recommended_action": "accept as paper-level",
+                            "open_url": "/collections/col-1/goals/goal-1?finding_id=finding-1",
+                            "acceptance_gate": {"accept_allowed": False},
+                            "evidence": [
+                                {
+                                    "label": "Paper A / p. 4",
+                                    "href": "/collections/col-1/documents/doc-1",
+                                }
+                            ],
                         }
                     ],
+                    "review_url": "/collections/col-1/goals/goal-1?review=queue",
+                    "risk_summary": {
+                        "reason:single_paper_evidence": 1,
+                        "warning:table_row_alignment_uncertain": 1,
+                    },
                 },
             }
         ],
@@ -98,6 +112,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "review-candidates.jsonl",
         "reviewed-findings.template.jsonl",
         "agent-review-prompts.jsonl",
+        "review-dashboard.md",
         "README.txt",
         "manifest.json",
     ]
@@ -111,6 +126,9 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert (workspace / "review-packet.txt").read_text(encoding="utf-8") == (
         "review packet\n\n"
     )
+    dashboard = (workspace / "review-dashboard.md").read_text(encoding="utf-8")
+    assert "### goal-1" in dashboard
+    assert "Direct accept blocked: 1" in dashboard
     assert json.loads(
         (workspace / "reviewed-findings.template.jsonl").read_text(encoding="utf-8")
     ) == {"finding_id": "finding-1", "action": "skip"}
@@ -159,3 +177,22 @@ def test_render_text_summary_lists_next_review_steps(tmp_path):
     assert "Review candidates: 2" in text
     assert "- review-packet.txt (10 lines)" in text
     assert "- Dry-run import_goal_review_decisions.py before writing labels." in text
+
+
+def test_render_review_dashboard_summarizes_goal_risks():
+    module = _load_workspace_module()
+
+    dashboard = module.render_review_dashboard(_summary())
+
+    assert "# Lens Goal Review Dashboard" in dashboard
+    assert "Review candidates: 1" in dashboard
+    assert "### goal-1" in dashboard
+    assert "Direct accept blocked: 1" in dashboard
+    assert (
+        "Top risks: reason:single_paper_evidence=1, "
+        "warning:table_row_alignment_uncertain=1"
+    ) in dashboard
+    assert (
+        "| Preheating increased ductility. | accept as paper-level | "
+        "Paper A / p. 4 | [open](/collections/col-1/goals/goal-1?finding_id=finding-1) |"
+    ) in dashboard

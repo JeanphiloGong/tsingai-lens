@@ -139,6 +139,11 @@ def _write_workspace_files(
             dataset_module.render_agent_review_prompt_jsonl_summary(summary),
             "Independent reviewer prompt rows; not importable expert decisions.",
         ),
+        (
+            "review-dashboard.md",
+            render_review_dashboard(summary),
+            "Short goal-by-goal review queue with risks and source links.",
+        ),
     ]
     files: list[dict[str, Any]] = []
     for filename, content, description in rendered:
@@ -231,6 +236,60 @@ def render_workspace_readme(
     return "\n".join(lines)
 
 
+def render_review_dashboard(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Lens Goal Review Dashboard",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        f"Review candidates: {_candidate_count(summary)}",
+        "",
+        "## Goal Queue",
+        "",
+    ]
+    goals = _mapping_list(summary.get("goals"))
+    if not goals:
+        lines.append("No goals found.")
+        return "\n".join(lines) + "\n"
+    for goal in goals:
+        packet = _mapping(goal.get("review_packet"))
+        candidates = _mapping_list(packet.get("candidates"))
+        if not candidates:
+            continue
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        review_url = _text(packet.get("review_url"))
+        lines.extend(
+            [
+                f"### {goal_id}",
+                "",
+                f"- Candidates: {len(candidates)}",
+                f"- Open review queue: {review_url or 'n/a'}",
+            ]
+        )
+        risks = _top_risks(_mapping(packet.get("risk_summary")))
+        if risks:
+            lines.append(f"- Top risks: {', '.join(risks)}")
+        blocked_count = sum(
+            1
+            for candidate in candidates
+            if not bool(_mapping(candidate.get("acceptance_gate")).get("accept_allowed"))
+        )
+        if blocked_count:
+            lines.append(f"- Direct accept blocked: {blocked_count}")
+        lines.extend(["", "| Finding | Action | Evidence | Open |", "|---|---|---|---|"])
+        for candidate in candidates:
+            lines.append(
+                "| "
+                f"{_markdown_cell(_text(candidate.get('statement')), 140)} | "
+                f"{_markdown_cell(_text(candidate.get('recommended_action')), 90)} | "
+                f"{_markdown_cell(_evidence_label(candidate), 100)} | "
+                f"{_markdown_link('open', _text(candidate.get('open_url')) or review_url)} |"
+            )
+        lines.append("")
+    if len(lines) == 6:
+        lines.append("No review candidates found.")
+    return "\n".join(lines) + "\n"
+
+
 def render_text_summary(result: dict[str, Any]) -> str:
     lines = [
         f"Prepared Lens goal review workspace: {result['output_dir']}",
@@ -306,6 +365,38 @@ def _candidate_count(summary: dict[str, Any]) -> int:
 
 def _sum_goal_int(summary: dict[str, Any], key: str) -> int:
     return sum(int(goal.get(key) or 0) for goal in _mapping_list(summary.get("goals")))
+
+
+def _top_risks(risk_summary: dict[str, Any]) -> list[str]:
+    ranked = sorted(
+        risk_summary.items(),
+        key=lambda item: (-int(item[1] or 0), str(item[0])),
+    )
+    return [f"{key}={value}" for key, value in ranked[:5]]
+
+
+def _evidence_label(candidate: dict[str, Any]) -> str:
+    evidence = _mapping_list(candidate.get("evidence"))
+    if not evidence:
+        return "n/a"
+    first = evidence[0]
+    label = _text(first.get("label")) or _text(first.get("source_ref")) or "evidence"
+    if len(evidence) > 1:
+        return f"{label} (+{len(evidence) - 1})"
+    return label
+
+
+def _markdown_cell(value: str, limit: int) -> str:
+    text = value.replace("|", "\\|").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text or "n/a"
+    return text[: max(limit - 3, 0)].rstrip() + "..."
+
+
+def _markdown_link(label: str, href: str) -> str:
+    if not href:
+        return "n/a"
+    return f"[{label}]({href})"
 
 
 def _line_count(value: str) -> int:

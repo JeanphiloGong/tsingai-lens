@@ -213,6 +213,16 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
         return _error(line_number, action, f"missing required field(s): {', '.join(missing)}")
 
     if action == "accept":
+        blocking_missing = _protocol_blocking_missing(row)
+        if blocking_missing:
+            return _error(
+                line_number,
+                action,
+                (
+                    "accept requires protocol_readiness without blocking gaps; "
+                    f"use correct or reject for: {', '.join(blocking_missing)}"
+                ),
+            )
         return {
             "status": "ready",
             "line": line_number,
@@ -338,6 +348,13 @@ def _review_warning(row: dict[str, Any]) -> str:
     if risky_reasons:
         return f"review_reasons={', '.join(risky_reasons)}"
     return ""
+
+
+def _protocol_blocking_missing(row: dict[str, Any]) -> list[str]:
+    readiness = row.get("protocol_readiness")
+    if not isinstance(readiness, dict):
+        return []
+    return _strings(readiness.get("blocking_missing"))
 
 
 def _review_warnings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:

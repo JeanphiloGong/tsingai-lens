@@ -271,8 +271,10 @@ Each exported JSONL row defaults to `"action": "skip"` and includes
 `accept`, `reject`, or `correct`; unchanged rows stay skipped and are not
 written as labels. `reject` rows need an `issue_type` such as `wrong_variable`,
 `wrong_direction`, or `insufficient_evidence`. `correct` rows need a corrected
-`suggested_target.statement` and at least one `evidence_ref_id`. Validate first,
-then import with a human reviewer id:
+`suggested_target.statement` and at least one `evidence_ref_id`. Rows with
+`protocol_readiness.blocking_missing` cannot be imported as `accept`; change
+them to `correct` after filling the missing fields/evidence, `reject`, or
+leave them as `skip`. Validate first, then import with a human reviewer id:
 
 ```bash
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \

@@ -404,6 +404,10 @@ categories, issue types, review reasons, and system warnings. Use these counts
 after imports to identify whether the model is mostly failing on variables,
 directions, evidence grounding, or risky review promotions before changing
 prompts or building fine-tuning data.
+The same summary also includes `optimization_breakdown` and top lists grouped
+by variable, outcome, direction, and evidence role. Use these grouped counts to
+decide whether the next optimization should target, for example, table-row
+evidence handling, a recurring variable confusion, or direction classification.
 
 After expert acceptance or curation creates `training_ready` samples, export the
 fine-tuning-compatible message rows with:

@@ -1094,6 +1094,12 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     by_system_warning: dict[str, int] = {}
     by_review_candidate_reason: dict[str, int] = {}
     by_review_candidate_warning: dict[str, int] = {}
+    optimization_breakdown: dict[str, dict[str, dict[str, dict[str, int]]]] = {
+        "by_variable": {},
+        "by_outcome": {},
+        "by_direction": {},
+        "by_evidence_role": {},
+    }
     warning_counts = {
         "missing_evidence": 0,
         "missing_source_text": 0,
@@ -1195,8 +1201,9 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
                 if feedback_records or _text(target.get("source")) == "curation"
                 else "unreviewed"
             )
+        error_category = _issue_error_category(issue_type)
         _increment_count(by_issue_type, issue_type)
-        _increment_count(by_error_category, _issue_error_category(issue_type))
+        _increment_count(by_error_category, error_category)
         _increment_count(
             by_support_grade,
             _text(target.get("support_grade"))
@@ -1260,10 +1267,67 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
             for record in evidence_records
         ):
             warning_counts["missing_source_text"] += 1
+        variable_values = _dimension_list(
+            system_prediction,
+            target,
+            "variables",
+            missing_label="unknown_variable",
+        )
+        outcome_values = _dimension_list(
+            system_prediction,
+            target,
+            "outcomes",
+            missing_label="unknown_outcome",
+        )
+        direction_values = _dimension_text(
+            system_prediction,
+            target,
+            "direction",
+            missing_label="unknown_direction",
+        )
+        review_reasons = list(_strings(system_prediction.get("review_reasons")))
+        system_warnings = list(_strings(system_prediction.get("warnings")))
+        _increment_quality_dimension(
+            optimization_breakdown["by_variable"],
+            values=variable_values,
+            issue_type=issue_type,
+            error_category=error_category,
+            dataset_use_status=dataset_use_status,
+            review_reasons=review_reasons,
+            system_warnings=system_warnings,
+        )
+        _increment_quality_dimension(
+            optimization_breakdown["by_outcome"],
+            values=outcome_values,
+            issue_type=issue_type,
+            error_category=error_category,
+            dataset_use_status=dataset_use_status,
+            review_reasons=review_reasons,
+            system_warnings=system_warnings,
+        )
+        _increment_quality_dimension(
+            optimization_breakdown["by_direction"],
+            values=direction_values,
+            issue_type=issue_type,
+            error_category=error_category,
+            dataset_use_status=dataset_use_status,
+            review_reasons=review_reasons,
+            system_warnings=system_warnings,
+        )
         for record in evidence_records:
+            evidence_role = _text(record.get("evidence_role")) or "uncategorized"
             _increment_count(
                 by_evidence_role,
-                _text(record.get("evidence_role")) or "uncategorized",
+                evidence_role,
+            )
+            _increment_quality_dimension(
+                optimization_breakdown["by_evidence_role"],
+                values=[evidence_role],
+                issue_type=issue_type,
+                error_category=error_category,
+                dataset_use_status=dataset_use_status,
+                review_reasons=review_reasons,
+                system_warnings=system_warnings,
             )
             _increment_count(
                 by_evidence_traceability_status,
@@ -1305,10 +1369,47 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "by_system_warning": by_system_warning,
         "by_review_candidate_reason": by_review_candidate_reason,
         "by_review_candidate_warning": by_review_candidate_warning,
+        "optimization_breakdown": optimization_breakdown,
         "top_error_categories": _top_counts(by_error_category),
         "top_issue_types": _top_counts(by_issue_type),
         "top_review_reasons": _top_counts(by_review_reason),
         "top_system_warnings": _top_counts(by_system_warning),
+        "top_variable_issue_types": _top_dimension_counts(
+            optimization_breakdown["by_variable"],
+            "issue_type",
+            skip={"none", "unreviewed"},
+        ),
+        "top_outcome_issue_types": _top_dimension_counts(
+            optimization_breakdown["by_outcome"],
+            "issue_type",
+            skip={"none", "unreviewed"},
+        ),
+        "top_direction_issue_types": _top_dimension_counts(
+            optimization_breakdown["by_direction"],
+            "issue_type",
+            skip={"none", "unreviewed"},
+        ),
+        "top_evidence_role_issue_types": _top_dimension_counts(
+            optimization_breakdown["by_evidence_role"],
+            "issue_type",
+            skip={"none", "unreviewed"},
+        ),
+        "top_variable_review_reasons": _top_dimension_counts(
+            optimization_breakdown["by_variable"],
+            "review_candidate_reason",
+        ),
+        "top_outcome_review_reasons": _top_dimension_counts(
+            optimization_breakdown["by_outcome"],
+            "review_candidate_reason",
+        ),
+        "top_direction_review_reasons": _top_dimension_counts(
+            optimization_breakdown["by_direction"],
+            "review_candidate_reason",
+        ),
+        "top_evidence_role_review_reasons": _top_dimension_counts(
+            optimization_breakdown["by_evidence_role"],
+            "review_candidate_reason",
+        ),
         "warning_counts": warning_counts,
     }
 
@@ -1317,12 +1418,85 @@ def _increment_count(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
 
 
+def _increment_quality_dimension(
+    breakdown: dict[str, dict[str, dict[str, int]]],
+    *,
+    values: list[str],
+    issue_type: str,
+    error_category: str,
+    dataset_use_status: str,
+    review_reasons: list[str],
+    system_warnings: list[str],
+) -> None:
+    for value in values:
+        bucket = breakdown.setdefault(
+            value,
+            {
+                "issue_type": {},
+                "error_category": {},
+                "review_candidate_reason": {},
+                "system_warning": {},
+            },
+        )
+        _increment_count(bucket["issue_type"], issue_type)
+        _increment_count(bucket["error_category"], error_category)
+        if dataset_use_status == "review_candidate":
+            for reason in review_reasons:
+                _increment_count(bucket["review_candidate_reason"], reason)
+            for warning in system_warnings:
+                _increment_count(bucket["system_warning"], warning)
+
+
+def _dimension_list(
+    system_prediction: Mapping[str, Any],
+    target: Mapping[str, Any],
+    key: str,
+    *,
+    missing_label: str,
+) -> list[str]:
+    values = list(_strings(system_prediction.get(key))) or list(
+        _strings(target.get(key))
+    )
+    return values or [missing_label]
+
+
+def _dimension_text(
+    system_prediction: Mapping[str, Any],
+    target: Mapping[str, Any],
+    key: str,
+    *,
+    missing_label: str,
+) -> list[str]:
+    value = _text(system_prediction.get(key)) or _text(target.get(key))
+    return [value or missing_label]
+
+
 def _top_counts(counts: dict[str, int], *, limit: int = 5) -> list[dict[str, object]]:
     return [
         {"name": key, "count": value}
         for key, value in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
         if value
     ][:limit]
+
+
+def _top_dimension_counts(
+    breakdown: Mapping[str, Mapping[str, Mapping[str, int]]],
+    metric: str,
+    *,
+    limit: int = 5,
+    skip: set[str] | None = None,
+) -> list[dict[str, object]]:
+    rows = []
+    skipped = skip or set()
+    for name, metrics in breakdown.items():
+        for key, count in _mapping(metrics.get(metric)).items():
+            if not count or key in skipped:
+                continue
+            rows.append({"name": name, "metric": key, "count": count})
+    return sorted(
+        rows,
+        key=lambda item: (-int(item["count"]), str(item["name"]), str(item["metric"])),
+    )[:limit]
 
 
 def _issue_error_category(issue_type: str) -> str:

@@ -473,6 +473,33 @@ def evaluate_goal_dataset_payload(
         "top_issue_types": _mapping_list(quality.get("top_issue_types")),
         "top_review_reasons": _mapping_list(quality.get("top_review_reasons")),
         "top_system_warnings": _mapping_list(quality.get("top_system_warnings")),
+        "optimization_breakdown": dict(
+            _mapping(quality.get("optimization_breakdown"))
+        ),
+        "top_variable_issue_types": _mapping_list(
+            quality.get("top_variable_issue_types")
+        ),
+        "top_outcome_issue_types": _mapping_list(
+            quality.get("top_outcome_issue_types")
+        ),
+        "top_direction_issue_types": _mapping_list(
+            quality.get("top_direction_issue_types")
+        ),
+        "top_evidence_role_issue_types": _mapping_list(
+            quality.get("top_evidence_role_issue_types")
+        ),
+        "top_variable_review_reasons": _mapping_list(
+            quality.get("top_variable_review_reasons")
+        ),
+        "top_outcome_review_reasons": _mapping_list(
+            quality.get("top_outcome_review_reasons")
+        ),
+        "top_direction_review_reasons": _mapping_list(
+            quality.get("top_direction_review_reasons")
+        ),
+        "top_evidence_role_review_reasons": _mapping_list(
+            quality.get("top_evidence_role_review_reasons")
+        ),
         "by_trace_status": dict(_mapping(quality.get("by_trace_status"))),
         "warning_counts": dict(warning_counts),
         "checks": checks,

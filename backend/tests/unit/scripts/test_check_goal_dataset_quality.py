@@ -46,6 +46,7 @@ def _dataset_payload(**overrides):
         "training_evidence_refs": [
             {
                 "evidence_ref_id": "ev-1",
+                "evidence_role": "direct_result",
                 "source_ref": "blk-1",
                 "label": "Paper A / p. 4",
                 "page": "4",
@@ -120,6 +121,64 @@ def _dataset_payload(**overrides):
         "top_review_reasons": [{"name": "single_paper_evidence", "count": 1}],
         "top_system_warnings": [
             {"name": "table_row_alignment_uncertain", "count": 1}
+        ],
+        "optimization_breakdown": {
+            "by_variable": {
+                "preheating": {
+                    "issue_type": {"wrong_variable": 1},
+                    "error_category": {"variable_error": 1},
+                    "review_candidate_reason": {},
+                    "system_warning": {},
+                }
+            },
+            "by_outcome": {
+                "ductility": {
+                    "issue_type": {"wrong_variable": 1},
+                    "error_category": {"variable_error": 1},
+                    "review_candidate_reason": {},
+                    "system_warning": {},
+                }
+            },
+            "by_direction": {
+                "increase": {
+                    "issue_type": {"wrong_variable": 1},
+                    "error_category": {"variable_error": 1},
+                    "review_candidate_reason": {},
+                    "system_warning": {},
+                }
+            },
+            "by_evidence_role": {
+                "direct_result": {
+                    "issue_type": {"wrong_variable": 1},
+                    "error_category": {"variable_error": 1},
+                    "review_candidate_reason": {},
+                    "system_warning": {},
+                }
+            },
+        },
+        "top_variable_issue_types": [
+            {"name": "preheating", "metric": "wrong_variable", "count": 1}
+        ],
+        "top_outcome_issue_types": [
+            {"name": "ductility", "metric": "wrong_variable", "count": 1}
+        ],
+        "top_direction_issue_types": [
+            {"name": "increase", "metric": "wrong_variable", "count": 1}
+        ],
+        "top_evidence_role_issue_types": [
+            {"name": "direct_result", "metric": "wrong_variable", "count": 1}
+        ],
+        "top_variable_review_reasons": [
+            {"name": "preheating", "metric": "single_paper_evidence", "count": 1}
+        ],
+        "top_outcome_review_reasons": [
+            {"name": "ductility", "metric": "single_paper_evidence", "count": 1}
+        ],
+        "top_direction_review_reasons": [
+            {"name": "increase", "metric": "single_paper_evidence", "count": 1}
+        ],
+        "top_evidence_role_review_reasons": [
+            {"name": "direct_result", "metric": "single_paper_evidence", "count": 1}
         ],
         "by_review_candidate_reason": {},
         "by_review_candidate_warning": {},
@@ -198,6 +257,27 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
     ]
     assert summary["by_review_reason"] == {"single_paper_evidence": 1}
     assert summary["by_system_warning"] == {"table_row_alignment_uncertain": 1}
+    assert summary["optimization_breakdown"]["by_variable"]["preheating"] == {
+        "issue_type": {"wrong_variable": 1},
+        "error_category": {"variable_error": 1},
+        "review_candidate_reason": {},
+        "system_warning": {},
+    }
+    assert summary["top_variable_issue_types"] == [
+        {"name": "preheating", "metric": "wrong_variable", "count": 1}
+    ]
+    assert summary["top_outcome_issue_types"] == [
+        {"name": "ductility", "metric": "wrong_variable", "count": 1}
+    ]
+    assert summary["top_direction_issue_types"] == [
+        {"name": "increase", "metric": "wrong_variable", "count": 1}
+    ]
+    assert summary["top_evidence_role_issue_types"] == [
+        {"name": "direct_result", "metric": "wrong_variable", "count": 1}
+    ]
+    assert summary["top_variable_review_reasons"] == [
+        {"name": "preheating", "metric": "single_paper_evidence", "count": 1}
+    ]
     assert summary["by_review_candidate_reason"] == {}
     assert summary["by_review_candidate_warning"] == {}
     assert all(item["status"] == "pass" for item in summary["checks"])

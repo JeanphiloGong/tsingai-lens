@@ -1343,6 +1343,11 @@
 		finding: ResearchUnderstandingPresentationFinding,
 		andNext = false
 	) {
+		if (findingNeedsManualAcceptNote(finding)) {
+			return andNext
+				? $t('research.understanding.quickReviewAcceptAndNext')
+				: $t('research.understanding.quickReviewAccept');
+		}
 		if (isPaperLevelAccept(finding)) {
 			return andNext
 				? $t('research.understanding.quickAcceptPaperLevelAndNext')
@@ -1356,6 +1361,13 @@
 	function findingCanAccept(finding: ResearchUnderstandingPresentationFinding) {
 		const gate = findingDatasetSampleFor(finding)?.acceptance_gate;
 		return !gate || (gate.accept_allowed && !gate.requires_correction);
+	}
+
+	function findingNeedsManualAcceptNote(finding: ResearchUnderstandingPresentationFinding) {
+		const sample = findingDatasetSampleFor(finding);
+		if (!sample) return false;
+		if (expertNotePromptForAction(sample.review_action.code)) return true;
+		return Boolean(sample.acceptance_gate?.review_checks.length);
 	}
 
 	function findingReviewReasonActionLabel(
@@ -1874,12 +1886,22 @@
 	async function acceptSelectedFinding() {
 		if (!selectedFinding) return;
 		activeReviewPanel = 'feedback';
+		if (findingNeedsManualAcceptNote(selectedFinding)) {
+			feedbackStatus = 'correct';
+			feedbackIssue = 'none';
+			return;
+		}
 		await acceptFinding(selectedFinding);
 	}
 
 	async function acceptSelectedFindingAndOpenNext() {
 		if (!selectedFinding) return;
 		activeReviewPanel = 'feedback';
+		if (findingNeedsManualAcceptNote(selectedFinding)) {
+			feedbackStatus = 'correct';
+			feedbackIssue = 'none';
+			return;
+		}
 		await acceptFinding(selectedFinding, { openNext: true });
 	}
 

@@ -289,6 +289,10 @@ reviewer ids and does not promote unreviewed AI suggestions to gold labels.
 Dry-run validation also checks that each reviewed `finding_id` still exists in
 the current goal dataset and that corrected `evidence_ref_id` values belong to
 that finding, so stale or hand-edited rows fail before any label is written.
+Dry-run and import summaries may include `warnings` for accepted or corrected
+rows that were originally paper-level, table-row, mechanism, or cross-paper
+confirmation candidates. These warnings do not block import; they tell the
+expert which promoted rows deserve one more look before training export.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

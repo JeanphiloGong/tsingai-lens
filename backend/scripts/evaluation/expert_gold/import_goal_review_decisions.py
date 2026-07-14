@@ -10,6 +10,22 @@ from typing import Any
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 ACTION_VALUES = frozenset({"accept", "reject", "correct", "skip"})
+RISKY_ACCEPT_ACTION_CODES = frozenset(
+    {
+        "accept_as_paper_level",
+        "review_table_rows",
+        "check_mechanism_evidence",
+    }
+)
+RISKY_ACCEPT_REASONS = frozenset(
+    {
+        "needs_cross_paper_confirmation",
+        "missing_mechanism_evidence",
+        "table_row_needs_expert_review",
+        "table_row_alignment_uncertain",
+        "non_single_variable_table_comparison",
+    }
+)
 REJECT_ISSUES = frozenset(
     {
         "evidence_not_grounded",
@@ -85,6 +101,7 @@ def import_review_decisions(
             skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
             counts={},
             errors=errors,
+            warnings=[],
             affected_goals=[],
         )
     if dry_run:
@@ -96,6 +113,7 @@ def import_review_decisions(
             skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
             counts=_counts(valid_decisions),
             errors=[],
+            warnings=_review_warnings(valid_decisions),
             affected_goals=[],
         )
 
@@ -121,6 +139,7 @@ def import_review_decisions(
         skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
         counts=_counts(valid_decisions),
         errors=[],
+        warnings=_review_warnings(valid_decisions),
         affected_goals=affected_goals,
     )
 
@@ -168,6 +187,7 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             "status": "ready",
             "line": line_number,
             "action": action,
+            "review_warning": _review_warning(row),
             "payload": {
                 "collection_id": _text(row.get("collection_id")),
                 "scope_type": "goal",
@@ -187,6 +207,7 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             "status": "ready",
             "line": line_number,
             "action": action,
+            "review_warning": "",
             "payload": {
                 "collection_id": _text(row.get("collection_id")),
                 "scope_type": "goal",
@@ -222,6 +243,7 @@ def _correct_decision(
         "status": "ready",
         "line": line_number,
         "action": action,
+        "review_warning": _review_warning(row),
         "payload": {
             "collection_id": _text(row.get("collection_id")),
             "scope_type": "goal",
@@ -270,6 +292,36 @@ def _target(row: dict[str, Any]) -> dict[str, Any]:
 def _note(row: dict[str, Any], fallback: str) -> str:
     note = _text(row.get("expert_note") or row.get("note"))
     return note or fallback
+
+
+def _review_warning(row: dict[str, Any]) -> str:
+    code = _text(row.get("recommended_action_code"))
+    reasons = set(_strings(row.get("review_reasons")))
+    risky_reasons = sorted(reasons & RISKY_ACCEPT_REASONS)
+    if code in RISKY_ACCEPT_ACTION_CODES and risky_reasons:
+        return (
+            f"recommended_action_code={code}; review_reasons="
+            f"{', '.join(risky_reasons)}"
+        )
+    if code in RISKY_ACCEPT_ACTION_CODES:
+        return f"recommended_action_code={code}"
+    if risky_reasons:
+        return f"review_reasons={', '.join(risky_reasons)}"
+    return ""
+
+
+def _review_warnings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "line": int(decision.get("line") or 0),
+            "action": decision["action"],
+            "finding_id": _text(decision.get("payload", {}).get("finding_id")),
+            "message": decision["review_warning"],
+        }
+        for decision in decisions
+        if decision.get("action") in {"accept", "correct"}
+        and _text(decision.get("review_warning"))
+    ]
 
 
 def _counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
@@ -454,6 +506,7 @@ def _summary(
     skipped: int,
     counts: dict[str, int],
     errors: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
     affected_goals: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -464,6 +517,7 @@ def _summary(
         "skipped_count": skipped,
         "counts": counts,
         "errors": errors,
+        "warnings": warnings,
         "affected_goals": affected_goals,
     }
 

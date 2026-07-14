@@ -172,6 +172,7 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
         "skipped_count": 1,
         "counts": {"accept": 1, "correct": 1, "reject": 1, "skip": 1},
         "errors": [],
+        "warnings": [],
         "affected_goals": [
             {
                 "collection_id": "col-1",
@@ -263,6 +264,7 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
     assert summary["status"] == "pass"
     assert summary["written_count"] == 0
     assert summary["counts"] == {"accept": 1}
+    assert summary["warnings"] == []
     assert summary["affected_goals"] == []
     assert service.feedback == []
     assert service.curations == []
@@ -305,6 +307,7 @@ def test_import_review_decisions_rejects_invalid_rows(tmp_path):
 
     assert summary["status"] == "fail"
     assert summary["written_count"] == 0
+    assert summary["warnings"] == []
     assert summary["affected_goals"] == []
     assert [error["message"] for error in summary["errors"]] == [
         "reject requires a valid issue_type",
@@ -342,6 +345,7 @@ def test_import_review_decisions_validates_current_dataset_refs(tmp_path):
 
     assert summary["status"] == "fail"
     assert summary["written_count"] == 0
+    assert summary["warnings"] == []
     assert summary["affected_goals"] == []
     assert [error["message"] for error in summary["errors"]] == [
         "finding_id does not exist in current goal dataset",
@@ -349,6 +353,68 @@ def test_import_review_decisions_validates_current_dataset_refs(tmp_path):
             "correct references evidence_ref_id(s) not present on current "
             "finding: missing-ev"
         ),
+    ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
+def test_import_review_decisions_warns_on_risky_accepts(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(
+                action="accept",
+                finding_id="finding-accept",
+                recommended_action_code="accept_as_paper_level",
+                review_reasons=[
+                    "needs_cross_paper_confirmation",
+                    "single_paper_evidence",
+                ],
+            ),
+            _base_row(
+                action="correct",
+                finding_id="finding-correct",
+                recommended_action_code="review_table_rows",
+                review_reasons=["table_row_needs_expert_review"],
+                suggested_target={
+                    "statement": "Preheating increased ductility by 14%.",
+                    "evidence_ref_ids": ["ev-1"],
+                },
+            ),
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 0
+    assert summary["warnings"] == [
+        {
+            "line": 1,
+            "action": "accept",
+            "finding_id": "finding-accept",
+            "message": (
+                "recommended_action_code=accept_as_paper_level; "
+                "review_reasons=needs_cross_paper_confirmation"
+            ),
+        },
+        {
+            "line": 2,
+            "action": "correct",
+            "finding_id": "finding-correct",
+            "message": (
+                "recommended_action_code=review_table_rows; "
+                "review_reasons=table_row_needs_expert_review"
+            ),
+        },
     ]
     assert service.feedback == []
     assert service.curations == []

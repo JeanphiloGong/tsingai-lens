@@ -286,6 +286,9 @@ python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
 
 The import writes only explicit human expert decisions. It rejects AI/agent
 reviewer ids and does not promote unreviewed AI suggestions to gold labels.
+Dry-run validation also checks that each reviewed `finding_id` still exists in
+the current goal dataset and that corrected `evidence_ref_id` values belong to
+that finding, so stale or hand-edited rows fail before any label is written.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

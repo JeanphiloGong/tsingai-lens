@@ -72,6 +72,10 @@ def import_review_decisions(
     decisions = [_decision_from_row(row, line_number=index + 1) for index, row in enumerate(rows)]
     errors = [decision for decision in decisions if decision["status"] == "error"]
     valid_decisions = [decision for decision in decisions if decision["status"] == "ready"]
+    service = None
+    if not errors:
+        service = feedback_service or _build_feedback_service()
+        errors.extend(_dataset_validation_errors(service, valid_decisions))
     if errors:
         return _summary(
             status="fail",
@@ -95,7 +99,8 @@ def import_review_decisions(
             affected_goals=[],
         )
 
-    service = feedback_service or _build_feedback_service()
+    if service is None:
+        service = feedback_service or _build_feedback_service()
     written = 0
     for decision in valid_decisions:
         action = decision["action"]
@@ -274,10 +279,55 @@ def _counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
     return {key: value for key, value in counts.items() if value}
 
 
-def _affected_goal_summaries(
+def _dataset_validation_errors(
     service: Any,
     decisions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    datasets = _datasets_for_decisions(service, decisions)
+    errors: list[dict[str, Any]] = []
+    for decision in decisions:
+        action = decision.get("action")
+        if action == "skip":
+            continue
+        payload = decision.get("payload", {})
+        collection_id = _text(payload.get("collection_id"))
+        goal_id = _text(payload.get("scope_id"))
+        finding_id = _text(payload.get("finding_id"))
+        dataset = datasets.get((collection_id, goal_id), {})
+        item = _dataset_item(dataset, finding_id)
+        if not item:
+            errors.append(
+                _error(
+                    int(decision.get("line") or 0),
+                    _text(action),
+                    "finding_id does not exist in current goal dataset",
+                )
+            )
+            continue
+        if action == "correct":
+            missing_refs = sorted(
+                set(_strings(payload.get("curated_evidence_ref_ids")))
+                - _dataset_evidence_ref_ids(item)
+            )
+            if missing_refs:
+                errors.append(
+                    _error(
+                        int(decision.get("line") or 0),
+                        _text(action),
+                        (
+                            "correct references evidence_ref_id(s) not present "
+                            f"on current finding: {', '.join(missing_refs)}"
+                        ),
+                    )
+                )
+    return errors
+
+
+def _datasets_for_decisions(
+    service: Any,
+    decisions: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    datasets = {}
     keys = sorted(
         {
             (
@@ -288,15 +338,44 @@ def _affected_goal_summaries(
             if decision.get("action") != "skip"
         }
     )
-    summaries = []
     for collection_id, goal_id in keys:
         if not collection_id or not goal_id:
             continue
-        dataset = service.export_dataset(
+        datasets[(collection_id, goal_id)] = service.export_dataset(
             collection_id=collection_id,
             scope_type="goal",
             scope_id=goal_id,
         )
+    return datasets
+
+
+def _dataset_item(dataset: dict[str, Any], finding_id: str) -> dict[str, Any]:
+    for item in _mapping_list(dataset.get("items")):
+        if _text(item.get("finding_id")) == finding_id:
+            return item
+    return {}
+
+
+def _dataset_evidence_ref_ids(item: dict[str, Any]) -> set[str]:
+    records = (
+        _mapping_list(item.get("training_evidence_refs"))
+        or _mapping_list(item.get("evidence_refs"))
+        or _mapping_list(item.get("input_blocks"))
+    )
+    return {
+        ref_id
+        for record in records
+        if (ref_id := _text(record.get("evidence_ref_id")))
+    }
+
+
+def _affected_goal_summaries(
+    service: Any,
+    decisions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    datasets = _datasets_for_decisions(service, decisions)
+    summaries = []
+    for dataset in datasets.values():
         summaries.append(_goal_readiness_summary(dataset))
     return summaries
 

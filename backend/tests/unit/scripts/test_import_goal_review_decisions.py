@@ -49,7 +49,7 @@ class FakeFeedbackService:
             "collection_id": kwargs["collection_id"],
             "scope_type": kwargs["scope_type"],
             "scope_id": kwargs["scope_id"],
-            "item_count": 3,
+            "item_count": 4,
             "quality_summary": {
                 "training_ready_sample_count": 2,
                 "training_message_sample_count": 1,
@@ -59,6 +59,12 @@ class FakeFeedbackService:
             },
             "items": [
                 {
+                    "finding_id": "finding-accept",
+                    "dataset_use_status": "training_ready",
+                    "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
+                },
+                {
+                    "finding_id": "finding-correct",
                     "dataset_use_status": "training_ready",
                     "expert_target": {
                         "statement": "Preheating increased ductility by 14%.",
@@ -77,8 +83,12 @@ class FakeFeedbackService:
                     ],
                     "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
                 },
-                {"dataset_use_status": "review_candidate"},
-                {"dataset_use_status": "rejected"},
+                {
+                    "finding_id": "finding-1",
+                    "dataset_use_status": "review_candidate",
+                    "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
+                },
+                {"finding_id": "finding-reject", "dataset_use_status": "rejected"},
             ],
         }
 
@@ -166,7 +176,7 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
             {
                 "collection_id": "col-1",
                 "goal_id": "goal-1",
-                "item_count": 3,
+                "item_count": 4,
                 "training_ready_count": 2,
                 "training_message_count": 1,
                 "protocol_ready_count": 1,
@@ -177,6 +187,11 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
         ],
     }
     assert service.dataset_exports == [
+        {
+            "collection_id": "col-1",
+            "scope_type": "goal",
+            "scope_id": "goal-1",
+        },
         {
             "collection_id": "col-1",
             "scope_type": "goal",
@@ -294,6 +309,46 @@ def test_import_review_decisions_rejects_invalid_rows(tmp_path):
     assert [error["message"] for error in summary["errors"]] == [
         "reject requires a valid issue_type",
         "correct requires at least one evidence_ref_id",
+    ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
+def test_import_review_decisions_validates_current_dataset_refs(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(action="accept", finding_id="missing-finding"),
+            _base_row(
+                action="correct",
+                finding_id="finding-correct",
+                suggested_target={
+                    "statement": "Preheating increased ductility by 14%.",
+                    "evidence_ref_ids": ["missing-ev"],
+                },
+            ),
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert summary["affected_goals"] == []
+    assert [error["message"] for error in summary["errors"]] == [
+        "finding_id does not exist in current goal dataset",
+        (
+            "correct references evidence_ref_id(s) not present on current "
+            "finding: missing-ev"
+        ),
     ]
     assert service.feedback == []
     assert service.curations == []

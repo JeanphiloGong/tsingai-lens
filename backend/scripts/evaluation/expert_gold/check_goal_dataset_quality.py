@@ -657,7 +657,7 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
             lines.extend(
                 [
                     "",
-                    f"  {index}. {_clip(candidate.get('statement'), 240)}",
+                    f"  {index}. {_text(candidate.get('statement')) or 'n/a'}",
                     (
                         "     fields: "
                         f"variables={_join(candidate.get('variables'))}; "
@@ -706,7 +706,7 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
             if suggested:
                 lines.append(
                     "     suggested target: "
-                    f"{_clip(suggested.get('statement'), 260)}"
+                    f"{_text(suggested.get('statement')) or 'n/a'}"
                 )
                 if _text(suggested.get("note")):
                     lines.append(f"     suggestion note: {_clip(suggested.get('note'), 260)}")

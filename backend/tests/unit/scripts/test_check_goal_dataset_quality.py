@@ -486,6 +486,67 @@ def test_render_review_packet_pairs_table_cell_lists_with_columns():
     )
 
 
+def test_render_review_packet_keeps_full_finding_statements():
+    check = _load_goal_dataset_check_module()
+    long_statement = (
+        "Changing scan strategy rotation angle and build orientation was "
+        "experimentally validated against crystallographic-texture-based "
+        "Bishop-Hill yield strength predictions; yield strength increased "
+        "from the 0-0-0 configuration to the 45-22.5-0 condition with "
+        "deviations generally below five percent."
+    )
+    long_suggested_statement = (
+        "Use this as a paper-level validation finding: scan strategy rotation "
+        "angle and build orientation changed crystallographic texture and the "
+        "associated Bishop-Hill yield strength prediction matched the measured "
+        "yield strength trend within the cited source scope."
+    )
+
+    packet = {
+        "goal_id": "goal-1",
+        "review_url": "/collections/col-1/goals/goal-1?review=queue",
+        "candidates": [
+            {
+                "statement": long_statement,
+                "variables": ["scan strategy rotation angle", "build orientation"],
+                "outcomes": ["yield strength"],
+                "direction": "predict",
+                "presentation_bucket": "primary",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "trace_status": "evidence_derived",
+                "open_url": "/collections/col-1/goals/goal-1?review=queue&finding_id=finding-1",
+                "recommended_action": "check whether mechanism evidence is required",
+                "acceptance_gate": {
+                    "status": "review_required",
+                    "accept_allowed": True,
+                    "review_checks": [],
+                },
+                "protocol_readiness": {"status": "ready_after_review"},
+                "suggested_target": {"statement": long_suggested_statement},
+                "evidence": [
+                    {
+                        "label": "Paper A / p. 8",
+                        "page": "8",
+                        "quote": "x" * (check.REVIEW_PACKET_QUOTE_LIMIT + 20),
+                        "href": "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text",
+                    }
+                ],
+            }
+        ],
+    }
+
+    text = check.render_review_packet_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+
+    assert long_statement in text
+    assert long_suggested_statement in text
+    assert f"{long_statement[:237]}..." not in text
+    assert f"{long_suggested_statement[:257]}..." not in text
+    assert f"{'x' * (check.REVIEW_PACKET_QUOTE_LIMIT - 3)}..." in text
+
+
 def test_render_decision_template_exports_editable_import_rows():
     check = _load_goal_dataset_check_module()
 

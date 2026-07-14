@@ -694,12 +694,15 @@ const translations: Record<Language, Translations> = {
 					needs_correction: 'Needs correction before use'
 				},
 				findingProtocolReadinessStatusFallback: 'Protocol readiness needs review',
+				findingProtocolReadinessUnavailableStatus: 'Readiness detail unavailable',
 				findingProtocolReadinessReadyBody:
 					'Variables, outcomes, direction or scope, and traceable evidence are complete for experiment drafting.',
 				findingProtocolReadinessAfterReviewBody:
 					'The protocol fields are complete; accepting or correcting this finding will make it usable for traceable experiment drafts.',
 				findingProtocolReadinessCorrectionBody:
 					'Correct the blocking fields before accepting this finding for protocol drafting.',
+				findingProtocolReadinessUnavailableBody:
+					'The running backend returned a dataset sample without protocol readiness details. Treat this finding as review-only until the backend is updated or restarted.',
 				findingProtocolReadinessMissing: 'Blocking gaps',
 				findingProtocolReadinessGapLabels: {
 					expert_review_decision: 'expert review decision',
@@ -3890,12 +3893,15 @@ const translations: Record<Language, Translations> = {
 					needs_correction: '使用前需要先校正'
 				},
 				findingProtocolReadinessStatusFallback: '实验方案可用性待确认',
+				findingProtocolReadinessUnavailableStatus: '实验方案明细不可用',
 				findingProtocolReadinessReadyBody:
 					'变量、结果、方向或范围以及可追溯证据已经齐全，可以进入实验方案草稿。',
 				findingProtocolReadinessAfterReviewBody:
 					'方案所需字段已经齐全；专家接受或校正后，就可以作为可追溯实验方案输入。',
 				findingProtocolReadinessCorrectionBody:
 					'接受该发现用于实验方案前，需要先校正这些阻塞字段。',
+				findingProtocolReadinessUnavailableBody:
+					'当前运行后端返回了数据集样本，但没有返回实验方案可用性明细。后端更新或重启前，只能把该发现作为待复核内容使用。',
 				findingProtocolReadinessMissing: '阻塞缺口',
 				findingProtocolReadinessGapLabels: {
 					expert_review_decision: '专家复核结论',

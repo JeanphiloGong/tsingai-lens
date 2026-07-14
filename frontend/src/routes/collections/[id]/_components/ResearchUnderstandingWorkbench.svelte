@@ -559,6 +559,9 @@
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
 	$: selectedFindingDatasetSample = selectedFinding ? findingDatasetSampleFor(selectedFinding) : null;
 	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
+	$: selectedFindingProtocolReadinessUnavailable = Boolean(
+		selectedFindingDatasetSample && !selectedFindingProtocolReadiness
+	);
 	$: selectedFindingReviewReasons = selectedDisplayFinding
 		? findingReviewReasonValues(selectedDisplayFinding)
 		: [];
@@ -4182,6 +4185,21 @@
 												</ul>
 											</div>
 										{/if}
+									</section>
+								{:else if selectedFindingProtocolReadinessUnavailable}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--protocol"
+										aria-label={$t('research.understanding.findingProtocolReadiness')}
+									>
+										<div>
+											<strong>
+												{$t('research.understanding.findingProtocolReadiness')}
+											</strong>
+											<span>
+												{$t('research.understanding.findingProtocolReadinessUnavailableStatus')}
+											</span>
+										</div>
+										<p>{$t('research.understanding.findingProtocolReadinessUnavailableBody')}</p>
 									</section>
 								{/if}
 								{#if selectedFindingReviewReasons.length}

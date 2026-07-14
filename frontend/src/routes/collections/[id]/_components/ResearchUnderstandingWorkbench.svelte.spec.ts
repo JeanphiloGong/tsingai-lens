@@ -1823,6 +1823,64 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(protocolPanel.getByText('expert review decision')).toBeInTheDocument();
 	});
 
+	it('explains when the running backend omits protocol readiness detail', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_mechanism_limited',
+									finding_id: 'finding_mechanism_limited',
+									label_status: 'silver',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'accept_as_paper_level',
+										label: 'Accept as paper-level evidence'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const findingDetail = await openMechanismClaimDetail();
+		const protocolPanel = findingDetail.getByLabelText('Protocol readiness');
+		await expect
+			.element(protocolPanel.getByText('Readiness detail unavailable'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				protocolPanel.getByText(
+					'The running backend returned a dataset sample without protocol readiness details. Treat this finding as review-only until the backend is updated or restarted.'
+				)
+			)
+			.toBeInTheDocument();
+	});
+
 	it('shows blocking protocol gaps before a finding can be accepted for protocol drafting', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

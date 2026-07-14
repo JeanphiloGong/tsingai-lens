@@ -20,6 +20,7 @@ DEFAULT_GOAL_IDS = (
     "goal_6bf7d2c1030e",
     "goal_3037e425673a",
 )
+DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 EXPERT_NOTE_PROMPTS = {
     "accept_as_paper_level": "Required: explain accepted paper-level scope.",
     "review_table_rows": "Required: explain checked table rows and values.",
@@ -203,6 +204,11 @@ def _write_workspace_files(
             render_optimization_summary(summary),
             "Error, review-risk, and optimization statistics.",
         ),
+        (
+            "review-commands.sh",
+            render_review_commands(summary),
+            "Copyable dry-run, import, export, and gate-check commands.",
+        ),
     ]
     files: list[dict[str, Any]] = []
     for filename, content, description in rendered:
@@ -264,6 +270,7 @@ def render_workspace_readme(
             "Review steps",
             "------------",
             "1. Read review-packet.txt and open the source links for each finding.",
+            "   Use review-priority.md first when many candidates remain.",
             (
                 "2. Edit reviewed-findings.template.jsonl only for rows a human "
                 "expert has checked."
@@ -280,6 +287,7 @@ def render_workspace_readme(
                 "--reviewer materials-expert@example.com "
                 "--dry-run --fail-on-warnings --format text"
             ),
+            "   Or run the matching command from review-commands.sh.",
             "5. Import only after the dry-run passes and the reviewer approves it:",
             (
                 "   ./.venv/bin/python "
@@ -293,10 +301,70 @@ def render_workspace_readme(
             "- This workspace has not written expert labels.",
             "- Agent-review prompts are input packets, not importable decisions.",
             "- training_ready is created only by explicit human expert decisions.",
+            "- review-commands.sh leaves the real import command commented out.",
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def render_review_commands(summary: dict[str, Any]) -> str:
+    collection_id = _text(summary.get("collection_id")) or DEFAULT_COLLECTION_ID
+    goal_args = " ".join(
+        f"--goal-id {_shell_quote(_text(goal.get('goal_id')))}"
+        for goal in _mapping_list(summary.get("goals"))
+        if _text(goal.get("goal_id"))
+    )
+    prepare_goal_args = f" {goal_args}" if goal_args else ""
+    return "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "",
+            f"BACKEND_DIR=${{BACKEND_DIR:-{_shell_quote(str(DEFAULT_BACKEND_ROOT))}}}",
+            'PYTHON="$BACKEND_DIR/.venv/bin/python"',
+            'SCRIPTS="$BACKEND_DIR/scripts/evaluation/expert_gold"',
+            "REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}",
+            "REVIEWER=${REVIEWER:-materials-expert@example.com}",
+            "",
+            "# Run with this review workspace as the current directory.",
+            "# Example:",
+            "#   (cd /tmp/lens-goal-review-... && bash review-commands.sh)",
+            "",
+            "echo '1. Validate human-reviewed decisions without writing labels'",
+            (
+                '"$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE" '
+                "--reviewer \"$REVIEWER\" --dry-run --fail-on-warnings --format text"
+            ),
+            "",
+            "echo '2. Import only after a human reviewer approves the dry-run output'",
+            (
+                '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE" '
+                "--reviewer \"$REVIEWER\" --format text"
+            ),
+            "",
+            "echo '3. Check the three-layer expert loop after import'",
+            (
+                '"$PYTHON" "$SCRIPTS/check_goal_expert_loop.py" --collection-id '
+                f"{_shell_quote(collection_id)}{prepare_goal_args} --format text"
+            ),
+            "",
+            "echo '4. Export training messages once labels are training-ready'",
+            (
+                '"$PYTHON" "$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
+                f"{_shell_quote(collection_id)}{prepare_goal_args} "
+                "--format messages-jsonl --require-training-ready"
+            ),
+            "",
+            "echo '5. Export traceable training JSONL once labels are training-ready'",
+            (
+                '"$PYTHON" "$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
+                f"{_shell_quote(collection_id)}{prepare_goal_args} "
+                "--format training-jsonl --require-training-ready"
+            ),
+            "",
+        ]
+    )
 
 
 def render_review_dashboard(summary: dict[str, Any]) -> str:
@@ -1105,6 +1173,10 @@ def _line_count(value: str) -> int:
     if not value:
         return 0
     return len(value.splitlines())
+
+
+def _shell_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 def _mapping(value: Any) -> dict[str, Any]:

@@ -257,13 +257,19 @@ frontend finding review entry, run:
 This creates one read-only handoff directory with `review-packet.txt`,
 `review-candidates.jsonl`, `reviewed-findings.template.jsonl`,
 `agent-review-prompts.jsonl`, `review-dashboard.md`,
-`dataset-readiness.md`, `training-ready.messages.jsonl`,
+`review-priority.md`, `review-checklist.md`, `dataset-readiness.md`,
+`expert-satisfaction.md`, `training-ready.messages.jsonl`,
 `training-ready.dataset.jsonl`, `optimization-summary.md`,
-`dataset-quality-summary.json`, `manifest.json`, and `README.txt`. It does not
+`review-commands.sh`, `dataset-quality-summary.json`, `manifest.json`, and
+`README.txt`. It does not
 import labels or mutate collection data; it only packages the current Findings
 review queue, current training-ready exports, and error/risk statistics so an
 expert can inspect source links, see which goals are not yet training-ready,
 and fill explicit decisions.
+Use `review-priority.md` to decide which candidates to inspect first, then run
+`review-commands.sh` from the workspace directory for the matching dry-run,
+gate, and export commands. The real import command in that script is commented
+out and must be enabled only after a human expert approves the dry-run.
 By default, the script creates a unique directory under `/tmp`; pass
 `--output-dir <empty_dir>` only when a fixed destination is required.
 

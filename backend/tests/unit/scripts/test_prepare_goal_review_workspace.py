@@ -182,6 +182,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "training-ready.messages.jsonl",
         "training-ready.dataset.jsonl",
         "optimization-summary.md",
+        "review-commands.sh",
         "README.txt",
         "manifest.json",
     ]
@@ -243,6 +244,21 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     )
     assert "wrong_variable: 1" in optimization
     assert "by_variable:preheating" in optimization
+    commands = (workspace / "review-commands.sh").read_text(encoding="utf-8")
+    assert "set -euo pipefail" in commands
+    assert 'REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}' in commands
+    assert '"$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE"' in commands
+    assert "--dry-run --fail-on-warnings --format text" in commands
+    assert '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE"' in commands
+    assert (
+        '"$SCRIPTS/check_goal_expert_loop.py" --collection-id '
+        "'col-1' --goal-id 'goal-1' --format text"
+    ) in commands
+    assert (
+        '"$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
+        "'col-1' --goal-id 'goal-1' --format training-jsonl "
+        "--require-training-ready"
+    ) in commands
     assert json.loads(
         (workspace / "reviewed-findings.template.jsonl").read_text(encoding="utf-8")
     ) == {"finding_id": "finding-1", "action": "skip"}
@@ -250,6 +266,8 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "Expert satisfaction: blocked" in readme
     assert "This workspace has not written expert labels." in readme
     assert "training_ready is created only by explicit human expert decisions." in readme
+    assert "Or run the matching command from review-commands.sh." in readme
+    assert "review-commands.sh leaves the real import command commented out." in readme
 
 
 def test_prepare_goal_review_workspace_refuses_non_empty_output_dir(tmp_path):

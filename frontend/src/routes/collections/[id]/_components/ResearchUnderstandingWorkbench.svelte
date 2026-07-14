@@ -1230,6 +1230,12 @@
 		return translatedCatalogLabel('research.understanding.findingProtocolReadinessGapLabels', gap);
 	}
 
+	function acceptanceGateBlockerLabel(blocker: string) {
+		const actionLabel = translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', blocker);
+		if (actionLabel !== blocker) return actionLabel;
+		return translatedCatalogLabel('research.understanding.datasetSystemWarnings', blocker);
+	}
+
 	function acceptanceGateStatusLabel(gate: ResearchUnderstandingAcceptanceGate) {
 		const label = $t(`research.understanding.findingAcceptanceGateStatuses.${gate.status}`);
 		if (!label.startsWith('research.')) return label;
@@ -1248,9 +1254,11 @@
 	}
 
 	function acceptanceGateCheckLabels(gate: ResearchUnderstandingAcceptanceGate) {
-		return gate.review_checks.length
-			? gate.review_checks
-			: gate.blocking_missing.map(protocolReadinessGapLabel);
+		return [
+			...gate.accept_blockers.map(acceptanceGateBlockerLabel),
+			...gate.review_checks,
+			...gate.blocking_missing.map(protocolReadinessGapLabel)
+		];
 	}
 
 	function expertNotePromptForAction(code: string) {
@@ -1360,7 +1368,10 @@
 
 	function findingCanAccept(finding: ResearchUnderstandingPresentationFinding) {
 		const gate = findingDatasetSampleFor(finding)?.acceptance_gate;
-		return !gate || (gate.accept_allowed && !gate.requires_correction);
+		return (
+			!gate ||
+			(gate.accept_allowed && !gate.requires_correction && gate.accept_blockers.length === 0)
+		);
 	}
 
 	function findingNeedsManualAcceptNote(finding: ResearchUnderstandingPresentationFinding) {

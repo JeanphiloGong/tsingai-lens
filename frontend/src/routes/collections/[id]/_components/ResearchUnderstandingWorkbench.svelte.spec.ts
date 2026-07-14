@@ -29,14 +29,15 @@ type DatasetSampleFixture = {
 		checks: Record<string, boolean>;
 		guidance: string;
 	};
-	acceptance_gate?: {
-		status: string;
-		accept_allowed: boolean;
-		requires_correction: boolean;
-		blocking_missing: string[];
-		review_checks: string[];
-		recommended_action_code: string;
-		guidance: string;
+		acceptance_gate?: {
+			status: string;
+			accept_allowed: boolean;
+			requires_correction: boolean;
+			blocking_missing: string[];
+			accept_blockers?: string[];
+			review_checks: string[];
+			recommended_action_code: string;
+			guidance: string;
 	};
 };
 
@@ -2020,6 +2021,97 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(protocolPanel.getByText('traceable source evidence', { exact: true }))
 			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Review accept', exact: true }))
+			.toBeDisabled();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Review accept and next' }))
+			.toBeDisabled();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+					(init as RequestInit | undefined)?.method === 'POST'
+				);
+			})
+		).toBe(false);
+	});
+
+	it('blocks quick accept when the acceptance gate reports hard blockers', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_strength_supported',
+									finding_id: 'finding_strength_supported',
+									label_status: 'candidate',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'verify_table_rows',
+										label: 'Verify parsed table rows'
+									},
+									acceptance_gate: {
+										status: 'review_required',
+										accept_allowed: true,
+										requires_correction: false,
+										blocking_missing: [],
+										accept_blockers: [
+											'verify_table_rows',
+											'table_row_alignment_uncertain'
+										],
+										review_checks: [
+											'Verify parsed table-row alignment against the source table.'
+										],
+										recommended_action_code: 'verify_table_rows',
+										guidance:
+											'Do not accept directly; correct or reject the table alignment risk first.'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await browserPage
+			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
+			.click();
+
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		const gatePanel = findingDetail.getByLabelText('Acceptance gate');
+		await expect
+			.element(
+				gatePanel.getByText(
+					'Do not accept directly; correct or reject the table alignment risk first.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(gatePanel.getByText('Verify source table rows')).toBeInTheDocument();
+		await expect.element(gatePanel.getByText('Table row alignment uncertain')).toBeInTheDocument();
 		await expect
 			.element(findingDetail.getByRole('button', { name: 'Review accept', exact: true }))
 			.toBeDisabled();

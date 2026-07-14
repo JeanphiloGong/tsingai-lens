@@ -400,6 +400,7 @@ export type ResearchUnderstandingAcceptanceGate = {
 	accept_allowed: boolean;
 	requires_correction: boolean;
 	blocking_missing: string[];
+	accept_blockers: string[];
 	review_checks: string[];
 	recommended_action_code: string;
 	guidance: string;
@@ -1223,6 +1224,7 @@ function normalizeResearchUnderstandingAcceptanceGate(
 		accept_allowed: Boolean(record.accept_allowed),
 		requires_correction: Boolean(record.requires_correction),
 		blocking_missing: toStringList(record.blocking_missing),
+		accept_blockers: toStringList(record.accept_blockers),
 		review_checks: toStringList(record.review_checks),
 		recommended_action_code: toText(record.recommended_action_code),
 		guidance: toText(record.guidance)

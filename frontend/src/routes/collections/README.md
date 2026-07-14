@@ -66,7 +66,9 @@ This node owns the collection workspace route family in the frontend.
   accept/reject/correct review; when the backend dataset sample provides an
   acceptance gate, the detail view also shows whether direct accept is allowed,
   whether correction is required first, and the expert checks that must be
-  completed before the finding becomes training-ready; the batch decision
+  completed before the finding becomes training-ready; hard `accept_blockers`
+  disable direct accept even when a stale or edited row says accept is allowed;
+  the batch decision
   import panel treats unconfirmed `agent_review` rows as review drafts and
   sends human-confirmed agent review rows to the backend import service, which
   applies the canonical accept/reject/correct conversion rules

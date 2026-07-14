@@ -202,7 +202,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 						dataset_use_status_filter: null,
 						item_count: 1,
 						label_counts: {
-							candidate: 0,
+							candidate: 1,
 							silver: 0,
 							gold: 1,
 							rejected: 0
@@ -211,10 +211,10 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 							training_ready_sample_count: 1,
 							training_message_sample_count: 1,
 							protocol_ready_sample_count: 1,
-							review_candidate_sample_count: 0,
+							review_candidate_sample_count: 1,
 							by_dataset_use_status: {
 								training_ready: 1,
-								review_candidate: 0,
+								review_candidate: 1,
 								rejected: 0
 							},
 							by_error_category: {
@@ -475,6 +475,18 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Download decision template' }))
+			.toHaveAttribute(
+				'href',
+				'/api/v1/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1&dataset_use_status=review_candidate&format=decision_template'
+			);
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Download review packet' }))
+			.toHaveAttribute(
+				'href',
+				'/api/v1/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1&dataset_use_status=review_candidate&format=review_packet'
+			);
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();

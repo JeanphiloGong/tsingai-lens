@@ -63,11 +63,13 @@ This node owns the collection workspace route family in the frontend.
   detail also shows the selected candidate's position in the active review queue and
   prioritizes the next review action for table-row checks, conflict resolution,
   mechanism-evidence decisions, paper-level scope limits, and continuous
-  accept/reject/correct review; when the backend dataset sample provides an
-  acceptance gate, the detail view also shows whether direct accept is allowed,
-  whether correction is required first, and the expert checks that must be
-  completed before the finding becomes training-ready; hard `accept_blockers`
-  disable direct accept even when a stale or edited row says accept is allowed;
+  accept/reject/correct review; the review loop exposes the decision template
+  and review packet download actions whenever review candidates remain; when
+  the backend dataset sample provides an acceptance gate, the detail view also
+  shows whether direct accept is allowed, whether correction is required first,
+  and the expert checks that must be completed before the finding becomes
+  training-ready; hard `accept_blockers` disable direct accept even when a
+  stale or edited row says accept is allowed;
   when the dataset sample provides a `review_decision_hint`, the detail view
   surfaces the next review decision, blocked actions, and accept-blocking
   reasons without showing raw JSON or internal identifiers;

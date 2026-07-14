@@ -3760,6 +3760,22 @@
 						<button type="button" on:click={openDatasetExport}>
 							{$t('research.understanding.reviewLoopOpenDataset')}
 						</button>
+						{#if datasetReviewCandidateSampleCount > 0}
+							<a
+								class="research-understanding-workbench__review-loop-link"
+								href={datasetDownloadUrl('decision_template', 'review_candidate')}
+								download
+							>
+								{$t('research.understanding.reviewLoopDownloadDecisionTemplate')}
+							</a>
+							<a
+								class="research-understanding-workbench__review-loop-link"
+								href={datasetDownloadUrl('review_packet', 'review_candidate')}
+								download
+							>
+								{$t('research.understanding.reviewLoopDownloadReviewPacket')}
+							</a>
+						{/if}
 						{#if goalCopilotHref}
 							{#if datasetProtocolReadySampleCount > 0}
 								<a class="research-understanding-workbench__review-loop-link" href={goalCopilotHref}>

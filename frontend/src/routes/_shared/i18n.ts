@@ -373,6 +373,8 @@ const translations: Record<Language, Translations> = {
 				reviewImportSubmit: 'Import decisions',
 				reviewImportSubmitting: 'Submitting...',
 				reviewImportEmpty: 'Paste at least one reviewed JSONL row before import.',
+				reviewImportAgentDraftOnly:
+					'This looks like an agent review draft. A human expert must confirm the suggestions by changing reviewed rows from skip to accept, reject, or correct before import.',
 				reviewImportInvalidRow: 'Each imported row must be a JSON object.',
 				reviewImportParseError: 'Line {line}: {message}',
 				reviewImportProgress:
@@ -3669,6 +3671,8 @@ const translations: Record<Language, Translations> = {
 				reviewImportSubmit: '导入决策',
 				reviewImportSubmitting: '正在提交...',
 				reviewImportEmpty: '导入前至少粘贴一行已复核 JSONL。',
+				reviewImportAgentDraftOnly:
+					'这看起来是 agent 复核草稿。需要专家先确认建议，并把已确认的行从 skip 改成 accept、reject 或 correct 后才能导入。',
 				reviewImportInvalidRow: '每一行导入内容都必须是 JSON 对象。',
 				reviewImportParseError: '第 {line} 行：{message}',
 				reviewImportProgress: '{actionable} 行可写入，{skipped} 行跳过，已写入 {written} 行。',

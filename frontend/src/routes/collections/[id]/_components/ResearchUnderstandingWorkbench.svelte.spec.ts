@@ -3518,6 +3518,77 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('blocks agent review drafts until a human sets import actions', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
+				return Promise.resolve(jsonResponse({ status: 'unexpected' }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = datasetSummaryLocator();
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+
+		const row = {
+			sample_id: 'sample_1',
+			finding_id: 'finding_strength_supported',
+			action: 'skip',
+			agent_review: {
+				reviewer: 'ai-reviewer-codex',
+				recommendation: 'accept',
+				note: 'Evidence supports this paper-level finding.'
+			}
+		};
+		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByRole('button', { name: 'Dry run' }).click();
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'This looks like an agent review draft. A human expert must confirm the suggestions by changing reviewed rows from skip to accept, reject, or correct before import.'
+				)
+			)
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				const method =
+					input instanceof Request
+						? input.method
+						: typeof (init as RequestInit | undefined)?.method === 'string'
+							? (init as RequestInit).method
+							: 'GET';
+				return (
+					requestPath(input as string | URL | Request).endsWith(
+						'/research-understanding/review-decisions/import'
+					) && method === 'POST'
+				);
+			})
+		).toBe(false);
+	});
+
 	it('imports reviewed decisions and refreshes dataset readiness', async () => {
 		let datasetRequestCount = 0;
 		let feedbackGetCount = 0;

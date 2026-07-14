@@ -3093,6 +3093,13 @@
 		return rows;
 	}
 
+	function reviewImportContainsAgentDraftOnly(rows: Record<string, unknown>[]) {
+		return (
+			rows.some((row) => Boolean(row.agent_review)) &&
+			rows.every((row) => String(row.action ?? '').trim().toLowerCase() === 'skip')
+		);
+	}
+
 	function reviewImportProgressText(summary: ResearchUnderstandingReviewDecisionImportResponse) {
 		const progress = summary.review_progress;
 		return $t('research.understanding.reviewImportProgress', {
@@ -3122,6 +3129,9 @@
 			const rows = parseReviewImportRows(reviewImportText);
 			if (!rows.length) {
 				throw new Error($t('research.understanding.reviewImportEmpty'));
+			}
+			if (reviewImportContainsAgentDraftOnly(rows)) {
+				throw new Error($t('research.understanding.reviewImportAgentDraftOnly'));
 			}
 			const summary = await importResearchUnderstandingReviewDecisions(collectionId, {
 				rows,

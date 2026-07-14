@@ -66,7 +66,9 @@ This node owns the collection workspace route family in the frontend.
   accept/reject/correct review; when the backend dataset sample provides an
   acceptance gate, the detail view also shows whether direct accept is allowed,
   whether correction is required first, and the expert checks that must be
-  completed before the finding becomes training-ready
+  completed before the finding becomes training-ready; the batch decision
+  import panel treats `agent_review` rows as review drafts until a human expert
+  changes confirmed rows from `skip` to `accept`, `reject`, or `correct`
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

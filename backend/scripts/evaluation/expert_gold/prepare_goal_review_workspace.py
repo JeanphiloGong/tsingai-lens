@@ -825,6 +825,7 @@ def _candidate_checklist_lines(
         f"- Scope: {_markdown_cell(_text(candidate.get('scope_summary')), 180)}",
         f"- Evidence: {_evidence_label(candidate)}",
     ]
+    lines.extend(_candidate_evidence_audit_lines(candidate))
     review_reasons = _text_list(candidate.get("review_reasons"))
     warnings = _text_list(candidate.get("warnings"))
     if review_reasons:
@@ -842,6 +843,63 @@ def _candidate_checklist_lines(
         ]
     )
     return lines
+
+
+def _candidate_evidence_audit_lines(candidate: dict[str, Any]) -> list[str]:
+    evidence_records = _mapping_list(candidate.get("evidence"))
+    if not evidence_records:
+        return ["- Evidence audit: no evidence records exported."]
+    lines = ["- Evidence audit:"]
+    for index, record in enumerate(evidence_records, start=1):
+        label = _text(record.get("label")) or _text(record.get("source_ref"))
+        lines.append(f"  - Evidence {index}: {_markdown_cell(label, 160)}")
+        source_href = _text(record.get("href")) or _text(record.get("open"))
+        if source_href:
+            lines.append(f"    - Open source: {_markdown_link('open source', source_href)}")
+        quote = _text(record.get("quote"))
+        if quote:
+            lines.append(f"    - Quote: {_markdown_cell(quote, 260)}")
+        table_audit = _mapping(record.get("table_audit"))
+        columns = _text_list(table_audit.get("columns"))
+        if columns:
+            lines.append(f"    - Table columns: {_join_text_list(columns)}")
+        for row_index, row in enumerate(
+            _mapping_list(table_audit.get("relevant_rows")),
+            start=1,
+        ):
+            row_text = _table_row_text(row, columns)
+            if row_text:
+                aligned = row.get("aligned")
+                suffix = " (alignment uncertain)" if aligned is False else ""
+                lines.append(
+                    f"    - Table row {row_index}{suffix}: "
+                    f"{_markdown_cell(row_text, 260)}"
+                )
+    return lines
+
+
+def _table_row_text(row: dict[str, Any], columns: list[str]) -> str:
+    cells_value = row.get("cells")
+    cells = _mapping(cells_value)
+    if cells:
+        return "; ".join(
+            f"{key}: {value}"
+            for key, value in cells.items()
+            if _text(key) and _text(value)
+        )
+    if isinstance(cells_value, list):
+        values = _text_list(cells_value)
+        if values:
+            return "; ".join(
+                f"{columns[index] if index < len(columns) else f'cell {index + 1}'}: {value}"
+                for index, value in enumerate(values)
+                if value
+            )
+    return "; ".join(
+        f"{key}: {value}"
+        for key, value in row.items()
+        if key != "cells" and _text(key) and _text(value)
+    )
 
 
 def _goal_heading(goal_id: str, question: str) -> str:

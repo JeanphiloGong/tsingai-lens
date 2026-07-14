@@ -75,6 +75,20 @@ def _summary():
                                 {
                                     "label": "Paper A / p. 4",
                                     "href": "/collections/col-1/documents/doc-1",
+                                    "quote": "Preheating increased ductility by 14%.",
+                                    "table_audit": {
+                                        "columns": ["Temperature", "Ductility"],
+                                        "relevant_rows": [
+                                            {
+                                                "cells": ["150 C", "+14%"],
+                                                "aligned": True,
+                                            },
+                                            {
+                                                "cells": ["room temperature", "baseline"],
+                                                "aligned": False,
+                                            },
+                                        ],
+                                    },
                                 }
                             ],
                         }
@@ -328,6 +342,15 @@ def test_render_review_checklist_gives_expert_decision_steps():
     assert "Recommended action: accept as paper-level" in checklist
     assert "Note: Required: explain accepted paper-level scope." in checklist
     assert "Evidence: Paper A / p. 4" in checklist
+    assert "Evidence audit:" in checklist
+    assert "Open source: [open source](/collections/col-1/documents/doc-1)" in checklist
+    assert "Quote: Preheating increased ductility by 14%." in checklist
+    assert "Table columns: Temperature, Ductility" in checklist
+    assert "Table row 1: Temperature: 150 C; Ductility: +14%" in checklist
+    assert (
+        "Table row 2 (alignment uncertain): Temperature: room temperature; "
+        "Ductility: baseline"
+    ) in checklist
     assert "- [ ] Evidence quote directly supports the finding." in checklist
     assert "- [ ] Scope/context is narrow enough for downstream experiment design." in checklist
 

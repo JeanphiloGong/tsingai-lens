@@ -3837,7 +3837,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 								pending_actionable_count: 1,
 								pending_accept_count: 1,
 								pending_reject_count: 0,
-								pending_correct_count: 0
+								pending_correct_count: 0,
+								projected_training_ready_count: 2,
+								projected_review_candidate_count: 13,
+								projected_rejected_count: 0
 							}
 						]
 					})
@@ -3887,6 +3890,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				browserPage.getByText('Pending write: 1 actionable (1 accept, 0 reject, 0 correct).')
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('After import: 2 training-ready, 13 review-candidate, 0 rejected.')
 			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Import warnings')).toBeInTheDocument();

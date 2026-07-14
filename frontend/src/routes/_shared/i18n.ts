@@ -397,6 +397,8 @@ const translations: Record<Language, Translations> = {
 					'Current: {training} training-ready, {messages} message-exportable, {protocol} protocol-ready, {review} review-candidate, {rejected} rejected.',
 				reviewImportAffectedGoalPending:
 					'Pending write: {actionable} actionable ({accept} accept, {reject} reject, {correct} correct).',
+				reviewImportAffectedGoalProjected:
+					'After import: {training} training-ready, {review} review-candidate, {rejected} rejected.',
 				reviewImportWarningsTitle: 'Import warnings',
 				reviewImportErrorsTitle: 'Import errors',
 				datasetNoTrainingReady: 'No training-ready samples',
@@ -3739,6 +3741,8 @@ const translations: Record<Language, Translations> = {
 					'当前：{training} 条可训练，{messages} 条可导出 messages，{protocol} 条可生成方案输入，{review} 条待复核，{rejected} 条已拒绝。',
 				reviewImportAffectedGoalPending:
 					'即将写入：{actionable} 行可写入（accept {accept}，reject {reject}，correct {correct}）。',
+				reviewImportAffectedGoalProjected:
+					'导入后预计：{training} 条可训练，{review} 条待复核，{rejected} 条已拒绝。',
 				reviewImportWarningsTitle: '导入警告',
 				reviewImportErrorsTitle: '导入错误',
 				datasetNoTrainingReady: '暂无可训练样本',

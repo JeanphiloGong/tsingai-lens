@@ -720,12 +720,31 @@ def _affected_goal_summaries(
     for key, dataset in datasets.items():
         summary = _goal_readiness_summary(dataset)
         pending = pending_by_goal.get(key, {})
+        pending_accept = int(pending.get("accept_count") or 0)
+        pending_reject = int(pending.get("reject_count") or 0)
+        pending_correct = int(pending.get("correct_count") or 0)
+        pending_training_ready = pending_accept + pending_correct
+        pending_resolved = pending_training_ready + pending_reject
+        training_ready_count = int(summary.get("training_ready_count") or 0)
+        review_candidate_count = int(summary.get("review_candidate_count") or 0)
+        rejected_count = int(summary.get("rejected_count") or 0)
         summary.update(
             {
                 "pending_actionable_count": int(pending.get("actionable_count") or 0),
-                "pending_accept_count": int(pending.get("accept_count") or 0),
-                "pending_reject_count": int(pending.get("reject_count") or 0),
-                "pending_correct_count": int(pending.get("correct_count") or 0),
+                "pending_accept_count": pending_accept,
+                "pending_reject_count": pending_reject,
+                "pending_correct_count": pending_correct,
+                "pending_training_ready_count": pending_training_ready,
+                "pending_rejected_count": pending_reject,
+                "pending_review_candidate_resolved_count": pending_resolved,
+                "projected_training_ready_count": (
+                    training_ready_count + pending_training_ready
+                ),
+                "projected_review_candidate_count": max(
+                    0,
+                    review_candidate_count - pending_resolved,
+                ),
+                "projected_rejected_count": rejected_count + pending_reject,
             }
         )
         summaries.append(summary)

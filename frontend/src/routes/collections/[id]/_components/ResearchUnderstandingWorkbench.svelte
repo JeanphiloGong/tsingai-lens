@@ -3360,6 +3360,14 @@
 		});
 	}
 
+	function reviewImportAffectedGoalProjectedText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedGoalProjected', {
+			training: Number(record.projected_training_ready_count ?? record.training_ready_count ?? 0),
+			review: Number(record.projected_review_candidate_count ?? record.review_candidate_count ?? 0),
+			rejected: Number(record.projected_rejected_count ?? record.rejected_count ?? 0)
+		});
+	}
+
 	function reviewImportGoalLabel(record: Record<string, unknown>) {
 		return typeof record.goal_id === 'string' && record.goal_id
 			? formatShortIdentifier(record.goal_id)
@@ -4248,6 +4256,7 @@
 															<span>{reviewImportGoalLabel(goalReadiness)}</span>
 															<small>{reviewImportAffectedGoalReadinessText(goalReadiness)}</small>
 															<small>{reviewImportAffectedGoalPendingText(goalReadiness)}</small>
+															<small>{reviewImportAffectedGoalProjectedText(goalReadiness)}</small>
 														</li>
 													{/each}
 												</ul>

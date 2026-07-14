@@ -194,6 +194,12 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
             "pending_accept_count": 1,
             "pending_reject_count": 0,
             "pending_correct_count": 0,
+            "pending_training_ready_count": 1,
+            "pending_rejected_count": 0,
+            "pending_review_candidate_resolved_count": 1,
+            "projected_training_ready_count": 2,
+            "projected_review_candidate_count": 0,
+            "projected_rejected_count": 0,
             "readiness_issues": [],
         }
     ]

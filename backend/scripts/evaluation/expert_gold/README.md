@@ -286,7 +286,21 @@ missing fields/evidence, `reject`, or leave them as `skip`. Validate first,
 then import with a human reviewer id:
 
 For agent-assisted review, keep every exported row at `"action": "skip"` and
-write the agent's suggestion under `agent_review` instead:
+write the agent's suggestion under `agent_review` instead. To prepare a safe
+draft file for the agent to fill, run:
+
+```bash
+python3 scripts/evaluation/expert_gold/prepare_agent_review_draft.py \
+  reviewed-findings.jsonl \
+  --output-path agent-reviewed-findings.jsonl
+```
+
+The prepared draft keeps every import action at `skip`; it only adds an
+`agent_review` object with an agent reviewer id, an `unclear` recommendation,
+the current suggested target, and the expert checks the agent must resolve.
+After the agent reviews the source evidence, it may change only
+`agent_review.recommendation`, `agent_review.issue_type`,
+`agent_review.note`, and `agent_review.suggested_target`. Example:
 
 ```json
 {
@@ -308,7 +322,7 @@ Check the draft before giving it to a human expert:
 
 ```bash
 python3 scripts/evaluation/expert_gold/check_agent_review_draft.py \
-  reviewed-findings.jsonl \
+  agent-reviewed-findings.jsonl \
   --format text
 ```
 

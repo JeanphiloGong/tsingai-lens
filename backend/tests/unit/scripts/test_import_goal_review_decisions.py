@@ -541,6 +541,41 @@ def test_import_review_decisions_rejects_accept_with_protocol_gaps(tmp_path):
     assert service.curations == []
 
 
+def test_import_review_decisions_rejects_accept_when_acceptance_gate_denies_it(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(
+                action="accept",
+                finding_id="finding-accept",
+                acceptance_gate={
+                    "accept_allowed": False,
+                    "requires_correction": True,
+                    "blocking_missing": [],
+                },
+            )
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert [error["message"] for error in summary["errors"]] == [
+        "accept is blocked by acceptance_gate; use correct or reject"
+    ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
 def test_import_review_decisions_validates_current_dataset_refs(tmp_path):
     module = _load_import_module()
     service = FakeFeedbackService()

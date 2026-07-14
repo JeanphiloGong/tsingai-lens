@@ -234,15 +234,12 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
         return _error(line_number, action, f"missing required field(s): {', '.join(missing)}")
 
     if action == "accept":
-        blocking_missing = _protocol_blocking_missing(row)
-        if blocking_missing:
+        blocking_error = _acceptance_gate_error(row)
+        if blocking_error:
             return _error(
                 line_number,
                 action,
-                (
-                    "accept requires protocol_readiness without blocking gaps; "
-                    f"use correct or reject for: {', '.join(blocking_missing)}"
-                ),
+                blocking_error,
             )
         return {
             "status": "ready",
@@ -348,14 +345,22 @@ def _confirmed_agent_review_row(
 
 
 def _confirmed_accept_error(row: dict[str, Any]) -> str:
+    error = _acceptance_gate_error(row)
+    if error:
+        return "confirmed accept is blocked by acceptance_gate"
+    return ""
+
+
+def _acceptance_gate_error(row: dict[str, Any]) -> str:
     gate = _mapping(row.get("acceptance_gate"))
-    blocking = _strings(gate.get("blocking_missing")) or _strings(
-        row.get("protocol_blocking_missing")
-    )
-    if gate and (not bool(gate.get("accept_allowed")) or blocking):
-        return "confirmed accept is blocked by acceptance_gate"
+    blocking = _protocol_blocking_missing(row)
+    if gate and (not bool(gate.get("accept_allowed")) or bool(gate.get("requires_correction"))):
+        return "accept is blocked by acceptance_gate; use correct or reject"
     if blocking:
-        return "confirmed accept is blocked by acceptance_gate"
+        return (
+            "accept requires protocol_readiness without blocking gaps; "
+            f"use correct or reject for: {', '.join(blocking)}"
+        )
     return ""
 
 

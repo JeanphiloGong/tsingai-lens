@@ -168,6 +168,31 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
     ]
 
 
+def test_review_import_service_blocks_accept_when_acceptance_gate_denies_it():
+    service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
+
+    summary = service.import_rows(
+        rows=[
+            _row(
+                action="accept",
+                acceptance_gate={
+                    "accept_allowed": False,
+                    "requires_correction": True,
+                    "blocking_missing": [],
+                },
+            )
+        ],
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert summary["errors"][0]["message"] == (
+        "accept is blocked by acceptance_gate; use correct or reject"
+    )
+
+
 def test_review_import_service_rejects_agent_reviewer():
     service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
 

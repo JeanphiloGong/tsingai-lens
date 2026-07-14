@@ -47,4 +47,5 @@ artifacts.
   Validates and imports expert review decision rows into feedback or curation
   records. CLI and future API entry points should call this service so
   accept/reject/correct rules, stale finding checks, evidence-ref validation,
-  warning handling, and review-progress summaries remain consistent.
+  acceptance-gate enforcement, warning handling, and review-progress summaries
+  remain consistent.

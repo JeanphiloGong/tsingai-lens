@@ -98,6 +98,7 @@ def _review_jsonl_row(
     expert_target = item.expert_target or {}
     evidence = item.training_evidence_refs or item.evidence_refs or item.input_blocks
     review_action = item.review_action or {}
+    protocol_readiness = _protocol_readiness_for_item(item)
     return {
         "collection_id": collection_id,
         "goal_id": item.scope_id if item.scope_type == "goal" else "",
@@ -127,6 +128,7 @@ def _review_jsonl_row(
             _strings(prediction.get("review_reasons")),
             _strings(prediction.get("warnings")),
         ),
+        "protocol_readiness": protocol_readiness,
         "action": "skip",
         "allowed_actions": list(REVIEW_ACTION_OPTIONS),
         "issue_type": "",
@@ -165,6 +167,91 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
         or _text(record.get("training_source_text"))
         or _text(record.get("text")),
     }
+
+
+def _protocol_readiness_for_item(item: Any) -> dict[str, Any]:
+    prediction = item.system_prediction or {}
+    expert_target = item.expert_target or {}
+    evidence = item.training_evidence_refs or item.evidence_refs or item.input_blocks
+    dataset_use_status = _text(item.dataset_use_status)
+    status = _text(
+        expert_target.get("status") or prediction.get("status")
+    ).lower()
+    support_grade = _text(
+        expert_target.get("support_grade") or prediction.get("support_grade")
+    ).lower()
+    checks = {
+        "expert_review_decision": dataset_use_status == "training_ready",
+        "training_messages": True,
+        "statement": bool(
+            _text(expert_target.get("statement") or prediction.get("statement"))
+        ),
+        "variables": bool(
+            _strings(expert_target.get("variables"))
+            or _strings(prediction.get("variables"))
+        ),
+        "outcomes": bool(
+            _strings(expert_target.get("outcomes"))
+            or _strings(prediction.get("outcomes"))
+        ),
+        "direction_or_scope": bool(
+            _text(expert_target.get("direction") or prediction.get("direction"))
+            or _text(
+                expert_target.get("scope_summary")
+                or prediction.get("scope_summary")
+            )
+        ),
+        "support_status": status not in {"unsupported", "conflicted"},
+        "support_grade": support_grade
+        not in {"insufficient", "conflict", "conflicted", "weak"},
+        "traceable_training_evidence": _has_traceable_evidence_records(evidence),
+    }
+    blocking_keys = (
+        "statement",
+        "variables",
+        "outcomes",
+        "direction_or_scope",
+        "support_status",
+        "support_grade",
+        "traceable_training_evidence",
+    )
+    blocking_missing = [key for key in blocking_keys if not checks[key]]
+    missing = [
+        key
+        for key in ("expert_review_decision", "training_messages", *blocking_keys)
+        if not checks[key]
+    ]
+    if not missing:
+        status_label = "protocol_ready"
+        guidance = "Ready for traceable protocol drafting."
+    elif blocking_missing:
+        status_label = "needs_correction"
+        guidance = "Correct the missing fields or evidence before importing this row."
+    else:
+        status_label = "ready_after_review"
+        guidance = "Accept only after expert review confirms the finding and evidence."
+    return {
+        "status": status_label,
+        "ready_after_review": not blocking_missing,
+        "missing": missing,
+        "blocking_missing": blocking_missing,
+        "checks": checks,
+        "guidance": guidance,
+    }
+
+
+def _has_traceable_evidence_records(records: list[dict[str, Any]]) -> bool:
+    return bool(records) and all(
+        _text(record.get("source_ref"))
+        and _text(record.get("href"))
+        and (
+            _text(record.get("quote"))
+            or _text(record.get("source_text"))
+            or _text(record.get("training_source_text"))
+            or _text(record.get("text"))
+        )
+        for record in records
+    )
 
 
 def _strings(value: Any) -> list[str]:

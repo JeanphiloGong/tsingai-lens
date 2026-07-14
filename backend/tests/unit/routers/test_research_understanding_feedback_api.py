@@ -783,6 +783,24 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     assert line["review_risk_flags"] == [
         "Paper-level evidence; do not treat as cross-paper conclusion without confirmation."
     ]
+    assert line["protocol_readiness"] == {
+        "status": "ready_after_review",
+        "ready_after_review": True,
+        "missing": ["expert_review_decision"],
+        "blocking_missing": [],
+        "checks": {
+            "expert_review_decision": False,
+            "training_messages": True,
+            "statement": True,
+            "variables": True,
+            "outcomes": True,
+            "direction_or_scope": True,
+            "support_status": True,
+            "support_grade": True,
+            "traceable_training_evidence": True,
+        },
+        "guidance": "Accept only after expert review confirms the finding and evidence.",
+    }
     assert line["action"] == "skip"
     assert "accept" in line["allowed_actions"]
     assert "wrong_direction" in line["reject_issue_options"]
@@ -801,6 +819,49 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
         "label_status": None,
         "dataset_use_status": "review_candidate",
     }
+
+
+def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
+    item = SimpleNamespace(
+        scope_type="goal",
+        scope_id="goal-1",
+        sample_id="rus-1",
+        finding_id="finding-1",
+        claim_id="claim-1",
+        dataset_use_status="review_candidate",
+        presentation_bucket="review_queue",
+        trace_status="evidence_derived",
+        system_prediction={
+            "statement": "Preheating improves ductility.",
+            "variables": [],
+            "outcomes": ["ductility"],
+            "direction": "",
+            "scope_summary": "",
+            "support_grade": "partial",
+            "review_status": "needs_review",
+        },
+        expert_target={},
+        review_action={},
+        training_evidence_refs=[
+            {
+                "evidence_ref_id": "ev-1",
+                "source_ref": "blk_1",
+                "href": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+                "quote": "Preheating increased ductility by 14%.",
+            }
+        ],
+        evidence_refs=[],
+        input_blocks=[],
+    )
+
+    row = feedback_controller._review_jsonl_row("col-1", item)
+
+    assert row["protocol_readiness"]["status"] == "needs_correction"
+    assert row["protocol_readiness"]["ready_after_review"] is False
+    assert row["protocol_readiness"]["blocking_missing"] == [
+        "variables",
+        "direction_or_scope",
+    ]
 
 
 def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):
@@ -932,6 +993,7 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
     assert line["goal_id"] == "goal-1"
     assert line["scope_type"] == "goal"
     assert line["action"] == "skip"
+    assert line["protocol_readiness"]["status"] == "ready_after_review"
     assert line["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {

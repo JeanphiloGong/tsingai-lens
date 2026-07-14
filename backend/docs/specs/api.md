@@ -731,7 +731,10 @@ envelope，`jsonl` 返回 newline-delimited 完整 sample，
 `messages_jsonl` 返回 newline-delimited `{"messages": [...]}` 行，便于常见
 chat evaluation/fine-tuning 工具直接消费。`review_jsonl` 返回可编辑的人工复核模板，
 每行默认 `action=skip`，并包含 `allowed_actions`、`reject_issue_options`、
-`review_instructions`、`review_risk_flags`、候选 Finding 字段、推荐动作和证据片段；
+`review_instructions`、`review_risk_flags`、候选 Finding 字段、推荐动作、证据片段和
+`protocol_readiness`。`protocol_readiness` 给出 `status`、`missing`、
+`blocking_missing` 和逐项 `checks`，用于判断该候选在专家接受/校正后是否具备
+实验方案输入所需的 statement、variables、outcomes、direction/scope 和可追溯证据；
 专家填写 `accept | reject | correct` 后可交给
 `scripts/evaluation/expert_gold/import_goal_review_decisions.py` 导入。前端下载训练集时应使用
 `dataset_use_status=training_ready`，避免把未复核候选样本混入训练输入。
@@ -820,6 +823,10 @@ direct、mechanism、condition context、background 等角色；`training_eviden
 应该核对什么，例如 `verify_table_rows`、`repair_evidence_binding`、
 `review_table_rows`、`check_mechanism_requirement` 或 `accept_as_paper_level`，
 不代表人工标签结果。
+离线 `check_goal_dataset_quality.py --format review-packet|review-jsonl` 和 HTTP
+`format=review_jsonl` 使用同一套 `protocol_readiness` 语义：`ready_after_review`
+表示只缺人工复核决定，`needs_correction` 表示还缺会阻断实验方案生成的字段或证据，
+`protocol_ready` 表示已满足复核、训练 messages 和方案输入要求。
 离线训练或微调准备应优先消费
 `training_evidence_refs[*].training_source_text`，不要把 condition/background
 证据当作结论监督文本。`training_messages` 是从

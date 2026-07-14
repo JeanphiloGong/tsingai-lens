@@ -213,6 +213,24 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         == "review selected table rows before accepting or correcting"
     )
     assert candidate["recommended_action_code"] == "review_table_rows"
+    assert candidate["protocol_readiness"] == {
+        "status": "ready_after_review",
+        "ready_after_review": True,
+        "missing": ["expert_review_decision"],
+        "blocking_missing": [],
+        "checks": {
+            "expert_review_decision": False,
+            "training_messages": True,
+            "statement": True,
+            "variables": True,
+            "outcomes": True,
+            "direction_or_scope": True,
+            "support_status": True,
+            "support_grade": True,
+            "traceable_training_evidence": True,
+        },
+        "guidance": "Accept only after expert review confirms the finding and evidence.",
+    }
     assert packet["risk_summary"] == {
         "action:review_table_rows": 1,
         "reason:single_paper_evidence": 1,
@@ -241,6 +259,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "reason:table_row_needs_expert_review=1"
     ) in text
     assert "review reasons: single_paper_evidence, table_row_needs_expert_review" in text
+    assert "protocol readiness: ready_after_review" in text
     assert "Paper A / p. 4 / p. 4" not in text
     assert "AI suggestion; human review still required." in text
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text
@@ -305,6 +324,10 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert rows[0]["review_risk_flags"] == [
         "Paper-level evidence; do not treat as cross-paper conclusion without confirmation."
     ]
+    assert rows[0]["protocol_readiness"]["status"] == "ready_after_review"
+    assert rows[0]["protocol_readiness"]["missing"] == ["expert_review_decision"]
+    assert rows[0]["protocol_readiness"]["blocking_missing"] == []
+    assert rows[0]["protocol_readiness"]["checks"]["variables"] is True
     assert rows[0]["action"] == "skip"
     assert rows[0]["allowed_actions"] == ["accept", "reject", "correct", "skip"]
     assert "wrong_direction" in rows[0]["reject_issue_options"]
@@ -335,6 +358,43 @@ def test_render_messages_jsonl_exports_training_ready_messages():
             ]
         }
     ]
+
+
+def test_build_goal_review_packet_marks_protocol_blocking_gaps():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "expert_target": None,
+            "system_prediction": {
+                "statement": "Preheating increased ductility by 14%.",
+                "variables": [],
+                "outcomes": ["ductility"],
+                "direction": "",
+                "scope_summary": "",
+                "support_grade": "strong",
+                "review_status": "needs_review",
+            },
+        }
+    )
+
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+    candidate = packet["candidates"][0]
+    text = check.render_review_packet_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+
+    assert candidate["protocol_readiness"]["status"] == "needs_correction"
+    assert candidate["protocol_readiness"]["ready_after_review"] is False
+    assert candidate["protocol_readiness"]["blocking_missing"] == [
+        "variables",
+        "direction_or_scope",
+    ]
+    assert (
+        "protocol readiness gaps: variables, direction_or_scope"
+        in text
+    )
 
 
 def test_render_messages_jsonl_skips_review_candidates():

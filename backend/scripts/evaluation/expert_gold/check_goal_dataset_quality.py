@@ -429,6 +429,7 @@ def build_goal_review_packet(
         review_reasons = _text_list(prediction.get("review_reasons"))
         warnings = _text_list(prediction.get("warnings"))
         review_action = _mapping(item.get("review_action"))
+        protocol_readiness = _protocol_readiness_for_item(item)
         candidates.append(
             {
                 "sample_id": _text(item.get("sample_id")),
@@ -459,6 +460,7 @@ def build_goal_review_packet(
                     evidence_records=evidence_records,
                 ),
                 "recommended_action_code": _text(review_action.get("code")),
+                "protocol_readiness": protocol_readiness,
                 "suggested_target": {
                     "source": _text(expert_target.get("source")),
                     "review_status": _text(expert_target.get("review_status")),
@@ -578,6 +580,15 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                 lines.append(f"     review reasons: {_join(review_reasons)}")
             if warnings:
                 lines.append(f"     warnings: {_join(warnings)}")
+            protocol_readiness = _mapping(candidate.get("protocol_readiness"))
+            readiness_status = _text(protocol_readiness.get("status"))
+            blocking_missing = _text_list(protocol_readiness.get("blocking_missing"))
+            if blocking_missing:
+                lines.append(
+                    f"     protocol readiness gaps: {_join(blocking_missing)}"
+                )
+            elif readiness_status:
+                lines.append(f"     protocol readiness: {readiness_status}")
             if _text(candidate.get("scope_summary")):
                 lines.append(f"     scope: {_clip(candidate.get('scope_summary'), 220)}")
             suggested = _mapping(candidate.get("suggested_target"))
@@ -654,6 +665,9 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
                         _text(candidate.get("recommended_action_code")),
                         _text_list(candidate.get("review_reasons")),
                         _text_list(candidate.get("warnings")),
+                    ),
+                    "protocol_readiness": dict(
+                        _mapping(candidate.get("protocol_readiness"))
                     ),
                     "action": "skip",
                     "allowed_actions": list(REVIEW_ACTION_OPTIONS),
@@ -734,25 +748,104 @@ def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
 
 
 def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
-    if not _has_fine_tuning_messages(item):
-        return False
+    return _protocol_readiness_for_item(item)["status"] == "protocol_ready"
+
+
+def _protocol_readiness_for_item(item: dict[str, Any]) -> dict[str, Any]:
     target = _mapping(item.get("expert_target"))
     prediction = _mapping(item.get("system_prediction"))
-    statement = _text(target.get("statement") or prediction.get("statement"))
-    variables = _text_list(target.get("variables")) or _text_list(
-        prediction.get("variables")
+    dataset_use_status = _text(item.get("dataset_use_status"))
+    evidence_records = (
+        _mapping_list(item.get("training_evidence_refs"))
+        or _mapping_list(item.get("evidence_refs"))
+        or _mapping_list(item.get("input_blocks"))
     )
-    outcomes = _text_list(target.get("outcomes")) or _text_list(
-        prediction.get("outcomes")
+    status = _text(target.get("status") or prediction.get("status")).lower()
+    support_grade = _text(
+        target.get("support_grade") or prediction.get("support_grade")
+    ).lower()
+    checks = {
+        "expert_review_decision": dataset_use_status == "training_ready",
+        "training_messages": (
+            _has_fine_tuning_messages(item)
+            if dataset_use_status == "training_ready"
+            else True
+        ),
+        "statement": bool(
+            _text(target.get("statement") or prediction.get("statement"))
+        ),
+        "variables": bool(
+            _text_list(target.get("variables"))
+            or _text_list(prediction.get("variables"))
+        ),
+        "outcomes": bool(
+            _text_list(target.get("outcomes"))
+            or _text_list(prediction.get("outcomes"))
+        ),
+        "direction_or_scope": bool(
+            _text(target.get("direction") or prediction.get("direction"))
+            or _text(target.get("scope_summary") or prediction.get("scope_summary"))
+        ),
+        "support_status": status not in {"unsupported", "conflicted"},
+        "support_grade": support_grade
+        not in {"insufficient", "conflict", "conflicted", "weak"},
+        "traceable_training_evidence": _has_traceable_evidence_records(
+            evidence_records
+        ),
+    }
+    blocking_keys = (
+        "statement",
+        "variables",
+        "outcomes",
+        "direction_or_scope",
+        "support_status",
+        "support_grade",
+        "traceable_training_evidence",
     )
-    direction = _text(target.get("direction") or prediction.get("direction"))
-    scope = _text(target.get("scope_summary") or prediction.get("scope_summary"))
-    return (
-        bool(statement)
-        and bool(variables)
-        and bool(outcomes)
-        and bool(direction or scope)
-        and _has_traceable_training_evidence(item)
+    blocking_missing = [key for key in blocking_keys if not checks[key]]
+    missing = [
+        key
+        for key in (
+            "expert_review_decision",
+            "training_messages",
+            *blocking_keys,
+        )
+        if not checks[key]
+    ]
+    if not missing:
+        status_label = "protocol_ready"
+        guidance = "Ready for traceable protocol drafting."
+    elif blocking_missing:
+        status_label = "needs_correction"
+        guidance = (
+            "Correct the missing fields or evidence before importing this row."
+        )
+    else:
+        status_label = "ready_after_review"
+        guidance = (
+            "Accept only after expert review confirms the finding and evidence."
+        )
+    return {
+        "status": status_label,
+        "ready_after_review": not blocking_missing,
+        "missing": missing,
+        "blocking_missing": blocking_missing,
+        "checks": checks,
+        "guidance": guidance,
+    }
+
+
+def _has_traceable_evidence_records(records: list[dict[str, Any]]) -> bool:
+    return bool(records) and all(
+        _text(record.get("source_ref"))
+        and _text(record.get("href"))
+        and (
+            _text(record.get("quote"))
+            or _text(record.get("source_text"))
+            or _text(record.get("training_source_text"))
+            or _text(record.get("text"))
+        )
+        for record in records
     )
 
 

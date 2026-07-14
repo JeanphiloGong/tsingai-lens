@@ -3128,6 +3128,28 @@
 		return parts.length ? parts.join(' · ') : JSON.stringify(record);
 	}
 
+	function reviewImportGoalProgressText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportGoalProgress', {
+			actionable: Number(record.actionable_count ?? 0),
+			skipped: Number(record.skipped_count ?? 0),
+			accept: Number(record.accept_count ?? 0),
+			reject: Number(record.reject_count ?? 0),
+			correct: Number(record.correct_count ?? 0)
+		});
+	}
+
+	function reviewImportGoalLabel(record: Record<string, unknown>) {
+		return typeof record.goal_id === 'string' && record.goal_id
+			? formatShortIdentifier(record.goal_id)
+			: $t('research.understanding.reviewImportUnknownGoal');
+	}
+
+	function reviewImportNextFindingLabel(record: Record<string, unknown>) {
+		return typeof record.next_review_finding_id === 'string' && record.next_review_finding_id
+			? formatShortIdentifier(record.next_review_finding_id)
+			: '';
+	}
+
 	async function submitReviewImport(dryRun: boolean) {
 		if (!collectionId || !reviewerReady) return;
 		reviewImportSubmitting = true;
@@ -3963,6 +3985,26 @@
 												<strong>{reviewImportSummary.errors.length}</strong>
 											</span>
 										</div>
+										{#if reviewImportSummary.decision_progress_by_goal.length}
+											<div class="research-understanding-workbench__review-import-progress">
+												<strong>{$t('research.understanding.reviewImportGoalProgressTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.decision_progress_by_goal as goalProgress, index (`goal-progress-${index}`)}
+														<li>
+															<span>{reviewImportGoalLabel(goalProgress)}</span>
+															<small>{reviewImportGoalProgressText(goalProgress)}</small>
+															{#if reviewImportNextFindingLabel(goalProgress)}
+																<small>
+																	{$t('research.understanding.reviewImportNextFinding', {
+																		finding: reviewImportNextFindingLabel(goalProgress)
+																	})}
+																</small>
+															{/if}
+														</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
 										{#if reviewImportSummary.warnings.length}
 											<div class="research-understanding-workbench__review-import-issues">
 												<strong>{$t('research.understanding.reviewImportWarningsTitle')}</strong>
@@ -6104,6 +6146,7 @@
 
 	.research-understanding-workbench__review-import-heading strong,
 	.research-understanding-workbench__review-import label span,
+	.research-understanding-workbench__review-import-progress strong,
 	.research-understanding-workbench__review-import-issues strong {
 		color: var(--text-primary);
 		font-size: 12px;
@@ -6205,6 +6248,47 @@
 
 	.research-understanding-workbench__review-import-summary strong {
 		color: var(--text-primary);
+	}
+
+	.research-understanding-workbench__review-import-progress {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-progress ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__review-import-progress li {
+		display: grid;
+		grid-template-columns: minmax(92px, 0.35fr) minmax(180px, 1fr) minmax(120px, 0.6fr);
+		gap: 8px;
+		align-items: center;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 6px 8px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-import-progress li > span {
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-progress li > small {
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__review-import-issues {

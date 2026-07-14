@@ -332,6 +332,7 @@ export type ResearchUnderstandingReviewDecisionImportResponse = {
 	errors: Record<string, unknown>[];
 	warnings: Record<string, unknown>[];
 	review_progress: Record<string, unknown>;
+	decision_progress_by_goal: Record<string, unknown>[];
 	affected_goals: Record<string, unknown>[];
 };
 export type ResearchUnderstandingGoldDraftItem = {

@@ -3454,6 +3454,18 @@ describe('ResearchUnderstandingWorkbench', () => {
 							ready_to_write: true,
 							next_steps: []
 						},
+						decision_progress_by_goal: [
+							{
+								goal_id: 'goal_1a7a26d850b9',
+								total_rows: 1,
+								actionable_count: 1,
+								skipped_count: 0,
+								accept_count: 1,
+								reject_count: 0,
+								correct_count: 0,
+								next_review_finding_id: ''
+							}
+						],
 						affected_goals: []
 					})
 				);
@@ -3484,6 +3496,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		await expect
 			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 0 written.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Goal review progress')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('goal_1a7a26d850b9')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('1 actionable, 0 skipped · accept 1, reject 0, correct 0'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Import warnings')).toBeInTheDocument();
 		await expect
@@ -3619,6 +3636,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 						errors: [],
 						warnings: [],
 						review_progress: { actionable_count: 1, skipped_count: 0 },
+						decision_progress_by_goal: [],
 						affected_goals: []
 					})
 				);
@@ -3757,6 +3775,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 							ready_to_write: true,
 							next_steps: []
 						},
+						decision_progress_by_goal: [],
 						affected_goals: [{ goal_id: 'obj_1', written_count: 1 }]
 					})
 				);

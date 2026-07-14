@@ -607,6 +607,7 @@ describe('research view shared helpers', () => {
 			errors: [],
 			warnings: [],
 			review_progress: { ready_to_write: true },
+			decision_progress_by_goal: [],
 			affected_goals: []
 		});
 

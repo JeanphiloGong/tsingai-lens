@@ -375,6 +375,19 @@ class FakeResearchUnderstandingReviewImportService:
                 "ready_to_write": True,
                 "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
             },
+            "decision_progress_by_goal": [
+                {
+                    "collection_id": "col-1",
+                    "goal_id": "goal-1",
+                    "total_rows": 1,
+                    "actionable_count": 1,
+                    "skipped_count": 0,
+                    "accept_count": 1,
+                    "reject_count": 0,
+                    "correct_count": 0,
+                    "next_review_finding_id": "",
+                }
+            ],
             "affected_goals": [],
         }
 
@@ -410,6 +423,7 @@ def test_research_understanding_review_decision_import_dry_run(monkeypatch):
     assert response.dry_run is True
     assert response.total_rows == 1
     assert response.review_progress["ready_to_write"] is True
+    assert response.decision_progress_by_goal[0]["goal_id"] == "goal-1"
     assert import_service.imported == {
         "rows": [
             {

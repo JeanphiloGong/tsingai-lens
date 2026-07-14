@@ -492,6 +492,7 @@ class ResearchUnderstandingReviewDecisionImportResponse(BaseModel):
     errors: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
     review_progress: dict[str, Any] = Field(default_factory=dict)
+    decision_progress_by_goal: list[dict[str, Any]] = Field(default_factory=list)
     affected_goals: list[dict[str, Any]] = Field(default_factory=list)
 
 

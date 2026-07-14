@@ -385,6 +385,11 @@ const translations: Record<Language, Translations> = {
 				reviewImportSkipped: 'Skipped',
 				reviewImportWarnings: 'Warnings',
 				reviewImportErrors: 'Errors',
+				reviewImportGoalProgressTitle: 'Goal review progress',
+				reviewImportGoalProgress:
+					'{actionable} actionable, {skipped} skipped · accept {accept}, reject {reject}, correct {correct}',
+				reviewImportNextFinding: 'Next finding: {finding}',
+				reviewImportUnknownGoal: 'Unknown goal',
 				reviewImportWarningsTitle: 'Import warnings',
 				reviewImportErrorsTitle: 'Import errors',
 				datasetNoTrainingReady: 'No training-ready samples',
@@ -3682,6 +3687,11 @@ const translations: Record<Language, Translations> = {
 				reviewImportSkipped: '已跳过',
 				reviewImportWarnings: '警告',
 				reviewImportErrors: '错误',
+				reviewImportGoalProgressTitle: '研究目标复核进度',
+				reviewImportGoalProgress:
+					'{actionable} 行可写入，{skipped} 行待复核 · accept {accept}，reject {reject}，correct {correct}',
+				reviewImportNextFinding: '下一条 Finding：{finding}',
+				reviewImportUnknownGoal: '未知研究目标',
 				reviewImportWarningsTitle: '导入警告',
 				reviewImportErrorsTitle: '导入错误',
 				datasetNoTrainingReady: '暂无可训练样本',

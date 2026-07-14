@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -51,6 +52,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--runtime-write-check",
+        action="store_true",
+        help=(
+            "When --api-base-url is set, create and update a goal-scoped smoke "
+            "experiment plan to verify saving works. This writes runtime data."
+        ),
+    )
+    parser.add_argument(
         "--require-all-training-ready",
         action="store_true",
         help=(
@@ -81,6 +90,7 @@ def main() -> None:
         collection_id=args.collection_id,
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
+        runtime_write_check=args.runtime_write_check,
         require_all_training_ready=args.require_all_training_ready,
         require_complete=args.require_complete,
     )
@@ -97,6 +107,7 @@ def check_goal_expert_loop(
     collection_id: str,
     goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
     api_base_url: str | None = None,
+    runtime_write_check: bool = False,
     require_all_training_ready: bool = False,
     require_complete: bool = False,
 ) -> dict[str, Any]:
@@ -119,7 +130,12 @@ def check_goal_expert_loop(
         api_base_url=api_base_url,
         require_training_ready=require_all_training_ready,
     )
-    runtime_contract = _runtime_contract_layer(api_base_url)
+    runtime_contract = _runtime_contract_layer(
+        api_base_url,
+        collection_id=collection_id,
+        goal_id=goal_ids[0] if goal_ids else "",
+        runtime_write_check=runtime_write_check,
+    )
     layers = {
         "expert_review": _expert_review_layer(findings),
         "dataset_accumulation": _dataset_layer(
@@ -231,23 +247,31 @@ def _experiment_layer(
         "requirement": (
             "At least one goal has training-ready findings with protocol design "
             "inputs that Goal Copilot can use for traceable protocol drafts, and "
-            "the running API can save goal-scoped experiment plans when "
-            "--api-base-url is used."
+            "the running API exposes goal-scoped experiment-plan routes. Pass "
+            "--runtime-write-check to verify saving against a running API."
         ),
     }
 
 
-def _runtime_contract_layer(api_base_url: str | None) -> dict[str, Any]:
+def _runtime_contract_layer(
+    api_base_url: str | None,
+    *,
+    collection_id: str,
+    goal_id: str,
+    runtime_write_check: bool,
+) -> dict[str, Any]:
     if not api_base_url:
         return {
             "status": "not_checked",
             "api_base_url": "",
+            "runtime_write_check": runtime_write_check,
             "checks": [],
             "requirement": "Pass --api-base-url to verify running API routes.",
         }
     base_url = api_base_url.rstrip("/")
     try:
-        paths = _fetch_openapi_paths(base_url)
+        cookie = _api_login_cookie(base_url)
+        paths = _fetch_openapi_paths(base_url, cookie=cookie)
     except RuntimeError as exc:
         return {
             "status": "fail",
@@ -286,29 +310,173 @@ def _runtime_contract_layer(api_base_url: str | None) -> dict[str, Any]:
             else "fail",
         },
     ]
+    if runtime_write_check:
+        checks.extend(
+            _experiment_plan_write_checks(
+                base_url,
+                collection_id=collection_id,
+                goal_id=goal_id,
+                cookie=cookie,
+            )
+        )
     return {
         "status": "pass"
         if all(check["status"] == "pass" for check in checks)
         else "fail",
         "api_base_url": base_url,
+        "runtime_write_check": runtime_write_check,
         "checks": checks,
-        "requirement": "Running API exposes goal experiment-plan routes.",
+        "requirement": (
+            "Running API exposes goal experiment-plan routes and, when "
+            "--runtime-write-check is set, accepts create/update smoke writes."
+        ),
     }
 
 
-def _fetch_openapi_paths(api_base_url: str) -> dict[str, Any]:
-    request = request_url.Request(f"{api_base_url}/api/openapi.json", method="GET")
-    try:
-        with request_url.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8") or "{}")
-    except HTTPError as exc:
-        raise RuntimeError(f"GET /api/openapi.json failed: {exc.code} {exc.reason}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"GET /api/openapi.json failed: {exc.reason}") from exc
+def _api_login_cookie(base_url: str) -> str:
+    email = os.getenv("LENS_CHECK_EMAIL")
+    password = os.getenv("LENS_CHECK_PASSWORD")
+    if not email and not password:
+        return ""
+    if not email or not password:
+        raise RuntimeError(
+            "set both LENS_CHECK_EMAIL and LENS_CHECK_PASSWORD for API checks"
+        )
+    response = _api_json_request(
+        base_url,
+        "/api/v1/auth/login",
+        method="POST",
+        payload={"email": email, "password": password},
+        include_headers=True,
+    )
+    headers = response["headers"]
+    cookie = str(headers.get("Set-Cookie") or headers.get("set-cookie") or "")
+    if not cookie:
+        raise RuntimeError("POST /api/v1/auth/login did not return Set-Cookie")
+    return cookie.split(";", 1)[0]
+
+
+def _fetch_openapi_paths(api_base_url: str, *, cookie: str = "") -> dict[str, Any]:
+    payload = _api_json_request(
+        api_base_url,
+        "/api/openapi.json",
+        cookie=cookie,
+    )
     paths = _mapping(payload.get("paths"))
     if not paths:
         raise RuntimeError("GET /api/openapi.json returned no paths")
     return paths
+
+
+def _experiment_plan_write_checks(
+    base_url: str,
+    *,
+    collection_id: str,
+    goal_id: str,
+    cookie: str,
+) -> list[dict[str, Any]]:
+    if not collection_id or not goal_id:
+        return [
+            {
+                "name": "write smoke experiment plan",
+                "path": "",
+                "method": "post",
+                "status": "fail",
+                "detail": "collection_id and goal_id are required",
+            }
+        ]
+    plan_list_path = f"/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    smoke_content = (
+        "Hypothesis: Lens runtime smoke check validates editable experiment "
+        "plan storage.\n\n"
+        "Variable matrix: compare the current saved draft before and after the "
+        "runtime smoke update.\n\n"
+        "Measurements: confirm the API returns a plan id and updated status.\n\n"
+        "Controls: run only against an operator-selected authenticated API.\n\n"
+        "Risks and limits: this smoke draft is archived immediately after "
+        "creation."
+    )
+    create_payload = {
+        "title": "Lens runtime smoke protocol",
+        "content": smoke_content,
+        "source_links": [],
+        "metadata": {"source": "expert_loop_runtime_smoke"},
+    }
+    try:
+        created = _api_json_request(
+            base_url,
+            plan_list_path,
+            method="POST",
+            payload=create_payload,
+            cookie=cookie,
+        )
+        plan_id = _text(created.get("plan_id"))
+        if not plan_id:
+            raise RuntimeError("POST experiment plan returned no plan_id")
+        _api_json_request(
+            base_url,
+            f"{plan_list_path}/{plan_id}",
+            method="PATCH",
+            payload={
+                "title": "Lens runtime smoke protocol",
+                "content": smoke_content
+                + "\n\nRisks and limits: archived after write verification.",
+                "status": "archived",
+            },
+            cookie=cookie,
+        )
+    except RuntimeError as exc:
+        return [
+            {
+                "name": "write smoke experiment plan",
+                "path": plan_list_path,
+                "method": "post/patch",
+                "status": "fail",
+                "detail": str(exc),
+            }
+        ]
+    return [
+        {
+            "name": "write smoke experiment plan",
+            "path": plan_list_path,
+            "method": "post/patch",
+            "status": "pass",
+            "detail": "created and archived smoke plan",
+        }
+    ]
+
+
+def _api_json_request(
+    base_url: str,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+    cookie: str = "",
+    include_headers: bool = False,
+) -> dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"Content-Type": "application/json"}
+    if cookie:
+        headers["Cookie"] = cookie
+    request = request_url.Request(
+        f"{base_url}{path}",
+        data=body,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with request_url.urlopen(request, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8") or "{}")
+            if include_headers:
+                return {"payload": data, "headers": response.headers}
+            return data
+    except HTTPError as exc:
+        raise RuntimeError(
+            f"{method} {path} failed: {exc.code} {exc.reason}"
+        ) from exc
+    except URLError as exc:
+        raise RuntimeError(f"{method} {path} failed: {exc.reason}") from exc
 
 
 def _goal_rollup(
@@ -513,10 +681,17 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                     if _text(check.get("status")) == "fail"
                 ]
                 for check in failed_checks:
-                    lines.append(
-                        "  missing route: "
-                        f"{_text(check.get('method')).upper()} {_text(check.get('path'))}"
-                    )
+                    detail = _text(check.get("detail"))
+                    if detail:
+                        lines.append(
+                            "  runtime check failed: "
+                            f"{_text(check.get('name'))}: {detail}"
+                        )
+                    else:
+                        lines.append(
+                            "  missing route: "
+                            f"{_text(check.get('method')).upper()} {_text(check.get('path'))}"
+                        )
     lines.extend(
         [
             "",

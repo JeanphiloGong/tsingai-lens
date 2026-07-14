@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
+from urllib.error import HTTPError
 
 
 def _load_goal_expert_loop_module():
@@ -483,7 +485,7 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
     monkeypatch.setattr(
         check,
         "_fetch_openapi_paths",
-        lambda _base_url: {
+        lambda _base_url, **_: {
             "/api/v1/collections/{collection_id}/goals/{goal_id}/analysis": {
                 "get": {}
             }
@@ -548,7 +550,7 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
     monkeypatch.setattr(
         check,
         "_fetch_openapi_paths",
-        lambda _base_url: {
+        lambda _base_url, **_: {
             plan_list_path: {"get": {}, "post": {}},
             plan_detail_path: {"patch": {}},
         },
@@ -564,3 +566,194 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
     assert summary["status"] == "pass"
     assert summary["completion_status"] == "complete"
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == "pass"
+    assert (
+        summary["layers"]["experiment_design"]["runtime_contract"]["runtime_write_check"]
+        is False
+    )
+
+
+def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_plan(
+    monkeypatch,
+):
+    check = _load_goal_expert_loop_module()
+    plan_list_path = (
+        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {
+                    "check_goal_dataset_quality": staticmethod(
+                        lambda **_: _completed_dataset_payload()
+                    )
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url, **_: {
+            plan_list_path: {"get": {}, "post": {}},
+            plan_detail_path: {"patch": {}},
+        },
+    )
+    requests: list[tuple[str, str, dict[str, object] | None, str]] = []
+
+    class FakeResponse:
+        def __init__(self, payload, *, headers=None):
+            self.payload = payload
+            self.headers = headers or {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        payload = json.loads(request.data.decode("utf-8")) if request.data else None
+        requests.append(
+            (
+                request.full_url,
+                request.get_method(),
+                payload,
+                request.headers.get("Cookie", ""),
+            )
+        )
+        if request.full_url.endswith("/api/v1/auth/login"):
+            return FakeResponse(
+                {"user": {"email": "admin@example.com"}},
+                headers={"Set-Cookie": "lens_session=session-1; Path=/"},
+            )
+        if request.get_method() == "POST" and request.full_url.endswith(
+            "/api/v1/collections/col-1/goals/goal-1/experiment-plans"
+        ):
+            return FakeResponse({"plan_id": "exp_smoke"})
+        if request.get_method() == "PATCH" and request.full_url.endswith(
+            "/api/v1/collections/col-1/goals/goal-1/experiment-plans/exp_smoke"
+        ):
+            return FakeResponse({"plan_id": "exp_smoke", "status": "archived"})
+        raise AssertionError(request.full_url)
+
+    monkeypatch.setenv("LENS_CHECK_EMAIL", "admin@example.com")
+    monkeypatch.setenv("LENS_CHECK_PASSWORD", "secret")
+    monkeypatch.setattr(check.request_url, "urlopen", fake_urlopen)
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        api_base_url="http://localhost:5173",
+        runtime_write_check=True,
+        require_complete=True,
+    )
+
+    runtime_contract = summary["layers"]["experiment_design"]["runtime_contract"]
+    assert summary["status"] == "pass"
+    assert runtime_contract["runtime_write_check"] is True
+    assert runtime_contract["checks"][-1] == {
+        "name": "write smoke experiment plan",
+        "path": "/api/v1/collections/col-1/goals/goal-1/experiment-plans",
+        "method": "post/patch",
+        "status": "pass",
+        "detail": "created and archived smoke plan",
+    }
+    assert requests == [
+        (
+            "http://localhost:5173/api/v1/auth/login",
+            "POST",
+            {"email": "admin@example.com", "password": "secret"},
+            "",
+        ),
+        (
+            "http://localhost:5173/api/v1/collections/col-1/goals/goal-1/experiment-plans",
+            "POST",
+            {
+                "title": "Lens runtime smoke protocol",
+                "content": requests[1][2]["content"],
+                "source_links": [],
+                "metadata": {"source": "expert_loop_runtime_smoke"},
+            },
+            "lens_session=session-1",
+        ),
+        (
+            "http://localhost:5173/api/v1/collections/col-1/goals/goal-1/experiment-plans/exp_smoke",
+            "PATCH",
+            {
+                "title": "Lens runtime smoke protocol",
+                "content": requests[2][2]["content"],
+                "status": "archived",
+            },
+            "lens_session=session-1",
+        ),
+    ]
+
+
+def test_check_goal_expert_loop_runtime_write_check_reports_write_failure(
+    monkeypatch,
+):
+    check = _load_goal_expert_loop_module()
+    plan_list_path = (
+        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url, **_: {
+            plan_list_path: {"get": {}, "post": {}},
+            plan_detail_path: {"patch": {}},
+        },
+    )
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        if request.full_url.endswith("/api/v1/auth/login"):
+            class LoginResponse:
+                headers = {"Set-Cookie": "lens_session=session-1; Path=/"}
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def read(self):
+                    return b"{}"
+
+            return LoginResponse()
+        raise HTTPError(request.full_url, 404, "Not Found", hdrs=None, fp=None)
+
+    monkeypatch.setenv("LENS_CHECK_EMAIL", "admin@example.com")
+    monkeypatch.setenv("LENS_CHECK_PASSWORD", "secret")
+    monkeypatch.setattr(check.request_url, "urlopen", fake_urlopen)
+
+    runtime_contract = check._runtime_contract_layer(
+        "http://localhost:5173",
+        collection_id="col-1",
+        goal_id="goal-1",
+        runtime_write_check=True,
+    )
+
+    assert runtime_contract["status"] == "fail"
+    assert runtime_contract["checks"][-1]["status"] == "fail"
+    assert "POST /api/v1/collections/col-1/goals/goal-1/experiment-plans failed" in (
+        runtime_contract["checks"][-1]["detail"]
+    )

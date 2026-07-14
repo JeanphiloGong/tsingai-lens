@@ -344,7 +344,23 @@ action, and a frontend `href` that opens the goal review queue or
 training-ready export view.
 When `--api-base-url` is provided, the combined check also verifies that the
 running API exposes the goal-scoped experiment-plan list, create, and update
-routes required to save traceable protocol drafts.
+routes required to save traceable protocol drafts. This default runtime check
+is read-only: it inspects the running OpenAPI contract but does not create a
+plan.
+To prove that the running API can actually create and edit goal-scoped plans,
+run an explicit write smoke check with an authenticated operator account:
+
+```bash
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --api-base-url http://localhost:5173 \
+  --runtime-write-check
+```
+
+`--runtime-write-check` creates a small smoke experiment-plan draft for the
+first checked goal and immediately updates it to `archived`. Use it only when
+writing runtime test data is acceptable.
 For a human-readable queue instead of the full JSON payload, run:
 
 ```bash

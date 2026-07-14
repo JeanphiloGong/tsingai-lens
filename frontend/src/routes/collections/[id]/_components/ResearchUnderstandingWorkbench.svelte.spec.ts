@@ -3589,7 +3589,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		).toBe(false);
 	});
 
-	it('converts human-confirmed agent review rows before import dry-run', async () => {
+	it('sends human-confirmed agent review rows to backend import dry-run', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -3670,12 +3670,15 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(importCall).toBeTruthy();
 		const body = JSON.parse(String(importCall?.[1]?.body));
 		expect(body.rows[0]).toMatchObject({
-			action: 'correct',
-			expert_note: 'Human confirmed the narrower target.',
-			curated_evidence_ref_ids: ['ev_strength'],
-			suggested_target: {
-				statement: 'Heat treatment changes tensile strength.',
-				evidence_ref_ids: ['ev_strength']
+			action: 'skip',
+			agent_review: {
+				human_confirmed: true,
+				recommendation: 'correct',
+				note: 'Human confirmed the narrower target.',
+				suggested_target: {
+					statement: 'Heat treatment changes tensile strength.',
+					evidence_ref_ids: ['ev_strength']
+				}
 			}
 		});
 		expect(body.dry_run).toBe(true);

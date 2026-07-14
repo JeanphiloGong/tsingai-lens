@@ -524,12 +524,15 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _decision_template_evidence(record: dict[str, Any]) -> dict[str, str]:
+def _decision_template_evidence(record: dict[str, Any]) -> dict[str, Any]:
+    table_audit = record.get("table_audit")
     return {
         "evidence_ref_id": _text(record.get("evidence_ref_id")),
         "label": _text(record.get("label")),
         "source_ref": _text(record.get("source_ref")),
         "page": _text(record.get("page")),
+        "value_summary": _text(record.get("value_summary")),
+        "table_audit": table_audit if isinstance(table_audit, dict) else None,
         "quote": _text(record.get("quote")),
         "open": _short_review_href(record.get("href")),
     }

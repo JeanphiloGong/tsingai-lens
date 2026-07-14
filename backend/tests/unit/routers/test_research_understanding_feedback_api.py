@@ -1086,6 +1086,11 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
                 "label": "P001 Section 3.2",
                 "source_ref": "blk_1",
                 "page": "9",
+                "value_summary": "ductility +14%",
+                "table_audit": {
+                    "columns": ["Preheat", "Ductility"],
+                    "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+                },
                 "quote": "Preheating increased ductility by 14%.",
                 "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
             }
@@ -1466,6 +1471,11 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
         "label": "P001 Section 3.2",
         "source_ref": "blk_1",
         "page": "9",
+        "value_summary": "ductility +14%",
+        "table_audit": {
+            "columns": ["Preheat", "Ductility"],
+            "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+        },
         "quote": "Preheating increased ductility by 14%.",
         "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
     }

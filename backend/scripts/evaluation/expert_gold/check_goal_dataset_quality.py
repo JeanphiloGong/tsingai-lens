@@ -1448,12 +1448,14 @@ def _table_row_text(row: dict[str, Any], columns: list[str]) -> str:
     )
 
 
-def _decision_template_evidence(record: dict[str, Any]) -> dict[str, str]:
+def _decision_template_evidence(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "evidence_ref_id": _text(record.get("evidence_ref_id")),
         "label": _text(record.get("label")),
         "source_ref": _text(record.get("source_ref")),
         "page": _text(record.get("page")),
+        "value_summary": _text(record.get("value_summary")),
+        "table_audit": _mapping(record.get("table_audit")) or None,
         "quote": _text(record.get("quote")),
         "open": _short_review_href(record.get("href")),
     }

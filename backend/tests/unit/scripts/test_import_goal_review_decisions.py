@@ -270,6 +270,74 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
     assert service.curations == []
 
 
+def test_import_review_decisions_warns_when_all_rows_are_skipped(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(input_path, [_base_row(action="skip"), _base_row(action="skip")])
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 0
+    assert summary["counts"] == {"skip": 2}
+    assert summary["warnings"] == [
+        {
+            "line": 0,
+            "action": "skip",
+            "finding_id": "",
+            "message": (
+                "no_actionable_decisions: all rows are skip; no expert labels "
+                "will be written"
+            ),
+        }
+    ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
+def test_import_review_decisions_fail_on_warnings_rejects_all_skip_import(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(input_path, [_base_row(action="skip")])
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        fail_on_warnings=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert summary["warnings"] == [
+        {
+            "line": 0,
+            "action": "skip",
+            "finding_id": "",
+            "message": (
+                "no_actionable_decisions: all rows are skip; no expert labels "
+                "will be written"
+            ),
+        }
+    ]
+    assert [error["message"] for error in summary["errors"]] == [
+        (
+            "review warning requires resolution: no_actionable_decisions: all "
+            "rows are skip; no expert labels will be written"
+        )
+    ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
 def test_import_review_decisions_requires_human_reviewer(tmp_path):
     module = _load_import_module()
     input_path = tmp_path / "review.jsonl"

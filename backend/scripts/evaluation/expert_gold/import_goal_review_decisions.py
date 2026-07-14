@@ -119,6 +119,7 @@ def import_review_decisions(
             affected_goals=[],
         )
     warnings = _review_warnings(valid_decisions)
+    warnings.extend(_actionable_decision_warnings(valid_decisions))
     if fail_on_warnings and warnings:
         return _summary(
             status="fail",
@@ -372,6 +373,22 @@ def _review_warnings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for decision in decisions
         if decision.get("action") in {"accept", "correct"}
         and _text(decision.get("review_warning"))
+    ]
+
+
+def _actionable_decision_warnings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if any(decision.get("action") in {"accept", "reject", "correct"} for decision in decisions):
+        return []
+    return [
+        {
+            "line": 0,
+            "action": "skip",
+            "finding_id": "",
+            "message": (
+                "no_actionable_decisions: all rows are skip; no expert labels "
+                "will be written"
+            ),
+        }
     ]
 
 

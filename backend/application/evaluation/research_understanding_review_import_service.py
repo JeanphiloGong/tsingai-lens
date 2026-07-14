@@ -354,6 +354,12 @@ def _confirmed_accept_error(row: dict[str, Any]) -> str:
 def _acceptance_gate_error(row: dict[str, Any]) -> str:
     gate = _mapping(row.get("acceptance_gate"))
     blocking = _protocol_blocking_missing(row)
+    accept_blockers = _strings(gate.get("accept_blockers")) if gate else []
+    if accept_blockers:
+        return (
+            "accept is blocked by acceptance_gate.accept_blockers; "
+            f"use correct or reject for: {', '.join(accept_blockers)}"
+        )
     if gate and (not bool(gate.get("accept_allowed")) or bool(gate.get("requires_correction"))):
         return "accept is blocked by acceptance_gate; use correct or reject"
     if blocking:

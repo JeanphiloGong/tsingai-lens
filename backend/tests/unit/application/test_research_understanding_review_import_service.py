@@ -193,6 +193,36 @@ def test_review_import_service_blocks_accept_when_acceptance_gate_denies_it():
     )
 
 
+def test_review_import_service_blocks_accept_when_acceptance_gate_has_blockers():
+    service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
+
+    summary = service.import_rows(
+        rows=[
+            _row(
+                action="accept",
+                acceptance_gate={
+                    "accept_allowed": True,
+                    "requires_correction": False,
+                    "blocking_missing": [],
+                    "accept_blockers": [
+                        "verify_table_rows",
+                        "table_row_alignment_uncertain",
+                    ],
+                },
+            )
+        ],
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert summary["errors"][0]["message"] == (
+        "accept is blocked by acceptance_gate.accept_blockers; "
+        "use correct or reject for: verify_table_rows, table_row_alignment_uncertain"
+    )
+
+
 def test_review_import_service_rejects_agent_reviewer():
     service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
 

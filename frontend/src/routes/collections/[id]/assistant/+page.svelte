@@ -462,8 +462,8 @@
 		return (message.warnings ?? []).includes('curated_research_findings_empty');
 	}
 
-	function hasTrainingReadyReviewGate(message: GoalSessionMessage) {
-		return message.review_gate === 'training_ready_findings';
+	function hasProtocolReadyReviewGate(message: GoalSessionMessage) {
+		return message.review_gate === 'protocol_ready_findings';
 	}
 
 	function missingSourceCitation(message: GoalSessionMessage) {
@@ -543,7 +543,7 @@
 			queryGoalId &&
 				message.role === 'assistant' &&
 				message.source_mode === 'collection_grounded' &&
-				hasTrainingReadyReviewGate(message) &&
+				hasProtocolReadyReviewGate(message) &&
 				messageText(message).trim() &&
 				visibleSourceLinks(message).length > 0 &&
 				hasEvidenceCitations(message) &&
@@ -770,7 +770,7 @@
 									{/if}
 									{#if message.role === 'assistant' &&
 										message.source_mode === 'collection_grounded' &&
-										!hasTrainingReadyReviewGate(message)}
+										!hasProtocolReadyReviewGate(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.reviewRequired')}
 										</p>
@@ -818,7 +818,7 @@
 										</p>
 									{:else if message.role === 'assistant' &&
 										message.source_mode === 'collection_grounded' &&
-										hasTrainingReadyReviewGate(message) &&
+										hasProtocolReadyReviewGate(message) &&
 										visibleSourceLinks(message).length &&
 										hasEvidenceCitations(message) &&
 										citesVisibleSourceLabel(message) &&

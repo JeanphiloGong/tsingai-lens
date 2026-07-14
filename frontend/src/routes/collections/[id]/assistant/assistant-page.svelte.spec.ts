@@ -185,7 +185,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -434,7 +434,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			);
 		}) as [string | URL | Request, RequestInit];
 		const payload = JSON.parse(messageInit.body as string);
-		expect(payload.message).toContain('training-ready findings');
+		expect(payload.message).toContain('protocol-ready findings');
 		expect(payload.message).toContain('Hypothesis');
 		expect(payload.message).toContain('Variable matrix');
 		expect(payload.message).toContain('Measurements');
@@ -530,7 +530,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: [],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [],
 						created_at: '2026-07-13T00:01:00+00:00'
 					})
@@ -596,7 +596,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -749,7 +749,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: [],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -792,7 +792,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		).toBe(false);
 	});
 
-	it('does not save grounded answers without the training-ready review gate', async () => {
+	it('does not save grounded answers without the protocol-ready review gate', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
@@ -853,7 +853,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Save is disabled until this goal has expert-reviewed training-ready findings.'))
+			.element(browserPage.getByText('Save is disabled until this goal has expert-reviewed protocol-ready findings.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
 		expect(
@@ -905,7 +905,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -987,7 +987,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -1069,7 +1069,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1', 'ev_2'],
 						warnings: [],
 						links: {},
-						review_gate: 'training_ready_findings',
+						review_gate: 'protocol_ready_findings',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -1170,7 +1170,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText(/unreviewed collection evidence/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Save is disabled until this goal has expert-reviewed training-ready findings.'))
+			.element(browserPage.getByText('Save is disabled until this goal has expert-reviewed protocol-ready findings.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
 		expect(

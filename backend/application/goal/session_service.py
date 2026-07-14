@@ -56,6 +56,7 @@ _MAX_ROLLING_SUMMARY_CHARS = 1600
 _MAX_SOURCE_LINKS = 12
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
 _UNSET = object()
+PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
 
 
 class GoalSessionNotFoundError(FileNotFoundError):
@@ -409,9 +410,9 @@ class GoalSessionService:
             links=links,
             source_links=source_links,
             review_gate=(
-                "training_ready_findings"
+                PROTOCOL_READY_REVIEW_GATE
                 if source_mode == "collection_grounded"
-                and context.get("review_gate") == "training_ready_findings"
+                and context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
                 else None
             ),
             created_at=_now_iso(),
@@ -648,7 +649,7 @@ class GoalSessionService:
             "source_links": self._public_source_links(source_refs),
             "source_refs": source_refs,
             "review_gate": (
-                "training_ready_findings" if curated_research_findings else None
+                PROTOCOL_READY_REVIEW_GATE if curated_research_findings else None
             ),
             "payload": self._compact_value(source_context_payload),
             "prompt_source_links": self._prompt_source_links(source_refs),
@@ -799,13 +800,17 @@ class GoalSessionService:
         )
         if not statement:
             return {}
-        if not self._curated_research_finding_is_actionable(target, prediction):
-            return {}
         evidence_refs = [
             self._curated_evidence_ref_for_prompt(ref)
             for ref in item.get("training_evidence_refs", [])
             if isinstance(ref, dict)
         ]
+        if not self._curated_research_finding_is_actionable(
+            target,
+            prediction,
+            evidence_refs=evidence_refs,
+        ):
+            return {}
         return {
             "finding": statement,
             "label_status": _clean_text(item.get("label_status")),
@@ -835,6 +840,8 @@ class GoalSessionService:
         self,
         target: dict[str, Any],
         prediction: dict[str, Any],
+        *,
+        evidence_refs: list[dict[str, Any]],
     ) -> bool:
         status = (
             _clean_text(target.get("status") or prediction.get("status")) or ""
@@ -847,7 +854,22 @@ class GoalSessionService:
             return False
         if support_grade in {"insufficient", "conflict", "conflicted", "weak"}:
             return False
-        return True
+        variables = self._stable_strings(
+            target.get("variables") or prediction.get("variables")
+        )
+        outcomes = self._stable_strings(
+            target.get("outcomes") or prediction.get("outcomes")
+        )
+        direction = _clean_text(target.get("direction") or prediction.get("direction"))
+        scope = _clean_text(
+            target.get("scope_summary") or prediction.get("scope_summary")
+        )
+        return (
+            bool(variables)
+            and bool(outcomes)
+            and bool(direction or scope)
+            and any(ref.get("evidence_ref_id") and ref.get("quote") for ref in evidence_refs)
+        )
 
     def _curated_evidence_ref_for_prompt(self, ref: dict[str, Any]) -> dict[str, Any]:
         evidence_id = _clean_text(ref.get("evidence_ref_id") or ref.get("evidence_id"))
@@ -936,8 +958,8 @@ class GoalSessionService:
                 "Answer only from the provided collection context. Cite source link "
                 "labels such as [Source 1] when making collection-supported claims. "
                 "When asked for experiments, protocols, or next-step research plans, "
-                "use curated/training-ready findings first and say when expert-reviewed "
-                "findings are insufficient for a decision. Protocol draft requirements: "
+                "use curated protocol-ready findings first and say when expert-reviewed "
+                "protocol inputs are insufficient for a decision. Protocol draft requirements: "
                 "write a structured protocol draft with these exact section labels: "
                 "Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. "
                 "Do not collapse protocol answers into one paragraph. Attach source labels "

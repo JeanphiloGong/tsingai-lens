@@ -207,8 +207,8 @@
 	}
 
 	function reviewGateLabel(value: string) {
-		if (value === 'training_ready_findings') {
-			return $t('research.goalWorkspace.experimentPlanTrainingReadyGate');
+		if (value === 'protocol_ready_findings') {
+			return $t('research.goalWorkspace.experimentPlanProtocolReadyGate');
 		}
 		return statusLabel(value);
 	}
@@ -235,7 +235,7 @@
 		return Boolean(
 			plan?.source_message_id ||
 				metadataText(plan, 'source') === 'goal_copilot' ||
-				metadataText(plan, 'review_gate') === 'training_ready_findings'
+				metadataText(plan, 'review_gate') === 'protocol_ready_findings'
 		);
 	}
 

@@ -806,7 +806,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 									source_session_id: 'session_2',
 									source_mode: 'collection_grounded',
 									used_evidence_ids: ['ev_1'],
-									review_gate: 'training_ready_findings'
+									review_gate: 'protocol_ready_findings'
 								},
 								created_by: 'expert-a',
 								created_at: '2026-07-13T00:01:00+00:00',
@@ -860,7 +860,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'Generated from reviewed Goal Copilot evidence · Reviewed training-ready findings'
+					'Generated from reviewed Goal Copilot evidence · Reviewed protocol-ready findings'
 				)
 			)
 			.toBeInTheDocument();
@@ -868,10 +868,10 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Generated from reviewed Goal Copilot evidence', { exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Reviewed training-ready findings', { exact: true }))
+			.element(browserPage.getByText('Reviewed protocol-ready findings', { exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Collection evidence answer')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('training_ready_findings')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('protocol_ready_findings')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('1 evidence link(s)')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Evidence sources')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('session_2')).not.toBeInTheDocument();

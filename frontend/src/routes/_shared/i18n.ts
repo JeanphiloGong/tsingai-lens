@@ -267,7 +267,7 @@ const translations: Record<Language, Translations> = {
 				open: 'Open plan',
 				defaultTitle: 'Experiment plan draft',
 				reviewRequired:
-					'Save is disabled until this goal has expert-reviewed training-ready findings.',
+					'Save is disabled until this goal has expert-reviewed protocol-ready findings.',
 				evidenceRequired:
 					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.',
 				sourceTraceRequired:
@@ -295,12 +295,12 @@ const translations: Record<Language, Translations> = {
 					'{review} finding(s) still need expert review before protocol drafts can be saved.',
 				needsReviewAction:
 					'{review} finding(s) still need expert review before protocol drafts can be saved. Next: {action}.',
-				empty: 'No training-ready findings are available for this goal yet.',
+				empty: 'No protocol-ready findings are available for this goal yet.',
 				error: 'Readiness is unavailable: {message}',
 				openGoal: 'Open goal review',
 				draftProtocol: 'Draft protocol',
 				protocolPrompt:
-					'Draft a traceable next-step experiment protocol from the training-ready findings for this goal. Include these exact sections: Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. Cite every evidence-backed recommendation with the visible source labels.'
+					'Draft a traceable next-step experiment protocol from the protocol-ready findings for this goal. Include these exact sections: Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. Cite every evidence-backed recommendation with the visible source labels.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -1418,7 +1418,7 @@ const translations: Record<Language, Translations> = {
 				experimentPlanCopilotSource: 'Generated from reviewed Goal Copilot evidence',
 				experimentPlanManualSource: 'Manual expert draft',
 				experimentPlanNoReviewGate: 'No automated review gate recorded',
-				experimentPlanTrainingReadyGate: 'Reviewed training-ready findings',
+				experimentPlanProtocolReadyGate: 'Reviewed protocol-ready findings',
 				experimentPlanCollectionGrounded: 'Collection evidence answer',
 				experimentPlanEvidenceCount: '{count} evidence link(s)',
 				experimentPlanSources: 'Evidence sources',
@@ -3455,7 +3455,7 @@ const translations: Record<Language, Translations> = {
 				saved: '已保存',
 				open: '打开方案',
 				defaultTitle: '实验方案草稿',
-				reviewRequired: '该研究目标还没有专家复核后的可训练 Findings，暂不能保存为实验方案。',
+				reviewRequired: '该研究目标还没有专家复核后的可生成方案 Findings，暂不能保存为实验方案。',
 				evidenceRequired: '该回答还没有引用用于方案的已复核证据，暂不能保存为实验方案。',
 				sourceTraceRequired:
 					'该回答因缺少可验证的可见来源引用而受限。请先检查 Findings 和证据，再用于实验方案。',
@@ -3479,12 +3479,12 @@ const translations: Record<Language, Translations> = {
 				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
 				needsReviewAction:
 					'还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。下一步：{action}。',
-				empty: '该目标还没有可用于实验方案的 training-ready Findings。',
+				empty: '该目标还没有可用于实验方案的 protocol-ready Findings。',
 				error: '就绪度不可用：{message}',
 				openGoal: '打开目标复核',
 				draftProtocol: '生成实验方案',
 				protocolPrompt:
-					'请基于该研究目标下 training-ready Findings 生成一个可追溯的下一步实验方案，并包含这些固定小节：Hypothesis、Variable matrix、Measurements、Controls、Risks or limits。每个有证据支撑的建议都必须引用可见的 source label。'
+					'请基于该研究目标下 protocol-ready Findings 生成一个可追溯的下一步实验方案，并包含这些固定小节：Hypothesis、Variable matrix、Measurements、Controls、Risks or limits。每个有证据支撑的建议都必须引用可见的 source label。'
 			},
 			sourceMode: {
 				collection_grounded: '基于知识库证据',
@@ -4540,7 +4540,7 @@ const translations: Record<Language, Translations> = {
 				experimentPlanCopilotSource: '来自已复核证据的目标助手方案',
 				experimentPlanManualSource: '专家手写草稿',
 				experimentPlanNoReviewGate: '未记录自动复核门槛',
-				experimentPlanTrainingReadyGate: '已复核可训练 Findings',
+				experimentPlanProtocolReadyGate: '已复核可生成方案 Findings',
 				experimentPlanCollectionGrounded: '基于集合证据的回答',
 				experimentPlanEvidenceCount: '{count} 条证据链接',
 				experimentPlanSources: '证据来源',

@@ -113,7 +113,7 @@ class GoalSessionMessageResponse(BaseModel):
     )
     review_gate: str | None = Field(
         default=None,
-        description="Review gate satisfied by the answer, such as training_ready_findings",
+        description="Review gate satisfied by the answer, such as protocol_ready_findings",
     )
     created_at: str = Field(..., description="Creation timestamp")
 

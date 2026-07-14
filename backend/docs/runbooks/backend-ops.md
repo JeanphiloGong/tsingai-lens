@@ -38,7 +38,7 @@ If the goal copilot model name does not match the served model id, goal chat
 returns `goal_copilot_model_unavailable`. In that state Lens deliberately
 refuses to save AI-generated experiment plans from the message, because those
 plans require a `collection_grounded` answer with source links and the
-`training_ready_findings` review gate.
+`protocol_ready_findings` review gate.
 
 ## Start the Backend
 

@@ -12,6 +12,7 @@ from infra.persistence.factory import (
     build_goal_session_repository,
 )
 
+PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
 
 BLOCKED_GOAL_COPILOT_WARNINGS = {
     "curated_research_findings_empty",
@@ -70,7 +71,7 @@ class ExperimentPlanService:
                 "source_session_id": source_session.session_id,
                 "source_mode": source_message.source_mode,
                 "used_evidence_ids": list(source_message.used_evidence_ids),
-                "review_gate": "training_ready_findings",
+                "review_gate": PROTOCOL_READY_REVIEW_GATE,
             }
         now = _now_iso()
         plan = ExperimentPlanRecord.from_mapping(
@@ -129,9 +130,9 @@ class ExperimentPlanService:
             raise ValueError("source_message_id must reference an assistant message")
         if message.source_mode != "collection_grounded":
             raise ValueError("goal copilot experiment plans require collection-grounded answers")
-        if message.review_gate != "training_ready_findings":
+        if message.review_gate != PROTOCOL_READY_REVIEW_GATE:
             raise ValueError(
-                "goal copilot experiment plans require training-ready findings"
+                "goal copilot experiment plans require protocol-ready findings"
             )
         if BLOCKED_GOAL_COPILOT_WARNINGS.intersection(message.warnings):
             raise ValueError("goal copilot answer is not eligible for experiment plan saving")
@@ -228,7 +229,7 @@ def _is_goal_copilot_plan(plan: ExperimentPlanRecord) -> bool:
     return (
         bool(plan.source_message_id)
         or plan.metadata.get("source") == "goal_copilot"
-        or plan.metadata.get("review_gate") == "training_ready_findings"
+        or plan.metadata.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
     )
 
 

@@ -65,7 +65,7 @@ def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
                 "used_evidence_ids": ["ev_1"],
                 "warnings": [],
                 "links": {},
-                "review_gate": "training_ready_findings",
+                "review_gate": "protocol_ready_findings",
                 "source_links": [
                     {
                         "kind": "evidence",

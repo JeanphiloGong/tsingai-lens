@@ -306,8 +306,24 @@ class _NonActionableTrainingReadyResearchUnderstandingFeedbackService:
             "scope_type": "goal",
             "scope_id": kwargs["scope_id"],
             "dataset_use_status_filter": kwargs["dataset_use_status"],
-            "item_count": 3,
+            "item_count": 4,
             "items": [
+                {
+                    "finding_id": "finding_missing_protocol_inputs",
+                    "label_status": "gold",
+                    "dataset_use_status": "training_ready",
+                    "expert_target": {
+                        "statement": "This accepted text lacks variables and outcomes for protocol design.",
+                        "support_grade": "strong",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_missing_inputs",
+                            "document_id": "paper-missing-inputs",
+                            "training_source_text": "Accepted text without actionable protocol fields.",
+                        }
+                    ],
+                },
                 {
                     "finding_id": "finding_unsupported",
                     "label_status": "gold",
@@ -789,7 +805,7 @@ def test_goal_chat_downgrades_uncited_grounded_answer(tmp_path):
     assert loaded["last_evidence_ids"] == []
 
 
-def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
+def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     feedback_service = _TrainingReadyResearchUnderstandingFeedbackService()
     service, collection_service = _service(
         tmp_path,
@@ -815,7 +831,7 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     loaded = service.get_session(session["session_id"])
 
     assert response["source_mode"] == "collection_grounded"
-    assert response["review_gate"] == "training_ready_findings"
+    assert response["review_gate"] == "protocol_ready_findings"
     assert "<think>" not in response["answer"]
     assert response["used_evidence_ids"] == ["ev_preheat_ductility"]
     assert response["source_links"] == [
@@ -830,7 +846,7 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
     ]
     assert loaded["focused_goal_id"] == "goal_preheat"
     assert service.list_messages(session["session_id"])["items"][-1]["review_gate"] == (
-        "training_ready_findings"
+        "protocol_ready_findings"
     )
     assert feedback_service.calls == [
         {
@@ -841,7 +857,7 @@ def test_goal_chat_uses_training_ready_findings_for_protocol_context(tmp_path):
         }
     ]
     prompt_messages = service.llm_client.chat.completions.calls[0]["messages"]
-    assert "curated/training-ready findings first" in prompt_messages[0]["content"]
+    assert "curated protocol-ready findings first" in prompt_messages[0]["content"]
     assert "Protocol draft requirements" in prompt_messages[0]["content"]
     assert "Hypothesis" in prompt_messages[0]["content"]
     assert "Variable matrix" in prompt_messages[0]["content"]
@@ -1039,7 +1055,7 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     assert dataset["items"][0]["dataset_use_status"] == "training_ready"
     assert len(dataset["items"][0]["training_messages"]) == 2
     assert response["source_mode"] == "collection_grounded"
-    assert response["review_gate"] == "training_ready_findings"
+    assert response["review_gate"] == "protocol_ready_findings"
     assert response["used_evidence_ids"] == ["ev_preheat"]
     assert response["source_links"] == [
         {
@@ -1055,7 +1071,7 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     assert "curated_research_findings" in prompt
     assert "microstructure changes" in prompt
     assert "ev_preheat" not in prompt
-    assert plan.metadata["review_gate"] == "training_ready_findings"
+    assert plan.metadata["review_gate"] == "protocol_ready_findings"
     assert plan.metadata["used_evidence_ids"] == ["ev_preheat"]
     assert plan.source_links[0]["href"].endswith("evidence_id=ev_preheat")
 
@@ -1092,7 +1108,7 @@ def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_
     assert "curated_research_findings_empty" not in response["warnings"]
 
 
-def test_goal_chat_warns_when_focused_scope_has_no_training_ready_findings(tmp_path):
+def test_goal_chat_warns_when_focused_scope_has_no_protocol_ready_findings(tmp_path):
     feedback_service = _EmptyTrainingReadyResearchUnderstandingFeedbackService()
     service, collection_service = _service(
         tmp_path,
@@ -1128,7 +1144,7 @@ def test_goal_chat_warns_when_focused_scope_has_no_training_ready_findings(tmp_p
     ]
 
 
-def test_goal_chat_excludes_non_actionable_training_ready_findings(tmp_path):
+def test_goal_chat_excludes_non_actionable_protocol_ready_findings(tmp_path):
     feedback_service = _NonActionableTrainingReadyResearchUnderstandingFeedbackService()
     service, collection_service = _service(
         tmp_path,
@@ -1156,6 +1172,7 @@ def test_goal_chat_excludes_non_actionable_training_ready_findings(tmp_path):
     assert "goal_copilot_missing_source_citation" in response["warnings"]
     prompt = service.llm_client.chat.completions.calls[0]["messages"][1]["content"]
     assert "curated_research_findings" not in prompt
+    assert "ev_missing_inputs" not in prompt
     assert "ev_unsupported" not in prompt
     assert "ev_conflict" not in prompt
     assert "ev_insufficient" not in prompt

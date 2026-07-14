@@ -50,7 +50,7 @@ def test_sqlite_goal_session_repository_round_trips_sessions_and_messages(tmp_pa
                 "used_evidence_ids": ["E01"],
                 "warnings": [],
                 "links": {"workspace": "/collections/col_demo"},
-                "review_gate": "training_ready_findings",
+                "review_gate": "protocol_ready_findings",
                 "source_links": [
                     {
                         "kind": "evidence",
@@ -71,13 +71,13 @@ def test_sqlite_goal_session_repository_round_trips_sessions_and_messages(tmp_pa
     ]
     assert messages[1]["answer"] == "Hardness is supported by [Source 1]."
     assert messages[1]["used_evidence_ids"] == ["E01"]
-    assert messages[1]["review_gate"] == "training_ready_findings"
+    assert messages[1]["review_gate"] == "protocol_ready_findings"
     assert messages[1]["source_links"][0]["label"] == "Source 1"
     context = repository.read_message_context("msg_assistant")
     assert context is not None
     assert context["session"]["focused_goal_id"] == "goal_lpbf"
     assert context["message"]["message_id"] == "msg_assistant"
-    assert context["message"]["review_gate"] == "training_ready_findings"
+    assert context["message"]["review_gate"] == "protocol_ready_findings"
     assert context["message"]["source_links"][0]["href"].endswith("evidence_id=E01")
 
 

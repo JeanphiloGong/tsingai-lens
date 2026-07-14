@@ -558,11 +558,29 @@
 	function experimentPlanTitle(text: string) {
 		const firstLine = text
 			.split('\n')
-			.map((line) => line.trim())
+			.map((line) => cleanPlanTitleLine(line))
+			.filter((line) => !isProtocolSectionHeading(line))
 			.find(Boolean);
 		if (!firstLine) return $t('goalCopilot.experimentPlan.defaultTitle');
-		const cleaned = firstLine.replace(/^#+\s*/, '').replace(/^\d+\.\s*/, '');
-		return cleaned.length > 80 ? `${cleaned.slice(0, 80)}...` : cleaned;
+		const title = text.match(/^\s*\*{0,2}hypothesis\*{0,2}\s*$/im)
+			? `Hypothesis: ${firstLine.replace(/^hypothesis\s*:\s*/i, '')}`
+			: firstLine;
+		return title.length > 80 ? `${title.slice(0, 80)}...` : title;
+	}
+
+	function cleanPlanTitleLine(line: string) {
+		return line
+			.trim()
+			.replace(/^#+\s*/, '')
+			.replace(/^\d+\.\s+/, '')
+			.replace(/^\*\*(.+)\*\*$/, '$1')
+			.trim();
+	}
+
+	function isProtocolSectionHeading(line: string) {
+		return ['hypothesis', 'variable matrix', 'measurements', 'controls', 'risks or limits'].includes(
+			line.toLowerCase()
+		);
 	}
 
 	function experimentPlanHref(planId: string) {

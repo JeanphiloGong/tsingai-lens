@@ -170,17 +170,19 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						session_id: 'session_1',
 						role: 'assistant',
 						content:
-							'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].\n' +
-							'Variable matrix: compare L-VED, M-VED, and H-VED builds.\n' +
-							'Measurements: defect fraction and fatigue strength.\n' +
-							'Controls: keep alloy, powder, and heat treatment fixed.\n' +
-							'Risks or limits: single-paper evidence should be validated.',
+							'**Hypothesis**\n' +
+							'VED changes defect fraction and fatigue strength [Source 1].\n\n' +
+							'**Variable matrix**\nCompare L-VED, M-VED, and H-VED builds.\n\n' +
+							'**Measurements**\nDefect fraction and fatigue strength.\n\n' +
+							'**Controls**\nKeep alloy, powder, and heat treatment fixed.\n\n' +
+							'**Risks or limits**\nSingle-paper evidence should be validated.',
 						answer:
-							'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].\n' +
-							'Variable matrix: compare L-VED, M-VED, and H-VED builds.\n' +
-							'Measurements: defect fraction and fatigue strength.\n' +
-							'Controls: keep alloy, powder, and heat treatment fixed.\n' +
-							'Risks or limits: single-paper evidence should be validated.',
+							'**Hypothesis**\n' +
+							'VED changes defect fraction and fatigue strength [Source 1].\n\n' +
+							'**Variable matrix**\nCompare L-VED, M-VED, and H-VED builds.\n\n' +
+							'**Measurements**\nDefect fraction and fatigue strength.\n\n' +
+							'**Controls**\nKeep alloy, powder, and heat treatment fixed.\n\n' +
+							'**Risks or limits**\nSingle-paper evidence should be validated.',
 						source_mode: 'collection_grounded',
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
@@ -205,11 +207,12 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						goal_id: 'goal_1',
 						title: 'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].',
 						content:
-							'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].\n' +
-							'Variable matrix: compare L-VED, M-VED, and H-VED builds.\n' +
-							'Measurements: defect fraction and fatigue strength.\n' +
-							'Controls: keep alloy, powder, and heat treatment fixed.\n' +
-							'Risks or limits: single-paper evidence should be validated.',
+							'**Hypothesis**\n' +
+							'VED changes defect fraction and fatigue strength [Source 1].\n\n' +
+							'**Variable matrix**\nCompare L-VED, M-VED, and H-VED builds.\n\n' +
+							'**Measurements**\nDefect fraction and fatigue strength.\n\n' +
+							'**Controls**\nKeep alloy, powder, and heat treatment fixed.\n\n' +
+							'**Risks or limits**\nSingle-paper evidence should be validated.',
 						status: 'draft',
 						source_message_id: 'msg_assistant_1',
 						source_links: [

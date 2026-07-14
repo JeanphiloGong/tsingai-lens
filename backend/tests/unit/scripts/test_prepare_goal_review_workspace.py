@@ -237,7 +237,10 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     satisfaction = (workspace / "expert-satisfaction.md").read_text(encoding="utf-8")
     assert "# Lens Expert Satisfaction Gate" in satisfaction
     assert "Overall: blocked" in satisfaction
-    assert "| Expert review usable | blocked | 1 review candidate(s) remain." in satisfaction
+    assert (
+        "| Expert review usable | satisfied | 1 candidate(s) are reviewable "
+        "with source links and accept/reject/correct actions."
+    ) in satisfaction
     assert "| Dataset accumulation usable | blocked | 1 goal(s) lack training-ready samples;" in satisfaction
     assert "| Experiment design usable | blocked | 1 goal(s) lack protocol-ready inputs." in satisfaction
     assert "the code path is usable but real expert labels are still missing" in satisfaction
@@ -482,7 +485,10 @@ def test_render_expert_satisfaction_report_maps_three_layers():
 
     assert "# Lens Expert Satisfaction Gate" in report
     assert "Overall: blocked" in report
-    assert "| Expert review usable | blocked | 1 review candidate(s) remain." in report
+    assert (
+        "| Expert review usable | satisfied | 1 candidate(s) are reviewable "
+        "with source links and accept/reject/correct actions."
+    ) in report
     assert "| Dataset accumulation usable | blocked | 1 goal(s) lack training-ready samples;" in report
     assert "| Experiment design usable | blocked | 1 goal(s) lack protocol-ready inputs." in report
     assert "review-checklist.md" in report

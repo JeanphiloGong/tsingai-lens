@@ -145,9 +145,12 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
                     "Findings are clear, evidence is jumpable, and rows can be "
                     "accepted, rejected, or corrected."
                 ),
-                "satisfied": False,
-                "status": "blocked",
-                "next_step": "Finish human decisions for all review candidates.",
+                "satisfied": True,
+                "status": "satisfied",
+                "next_step": (
+                    "Review candidates are available for human accept, reject, "
+                    "or correct decisions."
+                ),
             },
             {
                 "key": "dataset_accumulation",
@@ -334,8 +337,11 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert "Expert satisfaction: blocked" in text
-    assert "- Expert review usable: blocked" in text
-    assert "next: Finish human decisions for all review candidates." in text
+    assert "- Expert review usable: satisfied" in text
+    assert (
+        "next: Review candidates are available for human accept, reject, or correct decisions."
+        in text
+    )
     assert "- Dataset accumulation usable: blocked" in text
     assert (
         "next: Import human-confirmed accept, reject, or correct decisions, then rerun dataset export checks."

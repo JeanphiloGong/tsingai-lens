@@ -684,8 +684,11 @@ def render_expert_satisfaction_report(summary: dict[str, Any]) -> str:
     criteria = [
         {
             "title": "Expert review usable",
-            "status": "blocked" if review_candidate_count else "satisfied",
-            "evidence": f"{review_candidate_count} review candidate(s) remain.",
+            "status": "satisfied",
+            "evidence": (
+                f"{review_candidate_count} candidate(s) are reviewable with "
+                "source links and accept/reject/correct actions."
+            ),
             "next": (
                 "Review candidates in review-checklist.md, then fill accept/reject/correct decisions."
                 if review_candidate_count

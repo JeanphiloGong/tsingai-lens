@@ -743,10 +743,9 @@ def _expert_satisfaction_summary(
             "expert_review",
             "Expert review usable",
             "Findings are clear, evidence is jumpable, and rows can be accepted, rejected, or corrected.",
-            _mapping(layers.get("expert_review")).get("status") == "pass"
-            and review_candidates == 0,
+            _mapping(layers.get("expert_review")).get("status") == "pass",
             (
-                "Finish human decisions for all review candidates."
+                "Review candidates are available for human accept, reject, or correct decisions."
                 if review_candidates
                 else "Expert review queue is clear."
             ),

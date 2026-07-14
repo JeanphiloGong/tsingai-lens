@@ -33,6 +33,7 @@ class FakeFeedbackService:
     def __init__(self) -> None:
         self.feedback: list[dict] = []
         self.curations: list[dict] = []
+        self.dataset_exports: list[dict] = []
 
     def record_feedback(self, **kwargs):  # noqa: ANN003
         self.feedback.append(kwargs)
@@ -41,6 +42,45 @@ class FakeFeedbackService:
     def record_curation(self, **kwargs):  # noqa: ANN003
         self.curations.append(kwargs)
         return kwargs
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003
+        self.dataset_exports.append(kwargs)
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "item_count": 3,
+            "quality_summary": {
+                "training_ready_sample_count": 2,
+                "training_message_sample_count": 1,
+                "review_candidate_sample_count": 1,
+                "rejected_count": 1,
+                "next_review_finding_id": "finding-next",
+            },
+            "items": [
+                {
+                    "dataset_use_status": "training_ready",
+                    "expert_target": {
+                        "statement": "Preheating increased ductility by 14%.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                    },
+                    "training_messages": [
+                        {"role": "user", "content": "Evidence text"},
+                        {
+                            "role": "assistant",
+                            "content": (
+                                '{"statement":"Preheating increased ductility by 14%."}'
+                            ),
+                        },
+                    ],
+                    "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
+                },
+                {"dataset_use_status": "review_candidate"},
+                {"dataset_use_status": "rejected"},
+            ],
+        }
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -122,7 +162,27 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
         "skipped_count": 1,
         "counts": {"accept": 1, "correct": 1, "reject": 1, "skip": 1},
         "errors": [],
+        "affected_goals": [
+            {
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "item_count": 3,
+                "training_ready_count": 2,
+                "training_message_count": 1,
+                "protocol_ready_count": 1,
+                "review_candidate_count": 1,
+                "rejected_count": 1,
+                "next_review_finding_id": "finding-next",
+            }
+        ],
     }
+    assert service.dataset_exports == [
+        {
+            "collection_id": "col-1",
+            "scope_type": "goal",
+            "scope_id": "goal-1",
+        }
+    ]
     assert service.feedback == [
         {
             "collection_id": "col-1",
@@ -188,6 +248,7 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
     assert summary["status"] == "pass"
     assert summary["written_count"] == 0
     assert summary["counts"] == {"accept": 1}
+    assert summary["affected_goals"] == []
     assert service.feedback == []
     assert service.curations == []
 
@@ -229,6 +290,7 @@ def test_import_review_decisions_rejects_invalid_rows(tmp_path):
 
     assert summary["status"] == "fail"
     assert summary["written_count"] == 0
+    assert summary["affected_goals"] == []
     assert [error["message"] for error in summary["errors"]] == [
         "reject requires a valid issue_type",
         "correct requires at least one evidence_ref_id",

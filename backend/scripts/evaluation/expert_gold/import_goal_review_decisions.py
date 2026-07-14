@@ -81,6 +81,7 @@ def import_review_decisions(
             skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
             counts={},
             errors=errors,
+            affected_goals=[],
         )
     if dry_run:
         return _summary(
@@ -91,6 +92,7 @@ def import_review_decisions(
             skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
             counts=_counts(valid_decisions),
             errors=[],
+            affected_goals=[],
         )
 
     service = feedback_service or _build_feedback_service()
@@ -105,6 +107,7 @@ def import_review_decisions(
         else:
             service.record_feedback(reviewer=reviewer, **payload)
         written += 1
+    affected_goals = _affected_goal_summaries(service, valid_decisions)
     return _summary(
         status="pass",
         dry_run=False,
@@ -113,6 +116,7 @@ def import_review_decisions(
         skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
         counts=_counts(valid_decisions),
         errors=[],
+        affected_goals=affected_goals,
     )
 
 
@@ -270,6 +274,98 @@ def _counts(decisions: list[dict[str, Any]]) -> dict[str, int]:
     return {key: value for key, value in counts.items() if value}
 
 
+def _affected_goal_summaries(
+    service: Any,
+    decisions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    keys = sorted(
+        {
+            (
+                _text(decision.get("payload", {}).get("collection_id")),
+                _text(decision.get("payload", {}).get("scope_id")),
+            )
+            for decision in decisions
+            if decision.get("action") != "skip"
+        }
+    )
+    summaries = []
+    for collection_id, goal_id in keys:
+        if not collection_id or not goal_id:
+            continue
+        dataset = service.export_dataset(
+            collection_id=collection_id,
+            scope_type="goal",
+            scope_id=goal_id,
+        )
+        summaries.append(_goal_readiness_summary(dataset))
+    return summaries
+
+
+def _goal_readiness_summary(dataset: dict[str, Any]) -> dict[str, Any]:
+    quality = dataset.get("quality_summary")
+    quality = quality if isinstance(quality, dict) else {}
+    items = _mapping_list(dataset.get("items"))
+    training_ready = [
+        item for item in items if _text(item.get("dataset_use_status")) == "training_ready"
+    ]
+    return {
+        "collection_id": _text(dataset.get("collection_id")),
+        "goal_id": _text(dataset.get("scope_id")),
+        "item_count": int(dataset.get("item_count") or len(items)),
+        "training_ready_count": int(
+            quality.get("training_ready_sample_count") or len(training_ready)
+        ),
+        "training_message_count": int(
+            quality.get("training_message_sample_count")
+            or sum(1 for item in training_ready if _has_training_messages(item))
+        ),
+        "protocol_ready_count": sum(
+            1 for item in training_ready if _has_protocol_design_inputs(item)
+        ),
+        "review_candidate_count": int(
+            quality.get("review_candidate_sample_count")
+            or sum(
+                1
+                for item in items
+                if _text(item.get("dataset_use_status")) == "review_candidate"
+            )
+        ),
+        "rejected_count": int(
+            quality.get("rejected_count")
+            or sum(
+                1
+                for item in items
+                if _text(item.get("dataset_use_status")) == "rejected"
+            )
+        ),
+        "next_review_finding_id": _text(quality.get("next_review_finding_id")),
+    }
+
+
+def _has_training_messages(item: dict[str, Any]) -> bool:
+    messages = _mapping_list(item.get("training_messages"))
+    return len(messages) >= 2 and all(
+        _text(message.get("role")) and _text(message.get("content"))
+        for message in messages
+    )
+
+
+def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
+    if not _has_training_messages(item):
+        return False
+    target = item.get("expert_target")
+    target = target if isinstance(target, dict) else {}
+    prediction = item.get("system_prediction")
+    prediction = prediction if isinstance(prediction, dict) else {}
+    statement = _text(target.get("statement") or prediction.get("statement"))
+    variables = _strings(target.get("variables") or prediction.get("variables"))
+    outcomes = _strings(target.get("outcomes") or prediction.get("outcomes"))
+    direction = _text(target.get("direction") or prediction.get("direction"))
+    scope = _text(target.get("scope_summary") or prediction.get("scope_summary"))
+    evidence = _mapping_list(item.get("training_evidence_refs"))
+    return bool(statement and variables and outcomes and (direction or scope) and evidence)
+
+
 def _summary(
     *,
     status: str,
@@ -279,6 +375,7 @@ def _summary(
     skipped: int,
     counts: dict[str, int],
     errors: list[dict[str, Any]],
+    affected_goals: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "status": status,
@@ -288,6 +385,7 @@ def _summary(
         "skipped_count": skipped,
         "counts": counts,
         "errors": errors,
+        "affected_goals": affected_goals,
     }
 
 

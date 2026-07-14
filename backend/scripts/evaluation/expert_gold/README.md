@@ -286,6 +286,10 @@ python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
 
 The import writes only explicit human expert decisions. It rejects AI/agent
 reviewer ids and does not promote unreviewed AI suggestions to gold labels.
+Successful non-dry-run imports include `affected_goals` with the resulting
+`training_ready`, training-message, protocol-ready, review-candidate, and
+rejected counts so reviewers can immediately see whether the goal is ready for
+training export or protocol drafting.
 
 After expert acceptance or curation creates `training_ready` samples, export the
 fine-tuning-compatible message rows with:

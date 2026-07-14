@@ -450,11 +450,44 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                     f"   open: {_text(goal.get('href'))}",
                 ]
             )
+    next_commands = _next_step_commands(summary)
+    if next_commands:
+        lines.extend(["", "Next commands:"])
+        lines.extend(f"- {command}" for command in next_commands)
     return "\n".join(lines)
 
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _next_step_commands(summary: dict[str, Any]) -> list[str]:
+    if _text(summary.get("completion_status")) == "complete":
+        return []
+    collection_id = _text(summary.get("collection_id")) or DEFAULT_COLLECTION_ID
+    commands = [
+        (
+            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format review-packet"
+        ),
+        (
+            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format review-jsonl"
+        ),
+    ]
+    layers = _mapping(summary.get("layers"))
+    experiment_layer = _mapping(layers.get("experiment_design"))
+    if experiment_layer.get("status") == "pass":
+        commands.append(
+            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format messages-jsonl"
+        )
+    else:
+        commands.append(
+            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format messages-jsonl --require-training-ready"
+        )
+    return commands
 
 
 def _goal_review_url(

@@ -132,6 +132,59 @@ def _dataset_review_jsonl_response(
     return Response(content=body, media_type="application/x-ndjson")
 
 
+def _dataset_decision_template_response(
+    response: ResearchUnderstandingDatasetResponse,
+) -> Response:
+    rows = [
+        _decision_template_row(_review_jsonl_row(response.collection_id, item))
+        for item in response.items
+        if item.dataset_use_status == "review_candidate"
+    ]
+    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    if body:
+        body += "\n"
+    return Response(content=body, media_type="application/x-ndjson")
+
+
+def _decision_template_row(row: dict[str, Any]) -> dict[str, Any]:
+    evidence_ref_ids = [
+        ref_id for record in row["evidence"] if (ref_id := _text(record.get("evidence_ref_id")))
+    ]
+    suggested = row["suggested_target"] if isinstance(row["suggested_target"], dict) else {}
+    return {
+        "collection_id": row["collection_id"],
+        "goal_id": row["goal_id"],
+        "finding_id": row["finding_id"],
+        "claim_id": row["claim_id"],
+        "action": "skip",
+        "issue_type": "",
+        "expert_note": "",
+        "statement": row["statement"],
+        "variables": row["variables"],
+        "outcomes": row["outcomes"],
+        "direction": row["direction"],
+        "support_grade": row["support_grade"],
+        "recommended_action_code": row["recommended_action_code"],
+        "review_reasons": row["review_reasons"],
+        "protocol_blocking_missing": _strings(
+            row["protocol_readiness"].get("blocking_missing")
+        ),
+        "curated_evidence_ref_ids": evidence_ref_ids,
+        "suggested_target": {
+            "statement": _text(suggested.get("statement") or row["statement"]),
+            "status": _text(suggested.get("status")) or "limited",
+            "support_grade": _text(suggested.get("support_grade") or row["support_grade"]),
+            "review_status": _text(suggested.get("review_status")) or "accepted",
+            "variables": _strings(suggested.get("variables") or row["variables"]),
+            "mediators": _strings(suggested.get("mediators") or row["mediators"]),
+            "outcomes": _strings(suggested.get("outcomes") or row["outcomes"]),
+            "direction": _text(suggested.get("direction") or row["direction"]),
+            "scope_summary": _text(suggested.get("scope_summary") or row["scope_summary"]),
+            "evidence_ref_ids": evidence_ref_ids,
+        },
+    }
+
+
 def _dataset_review_packet_response(
     response: ResearchUnderstandingDatasetResponse,
 ) -> Response:
@@ -620,6 +673,8 @@ async def export_research_understanding_dataset(
         )
     if format == "review_jsonl":
         return _dataset_review_jsonl_response(response)
+    if format == "decision_template":
+        return _dataset_decision_template_response(response)
     if format == "review_packet":
         return _dataset_review_packet_response(response)
     return response
@@ -657,6 +712,8 @@ async def export_collection_research_understanding_dataset(
         )
     if format == "review_jsonl":
         return _dataset_review_jsonl_response(response)
+    if format == "decision_template":
+        return _dataset_decision_template_response(response)
     if format == "review_packet":
         return _dataset_review_packet_response(response)
     return response

@@ -3129,6 +3129,23 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(reviewPacketUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
 		expect(reviewPacketUrl.searchParams.get('format')).toBe('review_packet');
 
+		const decisionTemplateUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Decision template' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(decisionTemplateUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(decisionTemplateUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(decisionTemplateUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(decisionTemplateUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(decisionTemplateUrl.searchParams.get('format')).toBe('decision_template');
+
 		const datasetGetCall = fetchMock.mock.calls.find(([input, init]) => {
 			const url = requestUrl(input as string | URL | Request);
 			return (
@@ -3324,6 +3341,24 @@ describe('ResearchUnderstandingWorkbench', () => {
 			'review_candidate'
 		);
 		expect(collectionReviewPacketUrl.searchParams.get('format')).toBe('review_packet');
+
+		const collectionDecisionTemplateUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection decision template' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionDecisionTemplateUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionDecisionTemplateUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionDecisionTemplateUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(collectionDecisionTemplateUrl.searchParams.get('format')).toBe(
+			'decision_template'
+		);
 	});
 
 	it('keeps collection review export visible when the current goal has no review candidates', async () => {

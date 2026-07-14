@@ -892,6 +892,68 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     }
 
 
+def test_research_understanding_dataset_route_exports_decision_template(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="decision_template",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line == {
+        "collection_id": "col-1",
+        "goal_id": "goal-1",
+        "finding_id": "finding-1",
+        "claim_id": "claim-1",
+        "action": "skip",
+        "issue_type": "",
+        "expert_note": "",
+        "statement": "Preheating improves ductility.",
+        "variables": ["build platform preheating"],
+        "outcomes": ["ductility"],
+        "direction": "increases",
+        "support_grade": "partial",
+        "recommended_action_code": "accept_as_paper_level",
+        "review_reasons": ["single_paper_evidence"],
+        "protocol_blocking_missing": [],
+        "curated_evidence_ref_ids": ["ev-1"],
+        "suggested_target": {
+            "statement": "Preheating improves ductility by 14%.",
+            "status": "limited",
+            "support_grade": "partial",
+            "review_status": "accepted",
+            "variables": ["build platform preheating"],
+            "mediators": ["homogenized microstructure"],
+            "outcomes": ["ductility"],
+            "direction": "increases",
+            "scope_summary": "LPBF 316L",
+            "evidence_ref_ids": ["ev-1"],
+        },
+    }
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
 def test_research_understanding_dataset_route_exports_review_packet(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
     monkeypatch.setattr(
@@ -1146,6 +1208,43 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
     assert line["action"] == "skip"
     assert line["protocol_readiness"]["status"] == "ready_after_review"
     assert line["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_decision_template(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="decision_template",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert line["action"] == "skip"
+    assert line["curated_evidence_ref_ids"] == ["ev-1"]
+    assert line["suggested_target"]["evidence_ref_ids"] == ["ev-1"]
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",

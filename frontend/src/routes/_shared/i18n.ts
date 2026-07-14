@@ -356,9 +356,11 @@ const translations: Record<Language, Translations> = {
 					'Collection traceable training JSONL',
 				datasetDownloadCollectionReviewJson: 'Collection review JSON',
 				datasetDownloadCollectionReviewJsonl: 'Collection review JSONL template',
+				datasetDownloadCollectionDecisionTemplate: 'Collection decision template',
 				datasetDownloadCollectionReviewPacket: 'Collection review packet',
 				datasetDownloadReviewJson: 'Review candidates JSON',
 				datasetDownloadReviewJsonl: 'Review JSONL template',
+				datasetDownloadDecisionTemplate: 'Decision template',
 				datasetDownloadReviewPacket: 'Review packet',
 				datasetNoTrainingReady: 'No training-ready samples',
 				datasetTrainingMessagesNote:
@@ -3614,9 +3616,11 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadCollectionTrainingTraceableJsonl: '全集合可追溯训练 JSONL',
 				datasetDownloadCollectionReviewJson: '全集合待复核 JSON',
 				datasetDownloadCollectionReviewJsonl: '全集合待复核 JSONL 模板',
+				datasetDownloadCollectionDecisionTemplate: '全集合决策模板',
 				datasetDownloadCollectionReviewPacket: '全集合复核包',
 				datasetDownloadReviewJson: '待复核 JSON',
 				datasetDownloadReviewJsonl: '待复核 JSONL 模板',
+				datasetDownloadDecisionTemplate: '决策模板',
 				datasetDownloadReviewPacket: '复核包',
 				datasetNoTrainingReady: '暂无可训练样本',
 				datasetTrainingMessagesNote:

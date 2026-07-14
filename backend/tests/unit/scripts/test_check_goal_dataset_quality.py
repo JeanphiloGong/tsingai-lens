@@ -191,6 +191,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         == "/collections/col-1/goals/goal-1?review=queue&finding_id=finding-1"
     )
     assert candidate["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert candidate["evidence"][0]["evidence_ref_id"] == "ev-1"
     assert candidate["evidence"][0]["href"] == "/collections/col-1/documents/doc-1?source_ref=blk-1"
     assert "Goal goal-1: 1 review candidate(s)" in text
     assert (

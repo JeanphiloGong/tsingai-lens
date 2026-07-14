@@ -474,6 +474,10 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
             "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
             f"--collection-id {collection_id} --format review-jsonl"
         ),
+        (
+            "python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+            "reviewed-findings.jsonl --reviewer <human-reviewer> --dry-run"
+        ),
     ]
     layers = _mapping(summary.get("layers"))
     experiment_layer = _mapping(layers.get("experiment_design"))

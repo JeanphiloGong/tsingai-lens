@@ -265,6 +265,26 @@ python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format review-jsonl
 ```
 
+The reviewer must add an explicit `action` to each JSONL row before importing:
+`accept`, `reject`, `correct`, or `skip`. `reject` rows need an `issue_type`
+such as `wrong_variable`, `wrong_direction`, or `insufficient_evidence`.
+`correct` rows need a corrected `suggested_target.statement` and at least one
+`evidence_ref_id`. Validate first, then import with a human reviewer id:
+
+```bash
+python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
+  reviewed-findings.jsonl \
+  --reviewer materials-expert@example.com \
+  --dry-run
+
+python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
+  reviewed-findings.jsonl \
+  --reviewer materials-expert@example.com
+```
+
+The import writes only explicit human expert decisions. It rejects AI/agent
+reviewer ids and does not promote unreviewed AI suggestions to gold labels.
+
 After expert acceptance or curation creates `training_ready` samples, export the
 fine-tuning-compatible message rows with:
 

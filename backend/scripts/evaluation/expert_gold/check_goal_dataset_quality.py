@@ -689,6 +689,7 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
 
 def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
     return {
+        "evidence_ref_id": _text(record.get("evidence_ref_id")),
         "label": _text(record.get("label"))
         or _text(record.get("source_label"))
         or _text(record.get("source_kind")),

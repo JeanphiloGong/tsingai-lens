@@ -241,6 +241,10 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
+        "python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py reviewed-findings.jsonl --reviewer <human-reviewer> --dry-run"
+        in text
+    )
+    assert (
         "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format messages-jsonl"
         in text
     )

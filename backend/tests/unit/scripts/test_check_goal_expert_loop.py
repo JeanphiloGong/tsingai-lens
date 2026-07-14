@@ -267,8 +267,13 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
+        "python3 scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
+        "agent-reviewed-findings.jsonl --output-path human-confirmed-findings.jsonl"
+        in text
+    )
+    assert (
         "python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-        "reviewed-findings.jsonl --reviewer <human-reviewer> --dry-run --fail-on-warnings"
+        "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run --fail-on-warnings"
         in text
     )
     assert (

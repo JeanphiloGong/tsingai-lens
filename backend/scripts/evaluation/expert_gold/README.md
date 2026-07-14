@@ -330,17 +330,29 @@ This checker never writes labels. It fails if an agent draft changes `action`
 away from `skip`, if an agent reviewer does not use an `ai-reviewer*` or
 `agent-*` id, or if an agent recommends `accept` while `acceptance_gate` blocks
 direct acceptance. A human expert must verify the `agent_review` suggestions and
-copy only confirmed decisions into `action` before import.
+set `agent_review.human_confirmed=true` only on rows they approve. Then convert
+those confirmed suggestions into an importable decision file:
+
+```bash
+python3 scripts/evaluation/expert_gold/confirm_agent_review_decisions.py \
+  agent-reviewed-findings.jsonl \
+  --output-path human-confirmed-findings.jsonl
+```
+
+Rows without `agent_review.human_confirmed=true` stay at `action=skip`.
+Confirmed `unclear` or `skip` recommendations also remain skipped. Confirmed
+`accept`, `reject`, or `correct` recommendations become normal import actions;
+blocked accepts still fail and must be corrected, rejected, or left skipped.
 
 ```bash
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
-  reviewed-findings.jsonl \
+  human-confirmed-findings.jsonl \
   --reviewer materials-expert@example.com \
   --dry-run \
   --fail-on-warnings
 
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
-  reviewed-findings.jsonl \
+  human-confirmed-findings.jsonl \
   --reviewer materials-expert@example.com
 ```
 

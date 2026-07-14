@@ -837,8 +837,12 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
             "agent-reviewed-findings.jsonl --format text"
         ),
         (
+            "python3 scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
+            "agent-reviewed-findings.jsonl --output-path human-confirmed-findings.jsonl"
+        ),
+        (
             "python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-            "reviewed-findings.jsonl --reviewer <human-reviewer> --dry-run "
+            "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run "
             "--fail-on-warnings"
         ),
     ]

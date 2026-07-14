@@ -886,7 +886,7 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/import_goal_review_decisions.py "
             "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run "
-            "--fail-on-warnings"
+            "--fail-on-warnings --format text"
         ),
     ]
     layers = _mapping(summary.get("layers"))

@@ -317,7 +317,8 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     )
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-        "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run --fail-on-warnings"
+        "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run "
+        "--fail-on-warnings --format text"
         in text
     )
     assert (

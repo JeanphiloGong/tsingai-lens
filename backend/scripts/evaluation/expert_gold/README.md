@@ -278,7 +278,8 @@ then import with a human reviewer id:
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
   reviewed-findings.jsonl \
   --reviewer materials-expert@example.com \
-  --dry-run
+  --dry-run \
+  --fail-on-warnings
 
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
   reviewed-findings.jsonl \
@@ -293,7 +294,9 @@ that finding, so stale or hand-edited rows fail before any label is written.
 Dry-run and import summaries may include `warnings` for accepted or corrected
 rows that were originally paper-level, table-row, mechanism, or cross-paper
 confirmation candidates. These warnings do not block import; they tell the
-expert which promoted rows deserve one more look before training export.
+expert which promoted rows deserve one more look before training export. Add
+`--fail-on-warnings` during dry-run to make those warnings block until the
+expert changes the row to `correct`, `reject`, or leaves it as `skip`.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

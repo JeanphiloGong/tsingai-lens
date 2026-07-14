@@ -61,6 +61,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Validate and summarize decisions without writing feedback records.",
     )
+    parser.add_argument(
+        "--fail-on-warnings",
+        action="store_true",
+        help=(
+            "Fail when accepted or corrected rows still carry risky review "
+            "warnings, such as paper-level or table-row checks."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -70,6 +78,7 @@ def main() -> None:
         input_path=Path(args.input_path),
         reviewer=args.reviewer,
         dry_run=args.dry_run,
+        fail_on_warnings=args.fail_on_warnings,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
@@ -81,6 +90,7 @@ def import_review_decisions(
     input_path: Path,
     reviewer: str,
     dry_run: bool = False,
+    fail_on_warnings: bool = False,
     feedback_service: Any | None = None,
 ) -> dict[str, Any]:
     reviewer = _human_reviewer(reviewer)
@@ -104,6 +114,26 @@ def import_review_decisions(
             warnings=[],
             affected_goals=[],
         )
+    warnings = _review_warnings(valid_decisions)
+    if fail_on_warnings and warnings:
+        return _summary(
+            status="fail",
+            dry_run=dry_run,
+            total=len(rows),
+            written=0,
+            skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
+            counts=_counts(valid_decisions),
+            errors=[
+                _error(
+                    int(warning["line"]),
+                    _text(warning["action"]),
+                    f"review warning requires resolution: {warning['message']}",
+                )
+                for warning in warnings
+            ],
+            warnings=warnings,
+            affected_goals=[],
+        )
     if dry_run:
         return _summary(
             status="pass",
@@ -113,7 +143,7 @@ def import_review_decisions(
             skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
             counts=_counts(valid_decisions),
             errors=[],
-            warnings=_review_warnings(valid_decisions),
+            warnings=warnings,
             affected_goals=[],
         )
 
@@ -139,7 +169,7 @@ def import_review_decisions(
         skipped=sum(1 for decision in decisions if decision.get("action") == "skip"),
         counts=_counts(valid_decisions),
         errors=[],
-        warnings=_review_warnings(valid_decisions),
+        warnings=warnings,
         affected_goals=affected_goals,
     )
 

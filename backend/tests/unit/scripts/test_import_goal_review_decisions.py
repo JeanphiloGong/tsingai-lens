@@ -418,3 +418,51 @@ def test_import_review_decisions_warns_on_risky_accepts(tmp_path):
     ]
     assert service.feedback == []
     assert service.curations == []
+
+
+def test_import_review_decisions_can_fail_on_warnings(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(
+                action="accept",
+                finding_id="finding-accept",
+                recommended_action_code="accept_as_paper_level",
+                review_reasons=["needs_cross_paper_confirmation"],
+            )
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        fail_on_warnings=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert summary["warnings"] == [
+        {
+            "line": 1,
+            "action": "accept",
+            "finding_id": "finding-accept",
+            "message": (
+                "recommended_action_code=accept_as_paper_level; "
+                "review_reasons=needs_cross_paper_confirmation"
+            ),
+        }
+    ]
+    assert [error["message"] for error in summary["errors"]] == [
+        (
+            "review warning requires resolution: "
+            "recommended_action_code=accept_as_paper_level; "
+            "review_reasons=needs_cross_paper_confirmation"
+        )
+    ]
+    assert service.feedback == []
+    assert service.curations == []

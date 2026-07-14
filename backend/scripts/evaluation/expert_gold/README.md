@@ -432,6 +432,10 @@ current goal counts, pending accept/correct/reject decisions, projected
 `training_ready`, projected training-message and protocol-ready counts, remaining
 review candidates, rejected counts, and the first readiness issues that still
 block fine-tuning messages or protocol inputs.
+When skipped template rows include `review_work_order`, the text output also
+shows the next skipped finding's recommended decision path, whether direct
+accept is allowed, and the checks that should be completed before changing the
+row away from `skip`.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

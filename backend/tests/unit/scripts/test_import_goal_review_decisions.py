@@ -149,6 +149,18 @@ def _base_row(**overrides):
                 "quote": "Preheating increased ductility by 14%.",
             }
         ],
+        "review_work_order": {
+            "recommended_decision": "accept_or_correct_after_checks",
+            "next_action": "accept_after_checks",
+            "accept_allowed": True,
+            "blocked_actions": [],
+            "required_checks": ["Confirm paper-level scope."],
+            "why_accept_blocked": [],
+            "training_unlock": "accept or correct creates a training-ready target",
+            "protocol_unlock": "accept or correct can unlock protocol input",
+            "protocol_blocking_missing": [],
+            "import_note": "accept imports only after reviewer changes action",
+        },
     }
     row.update(overrides)
     return row
@@ -224,6 +236,18 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 "reject_count": 1,
                 "correct_count": 1,
                 "next_review_finding_id": "finding-skip",
+                "next_review_work_order": {
+                    "recommended_decision": "accept_or_correct_after_checks",
+                    "next_action": "accept_after_checks",
+                    "accept_allowed": True,
+                    "blocked_actions": [],
+                    "required_checks": ["Confirm paper-level scope."],
+                    "why_accept_blocked": [],
+                    "training_unlock": "accept or correct creates a training-ready target",
+                    "protocol_unlock": "accept or correct can unlock protocol input",
+                    "protocol_blocking_missing": [],
+                    "import_note": "accept imports only after reviewer changes action",
+                },
             }
         ],
         "affected_goals": [
@@ -450,6 +474,10 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     assert "Decision progress by goal:" in text
     assert "decisions: total=2 actionable=1 skipped=1 accept=1 correct=0 reject=0" in text
     assert "next_review_finding_id=finding-skip" in text
+    assert "next_review_work_order: decision=accept_or_correct_after_checks accept_allowed=True" in text
+    assert "next action: accept_after_checks" in text
+    assert "required checks:" in text
+    assert "Confirm paper-level scope." in text
     assert "- col-1/goal-1" in text
     assert (
         "now: training_ready=2 training_messages=1 protocol_ready=1 "

@@ -84,6 +84,18 @@ def _row(**overrides):
         "statement": "Preheating increases ductility.",
         "recommended_action_code": "",
         "review_reasons": [],
+        "review_work_order": {
+            "recommended_decision": "accept_or_correct_after_checks",
+            "next_action": "accept_after_checks",
+            "accept_allowed": True,
+            "blocked_actions": [],
+            "required_checks": ["Confirm paper-level scope."],
+            "why_accept_blocked": [],
+            "training_unlock": "accept or correct creates a training-ready target",
+            "protocol_unlock": "accept or correct can unlock protocol input",
+            "protocol_blocking_missing": [],
+            "import_note": "accept imports only after reviewer changes action",
+        },
     }
     row.update(overrides)
     return row
@@ -128,6 +140,18 @@ def test_review_import_service_writes_feedback_and_curation():
             "reject_count": 0,
             "correct_count": 1,
             "next_review_finding_id": "finding-skip",
+            "next_review_work_order": {
+                "recommended_decision": "accept_or_correct_after_checks",
+                "next_action": "accept_after_checks",
+                "accept_allowed": True,
+                "blocked_actions": [],
+                "required_checks": ["Confirm paper-level scope."],
+                "why_accept_blocked": [],
+                "training_unlock": "accept or correct creates a training-ready target",
+                "protocol_unlock": "accept or correct can unlock protocol input",
+                "protocol_blocking_missing": [],
+                "import_note": "accept imports only after reviewer changes action",
+            },
         }
     ]
     assert summary["review_scope_gate"] == {
@@ -194,6 +218,18 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
             "reject_count": 0,
             "correct_count": 0,
             "next_review_finding_id": "finding-accept",
+            "next_review_work_order": {
+                "recommended_decision": "accept_or_correct_after_checks",
+                "next_action": "accept_after_checks",
+                "accept_allowed": True,
+                "blocked_actions": [],
+                "required_checks": ["Confirm paper-level scope."],
+                "why_accept_blocked": [],
+                "training_unlock": "accept or correct creates a training-ready target",
+                "protocol_unlock": "accept or correct can unlock protocol input",
+                "protocol_blocking_missing": [],
+                "import_note": "accept imports only after reviewer changes action",
+            },
         }
     ]
     assert summary["review_scope_gate"] == {

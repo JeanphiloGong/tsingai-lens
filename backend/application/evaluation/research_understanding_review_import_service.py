@@ -248,6 +248,7 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             "status": "ready",
             "line": line_number,
             "action": "skip",
+            "review_work_order": _review_work_order(row),
             "payload": {
                 "collection_id": _text(row.get("collection_id")),
                 "scope_id": _text(row.get("goal_id")),
@@ -476,6 +477,26 @@ def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _review_work_order(row: dict[str, Any]) -> dict[str, Any]:
+    work_order = _mapping(row.get("review_work_order"))
+    if not work_order:
+        return {}
+    return {
+        "recommended_decision": _text(work_order.get("recommended_decision")),
+        "next_action": _text(work_order.get("next_action")),
+        "accept_allowed": bool(work_order.get("accept_allowed")),
+        "blocked_actions": _strings(work_order.get("blocked_actions")),
+        "required_checks": _strings(work_order.get("required_checks")),
+        "why_accept_blocked": _strings(work_order.get("why_accept_blocked")),
+        "training_unlock": _text(work_order.get("training_unlock")),
+        "protocol_unlock": _text(work_order.get("protocol_unlock")),
+        "protocol_blocking_missing": _strings(
+            work_order.get("protocol_blocking_missing")
+        ),
+        "import_note": _text(work_order.get("import_note")),
+    }
+
+
 def _confirmed_note(row: dict[str, Any], review: dict[str, Any]) -> str:
     note = _text(review.get("note"))
     existing = _text(row.get("expert_note"))
@@ -621,6 +642,7 @@ def _decision_progress_by_goal_internal(
                 "reject_count": 0,
                 "correct_count": 0,
                 "next_review_finding_id": "",
+                "next_review_work_order": {},
                 "decisions": [],
             }
         goal = goals[key]
@@ -631,6 +653,9 @@ def _decision_progress_by_goal_internal(
             goal["skipped_count"] += 1
             if not goal["next_review_finding_id"]:
                 goal["next_review_finding_id"] = _text(payload.get("finding_id"))
+                goal["next_review_work_order"] = _mapping(
+                    decision.get("review_work_order")
+                )
             continue
         if action in {"accept", "reject", "correct"}:
             goal["actionable_count"] += 1

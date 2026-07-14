@@ -220,6 +220,39 @@ def _render_decision_progress(goal: dict) -> list[str]:
     next_review = goal.get("next_review_finding_id")
     if next_review:
         lines.append(f"  next_review_finding_id={next_review}")
+    work_order = goal.get("next_review_work_order")
+    if isinstance(work_order, dict) and work_order:
+        lines.extend(_render_next_review_work_order(work_order))
+    return lines
+
+
+def _render_next_review_work_order(work_order: dict) -> list[str]:
+    lines = [
+        (
+            "  next_review_work_order: "
+            f"decision={work_order.get('recommended_decision', '')} "
+            f"accept_allowed={bool(work_order.get('accept_allowed'))}"
+        )
+    ]
+    next_action = work_order.get("next_action")
+    if next_action:
+        lines.append(f"  next action: {next_action}")
+    blocked_actions = work_order.get("blocked_actions")
+    if isinstance(blocked_actions, list) and blocked_actions:
+        lines.append(
+            "  blocked actions: "
+            + ", ".join(str(action) for action in blocked_actions)
+        )
+    required_checks = work_order.get("required_checks")
+    if isinstance(required_checks, list) and required_checks:
+        lines.append("  required checks:")
+        lines.extend(f"  - {check}" for check in required_checks[:3])
+    protocol_blocking = work_order.get("protocol_blocking_missing")
+    if isinstance(protocol_blocking, list) and protocol_blocking:
+        lines.append(
+            "  protocol blocking: "
+            + ", ".join(str(item) for item in protocol_blocking)
+        )
     return lines
 
 

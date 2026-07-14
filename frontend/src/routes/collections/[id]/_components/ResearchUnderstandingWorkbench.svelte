@@ -581,6 +581,7 @@
 		: [];
 	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
 	$: selectedFindingAcceptanceGate = selectedFindingDatasetSample?.acceptance_gate ?? null;
+	$: selectedFindingCanAccept = findingAcceptanceGateAllowsAccept(selectedFindingAcceptanceGate);
 	$: selectedFindingProtocolReadinessUnavailable = Boolean(
 		selectedFindingDatasetSample && !selectedFindingProtocolReadiness
 	);
@@ -1367,7 +1368,13 @@
 	}
 
 	function findingCanAccept(finding: ResearchUnderstandingPresentationFinding) {
-		const gate = findingDatasetSampleFor(finding)?.acceptance_gate;
+		const gate = findingDatasetSampleFor(finding, datasetSummary)?.acceptance_gate ?? null;
+		return findingAcceptanceGateAllowsAccept(gate);
+	}
+
+	function findingAcceptanceGateAllowsAccept(
+		gate: ResearchUnderstandingAcceptanceGate | null
+	) {
 		return (
 			!gate ||
 			(gate.accept_allowed && !gate.requires_correction && gate.accept_blockers.length === 0)
@@ -1925,7 +1932,13 @@
 		finding: ResearchUnderstandingPresentationFinding,
 		options: { openNext?: boolean } = {}
 	) {
-		if (!understanding || !collectionId || !selectedScopeId || !reviewerReady || !findingCanAccept(finding))
+		if (
+			!understanding ||
+			!collectionId ||
+			!selectedScopeId ||
+			!reviewerReady ||
+			!findingCanAccept(finding)
+		)
 			return;
 		feedbackSubmitting = true;
 		feedbackMessage = '';
@@ -4563,7 +4576,7 @@
 											disabled={feedbackSubmitting ||
 												!collectionId ||
 												!reviewerReady ||
-												!findingCanAccept(selectedFinding)}
+												!selectedFindingCanAccept}
 											on:click={acceptSelectedFinding}
 										>
 											{feedbackSubmitting
@@ -4575,7 +4588,7 @@
 											disabled={feedbackSubmitting ||
 												!collectionId ||
 												!reviewerReady ||
-												!findingCanAccept(selectedFinding) ||
+												!selectedFindingCanAccept ||
 												!nextReviewCandidateAfter(selectedFinding.finding_id, feedbackByTargetId)}
 											on:click={acceptSelectedFindingAndOpenNext}
 										>

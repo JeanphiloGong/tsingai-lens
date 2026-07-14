@@ -1379,6 +1379,8 @@ def _system_prediction(finding: Mapping[str, Any]) -> dict[str, Any]:
         "scope_summary": _text(finding.get("scope_summary")),
         "support_grade": _text(finding.get("support_grade")),
         "review_status": _text(finding.get("review_status")),
+        "generalization_status": _text(finding.get("generalization_status")),
+        "generalization_note": _text(finding.get("generalization_note")),
         "confidence": finding.get("confidence"),
         "paper_count": _int(finding.get("paper_count")),
         "evidence_count": _int(finding.get("evidence_count")),
@@ -1563,6 +1565,14 @@ def _training_messages(
             expert_target.get("support_grade")
             or system_prediction.get("support_grade")
         ),
+        "generalization_status": _text(
+            expert_target.get("generalization_status")
+            or system_prediction.get("generalization_status")
+        ),
+        "generalization_note": _text(
+            expert_target.get("generalization_note")
+            or system_prediction.get("generalization_note")
+        ),
         "evidence_ref_ids": list(
             _strings(
                 expert_target.get("evidence_ref_ids")
@@ -1573,7 +1583,7 @@ def _training_messages(
     user_content = "\n".join(
         [
             "Extract one evidence-grounded materials research finding from the source evidence.",
-            "Return only a JSON object with statement, variables, mediators, outcomes, direction, scope_summary, support_grade, and evidence_ref_ids.",
+            "Return only a JSON object with statement, variables, mediators, outcomes, direction, scope_summary, support_grade, generalization_status, generalization_note, and evidence_ref_ids.",
             "",
             "Evidence:",
             *(evidence_lines or ["No source evidence text available."]),

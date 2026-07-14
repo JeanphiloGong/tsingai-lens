@@ -1179,18 +1179,28 @@
 		return translatedCatalogLabel('research.understanding.findingProtocolReadinessGapLabels', gap);
 	}
 
+	function isPaperLevelAccept(finding: ResearchUnderstandingPresentationFinding) {
+		const actionCode = findingDatasetSampleFor(finding)?.review_action.code.trim() ?? '';
+		const reviewReasons = new Set(findingReviewReasonValues(finding));
+		return (
+			actionCode === 'accept_as_paper_level' ||
+			reviewReasons.has('single_paper_evidence') ||
+			reviewReasons.has('needs_cross_paper_confirmation') ||
+			finding.paper_count <= 1
+		);
+	}
+
+	function findingAcceptNote(finding: ResearchUnderstandingPresentationFinding) {
+		return isPaperLevelAccept(finding)
+			? 'Human expert accepted the source-backed paper-level finding.'
+			: 'Human expert accepted the source-grounded finding.';
+	}
+
 	function findingAcceptLabel(
 		finding: ResearchUnderstandingPresentationFinding,
 		andNext = false
 	) {
-		const actionCode = findingDatasetSampleFor(finding)?.review_action.code.trim() ?? '';
-		const reviewReasons = new Set(findingReviewReasonValues(finding));
-		const isPaperLevelAccept =
-			actionCode === 'accept_as_paper_level' ||
-			reviewReasons.has('single_paper_evidence') ||
-			reviewReasons.has('needs_cross_paper_confirmation') ||
-			finding.paper_count <= 1;
-		if (isPaperLevelAccept) {
+		if (isPaperLevelAccept(finding)) {
 			return andNext
 				? $t('research.understanding.quickAcceptPaperLevelAndNext')
 				: $t('research.understanding.quickAcceptPaperLevel');
@@ -1723,7 +1733,7 @@
 				claim_id: finding.claim_id,
 				review_status: 'correct',
 				issue_type: 'none',
-				note: null
+				note: findingAcceptNote(finding)
 			});
 			const targetId = reviewTargetKey(feedback);
 			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [

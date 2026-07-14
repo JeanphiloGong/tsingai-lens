@@ -2358,7 +2358,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			finding_id: 'finding_strength_supported',
 			review_status: 'correct',
 			issue_type: 'none',
-			note: null
+			note: 'Human expert accepted the source-backed paper-level finding.'
 		});
 		await expect
 			.element(
@@ -3938,7 +3938,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			claim_id: 'claim_mechanism_limited',
 			review_status: 'correct',
 			issue_type: 'none',
-			note: null
+			note: 'Human expert accepted the source-backed paper-level finding.'
 		});
 	});
 

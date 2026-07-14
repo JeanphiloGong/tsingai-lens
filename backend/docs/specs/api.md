@@ -835,7 +835,9 @@ support 或可追溯证据。
 证据当作结论监督文本。`training_messages` 是从
 `training_evidence_refs` 和 `expert_target` 派生的 chat-style
 `[{role, content}]` 样本：user message 包含可审计证据与上下文，assistant message
-是专家确认或校正后的结构化 finding JSON。它用于离线 evaluation/fine-tuning
+是专家确认或校正后的结构化 finding JSON，并保留
+`generalization_status` / `generalization_note`，避免把专家接受的单篇论文
+paper-level finding 训练成跨论文结论。它用于离线 evaluation/fine-tuning
 准备；需要直接生成 chat-style JSONL 时使用 `format=messages_jsonl`。审计和 UI 仍应读取 `expert_target`、`training_evidence_refs`、
 `context_refs` 和 `feedback_refs`。`trace_status` 可以是 `available`、`failed`、
 `evidence_derived` 或 `unavailable`。只有带文本输入块的 matched trace 才作为

@@ -317,6 +317,11 @@ def _sample_understanding() -> ResearchUnderstanding:
                         "scope_summary": "LPBF 316L",
                         "support_grade": "partial",
                         "review_status": "needs_review",
+                        "generalization_status": "paper_level_only",
+                        "generalization_note": (
+                            "Evidence comes from one paper; use as paper-level evidence, "
+                            "not a cross-paper conclusion."
+                        ),
                         "confidence": 0.7,
                         "paper_count": 1,
                         "evidence_count": 1,
@@ -759,6 +764,13 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["system_prediction"]["presentation_bucket"] == (
         "unbucketed"
     )
+    assert by_finding["finding-1"]["system_prediction"]["generalization_status"] == (
+        "paper_level_only"
+    )
+    assert by_finding["finding-1"]["system_prediction"]["generalization_note"] == (
+        "Evidence comes from one paper; use as paper-level evidence, "
+        "not a cross-paper conclusion."
+    )
     assert by_finding["finding-1"]["expert_target"]["source"] == "curation"
     assert by_finding["finding-1"]["expert_target"]["statement"] == (
         "Preheating improves ductility by 14% in LPBF 316L."
@@ -783,6 +795,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "role": "assistant",
         "content": (
             '{"direction": "increase", "evidence_ref_ids": ["ev-1"], '
+            '"generalization_note": "Evidence comes from one paper; use as paper-level evidence, not a cross-paper conclusion.", '
+            '"generalization_status": "paper_level_only", '
             '"mediators": ["porosity"], "outcomes": ["ductility"], '
             '"scope_summary": "LPBF 316L", '
             '"statement": "Preheating improves ductility by 14% in LPBF 316L.", '

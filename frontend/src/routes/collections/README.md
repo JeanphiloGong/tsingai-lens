@@ -76,8 +76,9 @@ This node owns the collection workspace route family in the frontend.
   sends human-confirmed agent review rows to the backend import service, which
   applies the canonical accept/reject/correct conversion rules; dry-runs also
   show affected-goal readiness counts and pending accept/reject/correct counts
-  so experts can judge whether a batch will create training-ready, exportable,
-  or protocol-ready samples before import
+  plus the expert satisfaction gate status and blocking reasons, so experts
+  can judge whether a batch will create training-ready, exportable, or
+  protocol-ready samples before import
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

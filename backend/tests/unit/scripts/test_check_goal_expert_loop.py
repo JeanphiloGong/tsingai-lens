@@ -100,6 +100,17 @@ def _completed_dataset_payload(status: str = "pass"):
     return payload
 
 
+def _runtime_paths(check):
+    plan_list_path = check.PLAN_LIST_PATH
+    plan_detail_path = check.PLAN_DETAIL_PATH
+    return {
+        check.GOAL_SESSION_PATH: {"post": {}},
+        check.GOAL_SESSION_MESSAGE_PATH: {"post": {}},
+        plan_list_path: {"get": {}, "post": {}},
+        plan_detail_path: {"patch": {}},
+    }
+
+
 def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkeypatch):
     check = _load_goal_expert_loop_module()
 
@@ -589,10 +600,6 @@ def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
 
 def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monkeypatch):
     check = _load_goal_expert_loop_module()
-    plan_list_path = (
-        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
-    )
-    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
     monkeypatch.setattr(
         check,
@@ -627,10 +634,7 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
     monkeypatch.setattr(
         check,
         "_local_openapi_paths",
-        lambda: {
-            plan_list_path: {"get": {}, "post": {}},
-            plan_detail_path: {"patch": {}},
-        },
+        lambda: _runtime_paths(check),
     )
 
     summary = check.check_goal_expert_loop(
@@ -647,9 +651,16 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == "fail"
     diagnostic = summary["layers"]["experiment_design"]["runtime_contract"]["diagnostic"]
     assert diagnostic["code"] == "running_api_not_current_backend"
-    assert "Local source app exposes experiment-plan routes" in diagnostic["detail"]
+    assert (
+        "Local source app exposes goal-session and experiment-plan routes"
+        in diagnostic["detail"]
+    )
+    assert "runtime write scope: route_contract_only" in text
+    assert "copilot save contract: review_gate=protocol_ready_findings" in text
     assert "runtime contract: fail" in text
     assert "runtime diagnostic: running_api_not_current_backend" in text
+    assert "missing route: POST /api/v1/goal-sessions" in text
+    assert "missing route: POST /api/v1/goal-sessions/{session_id}/messages" in text
     assert (
         "missing route: GET /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
         in text
@@ -666,10 +677,6 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
 
 def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatch):
     check = _load_goal_expert_loop_module()
-    plan_list_path = (
-        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
-    )
-    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
     monkeypatch.setattr(
         check,
@@ -695,10 +702,7 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
     monkeypatch.setattr(
         check,
         "_fetch_openapi_paths",
-        lambda _base_url, **_: {
-            plan_list_path: {"get": {}, "post": {}},
-            plan_detail_path: {"patch": {}},
-        },
+        lambda _base_url, **_: _runtime_paths(check),
     )
 
     summary = check.check_goal_expert_loop(
@@ -715,16 +719,23 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
         summary["layers"]["experiment_design"]["runtime_contract"]["runtime_write_check"]
         is False
     )
+    assert summary["layers"]["experiment_design"]["runtime_write_scope"] == (
+        "route_contract_only"
+    )
+    assert summary["layers"]["experiment_design"]["copilot_save_contract"] == {
+        "review_gate": "protocol_ready_findings",
+        "requires_source_message_id": True,
+        "requires_collection_grounded_answer": True,
+        "requires_auditable_source_links": True,
+        "requires_used_evidence_ids": True,
+        "requires_protocol_draft_structure": True,
+    }
 
 
 def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_plan(
     monkeypatch,
 ):
     check = _load_goal_expert_loop_module()
-    plan_list_path = (
-        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
-    )
-    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
     monkeypatch.setattr(
         check,
@@ -750,10 +761,7 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
     monkeypatch.setattr(
         check,
         "_fetch_openapi_paths",
-        lambda _base_url, **_: {
-            plan_list_path: {"get": {}, "post": {}},
-            plan_detail_path: {"patch": {}},
-        },
+        lambda _base_url, **_: _runtime_paths(check),
     )
     requests: list[tuple[str, str, dict[str, object] | None, str]] = []
 
@@ -811,6 +819,9 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
 
     runtime_contract = summary["layers"]["experiment_design"]["runtime_contract"]
     assert summary["status"] == "pass"
+    assert summary["layers"]["experiment_design"]["runtime_write_scope"] == (
+        "manual_experiment_plan_smoke"
+    )
     assert runtime_contract["runtime_write_check"] is True
     assert runtime_contract["checks"][-1] == {
         "name": "write smoke experiment plan",
@@ -854,10 +865,6 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
     monkeypatch,
 ):
     check = _load_goal_expert_loop_module()
-    plan_list_path = (
-        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
-    )
-    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
     monkeypatch.setattr(
         check,
@@ -883,10 +890,7 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
     monkeypatch.setattr(
         check,
         "_fetch_openapi_paths",
-        lambda _base_url, **_: {
-            plan_list_path: {"get": {}, "post": {}},
-            plan_detail_path: {"patch": {}},
-        },
+        lambda _base_url, **_: _runtime_paths(check),
     )
 
     def fake_write_checks(_base_url, **_kwargs):
@@ -957,6 +961,9 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
         "requires_all_goals_protocol_ready"
     ] is True
     assert summary["layers"]["experiment_design"]["requires_runtime_write"] is True
+    assert summary["layers"]["experiment_design"]["runtime_write_scope"] == (
+        "manual_experiment_plan_smoke"
+    )
     assert summary["layers"]["experiment_design"]["runtime_contract"][
         "runtime_write_check"
     ] is True
@@ -990,7 +997,7 @@ def test_check_goal_expert_loop_runtime_write_check_skips_when_routes_are_missin
         "path": "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans",
         "method": "post/patch",
         "status": "skipped",
-        "detail": "route checks failed; smoke write was not attempted",
+        "detail": "runtime route checks failed; smoke write was not attempted",
     }
 
 
@@ -998,18 +1005,11 @@ def test_check_goal_expert_loop_runtime_write_check_reports_write_failure(
     monkeypatch,
 ):
     check = _load_goal_expert_loop_module()
-    plan_list_path = (
-        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
-    )
-    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
     monkeypatch.setattr(
         check,
         "_fetch_openapi_paths",
-        lambda _base_url, **_: {
-            plan_list_path: {"get": {}, "post": {}},
-            plan_detail_path: {"patch": {}},
-        },
+        lambda _base_url, **_: _runtime_paths(check),
     )
 
     def fake_urlopen(request, timeout):

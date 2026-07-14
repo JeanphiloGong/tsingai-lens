@@ -496,10 +496,11 @@ loop: each row includes the research question, review candidate count, the next
 action, and a frontend `href` that opens the goal review queue or
 training-ready export view.
 When `--api-base-url` is provided, the combined check also verifies that the
-running API exposes the goal-scoped experiment-plan list, create, and update
-routes required to save traceable protocol drafts. This default runtime check
-is read-only: it inspects the running OpenAPI contract but does not create a
-plan.
+running API exposes the goal-session routes and the goal-scoped
+experiment-plan list, create, and update routes required by the Goal Copilot
+to draft and save traceable protocol plans. This default runtime check is
+read-only: it inspects the running OpenAPI contract but does not create a
+session, message, or plan.
 If the source app exposes those routes but the running API does not, the text
 summary reports `running_api_not_current_backend`; restart or update the
 backend process, or point `--api-base-url` at the current Lens app before
@@ -515,8 +516,14 @@ LENS_CHECK_PASSWORD=admin.. \
   --runtime-write-check
 ```
 
-`--runtime-write-check` creates a small smoke experiment-plan draft for the
-first checked goal and immediately updates it to `archived`. Use it only when
+`--runtime-write-check` creates a small manual smoke experiment-plan draft for
+the first checked goal and immediately updates it to `archived`. It proves the
+running API can persist editable goal-scoped plans, but it does not call the
+LLM or create a Goal Copilot source message. The stricter Goal Copilot save
+contract is enforced in application code and tests: a saved plan with
+`source_message_id` must come from a collection-grounded assistant message with
+`review_gate=protocol_ready_findings`, auditable source links, used evidence
+ids, and protocol-draft structure. Use the runtime write check only when
 writing runtime test data is acceptable.
 For a human-readable queue instead of the full JSON payload, run:
 
@@ -555,10 +562,11 @@ LENS_CHECK_PASSWORD=admin.. \
 
 This mode fails unless every checked goal has a training-ready sample, valid
 training messages, protocol-ready experiment inputs, zero remaining review
-candidates, and a running API that can create/update a goal-scoped experiment
-plan smoke draft. It is intentionally stricter than the default diagnostic
-check, which may report `pass (incomplete)` while there is still review work
-left.
+candidates, a running API that exposes the Goal Copilot and experiment-plan
+routes, and a running API that can create/update a goal-scoped manual
+experiment-plan smoke draft. It is intentionally stricter than the default
+diagnostic check, which may report `pass (incomplete)` while there is still
+review work left.
 
 The evaluator is offline and read-only. It does not call LLMs, rebuild PDFs, or
 change collection state. Natural language is scored through required claims,

@@ -25,11 +25,18 @@ DEFAULT_GOAL_IDS = (
 )
 PLAN_LIST_PATH = "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
 PLAN_DETAIL_PATH = f"{PLAN_LIST_PATH}/{{plan_id}}"
+GOAL_SESSION_PATH = "/api/v1/goal-sessions"
+GOAL_SESSION_MESSAGE_PATH = f"{GOAL_SESSION_PATH}/{{session_id}}/messages"
 PLAN_ROUTE_SPECS = (
     ("list experiment plans", PLAN_LIST_PATH, "get"),
     ("create experiment plan", PLAN_LIST_PATH, "post"),
     ("update experiment plan", PLAN_DETAIL_PATH, "patch"),
 )
+GOAL_COPILOT_ROUTE_SPECS = (
+    ("create goal copilot session", GOAL_SESSION_PATH, "post"),
+    ("post goal copilot message", GOAL_SESSION_MESSAGE_PATH, "post"),
+)
+RUNTIME_ROUTE_SPECS = (*GOAL_COPILOT_ROUTE_SPECS, *PLAN_ROUTE_SPECS)
 BACKEND_PYTHON = "./.venv/bin/python"
 
 
@@ -170,7 +177,7 @@ def check_goal_expert_loop(
             dataset,
             runtime_contract,
             require_all_goals_protocol_ready=expert_satisfaction_gate,
-            require_runtime_write=expert_satisfaction_gate,
+            require_runtime_write=effective_runtime_write_check,
         ),
     }
     goals = _goal_rollup(findings, dataset, collection_id=collection_id)
@@ -293,12 +300,27 @@ def _experiment_layer(
         "eligible_goal_ids": eligible_goal_ids,
         "requires_all_goals_protocol_ready": require_all_goals_protocol_ready,
         "requires_runtime_write": require_runtime_write,
+        "runtime_write_scope": (
+            "manual_experiment_plan_smoke"
+            if require_runtime_write
+            else "route_contract_only"
+        ),
+        "copilot_save_contract": {
+            "review_gate": "protocol_ready_findings",
+            "requires_source_message_id": True,
+            "requires_collection_grounded_answer": True,
+            "requires_auditable_source_links": True,
+            "requires_used_evidence_ids": True,
+            "requires_protocol_draft_structure": True,
+        },
         "runtime_contract": runtime_contract,
         "requirement": (
             "At least one goal has training-ready findings with protocol design "
             "inputs that Goal Copilot can use for traceable protocol drafts, and "
-            "the running API exposes goal-scoped experiment-plan routes. Pass "
-            "--runtime-write-check to verify saving against a running API."
+            "the running API exposes goal-session and goal-scoped experiment-plan "
+            "routes. Pass --runtime-write-check to verify manual plan persistence "
+            "against a running API; service tests cover the stricter Goal Copilot "
+            "source-message save contract."
         ),
     }
 
@@ -328,9 +350,9 @@ def _runtime_contract_layer(
             "api_base_url": base_url,
             "checks": [],
             "error": str(exc),
-            "requirement": "Running API exposes goal experiment-plan routes.",
+            "requirement": "Running API exposes goal-session and experiment-plan routes.",
         }
-    checks = _experiment_plan_route_checks(paths)
+    checks = _runtime_route_checks(paths)
     diagnostic = (
         _source_experiment_plan_route_diagnostic()
         if any(check["status"] == "fail" for check in checks)
@@ -352,7 +374,7 @@ def _runtime_contract_layer(
                 "path": PLAN_LIST_PATH,
                 "method": "post/patch",
                 "status": "skipped",
-                "detail": "route checks failed; smoke write was not attempted",
+                "detail": "runtime route checks failed; smoke write was not attempted",
             }
         )
     result = {
@@ -364,8 +386,9 @@ def _runtime_contract_layer(
         "runtime_write_check": runtime_write_check,
         "checks": checks,
         "requirement": (
-            "Running API exposes goal experiment-plan routes and, when "
-            "--runtime-write-check is set, accepts create/update smoke writes."
+            "Running API exposes goal-session and goal experiment-plan routes and, "
+            "when --runtime-write-check is set, accepts create/update manual "
+            "experiment-plan smoke writes."
         ),
     }
     if diagnostic:
@@ -374,6 +397,17 @@ def _runtime_contract_layer(
 
 
 def _experiment_plan_route_checks(paths: dict[str, Any]) -> list[dict[str, str]]:
+    return _route_checks(paths, PLAN_ROUTE_SPECS)
+
+
+def _runtime_route_checks(paths: dict[str, Any]) -> list[dict[str, str]]:
+    return _route_checks(paths, RUNTIME_ROUTE_SPECS)
+
+
+def _route_checks(
+    paths: dict[str, Any],
+    specs: tuple[tuple[str, str, str], ...],
+) -> list[dict[str, str]]:
     return [
         {
             "name": name,
@@ -381,7 +415,7 @@ def _experiment_plan_route_checks(paths: dict[str, Any]) -> list[dict[str, str]]
             "method": method,
             "status": "pass" if method in _mapping(paths.get(path)) else "fail",
         }
-        for name, path, method in PLAN_ROUTE_SPECS
+        for name, path, method in specs
     ]
 
 
@@ -393,22 +427,23 @@ def _source_experiment_plan_route_diagnostic() -> dict[str, Any]:
             "code": "source_route_check_unavailable",
             "detail": f"Could not inspect local source app routes: {exc}",
         }
-    source_checks = _experiment_plan_route_checks(source_paths)
+    source_checks = _runtime_route_checks(source_paths)
     if all(check["status"] == "pass" for check in source_checks):
         return {
             "code": "running_api_not_current_backend",
             "detail": (
-                "Local source app exposes experiment-plan routes, but the "
-                "running API does not. Restart or update the backend process, "
-                "or point --api-base-url to the current Lens app."
+                "Local source app exposes goal-session and experiment-plan routes, "
+                "but the running API does not. Restart or update the backend "
+                "process, or point --api-base-url to the current Lens app."
             ),
             "source_checks": source_checks,
         }
     return {
         "code": "source_routes_missing",
         "detail": (
-            "Local source app also does not expose all experiment-plan routes; "
-            "fix source route registration before checking runtime writes."
+            "Local source app also does not expose all goal-session and "
+            "experiment-plan routes; fix source route registration before "
+            "checking runtime writes."
         ),
         "source_checks": source_checks,
     }
@@ -853,6 +888,13 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         layer_mapping = _mapping(layer)
         lines.append(f"- {key}: {layer_mapping.get('status')}")
         if key == "experiment_design":
+            write_scope = _text(layer_mapping.get("runtime_write_scope"))
+            if write_scope:
+                lines.append(f"  runtime write scope: {write_scope}")
+            copilot_contract = _mapping(layer_mapping.get("copilot_save_contract"))
+            review_gate = _text(copilot_contract.get("review_gate"))
+            if review_gate:
+                lines.append(f"  copilot save contract: review_gate={review_gate}")
             runtime_contract = _mapping(layer_mapping.get("runtime_contract"))
             runtime_status = _text(runtime_contract.get("status"))
             if runtime_status and runtime_status != "not_checked":

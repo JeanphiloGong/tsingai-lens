@@ -718,6 +718,20 @@ const translations: Record<Language, Translations> = {
 				findingUsageResolveConflict: 'Resolve conflicting evidence before use.',
 				findingUsageRecordReview: 'Record expert feedback or curation for the final label.',
 				findingUsageKeepScope: 'Keep the stated scope and conditions attached when using it.',
+				findingAcceptanceGate: 'Acceptance gate',
+				findingAcceptanceGateStatuses: {
+					accepted: 'Already accepted',
+					review_required: 'Accept after review',
+					correction_required: 'Correct before accept'
+				},
+				findingAcceptanceGateStatusFallback: 'Review gate active',
+				findingAcceptanceGateAcceptedBody:
+					'This finding is already accepted for training or downstream use.',
+				findingAcceptanceGateReviewBody:
+					'Accept only after the listed checks and source evidence match.',
+				findingAcceptanceGateCorrectionBody:
+					'Correct or reject the blocking gaps before accepting this finding.',
+				findingAcceptanceGateChecks: 'Expert checks',
 				findingProtocolReadiness: 'Protocol readiness',
 				findingProtocolReadinessStatuses: {
 					protocol_ready: 'Ready for protocol drafting',

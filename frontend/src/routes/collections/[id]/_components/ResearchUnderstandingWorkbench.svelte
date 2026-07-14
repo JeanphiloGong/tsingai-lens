@@ -21,6 +21,7 @@
 		type ResearchUnderstandingDataset,
 		type ResearchUnderstandingDatasetExportFormat,
 		type ResearchUnderstandingDatasetLabelStatus,
+		type ResearchUnderstandingAcceptanceGate,
 		type ResearchUnderstandingProtocolReadiness,
 		type ResearchUnderstandingDatasetSample,
 		type ResearchUnderstandingDatasetUseStatus,
@@ -572,6 +573,7 @@
 		? trainingMessageDiagnosticsForSample(selectedFindingDatasetSample)
 		: [];
 	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
+	$: selectedFindingAcceptanceGate = selectedFindingDatasetSample?.acceptance_gate ?? null;
 	$: selectedFindingProtocolReadinessUnavailable = Boolean(
 		selectedFindingDatasetSample && !selectedFindingProtocolReadiness
 	);
@@ -1219,6 +1221,29 @@
 
 	function protocolReadinessGapLabel(gap: string) {
 		return translatedCatalogLabel('research.understanding.findingProtocolReadinessGapLabels', gap);
+	}
+
+	function acceptanceGateStatusLabel(gate: ResearchUnderstandingAcceptanceGate) {
+		const label = $t(`research.understanding.findingAcceptanceGateStatuses.${gate.status}`);
+		if (!label.startsWith('research.')) return label;
+		return $t('research.understanding.findingAcceptanceGateStatusFallback');
+	}
+
+	function acceptanceGateBody(gate: ResearchUnderstandingAcceptanceGate) {
+		if (gate.guidance) return gate.guidance;
+		if (gate.requires_correction) {
+			return $t('research.understanding.findingAcceptanceGateCorrectionBody');
+		}
+		if (gate.accept_allowed) {
+			return $t('research.understanding.findingAcceptanceGateReviewBody');
+		}
+		return $t('research.understanding.findingAcceptanceGateAcceptedBody');
+	}
+
+	function acceptanceGateCheckLabels(gate: ResearchUnderstandingAcceptanceGate) {
+		return gate.review_checks.length
+			? gate.review_checks
+			: gate.blocking_missing.map(protocolReadinessGapLabel);
 	}
 
 	function isPaperLevelAccept(finding: ResearchUnderstandingPresentationFinding) {
@@ -4474,6 +4499,30 @@
 												<ul>
 													{#each selectedTrainingMessageDiagnostics as diagnostic (diagnostic)}
 														<li>{trainingMessageDiagnosticLabel(diagnostic)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</section>
+								{/if}
+								{#if selectedFindingAcceptanceGate}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--acceptance"
+										aria-label={$t('research.understanding.findingAcceptanceGate')}
+									>
+										<div>
+											<strong>
+												{$t('research.understanding.findingAcceptanceGate')}
+											</strong>
+											<span>{acceptanceGateStatusLabel(selectedFindingAcceptanceGate)}</span>
+										</div>
+										<p>{acceptanceGateBody(selectedFindingAcceptanceGate)}</p>
+										{#if acceptanceGateCheckLabels(selectedFindingAcceptanceGate).length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.findingAcceptanceGateChecks')}</span>
+												<ul>
+													{#each acceptanceGateCheckLabels(selectedFindingAcceptanceGate) as check (check)}
+														<li>{check}</li>
 													{/each}
 												</ul>
 											</div>

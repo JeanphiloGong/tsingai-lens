@@ -393,6 +393,15 @@ export type ResearchUnderstandingProtocolReadiness = {
 	checks: Record<string, boolean>;
 	guidance: string;
 };
+export type ResearchUnderstandingAcceptanceGate = {
+	status: string;
+	accept_allowed: boolean;
+	requires_correction: boolean;
+	blocking_missing: string[];
+	review_checks: string[];
+	recommended_action_code: string;
+	guidance: string;
+};
 export type ResearchUnderstandingDatasetCountEntry = {
 	name: string;
 	count: number;
@@ -405,6 +414,7 @@ export type ResearchUnderstandingDatasetSample = {
 	dataset_use_status: ResearchUnderstandingDatasetUseStatus | null;
 	review_action: ResearchUnderstandingDatasetReviewAction;
 	protocol_readiness: ResearchUnderstandingProtocolReadiness | null;
+	acceptance_gate: ResearchUnderstandingAcceptanceGate | null;
 	metadata: {
 		training_message_diagnostic: string[];
 	};
@@ -1174,6 +1184,7 @@ function normalizeResearchUnderstandingDatasetSample(
 		dataset_use_status: normalizeResearchUnderstandingDatasetUseStatus(record.dataset_use_status),
 		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action),
 		protocol_readiness: normalizeResearchUnderstandingProtocolReadiness(record.protocol_readiness),
+		acceptance_gate: normalizeResearchUnderstandingAcceptanceGate(record.acceptance_gate),
 		metadata: normalizeResearchUnderstandingDatasetSampleMetadata(record.metadata)
 	};
 }
@@ -1196,6 +1207,22 @@ function normalizeResearchUnderstandingProtocolReadiness(
 		missing: toStringList(record.missing),
 		blocking_missing: toStringList(record.blocking_missing),
 		checks: toBooleanRecord(record.checks),
+		guidance: toText(record.guidance)
+	};
+}
+
+function normalizeResearchUnderstandingAcceptanceGate(
+	value: unknown
+): ResearchUnderstandingAcceptanceGate | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	return {
+		status: toText(record.status),
+		accept_allowed: Boolean(record.accept_allowed),
+		requires_correction: Boolean(record.requires_correction),
+		blocking_missing: toStringList(record.blocking_missing),
+		review_checks: toStringList(record.review_checks),
+		recommended_action_code: toText(record.recommended_action_code),
 		guidance: toText(record.guidance)
 	};
 }

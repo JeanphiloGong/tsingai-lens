@@ -63,7 +63,10 @@ This node owns the collection workspace route family in the frontend.
   detail also shows the selected candidate's position in the active review queue and
   prioritizes the next review action for table-row checks, conflict resolution,
   mechanism-evidence decisions, paper-level scope limits, and continuous
-  accept/reject/correct review
+  accept/reject/correct review; when the backend dataset sample provides an
+  acceptance gate, the detail view also shows whether direct accept is allowed,
+  whether correction is required first, and the expert checks that must be
+  completed before the finding becomes training-ready
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

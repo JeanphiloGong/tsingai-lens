@@ -868,6 +868,15 @@ describe('research view shared helpers', () => {
 						},
 						guidance: 'accept or correct before protocol use'
 					},
+					acceptance_gate: {
+						status: 'review_required',
+						accept_allowed: true,
+						requires_correction: false,
+						blocking_missing: [],
+						review_checks: ['Confirm paper-level scope.'],
+						recommended_action_code: 'verify_table_rows',
+						guidance: 'Accept only after checking source evidence.'
+					},
 					metadata: {
 						training_message_diagnostic: ['missing_message_pair']
 					}
@@ -926,6 +935,15 @@ describe('research view shared helpers', () => {
 					variables: true
 				},
 				guidance: 'accept or correct before protocol use'
+			},
+			acceptance_gate: {
+				status: 'review_required',
+				accept_allowed: true,
+				requires_correction: false,
+				blocking_missing: [],
+				review_checks: ['Confirm paper-level scope.'],
+				recommended_action_code: 'verify_table_rows',
+				guidance: 'Accept only after checking source evidence.'
 			},
 			metadata: {
 				training_message_diagnostic: ['missing_message_pair']

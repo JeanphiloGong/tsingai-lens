@@ -29,6 +29,15 @@ type DatasetSampleFixture = {
 		checks: Record<string, boolean>;
 		guidance: string;
 	};
+	acceptance_gate?: {
+		status: string;
+		accept_allowed: boolean;
+		requires_correction: boolean;
+		blocking_missing: string[];
+		review_checks: string[];
+		recommended_action_code: string;
+		guidance: string;
+	};
 };
 
 function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
@@ -1724,6 +1733,17 @@ describe('ResearchUnderstandingWorkbench', () => {
 									review_action: {
 										code: 'review_table_rows',
 										label: 'Review selected table rows'
+									},
+									acceptance_gate: {
+										status: 'review_required',
+										accept_allowed: true,
+										requires_correction: false,
+										blocking_missing: [],
+										review_checks: [
+											'Verify the selected table rows, variable columns, and outcome values.'
+										],
+										recommended_action_code: 'review_table_rows',
+										guidance: 'Accept only after checking the source table rows.'
 									}
 								}
 							]
@@ -1747,6 +1767,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const findingDetail = await openMechanismClaimDetail();
 		await expect.element(findingDetail.getByText('Review selected table rows')).toBeInTheDocument();
+		const gatePanel = findingDetail.getByLabelText('Acceptance gate');
+		await expect.element(gatePanel.getByText('Accept after review')).toBeInTheDocument();
+		await expect
+			.element(gatePanel.getByText('Accept only after checking the source table rows.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				gatePanel.getByText('Verify the selected table rows, variable columns, and outcome values.')
+			)
+			.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Repair evidence binding')).not.toBeInTheDocument();
 	});
 
@@ -1922,6 +1952,19 @@ describe('ResearchUnderstandingWorkbench', () => {
 											traceable_training_evidence: false
 										},
 										guidance: 'Correct variables, direction, and evidence before accepting.'
+									},
+									acceptance_gate: {
+										status: 'correction_required',
+										accept_allowed: false,
+										requires_correction: true,
+										blocking_missing: [
+											'variables',
+											'direction_or_scope',
+											'traceable_training_evidence'
+										],
+										review_checks: [],
+										recommended_action_code: 'correct_protocol_fields',
+										guidance: 'Do not accept directly; correct or reject the blocking gaps first.'
 									}
 								}
 							]
@@ -1950,6 +1993,14 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const protocolPanel = browserPage
 			.getByLabelText('Finding detail')
 			.getByLabelText('Protocol readiness');
+		const gatePanel = browserPage.getByLabelText('Finding detail').getByLabelText('Acceptance gate');
+		await expect.element(gatePanel.getByText('Correct before accept')).toBeInTheDocument();
+		await expect
+			.element(
+				gatePanel.getByText('Do not accept directly; correct or reject the blocking gaps first.')
+			)
+			.toBeInTheDocument();
+		await expect.element(gatePanel.getByText('variables', { exact: true })).toBeInTheDocument();
 		await expect.element(protocolPanel.getByText('Needs correction before use')).toBeInTheDocument();
 		await expect
 			.element(protocolPanel.getByText('Correct variables, direction, and evidence before accepting.'))

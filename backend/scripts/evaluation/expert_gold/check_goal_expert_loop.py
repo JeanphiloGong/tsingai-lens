@@ -897,27 +897,13 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
     collection_id = _text(summary.get("collection_id")) or DEFAULT_COLLECTION_ID
     commands = [
         (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-            f"--collection-id {collection_id} --format review-packet"
-        ),
-        (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-            f"--collection-id {collection_id} --format review-jsonl"
-        ),
-        (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-            f"--collection-id {collection_id} --format decision-template "
-            "> reviewed-findings.jsonl"
-        ),
-        (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-            f"--collection-id {collection_id} --format agent-review-prompt-jsonl "
-            "> agent-review-prompts.jsonl"
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
+            f"--collection-id {collection_id} --output-dir /tmp/lens-goal-review"
         ),
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/merge_agent_review_results.py "
-            "reviewed-findings.jsonl agent-review-results.jsonl "
-            "--output-path agent-reviewed-findings.jsonl"
+            "/tmp/lens-goal-review/reviewed-findings.template.jsonl "
+            "agent-review-results.jsonl --output-path agent-reviewed-findings.jsonl"
         ),
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_agent_review_draft.py "

@@ -291,27 +291,14 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     )
     assert "Next commands:" in text
     assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-packet"
-        in text
-    )
-    assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-jsonl"
-        in text
-    )
-    assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format decision-template "
-        "> reviewed-findings.jsonl"
-        in text
-    )
-    assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format agent-review-prompt-jsonl "
-        "> agent-review-prompts.jsonl"
+        "./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
+        "--collection-id col-1 --output-dir /tmp/lens-goal-review"
         in text
     )
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/merge_agent_review_results.py "
-        "reviewed-findings.jsonl agent-review-results.jsonl "
-        "--output-path agent-reviewed-findings.jsonl"
+        "/tmp/lens-goal-review/reviewed-findings.template.jsonl "
+        "agent-review-results.jsonl --output-path agent-reviewed-findings.jsonl"
         in text
     )
     assert (

@@ -3100,6 +3100,39 @@
 		);
 	}
 
+	function confirmedAgentReviewRows(rows: Record<string, unknown>[]) {
+		return rows.map((row) => {
+			const agentReview = objectValue(row.agent_review);
+			if (!agentReview || agentReview.human_confirmed !== true) return row;
+			const recommendation = String(agentReview.recommendation ?? '').trim().toLowerCase();
+			if (!['accept', 'reject', 'correct'].includes(recommendation)) return row;
+			const nextRow: Record<string, unknown> = {
+				...row,
+				action: recommendation,
+				expert_note: String(row.expert_note ?? agentReview.note ?? '').trim()
+			};
+			if (recommendation === 'reject') {
+				nextRow.issue_type = String(agentReview.issue_type ?? row.issue_type ?? '').trim();
+			}
+			if (recommendation === 'correct') {
+				const suggestedTarget = objectValue(agentReview.suggested_target) ?? objectValue(row.suggested_target);
+				if (suggestedTarget) {
+					nextRow.suggested_target = suggestedTarget;
+					if (Array.isArray(suggestedTarget.evidence_ref_ids)) {
+						nextRow.curated_evidence_ref_ids = suggestedTarget.evidence_ref_ids;
+					}
+				}
+			}
+			return nextRow;
+		});
+	}
+
+	function objectValue(value: unknown): Record<string, unknown> | null {
+		return value && typeof value === 'object' && !Array.isArray(value)
+			? (value as Record<string, unknown>)
+			: null;
+	}
+
 	function reviewImportProgressText(summary: ResearchUnderstandingReviewDecisionImportResponse) {
 		const progress = summary.review_progress;
 		return $t('research.understanding.reviewImportProgress', {
@@ -3126,7 +3159,7 @@
 		reviewImportError = '';
 		reviewImportSummary = null;
 		try {
-			const rows = parseReviewImportRows(reviewImportText);
+			const rows = confirmedAgentReviewRows(parseReviewImportRows(reviewImportText));
 			if (!rows.length) {
 				throw new Error($t('research.understanding.reviewImportEmpty'));
 			}

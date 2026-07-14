@@ -3568,7 +3568,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'This looks like an agent review draft. A human expert must confirm the suggestions by changing reviewed rows from skip to accept, reject, or correct before import.'
+					'This looks like an agent review draft. A human expert must either set agent_review.human_confirmed=true on approved rows or change reviewed rows from skip to accept, reject, or correct before import.'
 				)
 			)
 			.toBeInTheDocument();
@@ -3587,6 +3587,99 @@ describe('ResearchUnderstandingWorkbench', () => {
 				);
 			})
 		).toBe(false);
+	});
+
+	it('converts human-confirmed agent review rows before import dry-run', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						status: 'pass',
+						dry_run: true,
+						total_rows: 1,
+						written_count: 0,
+						skipped_count: 0,
+						counts: { correct: 1 },
+						errors: [],
+						warnings: [],
+						review_progress: { actionable_count: 1, skipped_count: 0 },
+						affected_goals: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = datasetSummaryLocator();
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+
+		const row = {
+			sample_id: 'sample_1',
+			finding_id: 'finding_strength_supported',
+			action: 'skip',
+			agent_review: {
+				reviewer: 'ai-reviewer-codex',
+				recommendation: 'correct',
+				note: 'Human confirmed the narrower target.',
+				human_confirmed: true,
+				suggested_target: {
+					statement: 'Heat treatment changes tensile strength.',
+					evidence_ref_ids: ['ev_strength']
+				}
+			}
+		};
+		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByRole('button', { name: 'Dry run' }).click();
+
+		const importCall = fetchMock.mock.calls.find(([input, init]) => {
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof (init as RequestInit | undefined)?.method === 'string'
+						? (init as RequestInit).method
+						: 'GET';
+			return (
+				requestPath(input as string | URL | Request).endsWith(
+					'/research-understanding/review-decisions/import'
+				) && method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(importCall).toBeTruthy();
+		const body = JSON.parse(String(importCall?.[1]?.body));
+		expect(body.rows[0]).toMatchObject({
+			action: 'correct',
+			expert_note: 'Human confirmed the narrower target.',
+			curated_evidence_ref_ids: ['ev_strength'],
+			suggested_target: {
+				statement: 'Heat treatment changes tensile strength.',
+				evidence_ref_ids: ['ev_strength']
+			}
+		});
+		expect(body.dry_run).toBe(true);
+		expect(body.fail_on_warnings).toBe(true);
 	});
 
 	it('imports reviewed decisions and refreshes dataset readiness', async () => {

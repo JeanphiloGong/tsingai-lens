@@ -290,6 +290,19 @@ write the agent's suggestion under `agent_review` instead. To prepare a safe
 draft file for the agent to fill, run:
 
 ```bash
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format agent-review-prompt-jsonl \
+  > agent-review-prompts.jsonl
+```
+
+`agent-review-prompt-jsonl` is the structured review input for an independent
+review agent. Each row contains the finding fields, acceptance gate, protocol
+readiness, evidence quotes and source links, suggested target, and the expected
+`agent_review` output schema. It intentionally does not include a top-level
+`action` field and does not set `human_confirmed`; it is a prompt/input packet,
+not an import file.
+
+```bash
 python3 scripts/evaluation/expert_gold/prepare_agent_review_draft.py \
   reviewed-findings.jsonl \
   --output-path agent-reviewed-findings.jsonl

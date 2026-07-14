@@ -501,6 +501,78 @@ def test_render_decision_template_exports_editable_import_rows():
     }
 
 
+def test_render_agent_review_prompt_jsonl_exports_independent_review_tasks():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "presentation_bucket": "review_queue",
+            "trace_status": "evidence_derived",
+            "system_prediction": {
+                "statement": "Preheating increased ductility by 14%.",
+                "variables": ["preheating"],
+                "mediators": ["grain refinement"],
+                "outcomes": ["ductility"],
+                "direction": "increase",
+                "scope_summary": "LPBF 316L at 150 C",
+                "support_grade": "strong",
+                "review_status": "needs_review",
+                "review_reasons": ["single_paper_evidence"],
+                "warnings": ["needs_expert_review"],
+            },
+            "review_action": {
+                "code": "accept_as_paper_level",
+                "label": "accept only as paper-level evidence unless another paper confirms it",
+            },
+            "expert_target": {
+                "statement": "Preheating increased ductility by 14%.",
+                "review_status": "correct",
+                "note": "AI suggestion; human review still required.",
+            },
+        }
+    )
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+
+    body = check.render_agent_review_prompt_jsonl_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+    rows = [json.loads(line) for line in body.splitlines()]
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["task"] == "review_lens_research_finding"
+    assert row["collection_id"] == "col-1"
+    assert row["goal_id"] == "goal-1"
+    assert row["finding_id"] == "finding-1"
+    assert row["reviewer_role"] == "independent_materials_science_reviewer"
+    assert "action" not in row
+    assert row["finding"] == {
+        "statement": "Preheating increased ductility by 14%.",
+        "variables": ["preheating"],
+        "mediators": ["grain refinement"],
+        "outcomes": ["ductility"],
+        "direction": "increase",
+        "scope_summary": "LPBF 316L at 150 C",
+        "support_grade": "strong",
+        "review_status": "needs_review",
+        "review_reasons": ["single_paper_evidence"],
+        "warnings": ["needs_expert_review"],
+        "recommended_action_code": "accept_as_paper_level",
+        "recommended_action": (
+            "accept only as paper-level evidence unless another paper confirms it"
+        ),
+    }
+    assert row["acceptance_gate"]["accept_allowed"] is True
+    assert row["protocol_readiness"]["status"] == "ready_after_review"
+    assert row["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert row["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert row["output_schema"]["agent_review"]["human_confirmed"] is False
+    assert "accept|reject|correct|unclear|skip" in row["output_schema"]["agent_review"][
+        "recommendation"
+    ]
+
+
 def test_render_messages_jsonl_exports_training_ready_messages():
     check = _load_goal_dataset_check_module()
 

@@ -118,6 +118,7 @@ def parse_args() -> argparse.Namespace:
             "review-packet",
             "review-jsonl",
             "decision-template",
+            "agent-review-prompt-jsonl",
             "messages-jsonl",
             "training-jsonl",
         ),
@@ -126,9 +127,10 @@ def parse_args() -> argparse.Namespace:
             "Output format. JSON is stable for automation; review-packet is a "
             "human-readable queue of candidate findings, evidence, and links; "
             "review-jsonl emits one candidate per line; decision-template emits "
-            "a compact editable import template; messages-jsonl emits fine-tuning-"
-            "compatible rows for training-ready samples; training-jsonl keeps "
-            "messages plus traceable sample metadata."
+            "a compact editable import template; agent-review-prompt-jsonl emits "
+            "one structured independent-review task per candidate; messages-jsonl "
+            "emits fine-tuning-compatible rows for training-ready samples; "
+            "training-jsonl keeps messages plus traceable sample metadata."
         ),
     )
     return parser.parse_args()
@@ -142,7 +144,12 @@ def main() -> None:
         api_base_url=args.api_base_url,
         require_training_ready=args.require_training_ready,
         include_review_packet=args.format
-        in {"review-packet", "review-jsonl", "decision-template"},
+        in {
+            "review-packet",
+            "review-jsonl",
+            "decision-template",
+            "agent-review-prompt-jsonl",
+        },
         include_training_export=args.format in {"messages-jsonl", "training-jsonl"},
         include_training_metadata=args.format == "training-jsonl",
     )
@@ -152,6 +159,8 @@ def main() -> None:
         output = render_review_jsonl_summary(summary)
     elif args.format == "decision-template":
         output = render_decision_template_summary(summary)
+    elif args.format == "agent-review-prompt-jsonl":
+        output = render_agent_review_prompt_jsonl_summary(summary)
     elif args.format == "messages-jsonl":
         output = render_messages_jsonl_summary(summary)
     elif args.format == "training-jsonl":
@@ -869,6 +878,94 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                 }
             )
     return _jsonl(rows)
+
+
+def render_agent_review_prompt_jsonl_summary(summary: dict[str, Any]) -> str:
+    rows = []
+    collection_id = _text(summary.get("collection_id"))
+    for goal in _mapping_list(summary.get("goals")):
+        packet = _mapping(goal.get("review_packet"))
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        for candidate in _mapping_list(packet.get("candidates")):
+            rows.append(
+                {
+                    "task": "review_lens_research_finding",
+                    "collection_id": collection_id,
+                    "goal_id": goal_id,
+                    "finding_id": _text(candidate.get("finding_id")),
+                    "claim_id": _text(candidate.get("claim_id")),
+                    "open_url": _text(candidate.get("open_url"))
+                    or _text(packet.get("review_url")),
+                    "reviewer_role": "independent_materials_science_reviewer",
+                    "instructions": [
+                        (
+                            "Judge whether the cited evidence supports the finding, "
+                            "including variable, outcome, direction, scope, and "
+                            "paper-level limitations."
+                        ),
+                        (
+                            "Return an agent_review object only; do not change "
+                            "top-level action or mark human_confirmed."
+                        ),
+                        (
+                            "Use recommendation=accept only when the evidence and "
+                            "acceptance gate checks pass; use correct for a narrower "
+                            "evidence-grounded target; use reject when evidence does "
+                            "not support the finding; use unclear when source review "
+                            "is still insufficient."
+                        ),
+                    ],
+                    "finding": _agent_review_finding(candidate),
+                    "acceptance_gate": dict(_mapping(candidate.get("acceptance_gate"))),
+                    "protocol_readiness": dict(
+                        _mapping(candidate.get("protocol_readiness"))
+                    ),
+                    "evidence": _mapping_list(candidate.get("evidence")),
+                    "suggested_target": dict(_mapping(candidate.get("suggested_target"))),
+                    "output_schema": {
+                        "agent_review": {
+                            "reviewer": "ai-reviewer-<name>",
+                            "recommendation": "accept|reject|correct|unclear|skip",
+                            "issue_type": (
+                                "none|evidence_not_grounded|missing_evidence|"
+                                "insufficient_evidence|wrong_variable|wrong_outcome|"
+                                "wrong_direction|wrong_context|wrong_relation|"
+                                "overclaim|unclear_statement|other"
+                            ),
+                            "note": "short evidence-grounded rationale",
+                            "suggested_target": {
+                                "statement": "required for correct",
+                                "variables": ["..."],
+                                "mediators": ["..."],
+                                "outcomes": ["..."],
+                                "direction": "...",
+                                "scope_summary": "...",
+                                "support_grade": "strong|partial|weak|conflicted",
+                                "evidence_ref_ids": ["..."],
+                            },
+                            "human_confirmed": False,
+                        }
+                    },
+                }
+            )
+    return _jsonl(rows)
+
+
+def _agent_review_finding(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "statement": _text(candidate.get("statement")),
+        "variables": _text_list(candidate.get("variables")),
+        "mediators": _text_list(candidate.get("mediators")),
+        "outcomes": _text_list(candidate.get("outcomes")),
+        "direction": _text(candidate.get("direction")),
+        "scope_summary": _text(candidate.get("scope_summary")),
+        "support_grade": _text(candidate.get("support_grade")),
+        "review_status": _text(candidate.get("review_status")),
+        "review_reasons": _text_list(candidate.get("review_reasons")),
+        "warnings": _text_list(candidate.get("warnings")),
+        "recommended_action_code": _text(candidate.get("recommended_action_code")),
+        "recommended_action": _text(candidate.get("recommended_action")),
+    }
 
 
 def _review_risk_flags(

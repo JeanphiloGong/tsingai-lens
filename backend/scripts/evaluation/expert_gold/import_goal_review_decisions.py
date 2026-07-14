@@ -223,6 +223,14 @@ def _render_goal_summary(goal: dict) -> list[str]:
             f"review_candidates={goal.get('projected_review_candidate_count', 0)} "
             f"rejected={goal.get('projected_rejected_count', 0)}"
         ),
+        (
+            "  unlock: "
+            f"training_ready=+{goal.get('pending_training_ready_count', 0)} "
+            f"training_messages=+{_projected_delta(goal, 'training_message')} "
+            f"protocol_ready=+{_projected_delta(goal, 'protocol_ready')} "
+            f"resolved_review_candidates="
+            f"{goal.get('pending_review_candidate_resolved_count', 0)}"
+        ),
     ]
     next_review = goal.get("next_review_finding_id")
     if next_review:
@@ -245,6 +253,12 @@ def _render_goal_summary(goal: dict) -> list[str]:
                     + ("; ".join(missing) if missing else "missing readiness details")
                 )
     return lines
+
+
+def _projected_delta(goal: dict, prefix: str) -> int:
+    current = int(goal.get(f"{prefix}_count") or 0)
+    projected = int(goal.get(f"projected_{prefix}_count") or current)
+    return max(0, projected - current)
 
 
 def _line_ref(row: dict) -> str:

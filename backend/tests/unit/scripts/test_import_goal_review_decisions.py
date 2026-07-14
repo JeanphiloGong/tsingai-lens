@@ -457,6 +457,10 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
         "after import: training_ready=3 training_messages=2 protocol_ready=2 "
         "review_candidates=0 rejected=1"
     ) in text
+    assert (
+        "unlock: training_ready=+1 training_messages=+1 protocol_ready=+1 "
+        "resolved_review_candidates=1"
+    ) in text
     assert "Readiness after import:" in text
     assert "goals=1 training_ready_goals=1 message_ready_goals=1 protocol_ready_goals=1" in text
     assert "ready_for_training_export=True ready_for_protocol_drafting=True" in text

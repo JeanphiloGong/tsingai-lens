@@ -448,6 +448,16 @@ def test_render_decision_template_exports_editable_import_rows():
         "review_reasons": ["single_paper_evidence"],
         "protocol_blocking_missing": [],
         "curated_evidence_ref_ids": ["ev-1"],
+        "evidence": [
+            {
+                "evidence_ref_id": "ev-1",
+                "label": "Paper A / p. 4",
+                "source_ref": "blk-1",
+                "page": "4",
+                "quote": "Preheating increased ductility by 14%.",
+                "open": "/collections/col-1/documents/doc-1?source_ref=blk-1",
+            }
+        ],
         "suggested_target": {
             "statement": "Preheating increased ductility by 14%.",
             "status": "limited",

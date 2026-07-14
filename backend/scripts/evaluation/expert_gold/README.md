@@ -271,11 +271,13 @@ python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
 
 Use `review-jsonl` when the reviewer needs the full candidate payload and
 evidence records. Use `decision-template` when the reviewer needs a compact
-editable import file. Each exported row defaults to `"action": "skip"`. The
-reviewer changes only rows they have checked to `accept`, `reject`, or
-`correct`; unchanged rows stay skipped and are not written as labels. `reject`
-rows need an `issue_type` such as `wrong_variable`, `wrong_direction`, or
-`insufficient_evidence`. `correct` rows need a corrected
+editable import file. Each decision-template row also carries an `evidence`
+summary with `evidence_ref_id`, source label, page, quote, and source-open link
+so the reviewer can audit the row before changing the action. Each exported row
+defaults to `"action": "skip"`. The reviewer changes only rows they have checked
+to `accept`, `reject`, or `correct`; unchanged rows stay skipped and are not
+written as labels. `reject` rows need an `issue_type` such as `wrong_variable`,
+`wrong_direction`, or `insufficient_evidence`. `correct` rows need a corrected
 `suggested_target.statement` and at least one `evidence_ref_id`. Rows with
 `protocol_readiness.blocking_missing` cannot be imported as `accept`; change
 them to `correct` after filling the missing fields/evidence, `reject`, or

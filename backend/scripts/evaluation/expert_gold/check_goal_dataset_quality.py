@@ -764,6 +764,7 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                 for record in evidence
                 if (ref_id := _text(record.get("evidence_ref_id")))
             ]
+            evidence_summary = [_decision_template_evidence(record) for record in evidence]
             rows.append(
                 {
                     "collection_id": collection_id,
@@ -788,6 +789,7 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                         )
                     ),
                     "curated_evidence_ref_ids": evidence_ref_ids,
+                    "evidence": evidence_summary,
                     "suggested_target": {
                         "statement": _text(
                             suggested.get("statement")
@@ -1202,6 +1204,17 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
         or _text(record.get("source_text"))
         or _text(record.get("training_source_text"))
         or _text(record.get("text")),
+    }
+
+
+def _decision_template_evidence(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "evidence_ref_id": _text(record.get("evidence_ref_id")),
+        "label": _text(record.get("label")),
+        "source_ref": _text(record.get("source_ref")),
+        "page": _text(record.get("page")),
+        "quote": _text(record.get("quote")),
+        "open": _short_review_href(record.get("href")),
     }
 
 

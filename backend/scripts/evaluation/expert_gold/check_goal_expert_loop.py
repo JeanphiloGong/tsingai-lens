@@ -310,7 +310,7 @@ def _runtime_contract_layer(
             else "fail",
         },
     ]
-    if runtime_write_check:
+    if runtime_write_check and all(check["status"] == "pass" for check in checks):
         checks.extend(
             _experiment_plan_write_checks(
                 base_url,
@@ -319,9 +319,20 @@ def _runtime_contract_layer(
                 cookie=cookie,
             )
         )
+    elif runtime_write_check:
+        checks.append(
+            {
+                "name": "write smoke experiment plan",
+                "path": plan_list_path,
+                "method": "post/patch",
+                "status": "skipped",
+                "detail": "route checks failed; smoke write was not attempted",
+            }
+        )
     return {
         "status": "pass"
-        if all(check["status"] == "pass" for check in checks)
+        if all(check["status"] in {"pass", "skipped"} for check in checks)
+        and not any(check["status"] == "fail" for check in checks)
         else "fail",
         "api_base_url": base_url,
         "runtime_write_check": runtime_write_check,
@@ -678,15 +689,17 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                 failed_checks = [
                     check
                     for check in _mapping_list(runtime_contract.get("checks"))
-                    if _text(check.get("status")) == "fail"
+                    if _text(check.get("status")) in {"fail", "skipped"}
                 ]
                 for check in failed_checks:
                     detail = _text(check.get("detail"))
                     if detail:
-                        lines.append(
-                            "  runtime check failed: "
-                            f"{_text(check.get('name'))}: {detail}"
+                        label = (
+                            "runtime check skipped"
+                            if _text(check.get("status")) == "skipped"
+                            else "runtime check failed"
                         )
+                        lines.append(f"  {label}: {_text(check.get('name'))}: {detail}")
                     else:
                         lines.append(
                             "  missing route: "

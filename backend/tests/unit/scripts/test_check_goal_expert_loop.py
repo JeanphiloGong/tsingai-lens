@@ -705,6 +705,38 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
     ]
 
 
+def test_check_goal_expert_loop_runtime_write_check_skips_when_routes_are_missing(
+    monkeypatch,
+):
+    check = _load_goal_expert_loop_module()
+
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url, **_: {
+            "/api/v1/collections/{collection_id}/goals/{goal_id}/analysis": {
+                "get": {}
+            }
+        },
+    )
+
+    runtime_contract = check._runtime_contract_layer(
+        "http://localhost:5173",
+        collection_id="col-1",
+        goal_id="goal-1",
+        runtime_write_check=True,
+    )
+
+    assert runtime_contract["status"] == "fail"
+    assert runtime_contract["checks"][-1] == {
+        "name": "write smoke experiment plan",
+        "path": "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans",
+        "method": "post/patch",
+        "status": "skipped",
+        "detail": "route checks failed; smoke write was not attempted",
+    }
+
+
 def test_check_goal_expert_loop_runtime_write_check_reports_write_failure(
     monkeypatch,
 ):

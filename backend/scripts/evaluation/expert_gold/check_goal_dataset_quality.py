@@ -25,6 +25,20 @@ DEFAULT_GOAL_IDS = (
     "goal_3037e425673a",
 )
 REVIEW_PACKET_QUOTE_LIMIT = 360
+REVIEW_ACTION_OPTIONS = ("accept", "reject", "correct", "skip")
+REJECT_ISSUE_OPTIONS = (
+    "evidence_not_grounded",
+    "missing_evidence",
+    "insufficient_evidence",
+    "wrong_variable",
+    "wrong_outcome",
+    "wrong_direction",
+    "wrong_context",
+    "wrong_relation",
+    "overclaim",
+    "unclear_statement",
+    "other",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -577,6 +591,11 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
                     "recommended_action_code": _text(
                         candidate.get("recommended_action_code")
                     ),
+                    "action": "skip",
+                    "allowed_actions": list(REVIEW_ACTION_OPTIONS),
+                    "issue_type": "",
+                    "reject_issue_options": list(REJECT_ISSUE_OPTIONS),
+                    "expert_note": "",
                     "suggested_target": dict(
                         _mapping(candidate.get("suggested_target"))
                     ),

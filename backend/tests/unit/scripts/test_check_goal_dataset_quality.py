@@ -264,6 +264,10 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert rows[0]["mediators"] == ["grain refinement"]
     assert rows[0]["outcomes"] == ["ductility"]
     assert rows[0]["recommended_action_code"] == "accept_as_paper_level"
+    assert rows[0]["action"] == "skip"
+    assert rows[0]["allowed_actions"] == ["accept", "reject", "correct", "skip"]
+    assert "wrong_direction" in rows[0]["reject_issue_options"]
+    assert rows[0]["expert_note"] == ""
     assert rows[0]["suggested_target"]["review_status"] == "correct"
     assert rows[0]["evidence"][0]["href"] == "/collections/col-1/documents/doc-1?source_ref=blk-1"
 

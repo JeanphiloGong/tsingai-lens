@@ -687,6 +687,31 @@ const translations: Record<Language, Translations> = {
 				findingUsageResolveConflict: 'Resolve conflicting evidence before use.',
 				findingUsageRecordReview: 'Record expert feedback or curation for the final label.',
 				findingUsageKeepScope: 'Keep the stated scope and conditions attached when using it.',
+				findingProtocolReadiness: 'Protocol readiness',
+				findingProtocolReadinessStatuses: {
+					protocol_ready: 'Ready for protocol drafting',
+					ready_after_review: 'Ready after expert review',
+					needs_correction: 'Needs correction before use'
+				},
+				findingProtocolReadinessStatusFallback: 'Protocol readiness needs review',
+				findingProtocolReadinessReadyBody:
+					'Variables, outcomes, direction or scope, and traceable evidence are complete for experiment drafting.',
+				findingProtocolReadinessAfterReviewBody:
+					'The protocol fields are complete; accepting or correcting this finding will make it usable for traceable experiment drafts.',
+				findingProtocolReadinessCorrectionBody:
+					'Correct the blocking fields before accepting this finding for protocol drafting.',
+				findingProtocolReadinessMissing: 'Blocking gaps',
+				findingProtocolReadinessGapLabels: {
+					expert_review_decision: 'expert review decision',
+					training_messages: 'training message export',
+					statement: 'finding statement',
+					variables: 'variables',
+					outcomes: 'outcomes',
+					direction_or_scope: 'direction or scope',
+					support_status: 'support status',
+					support_grade: 'support grade',
+					traceable_training_evidence: 'traceable source evidence'
+				},
 				findingReviewReasonPanel: 'Review priorities',
 				findingReviewReasonActionReady:
 					'Already expert-labeled. Keep these notes for audit, not queue priority.',
@@ -3858,6 +3883,31 @@ const translations: Record<Language, Translations> = {
 				findingUsageResolveConflict: '使用前需要处理冲突证据。',
 				findingUsageRecordReview: '记录专家反馈或校正，形成最终标签。',
 				findingUsageKeepScope: '使用时保留原始范围和条件。',
+				findingProtocolReadiness: '实验方案可用性',
+				findingProtocolReadinessStatuses: {
+					protocol_ready: '可用于生成实验方案',
+					ready_after_review: '专家复核后可用于方案',
+					needs_correction: '使用前需要先校正'
+				},
+				findingProtocolReadinessStatusFallback: '实验方案可用性待确认',
+				findingProtocolReadinessReadyBody:
+					'变量、结果、方向或范围以及可追溯证据已经齐全，可以进入实验方案草稿。',
+				findingProtocolReadinessAfterReviewBody:
+					'方案所需字段已经齐全；专家接受或校正后，就可以作为可追溯实验方案输入。',
+				findingProtocolReadinessCorrectionBody:
+					'接受该发现用于实验方案前，需要先校正这些阻塞字段。',
+				findingProtocolReadinessMissing: '阻塞缺口',
+				findingProtocolReadinessGapLabels: {
+					expert_review_decision: '专家复核结论',
+					training_messages: '训练 messages 导出',
+					statement: '研究发现表述',
+					variables: '变量',
+					outcomes: '结果',
+					direction_or_scope: '方向或范围',
+					support_status: '证据支持状态',
+					support_grade: '证据等级',
+					traceable_training_evidence: '可追溯原文证据'
+				},
 				findingReviewReasonPanel: '复核优先原因',
 				findingReviewReasonActionReady: '已有人类专家标注。这些原因只用于审计，不再作为队列优先级。',
 				findingReviewReasonActionRepair: '接受该发现前，需要先修复或拒绝当前证据绑定。',

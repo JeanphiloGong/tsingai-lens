@@ -20,6 +20,7 @@
 		type ResearchUnderstandingDataset,
 		type ResearchUnderstandingDatasetExportFormat,
 		type ResearchUnderstandingDatasetLabelStatus,
+		type ResearchUnderstandingProtocolReadiness,
 		type ResearchUnderstandingDatasetSample,
 		type ResearchUnderstandingDatasetUseStatus,
 		type ResearchUnderstandingAxisCoverageItem,
@@ -557,6 +558,7 @@
 		: null;
 	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
 	$: selectedFindingDatasetSample = selectedFinding ? findingDatasetSampleFor(selectedFinding) : null;
+	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
 	$: selectedFindingReviewReasons = selectedDisplayFinding
 		? findingReviewReasonValues(selectedDisplayFinding)
 		: [];
@@ -1148,6 +1150,30 @@
 		const code = sample?.review_action.code.trim() ?? '';
 		if (!code) return '';
 		return translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', code);
+	}
+
+	function protocolReadinessStatusLabel(readiness: ResearchUnderstandingProtocolReadiness) {
+		const label = $t(`research.understanding.findingProtocolReadinessStatuses.${readiness.status}`);
+		if (!label.startsWith('research.')) return label;
+		return $t('research.understanding.findingProtocolReadinessStatusFallback');
+	}
+
+	function protocolReadinessBody(readiness: ResearchUnderstandingProtocolReadiness) {
+		if (readiness.status === 'protocol_ready') {
+			return $t('research.understanding.findingProtocolReadinessReadyBody');
+		}
+		if (readiness.ready_after_review || readiness.status === 'ready_after_review') {
+			return $t('research.understanding.findingProtocolReadinessAfterReviewBody');
+		}
+		return readiness.guidance || $t('research.understanding.findingProtocolReadinessCorrectionBody');
+	}
+
+	function protocolReadinessGaps(readiness: ResearchUnderstandingProtocolReadiness) {
+		return readiness.blocking_missing.length ? readiness.blocking_missing : readiness.missing;
+	}
+
+	function protocolReadinessGapLabel(gap: string) {
+		return translatedCatalogLabel('research.understanding.findingProtocolReadinessGapLabels', gap);
 	}
 
 	function findingAcceptLabel(
@@ -4134,6 +4160,30 @@
 										</div>
 									</section>
 								{/if}
+								{#if selectedFindingProtocolReadiness}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--protocol"
+										aria-label={$t('research.understanding.findingProtocolReadiness')}
+									>
+										<div>
+											<strong>
+												{$t('research.understanding.findingProtocolReadiness')}
+											</strong>
+											<span>{protocolReadinessStatusLabel(selectedFindingProtocolReadiness)}</span>
+										</div>
+										<p>{protocolReadinessBody(selectedFindingProtocolReadiness)}</p>
+										{#if protocolReadinessGaps(selectedFindingProtocolReadiness).length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.findingProtocolReadinessMissing')}</span>
+												<ul>
+													{#each protocolReadinessGaps(selectedFindingProtocolReadiness) as gap (gap)}
+														<li>{protocolReadinessGapLabel(gap)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</section>
+								{/if}
 								{#if selectedFindingReviewReasons.length}
 									<section
 										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-reasons"
@@ -6153,6 +6203,38 @@
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol {
+		border-color: var(--accent-border);
+	}
+
+	.research-understanding-workbench__basis-panel--protocol > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol p,
+	.research-understanding-workbench__protocol-gaps {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__protocol-gaps {
+		display: grid;
+		gap: 4px;
 	}
 
 	.research-understanding-workbench__usage-path {

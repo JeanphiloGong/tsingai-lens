@@ -56,7 +56,10 @@ This node owns the collection workspace route family in the frontend.
   primary paper-level Findings that still need human confirmation are included,
   while the separate evidence-repair filter only narrows to Findings whose
   evidence, support, or projection needs closer inspection; Finding detail also
-  shows the selected candidate's position in the active review queue and
+  shows protocol-readiness gaps from the dataset sample so experts can tell
+  whether a Finding is ready after review or needs variable, direction, scope,
+  support, or traceable-evidence correction before experiment drafting; Finding
+  detail also shows the selected candidate's position in the active review queue and
   prioritizes the next review action for table-row checks, conflict resolution,
   mechanism-evidence decisions, paper-level scope limits, and continuous
   accept/reject/correct review

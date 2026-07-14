@@ -730,6 +730,18 @@ describe('research view shared helpers', () => {
 					review_action: {
 						code: 'verify_table_rows',
 						label: 'verify parsed table rows before accepting or correcting'
+					},
+					protocol_readiness: {
+						status: 'ready_after_review',
+						ready_after_review: true,
+						missing: ['expert_review_decision'],
+						blocking_missing: [],
+						checks: {
+							expert_review_decision: false,
+							statement: true,
+							variables: true
+						},
+						guidance: 'accept or correct before protocol use'
 					}
 				}
 			],
@@ -773,6 +785,18 @@ describe('research view shared helpers', () => {
 			review_action: {
 				code: 'verify_table_rows',
 				label: 'verify parsed table rows before accepting or correcting'
+			},
+			protocol_readiness: {
+				status: 'ready_after_review',
+				ready_after_review: true,
+				missing: ['expert_review_decision'],
+				blocking_missing: [],
+				checks: {
+					expert_review_decision: false,
+					statement: true,
+					variables: true
+				},
+				guidance: 'accept or correct before protocol use'
 			}
 		});
 	});

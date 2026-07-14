@@ -364,6 +364,14 @@ export type ResearchUnderstandingDatasetReviewAction = {
 	code: string;
 	label: string;
 };
+export type ResearchUnderstandingProtocolReadiness = {
+	status: string;
+	ready_after_review: boolean;
+	missing: string[];
+	blocking_missing: string[];
+	checks: Record<string, boolean>;
+	guidance: string;
+};
 export type ResearchUnderstandingDatasetCountEntry = {
 	name: string;
 	count: number;
@@ -374,6 +382,7 @@ export type ResearchUnderstandingDatasetSample = {
 	label_status: ResearchUnderstandingDatasetLabelStatus | null;
 	dataset_use_status: ResearchUnderstandingDatasetUseStatus | null;
 	review_action: ResearchUnderstandingDatasetReviewAction;
+	protocol_readiness: ResearchUnderstandingProtocolReadiness | null;
 };
 export type ResearchUnderstandingDataset = {
 	schema_version: string;
@@ -1136,7 +1145,23 @@ function normalizeResearchUnderstandingDatasetSample(
 		finding_id: findingId,
 		label_status: normalizeResearchUnderstandingDatasetLabelStatus(record.label_status),
 		dataset_use_status: normalizeResearchUnderstandingDatasetUseStatus(record.dataset_use_status),
-		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action)
+		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action),
+		protocol_readiness: normalizeResearchUnderstandingProtocolReadiness(record.protocol_readiness)
+	};
+}
+
+function normalizeResearchUnderstandingProtocolReadiness(
+	value: unknown
+): ResearchUnderstandingProtocolReadiness | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	return {
+		status: toText(record.status),
+		ready_after_review: Boolean(record.ready_after_review),
+		missing: toStringList(record.missing),
+		blocking_missing: toStringList(record.blocking_missing),
+		checks: toBooleanRecord(record.checks),
+		guidance: toText(record.guidance)
 	};
 }
 
@@ -1162,6 +1187,12 @@ function normalizeResearchUnderstandingDatasetUseStatus(
 ): ResearchUnderstandingDatasetUseStatus | null {
 	const status = toText(value) as ResearchUnderstandingDatasetUseStatus;
 	return ['training_ready', 'review_candidate', 'rejected'].includes(status) ? status : null;
+}
+
+function toBooleanRecord(value: unknown): Record<string, boolean> {
+	const record = asRecord(value);
+	if (!record) return {};
+	return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, Boolean(item)]));
 }
 
 function normalizeEvidenceReference(value: unknown): EvidenceReference | null {

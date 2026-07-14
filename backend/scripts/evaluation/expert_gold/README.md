@@ -324,6 +324,16 @@ python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --require-training-ready
 ```
 
+For evaluation, audit, or dataset registry import, use `training-jsonl` to keep
+the same `messages` payload plus `collection_id`, `goal_id`, `finding_id`,
+`claim_id`, reviewer/status fields, and `evidence_ref_ids` metadata:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format training-jsonl \
+  --require-training-ready
+```
+
 The dataset quality summary also reports `protocol_ready_count`. A sample is
 protocol-ready only when it is `training_ready`, has valid fine-tuning messages,
 contains a statement plus variable/outcome/direction-or-scope fields, and keeps

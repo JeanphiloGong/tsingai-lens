@@ -413,6 +413,70 @@ def test_render_messages_jsonl_exports_training_ready_messages():
         "support_grade": "partial",
         "variables": ["preheating"],
     }
+    assert "metadata" not in rows[0]
+
+
+def test_render_training_jsonl_exports_messages_with_traceable_metadata():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(collection_id="col-1", scope_type="goal")
+    export = check.build_goal_training_message_export(
+        dataset,
+        include_metadata=True,
+    )
+    body = check.render_training_jsonl_summary(
+        {"goals": [{"training_export": export}]}
+    )
+    rows = [json.loads(line) for line in body.splitlines()]
+
+    assert export["row_count"] == 1
+    assert rows[0]["messages"][0]["role"] == "user"
+    assert rows[0]["metadata"] == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "goal_id": "goal-1",
+        "sample_id": "sample-1",
+        "finding_id": "finding-1",
+        "claim_id": "claim-1",
+        "label_status": "",
+        "dataset_use_status": "training_ready",
+        "trace_status": "evidence_derived",
+        "reviewer": "",
+        "review_status": "",
+        "issue_type": "",
+        "support_grade": "partial",
+        "generalization_status": "paper_level_only",
+        "evidence_ref_ids": ["ev-1"],
+    }
+
+
+def test_check_goal_dataset_quality_includes_training_metadata_when_requested(
+    monkeypatch,
+):
+    check = _load_goal_dataset_check_module()
+    monkeypatch.setattr(
+        check,
+        "_local_goal_dataset",
+        lambda collection_id, goal_id: _dataset_payload(
+            collection_id=collection_id,
+            scope_id=goal_id,
+            scope_type="goal",
+        ),
+    )
+
+    summary = check.check_goal_dataset_quality(
+        collection_id="col-1",
+        goal_ids=("goal-1",),
+        include_training_export=True,
+        include_training_metadata=True,
+    )
+    body = check.render_training_jsonl_summary(summary)
+    rows = [json.loads(line) for line in body.splitlines()]
+
+    assert summary["goals"][0]["training_export"]["row_count"] == 1
+    assert rows[0]["metadata"]["collection_id"] == "col-1"
+    assert rows[0]["metadata"]["goal_id"] == "goal-1"
+    assert rows[0]["metadata"]["claim_id"] == "claim-1"
 
 
 def test_build_goal_review_packet_marks_protocol_blocking_gaps():

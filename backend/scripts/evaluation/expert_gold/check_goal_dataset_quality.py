@@ -93,13 +93,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("json", "review-packet", "review-jsonl", "messages-jsonl"),
+        choices=(
+            "json",
+            "review-packet",
+            "review-jsonl",
+            "messages-jsonl",
+            "training-jsonl",
+        ),
         default="json",
         help=(
             "Output format. JSON is stable for automation; review-packet is a "
             "human-readable queue of candidate findings, evidence, and links; "
             "review-jsonl emits one candidate per line; messages-jsonl emits "
-            "fine-tuning-compatible rows for training-ready samples."
+            "fine-tuning-compatible rows for training-ready samples; "
+            "training-jsonl keeps messages plus traceable sample metadata."
         ),
     )
     return parser.parse_args()
@@ -113,7 +120,8 @@ def main() -> None:
         api_base_url=args.api_base_url,
         require_training_ready=args.require_training_ready,
         include_review_packet=args.format in {"review-packet", "review-jsonl"},
-        include_training_export=args.format == "messages-jsonl",
+        include_training_export=args.format in {"messages-jsonl", "training-jsonl"},
+        include_training_metadata=args.format == "training-jsonl",
     )
     if args.format == "review-packet":
         output = render_review_packet_summary(summary) + "\n"
@@ -121,6 +129,8 @@ def main() -> None:
         output = render_review_jsonl_summary(summary)
     elif args.format == "messages-jsonl":
         output = render_messages_jsonl_summary(summary)
+    elif args.format == "training-jsonl":
+        output = render_training_jsonl_summary(summary)
     else:
         output = json.dumps(summary, ensure_ascii=False, indent=2) + "\n"
     write_stdout(output)
@@ -147,6 +157,7 @@ def check_goal_dataset_quality(
     require_training_ready: bool = False,
     include_review_packet: bool = False,
     include_training_export: bool = False,
+    include_training_metadata: bool = False,
 ) -> dict[str, Any]:
     backend_root = str(DEFAULT_BACKEND_ROOT)
     if backend_root not in sys.path:
@@ -179,6 +190,7 @@ def check_goal_dataset_quality(
         if include_training_export:
             goal_summary["training_export"] = build_goal_training_message_export(
                 dataset,
+                include_metadata=include_training_metadata,
             )
         goal_summaries.append(goal_summary)
         checks.extend(goal_summary["checks"])
@@ -494,29 +506,68 @@ def build_goal_review_packet(
     }
 
 
-def build_goal_training_message_export(dataset: dict[str, Any]) -> dict[str, Any]:
+def build_goal_training_message_export(
+    dataset: dict[str, Any],
+    *,
+    include_metadata: bool = False,
+) -> dict[str, Any]:
     rows = []
     for item in _mapping_list(dataset.get("items")):
         if _text(item.get("dataset_use_status")) != "training_ready":
             continue
         if not _has_fine_tuning_messages(item):
             continue
-        rows.append(
-            {
-                "messages": [
-                    {
-                        "role": _text(message.get("role")),
-                        "content": _text(message.get("content")),
-                    }
-                    for message in _mapping_list(item.get("training_messages"))
-                    if _text(message.get("role")) and _text(message.get("content"))
-                ]
-            }
-        )
+        row = {
+            "messages": [
+                {
+                    "role": _text(message.get("role")),
+                    "content": _text(message.get("content")),
+                }
+                for message in _mapping_list(item.get("training_messages"))
+                if _text(message.get("role")) and _text(message.get("content"))
+            ]
+        }
+        if include_metadata:
+            row["metadata"] = _training_export_metadata(dataset, item)
+        rows.append(row)
     return {
         "goal_id": _text(dataset.get("scope_id")),
         "row_count": len(rows),
         "rows": rows,
+    }
+
+
+def _training_export_metadata(
+    dataset: dict[str, Any],
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    target = _mapping(item.get("expert_target"))
+    prediction = _mapping(item.get("system_prediction"))
+    evidence_refs = _mapping_list(item.get("training_evidence_refs"))
+    return {
+        "collection_id": _text(dataset.get("collection_id")),
+        "scope_type": _text(dataset.get("scope_type")),
+        "goal_id": _text(dataset.get("scope_id")),
+        "sample_id": _text(item.get("sample_id")),
+        "finding_id": _text(item.get("finding_id")),
+        "claim_id": _text(item.get("claim_id")),
+        "label_status": _text(item.get("label_status")),
+        "dataset_use_status": _text(item.get("dataset_use_status")),
+        "trace_status": _text(item.get("trace_status")),
+        "reviewer": _text(target.get("reviewer")),
+        "review_status": _text(target.get("review_status")),
+        "issue_type": _text(target.get("issue_type")),
+        "support_grade": _text(
+            target.get("support_grade") or prediction.get("support_grade")
+        ),
+        "generalization_status": _text(
+            target.get("generalization_status")
+            or prediction.get("generalization_status")
+        ),
+        "evidence_ref_ids": _text_list(
+            target.get("evidence_ref_ids")
+            or [record.get("evidence_ref_id") for record in evidence_refs]
+        ),
     }
 
 
@@ -712,6 +763,16 @@ def render_messages_jsonl_summary(summary: dict[str, Any]) -> str:
     for goal in _mapping_list(summary.get("goals")):
         export = _mapping(goal.get("training_export"))
         rows.extend(_mapping_list(export.get("rows")))
+    return _jsonl(rows)
+
+
+def render_training_jsonl_summary(summary: dict[str, Any]) -> str:
+    rows = []
+    for goal in _mapping_list(summary.get("goals")):
+        export = _mapping(goal.get("training_export"))
+        for row in _mapping_list(export.get("rows")):
+            if isinstance(row.get("metadata"), dict):
+                rows.append(row)
     return _jsonl(rows)
 
 

@@ -30,6 +30,7 @@ PLAN_ROUTE_SPECS = (
     ("create experiment plan", PLAN_LIST_PATH, "post"),
     ("update experiment plan", PLAN_DETAIL_PATH, "patch"),
 )
+BACKEND_PYTHON = "./.venv/bin/python"
 
 
 def parse_args() -> argparse.Namespace:
@@ -852,38 +853,38 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
     collection_id = _text(summary.get("collection_id")) or DEFAULT_COLLECTION_ID
     commands = [
         (
-            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
             f"--collection-id {collection_id} --format review-packet"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
             f"--collection-id {collection_id} --format review-jsonl"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
             f"--collection-id {collection_id} --format decision-template "
             "> reviewed-findings.jsonl"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
             f"--collection-id {collection_id} --format agent-review-prompt-jsonl "
             "> agent-review-prompts.jsonl"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/merge_agent_review_results.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/merge_agent_review_results.py "
             "reviewed-findings.jsonl agent-review-results.jsonl "
             "--output-path agent-reviewed-findings.jsonl"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/check_agent_review_draft.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_agent_review_draft.py "
             "agent-reviewed-findings.jsonl --format text"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
             "agent-reviewed-findings.jsonl --output-path human-confirmed-findings.jsonl"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/import_goal_review_decisions.py "
             "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run "
             "--fail-on-warnings"
         ),
@@ -894,12 +895,12 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
         commands.extend(
             [
                 (
-                    "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+                    f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
                     f"--collection-id {collection_id} --format messages-jsonl "
                     "--require-training-ready"
                 ),
                 (
-                    "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+                    f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
                     f"--collection-id {collection_id} --format training-jsonl "
                     "--require-training-ready"
                 ),
@@ -907,7 +908,7 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
         )
     else:
         commands.append(
-            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
             f"--collection-id {collection_id} --format messages-jsonl --require-training-ready"
         )
     return commands

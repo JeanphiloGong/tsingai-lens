@@ -282,50 +282,50 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "table_row_alignment_uncertain: 1" in text
     assert "Next commands:" in text
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-packet"
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-packet"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-jsonl"
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-jsonl"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format decision-template "
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format decision-template "
         "> reviewed-findings.jsonl"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format agent-review-prompt-jsonl "
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format agent-review-prompt-jsonl "
         "> agent-review-prompts.jsonl"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/merge_agent_review_results.py "
+        "./.venv/bin/python scripts/evaluation/expert_gold/merge_agent_review_results.py "
         "reviewed-findings.jsonl agent-review-results.jsonl "
         "--output-path agent-reviewed-findings.jsonl"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_agent_review_draft.py "
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_agent_review_draft.py "
         "agent-reviewed-findings.jsonl --format text"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
+        "./.venv/bin/python scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
         "agent-reviewed-findings.jsonl --output-path human-confirmed-findings.jsonl"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+        "./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py "
         "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run --fail-on-warnings"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format messages-jsonl --require-training-ready"
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format messages-jsonl --require-training-ready"
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format training-jsonl --require-training-ready"
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format training-jsonl --require-training-ready"
         in text
     )
 

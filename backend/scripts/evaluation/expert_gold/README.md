@@ -227,12 +227,12 @@ runtime checks against a running frontend/API origin:
 ```bash
 LENS_CHECK_EMAIL=lens-admin@example.com \
 LENS_CHECK_PASSWORD=admin.. \
-python3 scripts/evaluation/expert_gold/check_goal_findings_projection.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_findings_projection.py \
   --api-base-url http://localhost:5173
 
 LENS_CHECK_EMAIL=lens-admin@example.com \
 LENS_CHECK_PASSWORD=admin.. \
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --api-base-url http://localhost:5173
 ```
 
@@ -250,7 +250,7 @@ its variables/outcomes/direction, evidence quote, source link, and direct
 frontend finding review entry, run:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format review-packet
 ```
 
@@ -261,10 +261,10 @@ For batch handoff to an independent reviewer or review agent, emit one pending
 candidate per line:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format review-jsonl
 
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format decision-template \
   > reviewed-findings.jsonl
 ```
@@ -290,7 +290,7 @@ write the agent's suggestion under `agent_review` instead. To prepare a safe
 draft file for the agent to fill, run:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format agent-review-prompt-jsonl \
   > agent-review-prompts.jsonl
 ```
@@ -305,7 +305,7 @@ After the agent writes one `agent_review` result per `finding_id`, merge those
 results back into the decision-template rows without making them importable:
 
 ```bash
-python3 scripts/evaluation/expert_gold/merge_agent_review_results.py \
+./.venv/bin/python scripts/evaluation/expert_gold/merge_agent_review_results.py \
   reviewed-findings.jsonl \
   agent-review-results.jsonl \
   --output-path agent-reviewed-findings.jsonl
@@ -337,7 +337,7 @@ After the agent reviews the source evidence, it may change only
 Check the draft before giving it to a human expert:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_agent_review_draft.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_agent_review_draft.py \
   agent-reviewed-findings.jsonl \
   --format text
 ```
@@ -350,7 +350,7 @@ set `agent_review.human_confirmed=true` only on rows they approve. Then convert
 those confirmed suggestions into an importable decision file:
 
 ```bash
-python3 scripts/evaluation/expert_gold/confirm_agent_review_decisions.py \
+./.venv/bin/python scripts/evaluation/expert_gold/confirm_agent_review_decisions.py \
   agent-reviewed-findings.jsonl \
   --output-path human-confirmed-findings.jsonl
 ```
@@ -361,13 +361,13 @@ Confirmed `unclear` or `skip` recommendations also remain skipped. Confirmed
 blocked accepts still fail and must be corrected, rejected, or left skipped.
 
 ```bash
-python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
+./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py \
   human-confirmed-findings.jsonl \
   --reviewer materials-expert@example.com \
   --dry-run \
   --fail-on-warnings
 
-python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
+./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py \
   human-confirmed-findings.jsonl \
   --reviewer materials-expert@example.com
 ```
@@ -406,7 +406,7 @@ After expert acceptance or curation creates `training_ready` samples, export the
 fine-tuning-compatible message rows with:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format messages-jsonl \
   --require-training-ready
 ```
@@ -416,7 +416,7 @@ the same `messages` payload plus `collection_id`, `goal_id`, `finding_id`,
 `claim_id`, reviewer/status fields, and `evidence_ref_ids` metadata:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format training-jsonl \
   --require-training-ready
 ```
@@ -431,7 +431,7 @@ To run the combined three-layer gate for expert review, dataset accumulation,
 and experiment-planning readiness:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py
 ```
 
 The combined check passes only when the expert-facing Findings are reviewable,
@@ -460,7 +460,7 @@ run an explicit write smoke check with an authenticated operator account:
 ```bash
 LENS_CHECK_EMAIL=lens-admin@example.com \
 LENS_CHECK_PASSWORD=admin.. \
-python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
   --api-base-url http://localhost:5173 \
   --runtime-write-check
 ```
@@ -471,7 +471,7 @@ writing runtime test data is acceptable.
 For a human-readable queue instead of the full JSON payload, run:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
   --require-complete \
   --format text
 ```
@@ -481,10 +481,10 @@ pass with only `review_candidate` samples. To require samples that can be used
 for training export, add:
 
 ```bash
-python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --require-training-ready
 
-python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
   --require-all-training-ready
 ```
 
@@ -497,7 +497,7 @@ For final acceptance of the full expert loop, use the expert satisfaction gate:
 ```bash
 LENS_CHECK_EMAIL=lens-admin@example.com \
 LENS_CHECK_PASSWORD=admin.. \
-python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
   --api-base-url http://localhost:5173 \
   --expert-satisfaction-gate \
   --format text

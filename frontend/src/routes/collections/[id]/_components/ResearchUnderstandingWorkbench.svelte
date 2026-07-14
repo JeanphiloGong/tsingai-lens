@@ -1861,7 +1861,7 @@
 
 	function rejectSelectedFinding() {
 		feedbackStatus = 'incorrect';
-		feedbackIssue = 'wrong_variable';
+		feedbackIssue = 'evidence_not_grounded';
 		feedbackNote = '';
 		activeReviewPanel = 'feedback';
 	}

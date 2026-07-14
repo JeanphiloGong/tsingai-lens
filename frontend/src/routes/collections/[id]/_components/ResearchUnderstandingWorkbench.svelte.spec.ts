@@ -4550,7 +4550,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await claimDetail.getByRole('button', { name: 'Reject' }).click();
 
 		await expect.element(claimDetail.getByLabelText('Review result')).toHaveValue('incorrect');
-		await expect.element(claimDetail.getByLabelText('Issue type')).toHaveValue('wrong_variable');
+		await expect.element(claimDetail.getByLabelText('Issue type')).toHaveValue('evidence_not_grounded');
 
 		await claimDetail.getByRole('button', { name: 'Correct' }).click();
 

@@ -3932,6 +3932,8 @@
 									<label>
 										<span>{$t('research.understanding.reviewImportTextareaLabel')}</span>
 										<textarea
+											id={`${titleId}-review-import-jsonl`}
+											name="review_import_jsonl"
 											rows="5"
 											bind:value={reviewImportText}
 											placeholder={$t('research.understanding.reviewImportTextareaPlaceholder')}

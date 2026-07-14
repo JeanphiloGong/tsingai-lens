@@ -3546,7 +3546,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			review_status: 'correct',
 			issue_type: 'none'
 		};
-		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		const importTextarea = browserPage.getByLabelText('Reviewed JSONL rows');
+		await expect.element(importTextarea).toHaveAttribute('name', 'review_import_jsonl');
+		await importTextarea.fill(JSON.stringify(row));
 		await browserPage.getByRole('button', { name: 'Dry run' }).click();
 
 		await expect

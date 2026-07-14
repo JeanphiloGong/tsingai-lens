@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 from typing import Any
 from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from urllib import request as request_url
 from urllib.error import HTTPError, URLError
 
@@ -674,7 +675,7 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                         [
                             f"       {evidence_index}. {label}{page_text}",
                             f"          quote: {_clip(record.get('quote'))}",
-                            f"          open: {_text(record.get('href')) or 'n/a'}",
+                            f"          open: {_short_review_href(record.get('href'))}",
                         ]
                     )
     if len(lines) == 4:
@@ -1173,6 +1174,27 @@ def _goal_review_url(
     if finding_id:
         params["finding_id"] = finding_id
     return f"/collections/{collection_id}/goals/{goal_id}?{urlencode(params)}"
+
+
+def _short_review_href(value: Any) -> str:
+    href = _text(value)
+    if not href:
+        return "n/a"
+    parsed = urlsplit(href)
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != "quote"
+    ]
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query),
+            parsed.fragment,
+        )
+    )
 
 
 def _text(value: Any) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
@@ -195,7 +196,7 @@ def _dataset_review_packet_response(
                     [
                         f"     {evidence_index}. {label}{page_text}",
                         f"        quote: {_clip(evidence.get('quote'), 360)}",
-                        f"        open: {evidence.get('href') or 'n/a'}",
+                        f"        open: {_short_review_href(evidence.get('href'))}",
                     ]
                 )
     if not rows:
@@ -396,6 +397,27 @@ def _clip(value: Any, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _short_review_href(value: Any) -> str:
+    href = _text(value)
+    if not href:
+        return "n/a"
+    parsed = urlsplit(href)
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != "quote"
+    ]
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query),
+            parsed.fragment,
+        )
+    )
 
 
 @router.post(

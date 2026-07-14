@@ -265,7 +265,7 @@ class FakeResearchUnderstandingFeedbackService:
                             "label": "P001 Section 3.2",
                             "source_ref": "blk_1",
                             "page": "9",
-                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1&quote=long-text",
                             "quote": "Preheating increased ductility by 14%.",
                             "source_text": (
                                 "Preheating increased ductility by 14% in LPBF 316L."
@@ -279,7 +279,7 @@ class FakeResearchUnderstandingFeedbackService:
                             "label": "P001 Section 3.2",
                             "source_ref": "blk_1",
                             "page": "9",
-                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1&quote=long-text",
                             "quote": "Preheating increased ductility by 14%.",
                             "source_text": (
                                 "Preheating increased ductility by 14% in LPBF 316L."
@@ -878,7 +878,7 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     assert line["issue_type"] == ""
     assert line["expert_note"] == ""
     assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
-    assert line["evidence"][0]["href"].endswith("source_ref=blk_1")
+    assert "source_ref=blk_1" in line["evidence"][0]["href"]
     assert line["suggested_target"]["statement"] == (
         "Preheating improves ductility by 14%."
     )
@@ -922,6 +922,7 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
     assert "review reasons: single_paper_evidence" in body
     assert "quote: Preheating increased ductility by 14%." in body
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk_1" in body
+    assert "quote=long-text" not in body
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",

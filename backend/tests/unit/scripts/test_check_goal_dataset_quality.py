@@ -40,7 +40,7 @@ def _dataset_payload(**overrides):
                 "source_kind": "text",
                 "source_ref": "blk-1",
                 "text": "Preheating increased ductility by 14%.",
-                "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
+                "href": "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text",
             }
         ],
         "training_evidence_refs": [
@@ -49,7 +49,7 @@ def _dataset_payload(**overrides):
                 "source_ref": "blk-1",
                 "label": "Paper A / p. 4",
                 "page": "4",
-                "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
+                "href": "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text",
                 "quote": "Preheating increased ductility by 14%.",
             }
         ],
@@ -296,7 +296,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     )
     assert candidate["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
     assert candidate["evidence"][0]["evidence_ref_id"] == "ev-1"
-    assert candidate["evidence"][0]["href"] == "/collections/col-1/documents/doc-1?source_ref=blk-1"
+    assert (
+        candidate["evidence"][0]["href"]
+        == "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text"
+    )
     assert "Goal goal-1: 1 review candidate(s)" in text
     assert (
         "open finding: /collections/col-1/goals/goal-1?review=queue&finding_id=finding-1"
@@ -316,6 +319,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     assert "Paper A / p. 4 / p. 4" not in text
     assert "AI suggestion; human review still required." in text
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk-1" in text
+    assert "quote=long-text" not in text
 
     summary = check.evaluate_goal_dataset_payload(dataset)
     assert summary["next_review_finding_id"] == "finding-1"
@@ -387,7 +391,10 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert "wrong_direction" in rows[0]["reject_issue_options"]
     assert rows[0]["expert_note"] == ""
     assert rows[0]["suggested_target"]["review_status"] == "correct"
-    assert rows[0]["evidence"][0]["href"] == "/collections/col-1/documents/doc-1?source_ref=blk-1"
+    assert (
+        rows[0]["evidence"][0]["href"]
+        == "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text"
+    )
 
 
 def test_render_messages_jsonl_exports_training_ready_messages():

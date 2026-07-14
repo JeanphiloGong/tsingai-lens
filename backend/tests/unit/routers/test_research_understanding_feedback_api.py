@@ -1094,6 +1094,50 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
     }
 
 
+def test_research_understanding_dataset_route_exports_agent_review_prompt(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="agent_review_prompt_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["task"] == "review_lens_research_finding"
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert "action" not in line
+    assert line["finding"]["statement"] == "Preheating improves ductility."
+    assert line["acceptance_gate"]["status"] == "review_required"
+    assert line["protocol_readiness"]["status"] == "ready_after_review"
+    assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert line["output_schema"]["agent_review"]["human_confirmed"] is False
+    assert line["output_schema"]["agent_review"]["recommendation"] == (
+        "accept|reject|correct|unclear|skip"
+    )
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
 def test_research_understanding_dataset_route_exports_review_packet(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
     monkeypatch.setattr(
@@ -1407,6 +1451,43 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
         "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
     }
     assert line["suggested_target"]["evidence_ref_ids"] == ["ev-1"]
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_agent_review_prompt(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="agent_review_prompt_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["task"] == "review_lens_research_finding"
+    assert line["scope_type"] == "goal"
+    assert line["goal_id"] == "goal-1"
+    assert "action" not in line
+    assert line["output_schema"]["agent_review"]["reviewer"] == "ai-reviewer-<name>"
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",

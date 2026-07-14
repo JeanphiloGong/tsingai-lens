@@ -3197,6 +3197,25 @@ describe('ResearchUnderstandingWorkbench', () => {
 		);
 		expect(decisionTemplateUrl.searchParams.get('format')).toBe('decision_template');
 
+		const agentReviewPromptUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Agent review prompts' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(agentReviewPromptUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(agentReviewPromptUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(agentReviewPromptUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(agentReviewPromptUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(agentReviewPromptUrl.searchParams.get('format')).toBe(
+			'agent_review_prompt_jsonl'
+		);
+
 		const datasetGetCall = fetchMock.mock.calls.find(([input, init]) => {
 			const url = requestUrl(input as string | URL | Request);
 			return (
@@ -3409,6 +3428,24 @@ describe('ResearchUnderstandingWorkbench', () => {
 		);
 		expect(collectionDecisionTemplateUrl.searchParams.get('format')).toBe(
 			'decision_template'
+		);
+
+		const collectionAgentReviewPromptUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection agent review prompts' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionAgentReviewPromptUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionAgentReviewPromptUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionAgentReviewPromptUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(collectionAgentReviewPromptUrl.searchParams.get('format')).toBe(
+			'agent_review_prompt_jsonl'
 		);
 	});
 

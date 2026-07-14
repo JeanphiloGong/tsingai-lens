@@ -171,6 +171,87 @@ def _dataset_decision_template_response(
     return Response(content=body, media_type="application/x-ndjson")
 
 
+def _dataset_agent_review_prompt_response(
+    response: ResearchUnderstandingDatasetResponse,
+) -> Response:
+    rows = [
+        _agent_review_prompt_row(_review_jsonl_row(response.collection_id, item))
+        for item in response.items
+        if item.dataset_use_status == "review_candidate"
+    ]
+    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    if body:
+        body += "\n"
+    return Response(content=body, media_type="application/x-ndjson")
+
+
+def _agent_review_prompt_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task": "review_lens_research_finding",
+        "collection_id": row["collection_id"],
+        "goal_id": row["goal_id"],
+        "scope_type": row["scope_type"],
+        "scope_id": row["scope_id"],
+        "sample_id": row["sample_id"],
+        "finding_id": row["finding_id"],
+        "claim_id": row["claim_id"],
+        "reviewer_role": "independent_materials_science_reviewer",
+        "instructions": [
+            (
+                "Judge whether the cited evidence supports the finding, including "
+                "variable, outcome, direction, scope, and paper-level limitations."
+            ),
+            (
+                "Return an agent_review object only; do not change top-level "
+                "action or mark human_confirmed."
+            ),
+            (
+                "Use recommendation=accept only when the evidence and acceptance "
+                "gate checks pass; use correct for a narrower evidence-grounded "
+                "target; use reject when evidence does not support the finding; "
+                "use unclear when source review is still insufficient."
+            ),
+        ],
+        "finding": {
+            "statement": row["statement"],
+            "variables": row["variables"],
+            "mediators": row["mediators"],
+            "outcomes": row["outcomes"],
+            "direction": row["direction"],
+            "scope_summary": row["scope_summary"],
+            "support_grade": row["support_grade"],
+            "review_status": row["review_status"],
+            "review_reasons": row["review_reasons"],
+            "warnings": row["warnings"],
+            "recommended_action_code": row["recommended_action_code"],
+            "recommended_action": row["recommended_action"],
+        },
+        "acceptance_gate": row["acceptance_gate"],
+        "protocol_readiness": row["protocol_readiness"],
+        "evidence": row["evidence"],
+        "suggested_target": row["suggested_target"],
+        "output_schema": {
+            "agent_review": {
+                "reviewer": "ai-reviewer-<name>",
+                "recommendation": "accept|reject|correct|unclear|skip",
+                "issue_type": "none|" + "|".join(REJECT_ISSUE_OPTIONS),
+                "note": "short evidence-grounded rationale",
+                "suggested_target": {
+                    "statement": "required for correct",
+                    "variables": ["..."],
+                    "mediators": ["..."],
+                    "outcomes": ["..."],
+                    "direction": "...",
+                    "scope_summary": "...",
+                    "support_grade": "strong|partial|weak|conflicted",
+                    "evidence_ref_ids": ["..."],
+                },
+                "human_confirmed": False,
+            }
+        },
+    }
+
+
 def _decision_template_row(row: dict[str, Any]) -> dict[str, Any]:
     evidence_ref_ids = [
         ref_id for record in row["evidence"] if (ref_id := _text(record.get("evidence_ref_id")))
@@ -815,6 +896,8 @@ async def export_research_understanding_dataset(
         return _dataset_review_jsonl_response(response)
     if format == "decision_template":
         return _dataset_decision_template_response(response)
+    if format == "agent_review_prompt_jsonl":
+        return _dataset_agent_review_prompt_response(response)
     if format == "review_packet":
         return _dataset_review_packet_response(response)
     return response
@@ -854,6 +937,8 @@ async def export_collection_research_understanding_dataset(
         return _dataset_review_jsonl_response(response)
     if format == "decision_template":
         return _dataset_decision_template_response(response)
+    if format == "agent_review_prompt_jsonl":
+        return _dataset_agent_review_prompt_response(response)
     if format == "review_packet":
         return _dataset_review_packet_response(response)
     return response

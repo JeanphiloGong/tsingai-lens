@@ -370,6 +370,7 @@ export type ResearchUnderstandingDatasetExportFormat =
 	| 'training_jsonl'
 	| 'review_jsonl'
 	| 'decision_template'
+	| 'agent_review_prompt_jsonl'
 	| 'review_packet';
 export type ResearchUnderstandingDatasetFilters = {
 	scope_type: string;

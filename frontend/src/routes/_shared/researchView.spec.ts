@@ -125,6 +125,34 @@ describe('research view shared helpers', () => {
 		);
 	});
 
+	it('builds agent review prompt dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'agent_review_prompt_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'agent_review_prompt_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
+		);
+	});
+
 	it('fetches collection and document research views through same-origin api paths', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',

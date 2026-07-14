@@ -3887,6 +3887,9 @@
 										<a href={datasetDownloadUrl('decision_template', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadDecisionTemplate')}
 										</a>
+										<a href={datasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadAgentReviewPrompt')}
+										</a>
 										<a href={datasetDownloadUrl('review_packet', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadReviewPacket')}
 										</a>
@@ -3900,6 +3903,9 @@
 										</a>
 										<a href={collectionDatasetDownloadUrl('decision_template', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadCollectionDecisionTemplate')}
+										</a>
+										<a href={collectionDatasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadCollectionAgentReviewPrompt')}
 										</a>
 										<a href={collectionDatasetDownloadUrl('review_packet', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadCollectionReviewPacket')}

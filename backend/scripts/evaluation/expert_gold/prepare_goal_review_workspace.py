@@ -144,6 +144,11 @@ def _write_workspace_files(
             render_review_dashboard(summary),
             "Short goal-by-goal review queue with risks and source links.",
         ),
+        (
+            "dataset-readiness.md",
+            render_dataset_readiness_report(summary),
+            "Training export and protocol readiness by goal.",
+        ),
     ]
     files: list[dict[str, Any]] = []
     for filename, content, description in rendered:
@@ -290,6 +295,68 @@ def render_review_dashboard(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_dataset_readiness_report(summary: dict[str, Any]) -> str:
+    goals = _mapping_list(summary.get("goals"))
+    total_training = _sum_goal_int(summary, "training_ready_count")
+    total_messages = _sum_goal_int(summary, "training_message_ready_count")
+    total_protocol = _sum_goal_int(summary, "protocol_ready_count")
+    total_review = _sum_goal_int(summary, "review_candidate_count")
+    lines = [
+        "# Lens Dataset Readiness",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        f"Status: {_text(summary.get('status')) or 'n/a'}",
+        "",
+        "## Totals",
+        "",
+        f"- training_ready findings: {total_training}",
+        f"- training-message-ready findings: {total_messages}",
+        f"- protocol-ready findings: {total_protocol}",
+        f"- pending review candidates: {total_review}",
+        "",
+        "## Goal Readiness",
+        "",
+        (
+            "| Goal | Training ready | Messages | Protocol inputs | "
+            "Review candidates | Next action |"
+        ),
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for goal in goals:
+        goal_id = _text(goal.get("goal_id"))
+        next_action = _text(_mapping(goal.get("next_review_action")).get("label"))
+        if not next_action:
+            next_action = _readiness_next_action(goal)
+        lines.append(
+            "| "
+            f"{_markdown_cell(goal_id, 80)} | "
+            f"{int(goal.get('training_ready_count') or 0)} | "
+            f"{int(goal.get('training_message_ready_count') or 0)} | "
+            f"{int(goal.get('protocol_ready_count') or 0)} | "
+            f"{int(goal.get('review_candidate_count') or 0)} | "
+            f"{_markdown_cell(next_action, 120)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Export Rule",
+            "",
+            (
+                "- `training-jsonl --require-training-ready` should be treated as "
+                "complete only after every target goal has at least one "
+                "training-ready sample."
+            ),
+            (
+                "- Existing training-ready rows may still be emitted while the "
+                "overall command fails for unreviewed goals; use this report to "
+                "find the remaining goals."
+            ),
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_text_summary(result: dict[str, Any]) -> str:
     lines = [
         f"Prepared Lens goal review workspace: {result['output_dir']}",
@@ -397,6 +464,18 @@ def _markdown_link(label: str, href: str) -> str:
     if not href:
         return "n/a"
     return f"[{label}]({href})"
+
+
+def _readiness_next_action(goal: dict[str, Any]) -> str:
+    if int(goal.get("review_candidate_count") or 0) > 0:
+        return "review pending candidates"
+    if int(goal.get("training_ready_count") or 0) == 0:
+        return "add or confirm at least one expert label"
+    if int(goal.get("training_message_ready_count") or 0) == 0:
+        return "repair training message fields"
+    if int(goal.get("protocol_ready_count") or 0) == 0:
+        return "repair protocol input fields"
+    return "ready for training export and protocol drafting"
 
 
 def _line_count(value: str) -> int:

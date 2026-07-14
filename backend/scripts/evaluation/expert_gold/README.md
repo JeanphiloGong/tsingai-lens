@@ -258,9 +258,10 @@ frontend finding review entry, run:
 This creates one read-only handoff directory with `review-packet.txt`,
 `review-candidates.jsonl`, `reviewed-findings.template.jsonl`,
 `agent-review-prompts.jsonl`, `review-dashboard.md`,
-`dataset-quality-summary.json`, `manifest.json`, and `README.txt`. It does not
-import labels or mutate collection data; it only packages the current Findings
-review queue so an expert can inspect source links and fill explicit decisions.
+`dataset-readiness.md`, `dataset-quality-summary.json`, `manifest.json`, and
+`README.txt`. It does not import labels or mutate collection data; it only
+packages the current Findings review queue so an expert can inspect source
+links, see which goals are not yet training-ready, and fill explicit decisions.
 
 To print the packet directly instead of preparing a workspace, run:
 

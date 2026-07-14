@@ -37,7 +37,10 @@ def _summary():
             {
                 "goal_id": "goal-1",
                 "training_ready_count": 0,
+                "training_message_ready_count": 0,
                 "protocol_ready_count": 0,
+                "review_candidate_count": 1,
+                "next_review_action": {"label": "accept as paper-level"},
                 "review_packet": {
                     "goal_id": "goal-1",
                     "candidates": [
@@ -113,6 +116,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "reviewed-findings.template.jsonl",
         "agent-review-prompts.jsonl",
         "review-dashboard.md",
+        "dataset-readiness.md",
         "README.txt",
         "manifest.json",
     ]
@@ -129,6 +133,9 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     dashboard = (workspace / "review-dashboard.md").read_text(encoding="utf-8")
     assert "### goal-1" in dashboard
     assert "Direct accept blocked: 1" in dashboard
+    readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
+    assert "pending review candidates: 1" in readiness
+    assert "| goal-1 | 0 | 0 | 0 | 1 | accept as paper-level |" in readiness
     assert json.loads(
         (workspace / "reviewed-findings.template.jsonl").read_text(encoding="utf-8")
     ) == {"finding_id": "finding-1", "action": "skip"}
@@ -196,3 +203,18 @@ def test_render_review_dashboard_summarizes_goal_risks():
         "| Preheating increased ductility. | accept as paper-level | "
         "Paper A / p. 4 | [open](/collections/col-1/goals/goal-1?finding_id=finding-1) |"
     ) in dashboard
+
+
+def test_render_dataset_readiness_report_explains_partial_exports():
+    module = _load_workspace_module()
+
+    report = module.render_dataset_readiness_report(_summary())
+
+    assert "# Lens Dataset Readiness" in report
+    assert "training_ready findings: 0" in report
+    assert "pending review candidates: 1" in report
+    assert "| goal-1 | 0 | 0 | 0 | 1 | accept as paper-level |" in report
+    assert (
+        "Existing training-ready rows may still be emitted while the overall command fails"
+        in report
+    )

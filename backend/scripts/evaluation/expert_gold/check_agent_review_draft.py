@@ -97,6 +97,7 @@ def check_agent_review_draft(
         "total_rows": len(rows),
         "agent_reviewed_count": agent_reviewed_count,
         "counts": counts,
+        "goals": _goal_handoff(row_results),
         "errors": errors,
         "warnings": warnings,
         "human_handoff": {
@@ -157,6 +158,21 @@ def render_text_summary(summary: dict[str, Any]) -> str:
     if handoff:
         lines.append("")
         lines.append(str(handoff.get("required_action") or ""))
+    goals = _mapping_list(summary.get("goals"))
+    if goals:
+        lines.append("")
+        lines.append("Goal handoff:")
+        for goal in goals:
+            lines.append(
+                "- "
+                f"{goal.get('goal_id') or 'n/a'}: "
+                f"reviewed={goal.get('agent_reviewed_count', 0)} "
+                f"accept={goal.get('accept_count', 0)} "
+                f"reject={goal.get('reject_count', 0)} "
+                f"correct={goal.get('correct_count', 0)} "
+                f"unclear={goal.get('unclear_count', 0)} "
+                f"next={goal.get('next_action') or 'n/a'}"
+            )
     return "\n".join(lines)
 
 
@@ -177,6 +193,9 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     if not agent_review:
         warnings.append(_issue(line_number, finding_id, "missing agent_review"))
         return {
+            "collection_id": _text(row.get("collection_id")),
+            "goal_id": _text(row.get("goal_id")),
+            "finding_id": finding_id,
             "recommendation": "missing",
             "errors": errors,
             "warnings": warnings,
@@ -248,9 +267,71 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     if not _mapping_list(row.get("evidence")):
         warnings.append(_issue(line_number, finding_id, "row has no evidence summary"))
     return {
+        "collection_id": _text(row.get("collection_id")),
+        "goal_id": _text(row.get("goal_id")),
+        "finding_id": finding_id,
         "recommendation": recommendation or "missing",
         "errors": errors,
         "warnings": warnings,
+    }
+
+
+def _goal_handoff(row_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    goals: dict[tuple[str, str], dict[str, Any]] = {}
+    for result in row_results:
+        key = (_text(result.get("collection_id")), _text(result.get("goal_id")))
+        goal = goals.setdefault(
+            key,
+            {
+                "collection_id": key[0],
+                "goal_id": key[1],
+                "total_rows": 0,
+                "agent_reviewed_count": 0,
+                "accept_count": 0,
+                "reject_count": 0,
+                "correct_count": 0,
+                "unclear_count": 0,
+                "skip_count": 0,
+                "missing_count": 0,
+                "first_unresolved_finding_id": "",
+            },
+        )
+        recommendation = _text(result.get("recommendation")) or "missing"
+        goal["total_rows"] += 1
+        if recommendation in {"accept", "reject", "correct", "unclear"}:
+            goal["agent_reviewed_count"] += 1
+        count_key = f"{recommendation}_count"
+        if count_key in goal:
+            goal[count_key] += 1
+        if recommendation in {"missing", "skip", "unclear"} and not goal[
+            "first_unresolved_finding_id"
+        ]:
+            goal["first_unresolved_finding_id"] = _text(result.get("finding_id"))
+    return [_finalize_goal_handoff(goal) for goal in goals.values()]
+
+
+def _finalize_goal_handoff(goal: dict[str, Any]) -> dict[str, Any]:
+    actionable = (
+        int(goal.get("accept_count") or 0)
+        + int(goal.get("reject_count") or 0)
+        + int(goal.get("correct_count") or 0)
+    )
+    unresolved = (
+        int(goal.get("unclear_count") or 0)
+        + int(goal.get("skip_count") or 0)
+        + int(goal.get("missing_count") or 0)
+    )
+    if actionable:
+        next_action = "human confirm actionable recommendations"
+    elif unresolved:
+        next_action = "resolve unclear or missing agent recommendations"
+    else:
+        next_action = "no pending recommendations"
+    return {
+        **goal,
+        "actionable_count": actionable,
+        "unresolved_count": unresolved,
+        "next_action": next_action,
     }
 
 

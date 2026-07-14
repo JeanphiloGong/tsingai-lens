@@ -93,6 +93,24 @@ def test_check_agent_review_draft_accepts_safe_silver_draft(tmp_path):
     assert summary["total_rows"] == 2
     assert summary["agent_reviewed_count"] == 2
     assert summary["counts"] == {"accept": 1, "correct": 1}
+    assert summary["goals"] == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-1",
+            "total_rows": 2,
+            "agent_reviewed_count": 2,
+            "accept_count": 1,
+            "reject_count": 0,
+            "correct_count": 1,
+            "unclear_count": 0,
+            "skip_count": 0,
+            "missing_count": 0,
+            "first_unresolved_finding_id": "",
+            "actionable_count": 2,
+            "unresolved_count": 0,
+            "next_action": "human confirm actionable recommendations",
+        }
+    ]
     assert summary["errors"] == []
     assert summary["warnings"] == [
         {
@@ -106,6 +124,12 @@ def test_check_agent_review_draft_accepts_safe_silver_draft(tmp_path):
     ]
     assert summary["human_handoff"]["ready_for_human_review"] is True
     assert "Rows remain action=skip" in summary["human_handoff"]["import_guard"]
+    text = module.render_text_summary(summary)
+    assert "Goal handoff:" in text
+    assert (
+        "- goal-1: reviewed=2 accept=1 reject=0 correct=1 unclear=0 "
+        "next=human confirm actionable recommendations"
+    ) in text
 
 
 def test_check_agent_review_draft_rejects_import_actions(tmp_path):
@@ -178,5 +202,45 @@ def test_check_agent_review_draft_warnings_can_fail(tmp_path):
             "line": 1,
             "finding_id": "finding-1",
             "message": "agent reviewed row should include agent_review.note",
+        }
+    ]
+
+
+def test_check_agent_review_draft_groups_unresolved_rows_by_goal(tmp_path):
+    module = _load_check_module()
+    input_path = tmp_path / "agent-draft.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _row(
+                finding_id="finding-1",
+                agent_review={
+                    "reviewer": "ai-reviewer-codex",
+                    "recommendation": "unclear",
+                    "note": "Evidence needs expert judgment.",
+                },
+            ),
+            _row(finding_id="finding-2", agent_review={}),
+        ],
+    )
+
+    summary = module.check_agent_review_draft(input_path)
+
+    assert summary["goals"] == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-1",
+            "total_rows": 2,
+            "agent_reviewed_count": 1,
+            "accept_count": 0,
+            "reject_count": 0,
+            "correct_count": 0,
+            "unclear_count": 1,
+            "skip_count": 0,
+            "missing_count": 1,
+            "first_unresolved_finding_id": "finding-1",
+            "actionable_count": 0,
+            "unresolved_count": 2,
+            "next_action": "resolve unclear or missing agent recommendations",
         }
     ]

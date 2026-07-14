@@ -114,6 +114,80 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 				}
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
+			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						status: 'ok',
+						dry_run: true,
+						total_rows: 2,
+						written_count: 0,
+						skipped_count: 1,
+						counts: {
+							accept: 1,
+							skip: 1
+						},
+						errors: [],
+						warnings: [],
+						review_progress: {
+							actionable_count: 1,
+							skipped_count: 1,
+							accept_count: 1,
+							reject_count: 0,
+							correct_count: 0
+						},
+						decision_progress_by_goal: [
+							{
+								goal_id: 'goal_1',
+								actionable_count: 1,
+								skipped_count: 1,
+								accept_count: 1,
+								reject_count: 0,
+								correct_count: 0,
+								next_review_finding_id: 'finding_claim_2'
+							}
+						],
+						affected_goals: [
+							{
+								goal_id: 'goal_1',
+								training_ready_count: 1,
+								training_message_count: 1,
+								protocol_ready_count: 1,
+								review_candidate_count: 1,
+								rejected_count: 0,
+								pending_actionable_count: 1,
+								pending_accept_count: 1,
+								pending_reject_count: 0,
+								pending_correct_count: 0,
+								projected_training_ready_count: 1,
+								projected_review_candidate_count: 1,
+								projected_rejected_count: 0
+							}
+						],
+						readiness_summary: {
+							goal_count: 1,
+							projected_training_ready_goal_count: 1,
+							projected_training_message_goal_count: 1,
+							projected_protocol_ready_goal_count: 1,
+							projected_review_candidate_count: 1,
+							projected_rejected_count: 0,
+							ready_for_training_export: true,
+							ready_for_protocol_drafting: true
+						},
+						review_scope_gate: {
+							status: 'blocked',
+							ready_for_expert_satisfaction_gate: false,
+							blocking_reasons: ['unchecked_rows_remain', 'review_candidates_remain'],
+							actionable_count: 1,
+							skipped_count: 1,
+							ready_for_training_export: true,
+							ready_for_protocol_drafting: true,
+							goals_still_needing_review_count: 1,
+							goals_missing_training_messages_count: 0,
+							goals_missing_protocol_ready_count: 0
+						}
+					})
+				);
+			}
 			if (path.endsWith('/research-understanding/dataset')) {
 				return Promise.resolve(
 					jsonResponse({
@@ -404,7 +478,11 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
 			.toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Accept' }).first().click();
+		await browserPage
+			.getByRole('row', { name: /Heat treatment changes tensile strength\./ })
+			.getByRole('button', { name: 'Review evidence' })
+			.click();
+		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
 		const feedbackCall = fetchMock.mock.calls.find(
 			([input, init]) =>
 				requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
@@ -436,8 +514,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.not.toBeInTheDocument();
 		await browserPage
 			.getByRole('row', { name: /Heat treatment changes tensile strength\./ })
-			.getByRole('button', { name: 'Accept' })
+			.getByRole('button', { name: 'Review evidence' })
 			.click();
+		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
 		await vi.waitFor(() => {
 			const feedbackPosts = fetchMock.mock.calls.filter(
 				([input, init]) =>
@@ -446,10 +525,12 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			);
 			expect(feedbackPosts).toHaveLength(1);
 		});
+		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await browserPage
 			.getByRole('row', { name: /Aging treatment improves yield strength\./ })
-			.getByRole('button', { name: 'Accept' })
+			.getByRole('button', { name: 'Review evidence' })
 			.click();
+		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
 
 		await vi.waitFor(() => {
 			const feedbackPosts = fetchMock.mock.calls.filter(
@@ -495,6 +576,35 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Gold').first()).toBeInTheDocument();
 	});
 
+	it('shows the expert satisfaction gate after decision import dry-run', async () => {
+		render(Page);
+
+		await browserPage.getByText('Dataset', { exact: true }).click();
+		await browserPage
+			.getByLabelText('Reviewed JSONL rows')
+			.fill(
+				[
+					'{"finding_id":"finding_claim_1","claim_id":"claim_1","action":"accept"}',
+					'{"finding_id":"finding_claim_2","claim_id":"claim_2","action":"skip"}'
+				].join('\n')
+			);
+		await browserPage.getByRole('button', { name: 'Dry run' }).click();
+
+		await expect.element(browserPage.getByText('Expert satisfaction gate')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Gate status: blocked.')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Actionable rows 1, skipped rows 1. Training export ready; protocol drafting ready.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Some rows are still skipped or unchecked.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Some findings still need review.')).toBeInTheDocument();
+	});
+
 	it('opens the rejection form from a finding table row', async () => {
 		render(Page);
 
@@ -502,7 +612,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 
 		await expect.element(browserPage.getByRole('heading', { name: 'Expert feedback' })).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Review result')).toHaveValue('incorrect');
-		await expect.element(browserPage.getByLabelText('Issue type')).toHaveValue('wrong_variable');
+		await expect.element(browserPage.getByLabelText('Issue type')).toHaveValue('evidence_not_grounded');
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Save feedback', exact: true }))
 			.toBeInTheDocument();

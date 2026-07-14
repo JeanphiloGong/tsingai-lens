@@ -3418,6 +3418,64 @@
 		});
 	}
 
+	function reviewImportHasScopeGate(summary: ResearchUnderstandingReviewDecisionImportResponse) {
+		return Object.keys(summary.review_scope_gate).length > 0;
+	}
+
+	function reviewImportScopeGateStatusText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.review_scope_gate;
+		const ready = Boolean(record.ready_for_expert_satisfaction_gate);
+		return $t('research.understanding.reviewImportScopeGateStatus', {
+			status: ready
+				? $t('research.understanding.reviewImportScopeGateReady')
+				: $t('research.understanding.reviewImportScopeGateBlocked')
+		});
+	}
+
+	function reviewImportScopeGateCountsText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.review_scope_gate;
+		return $t('research.understanding.reviewImportScopeGateCounts', {
+			actionable: Number(record.actionable_count ?? 0),
+			skipped: Number(record.skipped_count ?? 0),
+			trainingStatus: record.ready_for_training_export
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady'),
+			protocolStatus: record.ready_for_protocol_drafting
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady')
+		});
+	}
+
+	function reviewImportScopeGateReasonLabel(reason: string) {
+		switch (reason) {
+			case 'no_actionable_decisions':
+				return $t('research.understanding.reviewImportScopeGateReasonNoActionable');
+			case 'unchecked_rows_remain':
+				return $t('research.understanding.reviewImportScopeGateReasonUncheckedRows');
+			case 'review_candidates_remain':
+				return $t('research.understanding.reviewImportScopeGateReasonReviewCandidates');
+			case 'training_export_not_ready':
+				return $t('research.understanding.reviewImportScopeGateReasonTraining');
+			case 'protocol_drafting_not_ready':
+				return $t('research.understanding.reviewImportScopeGateReasonProtocol');
+			default:
+				return humanizeCode(reason);
+		}
+	}
+
+	function reviewImportScopeGateReasons(summary: ResearchUnderstandingReviewDecisionImportResponse) {
+		const reasons = summary.review_scope_gate.blocking_reasons;
+		return Array.isArray(reasons)
+			? reasons
+					.filter((reason): reason is string => typeof reason === 'string' && reason.length > 0)
+					.map((reason) => reviewImportScopeGateReasonLabel(reason))
+			: [];
+	}
+
 	function reviewImportGoalLabel(record: Record<string, unknown>) {
 		return typeof record.goal_id === 'string' && record.goal_id
 			? formatShortIdentifier(record.goal_id)
@@ -4285,6 +4343,23 @@
 												<strong>{$t('research.understanding.reviewImportReadinessTitle')}</strong>
 												<small>{reviewImportReadinessCountsText(reviewImportSummary)}</small>
 												<small>{reviewImportReadinessGateText(reviewImportSummary)}</small>
+											</div>
+										{/if}
+										{#if reviewImportHasScopeGate(reviewImportSummary)}
+											<div
+												class="research-understanding-workbench__review-import-scope-gate"
+												aria-label={$t('research.understanding.reviewImportScopeGateTitle')}
+											>
+												<strong>{$t('research.understanding.reviewImportScopeGateTitle')}</strong>
+												<small>{reviewImportScopeGateStatusText(reviewImportSummary)}</small>
+												<small>{reviewImportScopeGateCountsText(reviewImportSummary)}</small>
+												{#if reviewImportScopeGateReasons(reviewImportSummary).length}
+													<ul aria-label={$t('research.understanding.reviewImportScopeGateReasonsTitle')}>
+														{#each reviewImportScopeGateReasons(reviewImportSummary) as reason (reason)}
+															<li>{reason}</li>
+														{/each}
+													</ul>
+												{/if}
 											</div>
 										{/if}
 										{#if reviewImportSummary.decision_progress_by_goal.length}
@@ -6535,6 +6610,7 @@
 	.research-understanding-workbench__review-import-heading strong,
 	.research-understanding-workbench__review-import label span,
 	.research-understanding-workbench__review-import-progress strong,
+	.research-understanding-workbench__review-import-scope-gate strong,
 	.research-understanding-workbench__review-import-issues strong {
 		color: var(--text-primary);
 		font-size: 12px;
@@ -6642,6 +6718,33 @@
 		display: grid;
 		gap: 5px;
 		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-scope-gate {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 8px 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-import-scope-gate small {
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-scope-gate ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__review-import-progress ul {

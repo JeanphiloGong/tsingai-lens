@@ -266,12 +266,13 @@ python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
 ```
 
 Each exported JSONL row defaults to `"action": "skip"` and includes
-`allowed_actions` plus `reject_issue_options`. The reviewer changes only rows
-they have checked to `accept`, `reject`, or `correct`; unchanged rows stay
-skipped and are not written as labels. `reject` rows need an `issue_type` such
-as `wrong_variable`, `wrong_direction`, or `insufficient_evidence`. `correct`
-rows need a corrected `suggested_target.statement` and at least one
-`evidence_ref_id`. Validate first, then import with a human reviewer id:
+`allowed_actions`, `reject_issue_options`, `review_instructions`, and
+`review_risk_flags`. The reviewer changes only rows they have checked to
+`accept`, `reject`, or `correct`; unchanged rows stay skipped and are not
+written as labels. `reject` rows need an `issue_type` such as `wrong_variable`,
+`wrong_direction`, or `insufficient_evidence`. `correct` rows need a corrected
+`suggested_target.statement` and at least one `evidence_ref_id`. Validate first,
+then import with a human reviewer id:
 
 ```bash
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \

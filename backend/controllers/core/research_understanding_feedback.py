@@ -40,6 +40,20 @@ REJECT_ISSUE_OPTIONS = (
     "unclear_statement",
     "other",
 )
+REVIEW_INSTRUCTIONS = (
+    "Set action=accept only after the finding, direction, scope, and cited "
+    "evidence match. Set action=reject with issue_type when the evidence does "
+    "not support the finding. Set action=correct with suggested_target when "
+    "the finding is partly right. Leave action=skip for unchecked rows."
+)
+REVIEW_RISK_FLAGS = {
+    "accept_as_paper_level": "Paper-level evidence; do not treat as cross-paper conclusion without confirmation.",
+    "review_table_rows": "Table-row finding; verify selected rows and changed variables before accepting.",
+    "verify_table_rows": "Parsed table alignment is uncertain; verify source table before accepting.",
+    "review_table_variables": "Multiple table variables may change together; avoid assigning a single-variable effect without checking.",
+    "check_mechanism_requirement": "Mechanism evidence may be missing; decide whether the final label needs mechanism support.",
+    "resolve_conflict": "Conflicting direction; resolve evidence conflict before downstream use.",
+}
 
 
 def _dataset_jsonl_response(
@@ -107,6 +121,12 @@ def _review_jsonl_row(
         "warnings": _strings(prediction.get("warnings")),
         "recommended_action": _text(review_action.get("label")),
         "recommended_action_code": _text(review_action.get("code")),
+        "review_instructions": REVIEW_INSTRUCTIONS,
+        "review_risk_flags": _review_risk_flags(
+            _text(review_action.get("code")),
+            _strings(prediction.get("review_reasons")),
+            _strings(prediction.get("warnings")),
+        ),
         "action": "skip",
         "allowed_actions": list(REVIEW_ACTION_OPTIONS),
         "issue_type": "",
@@ -115,6 +135,20 @@ def _review_jsonl_row(
         "suggested_target": expert_target,
         "evidence": [_review_evidence_record(record) for record in evidence],
     }
+
+
+def _review_risk_flags(
+    recommended_action_code: str,
+    review_reasons: list[str],
+    warnings: list[str],
+) -> list[str]:
+    flags = []
+    if recommended_action_code in REVIEW_RISK_FLAGS:
+        flags.append(REVIEW_RISK_FLAGS[recommended_action_code])
+    for value in [*review_reasons, *warnings]:
+        if value in REVIEW_RISK_FLAGS and REVIEW_RISK_FLAGS[value] not in flags:
+            flags.append(REVIEW_RISK_FLAGS[value])
+    return flags
 
 
 def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:

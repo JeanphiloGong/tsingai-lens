@@ -272,6 +272,10 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert rows[0]["mediators"] == ["grain refinement"]
     assert rows[0]["outcomes"] == ["ductility"]
     assert rows[0]["recommended_action_code"] == "accept_as_paper_level"
+    assert rows[0]["review_instructions"].startswith("Set action=accept")
+    assert rows[0]["review_risk_flags"] == [
+        "Paper-level evidence; do not treat as cross-paper conclusion without confirmation."
+    ]
     assert rows[0]["action"] == "skip"
     assert rows[0]["allowed_actions"] == ["accept", "reject", "correct", "skip"]
     assert "wrong_direction" in rows[0]["reject_issue_options"]

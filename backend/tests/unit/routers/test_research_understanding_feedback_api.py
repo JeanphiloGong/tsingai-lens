@@ -773,6 +773,10 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     assert line["outcomes"] == ["ductility"]
     assert line["direction"] == "increases"
     assert line["recommended_action"] == "Accept as paper-level evidence"
+    assert line["review_instructions"].startswith("Set action=accept")
+    assert line["review_risk_flags"] == [
+        "Paper-level evidence; do not treat as cross-paper conclusion without confirmation."
+    ]
     assert line["action"] == "skip"
     assert "accept" in line["allowed_actions"]
     assert "wrong_direction" in line["reject_issue_options"]

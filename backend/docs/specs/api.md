@@ -730,8 +730,9 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 envelope，`jsonl` 返回 newline-delimited 完整 sample，
 `messages_jsonl` 返回 newline-delimited `{"messages": [...]}` 行，便于常见
 chat evaluation/fine-tuning 工具直接消费。`review_jsonl` 返回可编辑的人工复核模板，
-每行默认 `action=skip`，并包含 `allowed_actions`、`reject_issue_options`、候选
-Finding 字段、推荐动作和证据片段；专家填写 `accept | reject | correct` 后可交给
+每行默认 `action=skip`，并包含 `allowed_actions`、`reject_issue_options`、
+`review_instructions`、`review_risk_flags`、候选 Finding 字段、推荐动作和证据片段；
+专家填写 `accept | reject | correct` 后可交给
 `scripts/evaluation/expert_gold/import_goal_review_decisions.py` 导入。前端下载训练集时应使用
 `dataset_use_status=training_ready`，避免把未复核候选样本混入训练输入。
 

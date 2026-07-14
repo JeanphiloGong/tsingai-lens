@@ -732,9 +732,8 @@ def _has_traceable_training_evidence(item: dict[str, Any]) -> bool:
 
 
 def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
-    expert_target = _mapping(item.get("expert_target"))
-    target_statement = _text(expert_target.get("statement"))
-    if not target_statement:
+    expected = _training_message_expected_payload(item)
+    if not _training_message_expected_payload_is_complete(expected):
         return False
     messages = _mapping_list(item.get("training_messages"))
     if len(messages) < 2:
@@ -754,9 +753,95 @@ def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
         return False
     if not isinstance(assistant_payload, dict):
         return False
-    return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
-        target_statement
+    return _training_message_payload_matches_expected(assistant_payload, expected)
+
+
+def _training_message_expected_payload(item: dict[str, Any]) -> dict[str, Any]:
+    expert_target = _mapping(item.get("expert_target"))
+    prediction = _mapping(item.get("system_prediction"))
+    evidence = _mapping_list(item.get("training_evidence_refs"))
+    return {
+        "statement": _text(
+            expert_target.get("statement") or prediction.get("statement")
+        ),
+        "variables": _text_list(
+            expert_target.get("variables") or prediction.get("variables")
+        ),
+        "outcomes": _text_list(
+            expert_target.get("outcomes") or prediction.get("outcomes")
+        ),
+        "direction": _text(
+            expert_target.get("direction") or prediction.get("direction")
+        ),
+        "scope_summary": _text(
+            expert_target.get("scope_summary") or prediction.get("scope_summary")
+        ),
+        "support_grade": _text(
+            expert_target.get("support_grade") or prediction.get("support_grade")
+        ),
+        "generalization_status": _text(
+            expert_target.get("generalization_status")
+            or prediction.get("generalization_status")
+        ),
+        "evidence_ref_ids": _text_list(
+            expert_target.get("evidence_ref_ids")
+            or [record.get("evidence_ref_id") for record in evidence]
+        ),
+    }
+
+
+def _training_message_expected_payload_is_complete(
+    expected: dict[str, Any],
+) -> bool:
+    return bool(
+        _text(expected.get("statement"))
+        and _text_list(expected.get("variables"))
+        and _text_list(expected.get("outcomes"))
+        and (
+            _text(expected.get("direction"))
+            or _text(expected.get("scope_summary"))
+        )
+        and _text(expected.get("support_grade"))
+        and _text(expected.get("generalization_status"))
+        and _text_list(expected.get("evidence_ref_ids"))
     )
+
+
+def _training_message_payload_matches_expected(
+    assistant_payload: dict[str, Any],
+    expected: dict[str, Any],
+) -> bool:
+    if _normalized_text(assistant_payload.get("statement")) != _normalized_text(
+        expected.get("statement")
+    ):
+        return False
+    if _normalized_text_list(assistant_payload.get("variables")) != _normalized_text_list(
+        expected.get("variables")
+    ):
+        return False
+    if _normalized_text_list(assistant_payload.get("outcomes")) != _normalized_text_list(
+        expected.get("outcomes")
+    ):
+        return False
+    if _text(expected.get("direction")) and _normalized_text(
+        assistant_payload.get("direction")
+    ) != _normalized_text(expected.get("direction")):
+        return False
+    if _text(expected.get("scope_summary")) and _normalized_text(
+        assistant_payload.get("scope_summary")
+    ) != _normalized_text(expected.get("scope_summary")):
+        return False
+    if _normalized_text(assistant_payload.get("support_grade")) != _normalized_text(
+        expected.get("support_grade")
+    ):
+        return False
+    if _normalized_text(
+        assistant_payload.get("generalization_status")
+    ) != _normalized_text(expected.get("generalization_status")):
+        return False
+    return _normalized_text_list(
+        assistant_payload.get("evidence_ref_ids")
+    ) == _normalized_text_list(expected.get("evidence_ref_ids"))
 
 
 def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
@@ -987,6 +1072,10 @@ def _text(value: Any) -> str:
 
 def _normalized_text(value: Any) -> str:
     return " ".join(_text(value).casefold().split())
+
+
+def _normalized_text_list(value: Any) -> tuple[str, ...]:
+    return tuple(_normalized_text(item) for item in _text_list(value))
 
 
 def _jsonl(rows: list[dict[str, Any]]) -> str:

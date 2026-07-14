@@ -1602,26 +1602,11 @@ def _training_messages(
 
 
 def _has_training_messages_for_expert_target(item: Mapping[str, Any]) -> bool:
-    target_statement = _text(_mapping(item.get("expert_target")).get("statement"))
-    if not target_statement:
-        return False
-    messages = _mapping_list(item.get("training_messages"))
-    if len(messages) < 2:
-        return False
-    if _text(messages[0].get("role")) != "user" or not _text(
-        messages[0].get("content")
-    ):
-        return False
-    if _text(messages[-1].get("role")) != "assistant":
-        return False
-    try:
-        assistant_payload = json.loads(_text(messages[-1].get("content")))
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(assistant_payload, Mapping):
-        return False
-    return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
-        target_statement
+    return _training_messages_match_target(
+        _mapping(item.get("expert_target")),
+        _mapping(item.get("system_prediction")),
+        _mapping_list(item.get("training_messages")),
+        evidence_records=_mapping_list(item.get("training_evidence_refs")),
     )
 
 
@@ -1681,7 +1666,9 @@ def _protocol_readiness_for_sample(
         "training_messages": (
             _training_messages_match_target(
                 expert_target,
+                system_prediction,
                 training_messages,
+                evidence_records=training_evidence_records,
             )
             if dataset_use_status == "training_ready"
             else True
@@ -1754,10 +1741,17 @@ def _protocol_readiness_for_sample(
 
 def _training_messages_match_target(
     expert_target: Mapping[str, Any],
+    system_prediction: Mapping[str, Any],
     messages: list[dict[str, Any]],
+    *,
+    evidence_records: list[dict[str, Any]],
 ) -> bool:
-    target_statement = _text(expert_target.get("statement"))
-    if not target_statement:
+    expected = _training_message_expected_payload(
+        expert_target,
+        system_prediction,
+        evidence_records=evidence_records,
+    )
+    if not _training_message_expected_payload_is_complete(expected):
         return False
     if len(messages) < 2:
         return False
@@ -1773,13 +1767,116 @@ def _training_messages_match_target(
         return False
     if not isinstance(assistant_payload, Mapping):
         return False
-    return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
-        target_statement
+    return _training_message_payload_matches_expected(assistant_payload, expected)
+
+
+def _training_message_expected_payload(
+    expert_target: Mapping[str, Any],
+    system_prediction: Mapping[str, Any],
+    *,
+    evidence_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "statement": _text(
+            expert_target.get("statement") or system_prediction.get("statement")
+        ),
+        "variables": list(
+            _strings(expert_target.get("variables") or system_prediction.get("variables"))
+        ),
+        "mediators": list(
+            _strings(expert_target.get("mediators") or system_prediction.get("mediators"))
+        ),
+        "outcomes": list(
+            _strings(expert_target.get("outcomes") or system_prediction.get("outcomes"))
+        ),
+        "direction": _text(
+            expert_target.get("direction") or system_prediction.get("direction")
+        ),
+        "scope_summary": _text(
+            expert_target.get("scope_summary")
+            or system_prediction.get("scope_summary")
+        ),
+        "support_grade": _text(
+            expert_target.get("support_grade")
+            or system_prediction.get("support_grade")
+        ),
+        "generalization_status": _text(
+            expert_target.get("generalization_status")
+            or system_prediction.get("generalization_status")
+        ),
+        "generalization_note": _text(
+            expert_target.get("generalization_note")
+            or system_prediction.get("generalization_note")
+        ),
+        "evidence_ref_ids": list(
+            _strings(
+                expert_target.get("evidence_ref_ids")
+                or [record.get("evidence_ref_id") for record in evidence_records]
+            )
+        ),
+    }
+
+
+def _training_message_expected_payload_is_complete(
+    expected: Mapping[str, Any],
+) -> bool:
+    return bool(
+        _text(expected.get("statement"))
+        and _strings(expected.get("variables"))
+        and _strings(expected.get("outcomes"))
+        and (
+            _text(expected.get("direction"))
+            or _text(expected.get("scope_summary"))
+        )
+        and _text(expected.get("support_grade"))
+        and _text(expected.get("generalization_status"))
+        and _strings(expected.get("evidence_ref_ids"))
     )
 
 
+def _training_message_payload_matches_expected(
+    assistant_payload: Mapping[str, Any],
+    expected: Mapping[str, Any],
+) -> bool:
+    if _normalized_text(assistant_payload.get("statement")) != _normalized_text(
+        expected.get("statement")
+    ):
+        return False
+    if _normalized_strings(assistant_payload.get("variables")) != _normalized_strings(
+        expected.get("variables")
+    ):
+        return False
+    if _normalized_strings(assistant_payload.get("outcomes")) != _normalized_strings(
+        expected.get("outcomes")
+    ):
+        return False
+    if _text(expected.get("direction")) and _normalized_text(
+        assistant_payload.get("direction")
+    ) != _normalized_text(expected.get("direction")):
+        return False
+    if _text(expected.get("scope_summary")) and _normalized_text(
+        assistant_payload.get("scope_summary")
+    ) != _normalized_text(expected.get("scope_summary")):
+        return False
+    if _normalized_text(assistant_payload.get("support_grade")) != _normalized_text(
+        expected.get("support_grade")
+    ):
+        return False
+    if _normalized_text(
+        assistant_payload.get("generalization_status")
+    ) != _normalized_text(expected.get("generalization_status")):
+        return False
+    return _normalized_strings(
+        assistant_payload.get("evidence_ref_ids")
+    ) == _normalized_strings(expected.get("evidence_ref_ids"))
+
+
 def _normalized_text(value: Any) -> str:
-    return " ".join(_text(value).casefold().split())
+    return " ".join((_text(value) or "").casefold().split())
+
+
+def _normalized_strings(values: Any) -> tuple[str, ...]:
+    return tuple(_normalized_text(value) for value in _strings(values))
 
 
 def _is_ai_reviewer(reviewer: str | None) -> bool:

@@ -2155,6 +2155,72 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
     assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0
 
 
+def test_research_understanding_feedback_service_requires_training_message_scope_boundary(
+    monkeypatch,
+):
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility by 14% in LPBF 316L.",
+                "curated_variables": ["preheating"],
+                "curated_outcomes": ["ductility"],
+                "curated_direction": "increase",
+                "curated_scope_summary": "LPBF 316L",
+                "curated_support_grade": "partial",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        ruf_service,
+        "_training_messages",
+        lambda **_: [
+            {"role": "user", "content": "Extract one finding."},
+            {
+                "role": "assistant",
+                "content": (
+                    '{"direction": "increase", "evidence_ref_ids": ["ev-1"], '
+                    '"outcomes": ["ductility"], "scope_summary": "LPBF 316L", '
+                    '"statement": "Preheating improves ductility by 14% in LPBF 316L.", '
+                    '"support_grade": "partial", "variables": ["preheating"]}'
+                ),
+            },
+        ],
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        dataset_use_status="training_ready",
+    )
+
+    assert dataset["item_count"] == 1
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 1
+    assert dataset["quality_summary"]["training_message_sample_count"] == 0
+    assert dataset["items"][0]["protocol_readiness"]["status"] == "needs_correction"
+    assert "training_messages" in dataset["items"][0]["protocol_readiness"][
+        "blocking_missing"
+    ]
+
+
 def test_research_understanding_feedback_service_requires_actionable_protocol_inputs():
     repository = FakeEvaluationRepository()
     repository.curations = (
@@ -2193,7 +2259,8 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
     assert dataset["items"][0]["training_messages"]
     assert dataset["items"][0]["protocol_readiness"]["status"] == "needs_correction"
     assert dataset["items"][0]["protocol_readiness"]["blocking_missing"] == [
-        "support_grade"
+        "training_messages",
+        "support_grade",
     ]
     assert dataset["items"][0]["protocol_readiness"]["checks"]["variables"] is True
     assert dataset["items"][0]["protocol_readiness"]["checks"]["outcomes"] is True
@@ -2202,7 +2269,7 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
         is True
     )
     assert dataset["quality_summary"]["training_ready_sample_count"] == 1
-    assert dataset["quality_summary"]["training_message_sample_count"] == 1
+    assert dataset["quality_summary"]["training_message_sample_count"] == 0
     assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0
 
 

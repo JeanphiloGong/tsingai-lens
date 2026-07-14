@@ -843,7 +843,12 @@ paper-level finding 训练成跨论文结论。它用于离线 evaluation/fine-t
 `evidence_derived` 或 `unavailable`。只有带文本输入块的 matched trace 才作为
 `available`/`failed` 输入导出；历史 trace 缺少文本输入块、或 matched trace 失败但
 evidence 已能定位到原文时，导出使用 `trace_status=evidence_derived`，并从
-resolved evidence quote/source text 重建 `input_blocks`。`model_output` 仍保留
+resolved evidence quote/source text 重建 `input_blocks`。
+训练 message readiness 会校验 assistant JSON 的 statement、variables、outcomes、
+direction/scope、support_grade、generalization_status 和 evidence_ref_ids 与
+`expert_target` / `system_prediction` / `training_evidence_refs` 对齐，避免只含
+一句自然语言结论的样本进入微调导出。
+`model_output` 仍保留
 bounded `raw_output` 和 `parsed_output` 摘要用于诊断，不包含 API key、Authorization
 header、完整环境变量或 client 配置。该接口只从已持久化 understanding artifact、
 feedback 和 curations 派生样本，不注册 gold set，也不修改原始 artifact。

@@ -55,6 +55,13 @@ def _dataset_payload(**overrides):
         "expert_target": {
             "source": "curation",
             "statement": "Preheating increased ductility by 14%.",
+            "variables": ["preheating"],
+            "outcomes": ["ductility"],
+            "direction": "increase",
+            "scope_summary": "LPBF 316L at 150 C",
+            "support_grade": "partial",
+            "generalization_status": "paper_level_only",
+            "evidence_ref_ids": ["ev-1"],
         },
         "system_prediction": {
             "statement": "Preheating increased ductility by 14%.",
@@ -62,6 +69,8 @@ def _dataset_payload(**overrides):
             "outcomes": ["ductility"],
             "direction": "increase",
             "scope_summary": "LPBF 316L at 150 C",
+            "support_grade": "partial",
+            "generalization_status": "paper_level_only",
         },
         "training_messages": [
             {
@@ -70,7 +79,19 @@ def _dataset_payload(**overrides):
             },
             {
                 "role": "assistant",
-                "content": '{"statement": "Preheating increased ductility by 14%."}',
+                "content": json.dumps(
+                    {
+                        "statement": "Preheating increased ductility by 14%.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "scope_summary": "LPBF 316L at 150 C",
+                        "support_grade": "partial",
+                        "generalization_status": "paper_level_only",
+                        "evidence_ref_ids": ["ev-1"],
+                    },
+                    sort_keys=True,
+                ),
             },
         ],
     }
@@ -367,20 +388,21 @@ def test_render_messages_jsonl_exports_training_ready_messages():
     rows = [json.loads(line) for line in body.splitlines()]
 
     assert export["row_count"] == 1
-    assert rows == [
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Extract one evidence-grounded materials finding.",
-                },
-                {
-                    "role": "assistant",
-                    "content": '{"statement": "Preheating increased ductility by 14%."}',
-                },
-            ]
-        }
-    ]
+    assert rows[0]["messages"][0] == {
+        "role": "user",
+        "content": "Extract one evidence-grounded materials finding.",
+    }
+    assistant_payload = json.loads(rows[0]["messages"][1]["content"])
+    assert assistant_payload == {
+        "direction": "increase",
+        "evidence_ref_ids": ["ev-1"],
+        "generalization_status": "paper_level_only",
+        "outcomes": ["ductility"],
+        "scope_summary": "LPBF 316L at 150 C",
+        "statement": "Preheating increased ductility by 14%.",
+        "support_grade": "partial",
+        "variables": ["preheating"],
+    }
 
 
 def test_build_goal_review_packet_marks_protocol_blocking_gaps():
@@ -547,12 +569,25 @@ def test_evaluate_goal_dataset_payload_fails_missing_protocol_inputs():
     summary = check.evaluate_goal_dataset_payload(
         _dataset_payload(
             item_overrides={
+                "expert_target": {
+                    "source": "curation",
+                    "statement": "Preheating increased ductility by 14%.",
+                    "variables": [],
+                    "outcomes": ["ductility"],
+                    "direction": "increase",
+                    "scope_summary": "LPBF 316L at 150 C",
+                    "support_grade": "partial",
+                    "generalization_status": "paper_level_only",
+                    "evidence_ref_ids": ["ev-1"],
+                },
                 "system_prediction": {
                     "statement": "Preheating increased ductility by 14%.",
                     "variables": [],
                     "outcomes": ["ductility"],
                     "direction": "increase",
                     "scope_summary": "LPBF 316L at 150 C",
+                    "support_grade": "partial",
+                    "generalization_status": "paper_level_only",
                 }
             }
         )
@@ -578,6 +613,42 @@ def test_evaluate_goal_dataset_payload_fails_mismatched_training_message_target(
                     {
                         "role": "assistant",
                         "content": '{"statement": "System prediction, not expert target."}',
+                    },
+                ]
+            }
+        )
+    )
+
+    assert "training-ready samples include fine-tuning messages" in _failed_check_names(
+        summary
+    )
+
+
+def test_evaluate_goal_dataset_payload_fails_training_message_without_scope_boundary():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "training_messages": [
+                    {
+                        "role": "user",
+                        "content": "Extract one evidence-grounded materials finding.",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "statement": "Preheating increased ductility by 14%.",
+                                "variables": ["preheating"],
+                                "outcomes": ["ductility"],
+                                "direction": "increase",
+                                "scope_summary": "LPBF 316L at 150 C",
+                                "support_grade": "partial",
+                                "evidence_ref_ids": ["ev-1"],
+                            },
+                            sort_keys=True,
+                        ),
                     },
                 ]
             }

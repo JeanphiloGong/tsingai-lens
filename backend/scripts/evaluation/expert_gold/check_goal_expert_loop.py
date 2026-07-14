@@ -67,6 +67,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--expert-satisfaction-gate",
+        action="store_true",
+        help=(
+            "Final acceptance gate for the three-layer goal loop. Fails unless "
+            "all checked goals are complete, all training exports are ready, "
+            "and --api-base-url can pass the experiment-plan write smoke check."
+        ),
+    )
+    parser.add_argument(
         "--require-all-training-ready",
         action="store_true",
         help=(
@@ -98,6 +107,7 @@ def main() -> None:
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
         runtime_write_check=args.runtime_write_check,
+        expert_satisfaction_gate=args.expert_satisfaction_gate,
         require_all_training_ready=args.require_all_training_ready,
         require_complete=args.require_complete,
     )
@@ -115,9 +125,15 @@ def check_goal_expert_loop(
     goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
     api_base_url: str | None = None,
     runtime_write_check: bool = False,
+    expert_satisfaction_gate: bool = False,
     require_all_training_ready: bool = False,
     require_complete: bool = False,
 ) -> dict[str, Any]:
+    effective_require_all_training_ready = (
+        require_all_training_ready or expert_satisfaction_gate
+    )
+    effective_require_complete = require_complete or expert_satisfaction_gate
+    effective_runtime_write_check = runtime_write_check or expert_satisfaction_gate
     findings_module = _load_sibling_module(
         "check_goal_findings_projection.py",
         "check_goal_findings_projection",
@@ -135,28 +151,33 @@ def check_goal_expert_loop(
         collection_id=collection_id,
         goal_ids=goal_ids,
         api_base_url=api_base_url,
-        require_training_ready=require_all_training_ready,
+        require_training_ready=effective_require_all_training_ready,
     )
     runtime_contract = _runtime_contract_layer(
         api_base_url,
         collection_id=collection_id,
         goal_id=goal_ids[0] if goal_ids else "",
-        runtime_write_check=runtime_write_check,
+        runtime_write_check=effective_runtime_write_check,
     )
     layers = {
         "expert_review": _expert_review_layer(findings),
         "dataset_accumulation": _dataset_layer(
             dataset,
-            require_all_training_ready=require_all_training_ready,
+            require_all_training_ready=effective_require_all_training_ready,
         ),
-        "experiment_design": _experiment_layer(dataset, runtime_contract),
+        "experiment_design": _experiment_layer(
+            dataset,
+            runtime_contract,
+            require_all_goals_protocol_ready=expert_satisfaction_gate,
+            require_runtime_write=expert_satisfaction_gate,
+        ),
     }
     goals = _goal_rollup(findings, dataset, collection_id=collection_id)
     completion = _completion_summary(goals)
     status = (
         "fail"
         if any(layer["status"] == "fail" for layer in layers.values())
-        or (require_complete and completion["status"] != "complete")
+        or (effective_require_complete and completion["status"] != "complete")
         else "pass"
     )
     return {
@@ -164,8 +185,9 @@ def check_goal_expert_loop(
         "completion_status": completion["status"],
         "collection_id": collection_id,
         "goal_count": len(goal_ids),
-        "require_all_training_ready": require_all_training_ready,
-        "require_complete": require_complete,
+        "expert_satisfaction_gate": expert_satisfaction_gate,
+        "require_all_training_ready": effective_require_all_training_ready,
+        "require_complete": effective_require_complete,
         "layers": layers,
         "remaining_work": completion["remaining_work"],
         "findings_status": findings["status"],
@@ -238,6 +260,9 @@ def _dataset_layer(
 def _experiment_layer(
     dataset: dict[str, Any],
     runtime_contract: dict[str, Any],
+    *,
+    require_all_goals_protocol_ready: bool = False,
+    require_runtime_write: bool = False,
 ) -> dict[str, Any]:
     goals = _mapping_list(dataset.get("goals"))
     eligible_goal_ids = [
@@ -246,10 +271,21 @@ def _experiment_layer(
         if int(goal.get("protocol_ready_count") or 0) > 0
     ]
     runtime_status = _text(runtime_contract.get("status")) or "not_checked"
-    runtime_ready = runtime_status in {"pass", "not_checked"}
+    runtime_ready = runtime_status == "pass" or (
+        runtime_status == "not_checked" and not require_runtime_write
+    )
+    if require_runtime_write and not bool(runtime_contract.get("runtime_write_check")):
+        runtime_ready = False
+    protocol_ready = (
+        len(eligible_goal_ids) == len(goals) and len(goals) > 0
+        if require_all_goals_protocol_ready
+        else bool(eligible_goal_ids)
+    )
     return {
-        "status": "pass" if eligible_goal_ids and runtime_ready else "fail",
+        "status": "pass" if protocol_ready and runtime_ready else "fail",
         "eligible_goal_ids": eligible_goal_ids,
+        "requires_all_goals_protocol_ready": require_all_goals_protocol_ready,
+        "requires_runtime_write": require_runtime_write,
         "runtime_contract": runtime_contract,
         "requirement": (
             "At least one goal has training-ready findings with protocol design "

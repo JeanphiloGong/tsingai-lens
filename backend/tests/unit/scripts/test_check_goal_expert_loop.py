@@ -198,6 +198,44 @@ def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeyp
     assert summary["require_complete"] is True
 
 
+def test_check_goal_expert_loop_expert_gate_fails_on_remaining_work(monkeypatch):
+    check = _load_goal_expert_loop_module()
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: _dataset_payload())},
+            )
+        ),
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        expert_satisfaction_gate=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["expert_satisfaction_gate"] is True
+    assert summary["require_all_training_ready"] is True
+    assert summary["require_complete"] is True
+    assert summary["completion_status"] == "incomplete"
+    assert summary["layers"]["experiment_design"]["requires_runtime_write"] is True
+    assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == (
+        "not_checked"
+    )
+
+
 def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     check = _load_goal_expert_loop_module()
 
@@ -743,6 +781,77 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
             "lens_session=session-1",
         ),
     ]
+
+
+def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
+    monkeypatch,
+):
+    check = _load_goal_expert_loop_module()
+    plan_list_path = (
+        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {
+                    "check_goal_dataset_quality": staticmethod(
+                        lambda **_: _completed_dataset_payload()
+                    )
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url, **_: {
+            plan_list_path: {"get": {}, "post": {}},
+            plan_detail_path: {"patch": {}},
+        },
+    )
+
+    def fake_write_checks(_base_url, **_kwargs):
+        return [
+            {
+                "name": "write smoke experiment plan",
+                "path": "/api/v1/collections/col-1/goals/goal-1/experiment-plans",
+                "method": "post/patch",
+                "status": "pass",
+                "detail": "created and archived smoke plan",
+            }
+        ]
+
+    monkeypatch.setattr(check, "_experiment_plan_write_checks", fake_write_checks)
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        api_base_url="http://localhost:5173",
+        expert_satisfaction_gate=True,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["completion_status"] == "complete"
+    assert summary["expert_satisfaction_gate"] is True
+    assert summary["layers"]["experiment_design"][
+        "requires_all_goals_protocol_ready"
+    ] is True
+    assert summary["layers"]["experiment_design"]["requires_runtime_write"] is True
+    assert summary["layers"]["experiment_design"]["runtime_contract"][
+        "runtime_write_check"
+    ] is True
 
 
 def test_check_goal_expert_loop_runtime_write_check_skips_when_routes_are_missing(

@@ -476,15 +476,23 @@ That stricter mode fails until every checked goal has at least one
 `training_ready` sample. Both scripts are read-only and do not rebuild
 collections or mutate feedback.
 
-For final acceptance of the full expert loop, use:
+For final acceptance of the full expert loop, use the expert satisfaction gate:
 
 ```bash
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
 python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py \
-  --require-complete
+  --api-base-url http://localhost:5173 \
+  --expert-satisfaction-gate \
+  --format text
 ```
 
 This mode fails unless every checked goal has a training-ready sample, valid
-training messages, and zero remaining review candidates.
+training messages, protocol-ready experiment inputs, zero remaining review
+candidates, and a running API that can create/update a goal-scoped experiment
+plan smoke draft. It is intentionally stricter than the default diagnostic
+check, which may report `pass (incomplete)` while there is still review work
+left.
 
 The evaluator is offline and read-only. It does not call LLMs, rebuild PDFs, or
 change collection state. Natural language is scored through required claims,

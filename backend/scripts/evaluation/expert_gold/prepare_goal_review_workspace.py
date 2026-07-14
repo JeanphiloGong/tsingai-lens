@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+from pathlib import Path
+import sys
+from typing import Any
+
+
+DEFAULT_COLLECTION_ID = "col_0cc5013fdb3c"
+DEFAULT_GOAL_IDS = (
+    "goal_0914003ad572",
+    "goal_1a7a26d850b9",
+    "goal_399171646354",
+    "goal_061c9c049e69",
+    "goal_6bf7d2c1030e",
+    "goal_3037e425673a",
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Prepare a read-only Lens goal review workspace with review packets, "
+            "decision templates, and agent-review prompts."
+        )
+    )
+    parser.add_argument(
+        "--collection-id",
+        default=DEFAULT_COLLECTION_ID,
+        help="Collection id to prepare.",
+    )
+    parser.add_argument(
+        "--goal-id",
+        action="append",
+        dest="goal_ids",
+        help="Goal id to prepare. May repeat. Defaults to the local 6-goal 316L set.",
+    )
+    parser.add_argument(
+        "--api-base-url",
+        help=(
+            "Optional running Lens API or frontend origin to read, for example "
+            "http://localhost:5173. Set LENS_CHECK_EMAIL and "
+            "LENS_CHECK_PASSWORD when login is required."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        required=True,
+        help="Empty directory where review workspace files will be written.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    result = prepare_goal_review_workspace(
+        collection_id=args.collection_id,
+        goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        api_base_url=args.api_base_url,
+        output_dir=Path(args.output_dir),
+    )
+    print(render_text_summary(result))
+    if result["status"] == "fail":
+        raise SystemExit(1)
+
+
+def prepare_goal_review_workspace(
+    *,
+    collection_id: str,
+    goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    output_dir: Path,
+    api_base_url: str | None = None,
+) -> dict[str, Any]:
+    _ensure_empty_output_dir(output_dir)
+    dataset_module = _load_dataset_quality_module()
+    summary = dataset_module.check_goal_dataset_quality(
+        collection_id=collection_id,
+        goal_ids=goal_ids,
+        api_base_url=api_base_url,
+        include_review_packet=True,
+    )
+    files = _write_workspace_files(
+        output_dir=output_dir,
+        summary=summary,
+        dataset_module=dataset_module,
+    )
+    manifest_path = output_dir / "manifest.json"
+    files.append(
+        {
+            "filename": "manifest.json",
+            "path": str(manifest_path),
+            "description": "Machine-readable workspace manifest.",
+            "line_count": 0,
+        }
+    )
+    manifest = _workspace_manifest(summary, output_dir=output_dir, files=files)
+    manifest["files"][-1]["line_count"] = _line_count(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _write_workspace_files(
+    *,
+    output_dir: Path,
+    summary: dict[str, Any],
+    dataset_module: Any,
+) -> list[dict[str, Any]]:
+    rendered = [
+        (
+            "dataset-quality-summary.json",
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+            "Full machine-readable dataset quality summary.",
+        ),
+        (
+            "review-packet.txt",
+            dataset_module.render_review_packet_summary(summary) + "\n",
+            "Human-readable findings, gates, evidence quotes, and source links.",
+        ),
+        (
+            "review-candidates.jsonl",
+            dataset_module.render_review_jsonl_summary(summary),
+            "One full review candidate per line.",
+        ),
+        (
+            "reviewed-findings.template.jsonl",
+            dataset_module.render_decision_template_summary(summary),
+            "Editable human decision template; rows default to action=skip.",
+        ),
+        (
+            "agent-review-prompts.jsonl",
+            dataset_module.render_agent_review_prompt_jsonl_summary(summary),
+            "Independent reviewer prompt rows; not importable expert decisions.",
+        ),
+    ]
+    files: list[dict[str, Any]] = []
+    for filename, content, description in rendered:
+        path = output_dir / filename
+        path.write_text(content, encoding="utf-8")
+        files.append(
+            {
+                "filename": filename,
+                "path": str(path),
+                "description": description,
+                "line_count": _line_count(content),
+            }
+        )
+
+    readme_path = output_dir / "README.txt"
+    readme_content = render_workspace_readme(summary, files=files)
+    readme_path.write_text(readme_content, encoding="utf-8")
+    files.append(
+        {
+            "filename": "README.txt",
+            "path": str(readme_path),
+            "description": "Review workflow instructions and safety notes.",
+            "line_count": _line_count(readme_content),
+        }
+    )
+    return files
+
+
+def render_workspace_readme(
+    summary: dict[str, Any],
+    *,
+    files: list[dict[str, Any]],
+) -> str:
+    collection_id = _text(summary.get("collection_id"))
+    candidate_count = _candidate_count(summary)
+    lines = [
+        "Lens Goal Review Workspace",
+        "==========================",
+        "",
+        f"Collection: {collection_id or 'n/a'}",
+        f"Status: {_text(summary.get('status')) or 'n/a'}",
+        f"Goal count: {int(summary.get('goal_count') or 0)}",
+        f"Review candidates: {candidate_count}",
+        "",
+        "Files",
+        "-----",
+    ]
+    for file_info in files:
+        lines.append(
+            f"- {file_info['filename']}: {file_info['description']}"
+        )
+    lines.extend(
+        [
+            "",
+            "Review steps",
+            "------------",
+            "1. Read review-packet.txt and open the source links for each finding.",
+            (
+                "2. Edit reviewed-findings.template.jsonl only for rows a human "
+                "expert has checked."
+            ),
+            (
+                "3. Keep unchecked rows at action=skip; use accept, reject, or "
+                "correct only with an expert note when required."
+            ),
+            "4. Validate before writing labels:",
+            (
+                "   ./.venv/bin/python "
+                "scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+                "reviewed-findings.template.jsonl "
+                "--reviewer materials-expert@example.com "
+                "--dry-run --fail-on-warnings --format text"
+            ),
+            "5. Import only after the dry-run passes and the reviewer approves it:",
+            (
+                "   ./.venv/bin/python "
+                "scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+                "reviewed-findings.template.jsonl "
+                "--reviewer materials-expert@example.com --format text"
+            ),
+            "",
+            "Safety",
+            "------",
+            "- This workspace has not written expert labels.",
+            "- Agent-review prompts are input packets, not importable decisions.",
+            "- training_ready is created only by explicit human expert decisions.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_text_summary(result: dict[str, Any]) -> str:
+    lines = [
+        f"Prepared Lens goal review workspace: {result['output_dir']}",
+        f"Status: {result['status']}",
+        f"Collection: {result['collection_id']}",
+        f"Goals: {result['goal_count']}",
+        f"Review candidates: {result['review_candidate_count']}",
+        "Files:",
+    ]
+    for file_info in result["files"]:
+        lines.append(f"- {file_info['filename']} ({file_info['line_count']} lines)")
+    lines.extend(
+        [
+            "Next:",
+            "- Review review-packet.txt and source links.",
+            "- Fill reviewed-findings.template.jsonl with human-confirmed decisions.",
+            "- Dry-run import_goal_review_decisions.py before writing labels.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _workspace_manifest(
+    summary: dict[str, Any],
+    *,
+    output_dir: Path,
+    files: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "status": _text(summary.get("status")) or "unknown",
+        "collection_id": _text(summary.get("collection_id")),
+        "goal_count": int(summary.get("goal_count") or 0),
+        "review_candidate_count": _candidate_count(summary),
+        "training_ready_count": _sum_goal_int(summary, "training_ready_count"),
+        "protocol_ready_count": _sum_goal_int(summary, "protocol_ready_count"),
+        "output_dir": str(output_dir),
+        "files": files,
+        "next_steps": [
+            "review review-packet.txt and source links",
+            "fill reviewed-findings.template.jsonl with human-confirmed decisions",
+            "dry-run import_goal_review_decisions.py before writing labels",
+        ],
+    }
+
+
+def _ensure_empty_output_dir(output_dir: Path) -> None:
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError(f"output dir must be empty: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _load_dataset_quality_module():
+    script_path = Path(__file__).resolve().with_name("check_goal_dataset_quality.py")
+    spec = importlib.util.spec_from_file_location(
+        "check_goal_dataset_quality",
+        script_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _candidate_count(summary: dict[str, Any]) -> int:
+    total = 0
+    for goal in _mapping_list(summary.get("goals")):
+        packet = _mapping(goal.get("review_packet"))
+        total += len(_mapping_list(packet.get("candidates")))
+    return total
+
+
+def _sum_goal_int(summary: dict[str, Any], key: str) -> int:
+    return sum(int(goal.get(key) or 0) for goal in _mapping_list(summary.get("goals")))
+
+
+def _line_count(value: str) -> int:
+    if not value:
+        return 0
+    return len(value.splitlines())
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _mapping_list(value: Any) -> list[dict[str, Any]]:
+    return (
+        [item for item in value if isinstance(item, dict)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+if __name__ == "__main__":
+    main()

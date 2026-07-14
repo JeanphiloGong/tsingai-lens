@@ -250,6 +250,21 @@ its variables/outcomes/direction, evidence quote, source link, and direct
 frontend finding review entry, run:
 
 ```bash
+./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py \
+  --collection-id <collection_id> \
+  --output-dir /tmp/lens-goal-review
+```
+
+This creates one read-only handoff directory with `review-packet.txt`,
+`review-candidates.jsonl`, `reviewed-findings.template.jsonl`,
+`agent-review-prompts.jsonl`, `dataset-quality-summary.json`, `manifest.json`,
+and `README.txt`. It does not import labels or mutate collection data; it only
+packages the current Findings review queue so an expert can inspect source
+links and fill explicit decisions.
+
+To print the packet directly instead of preparing a workspace, run:
+
+```bash
 ./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --format review-packet
 ```

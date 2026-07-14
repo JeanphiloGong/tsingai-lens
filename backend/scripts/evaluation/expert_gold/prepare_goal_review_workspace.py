@@ -169,6 +169,11 @@ def _write_workspace_files(
             "Short goal-by-goal review queue with risks and source links.",
         ),
         (
+            "review-priority.md",
+            render_review_priority_report(summary),
+            "Cross-goal expert work order sorted by review risk.",
+        ),
+        (
             "review-checklist.md",
             render_review_checklist(summary),
             "Expert checklist for deciding accept, reject, correct, or skip.",
@@ -354,6 +359,45 @@ def render_review_dashboard(summary: dict[str, Any]) -> str:
         lines.append("")
     if len(lines) == 6:
         lines.append("No review candidates found.")
+    return "\n".join(lines) + "\n"
+
+
+def render_review_priority_report(summary: dict[str, Any]) -> str:
+    ranked = _ranked_review_candidates(summary)
+    lines = [
+        "# Lens Review Priority Queue",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        f"Review candidates: {len(ranked)}",
+        "",
+        "## Work Order",
+        "",
+        "1. Resolve findings where direct accept is blocked.",
+        "2. Verify table rows, table variables, and alignment warnings.",
+        "3. Decide whether missing mechanism evidence changes the final label.",
+        "4. Confirm paper-level scope for otherwise grounded single-paper findings.",
+        "",
+        "## Priority Queue",
+        "",
+        "| Priority | Goal | Finding | Action | Evidence | Open |",
+        "|---|---|---|---|---|---|",
+    ]
+    if not ranked:
+        lines.append("| n/a | n/a | No review candidates found. | n/a | n/a | n/a |")
+        return "\n".join(lines) + "\n"
+    for row in ranked:
+        lines.append(
+            "| "
+            f"{_markdown_cell(row['priority'], 80)} | "
+            f"{_markdown_cell(row['goal'], 100)} | "
+            f"{_markdown_cell(row['finding'], 140)} | "
+            f"{_markdown_cell(row['action'], 100)} | "
+            f"{_markdown_cell(row['evidence'], 100)} | "
+            f"{_markdown_link('open', row['open_url'])} |"
+        )
+    lines.extend(["", "## Priority Counts", ""])
+    for label, count in _priority_counts(ranked):
+        lines.append(f"- {label}: {count}")
     return "\n".join(lines) + "\n"
 
 
@@ -800,6 +844,61 @@ def _candidate_note_prompt(candidate: dict[str, Any]) -> str:
         prompt = EXPERT_NOTE_PROMPTS.get(action_code)
         return prompt or "optional"
     return _text(candidate.get("expert_note_prompt")) or "required"
+
+
+def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, str]]:
+    rows = []
+    for goal in _mapping_list(summary.get("goals")):
+        packet = _mapping(goal.get("review_packet"))
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        question = _text(goal.get("question"))
+        review_url = _text(packet.get("review_url"))
+        for candidate in _mapping_list(packet.get("candidates")):
+            rank, priority = _review_priority(candidate)
+            open_url = _text(candidate.get("open_url")) or review_url
+            rows.append(
+                {
+                    "rank": f"{rank:02d}",
+                    "priority": priority,
+                    "goal": _goal_heading(goal_id, question),
+                    "finding": _text(candidate.get("statement")),
+                    "action": _text(candidate.get("recommended_action")) or "review",
+                    "evidence": _evidence_label(candidate),
+                    "open_url": open_url,
+                }
+            )
+    rows.sort(key=lambda row: (row["rank"], row["goal"], row["finding"]))
+    return rows
+
+
+def _review_priority(candidate: dict[str, Any]) -> tuple[int, str]:
+    action_code = _text(candidate.get("recommended_action_code"))
+    gate = _mapping(candidate.get("acceptance_gate"))
+    hint = _mapping(candidate.get("review_decision_hint"))
+    review_terms = {
+        action_code,
+        *_text_list(candidate.get("review_reasons")),
+        *_text_list(candidate.get("warnings")),
+    }
+    if not bool(gate.get("accept_allowed")) or _text_list(hint.get("blocked_actions")):
+        return 1, "P1 correct/reject: accept blocked"
+    if "table_row_alignment_uncertain" in review_terms or action_code == "verify_table_rows":
+        return 1, "P1 verify table alignment"
+    if action_code in {"review_table_rows", "review_table_variables"}:
+        return 2, "P2 verify table rows or variables"
+    if "missing_mechanism_evidence" in review_terms or action_code == "check_mechanism_requirement":
+        return 3, "P3 decide mechanism requirement"
+    if action_code == "accept_as_paper_level":
+        return 4, "P4 confirm paper-level scope"
+    return 5, "P5 general expert review"
+
+
+def _priority_counts(rows: list[dict[str, str]]) -> list[tuple[str, int]]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        priority = row["priority"]
+        counts[priority] = counts.get(priority, 0) + 1
+    return sorted(counts.items())
 
 
 def _candidate_checklist_lines(

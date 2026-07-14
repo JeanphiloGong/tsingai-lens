@@ -175,6 +175,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "reviewed-findings.template.jsonl",
         "agent-review-prompts.jsonl",
         "review-dashboard.md",
+        "review-priority.md",
         "review-checklist.md",
         "dataset-readiness.md",
         "expert-satisfaction.md",
@@ -200,6 +201,12 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "| Finding | Gate | Action | Note required | Evidence | Open |" in dashboard
     assert "accept blocked: table row alignment" in dashboard
     assert "Required: explain accepted paper-level scope." in dashboard
+    priority = (workspace / "review-priority.md").read_text(encoding="utf-8")
+    assert "# Lens Review Priority Queue" in priority
+    assert "P1 correct/reject: accept blocked" in priority
+    assert "How does preheating affect ductility? (goal-1)" in priority
+    assert "Preheating increased ductility." in priority
+    assert "accept as paper-level" in priority
     checklist = (workspace / "review-checklist.md").read_text(encoding="utf-8")
     assert "# Lens Expert Review Checklist" in checklist
     assert "### How does preheating affect ductility? (goal-1)" in checklist
@@ -322,6 +329,42 @@ def test_render_review_dashboard_summarizes_goal_risks():
         "accept as paper-level | Required: explain accepted paper-level scope. | "
         "Paper A / p. 4 | [open](/collections/col-1/goals/goal-1?finding_id=finding-1) |"
     ) in dashboard
+
+
+def test_render_review_priority_report_orders_accept_blockers_first():
+    module = _load_workspace_module()
+    summary = _summary()
+    summary["goals"][0]["question"] = "How does preheating affect ductility?"
+    summary["goals"][0]["review_packet"]["candidates"].append(
+        {
+            "finding_id": "finding-2",
+            "statement": "Preheating needs paper-level confirmation.",
+            "recommended_action_code": "accept_as_paper_level",
+            "recommended_action": "accept as paper-level",
+            "open_url": "/collections/col-1/goals/goal-1?finding_id=finding-2",
+            "acceptance_gate": {"accept_allowed": True},
+            "review_reasons": ["single_paper_evidence"],
+            "evidence": [{"label": "Paper B / p. 2"}],
+        }
+    )
+
+    report = module.render_review_priority_report(summary)
+
+    assert "# Lens Review Priority Queue" in report
+    assert "1. Resolve findings where direct accept is blocked." in report
+    assert (
+        "| P1 correct/reject: accept blocked | How does preheating affect ductility? "
+        "(goal-1) | Preheating increased ductility. | accept as paper-level | "
+        "Paper A / p. 4 |"
+    ) in report
+    assert (
+        "| P4 confirm paper-level scope | How does preheating affect ductility? "
+        "(goal-1) | Preheating needs paper-level confirmation. | "
+        "accept as paper-level | Paper B / p. 2 |"
+    ) in report
+    assert report.index("P1 correct/reject") < report.index("P4 confirm")
+    assert "- P1 correct/reject: accept blocked: 1" in report
+    assert "- P4 confirm paper-level scope: 1" in report
 
 
 def test_render_review_checklist_gives_expert_decision_steps():

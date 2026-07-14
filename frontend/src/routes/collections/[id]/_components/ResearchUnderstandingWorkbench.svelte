@@ -1287,6 +1287,21 @@
 		return $t('research.understanding.findingReviewReasonActionReview');
 	}
 
+	function findingReviewReasonLabels(
+		finding: ResearchUnderstandingPresentationFinding,
+		limit = 3
+	) {
+		return findingReviewReasonValues(finding).slice(0, limit).map(findingReviewReasonLabel);
+	}
+
+	function protocolReadinessBlockingLabels(
+		readiness: ResearchUnderstandingProtocolReadiness | null | undefined,
+		limit = 3
+	) {
+		if (!readiness || readiness.status === 'protocol_ready') return [];
+		return protocolReadinessGaps(readiness).slice(0, limit).map(protocolReadinessGapLabel);
+	}
+
 	function relatedReviewFindings(
 		finding: ResearchUnderstandingPresentationFinding,
 		findings: ResearchUnderstandingPresentationFinding[]
@@ -3273,6 +3288,10 @@
 					{#if datasetSummary && nextReviewCandidateFinding && !reviewQueueOnly && !datasetReviewCandidatesOnly}
 						{@const nextDisplayFinding = findingForDisplay(nextReviewCandidateFinding)}
 						{@const nextUsagePreview = findingUsagePreview(nextDisplayFinding)}
+						{@const nextReviewReasonLabels = findingReviewReasonLabels(nextDisplayFinding)}
+						{@const nextProtocolBlockingLabels = protocolReadinessBlockingLabels(
+							nextReviewCandidateSample?.protocol_readiness
+						)}
 						<div
 							class="research-understanding-workbench__review-loop-next"
 							aria-label={$t('research.understanding.reviewLoopNextCandidate')}
@@ -3315,6 +3334,21 @@
 										count: findingReviewReasonValues(nextDisplayFinding).length
 									})}
 								</span>
+								{#if nextReviewReasonLabels.length}
+									<ul>
+										{#each nextReviewReasonLabels as reason (reason)}
+											<li>{reason}</li>
+										{/each}
+									</ul>
+								{/if}
+								{#if nextProtocolBlockingLabels.length}
+									<span>{$t('research.understanding.reviewLoopNextProtocolBlockers')}</span>
+									<ul>
+										{#each nextProtocolBlockingLabels as gap (gap)}
+											<li>{gap}</li>
+										{/each}
+									</ul>
+								{/if}
 							</div>
 							<div class="research-understanding-workbench__review-loop-next-actions">
 								<button

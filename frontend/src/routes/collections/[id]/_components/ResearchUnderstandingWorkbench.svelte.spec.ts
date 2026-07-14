@@ -1987,6 +1987,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 									review_action: {
 										code: 'accept_as_paper_level',
 										label: 'Accept as paper-level evidence'
+									},
+									protocol_readiness: {
+										status: 'ready_after_review',
+										ready_after_review: true,
+										missing: ['expert_review_decision'],
+										blocking_missing: ['expert_review_decision'],
+										checks: {
+											expert_review_decision: false
+										},
+										guidance: 'accept or correct before protocol use'
 									}
 								}
 							]
@@ -2070,6 +2080,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('Accept as paper-level evidence')).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('5 review reason(s)')).toBeInTheDocument();
+		await expect.element(reviewLoop.getByText('Evidence comes from one paper.')).toBeInTheDocument();
+		await expect.element(reviewLoop.getByText('Support is partial.')).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('heat treatment', { exact: true })).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('yield strength', { exact: true })).toBeInTheDocument();
 		await expect.element(reviewLoop.getByRole('button', { name: 'Review evidence' })).toBeInTheDocument();
@@ -2554,7 +2566,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await expect
-			.element(browserPage.getByText(/Needs another paper to confirm/))
+			.element(
+				browserPage.getByText(
+					'Needs another paper to confirm, contradict, or extend it.',
+					{ exact: true }
+				)
+			)
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Annealing may reduce cellular substructure.').first())
@@ -3040,8 +3057,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(jsonUrl.searchParams.get('format')).toBe('json');
 
 		const jsonlUrl = new URL(
-			browserPage.getByRole('link', { name: 'Training JSONL' }).element().getAttribute('href') ??
-				'',
+			browserPage
+				.getByRole('link', { name: 'Training JSONL', exact: true })
+				.element()
+				.getAttribute('href') ?? '',
 			'http://localhost'
 		);
 		expect(jsonlUrl.pathname).toBe('/api/v1/collections/col_123/research-understanding/dataset');

@@ -285,6 +285,39 @@ cannot be imported as `accept`; change them to `correct` after filling the
 missing fields/evidence, `reject`, or leave them as `skip`. Validate first,
 then import with a human reviewer id:
 
+For agent-assisted review, keep every exported row at `"action": "skip"` and
+write the agent's suggestion under `agent_review` instead:
+
+```json
+{
+  "action": "skip",
+  "agent_review": {
+    "reviewer": "ai-reviewer-codex",
+    "recommendation": "correct",
+    "issue_type": "wrong_outcome",
+    "note": "The quote supports ductility, not generic mechanical properties.",
+    "suggested_target": {
+      "statement": "Preheating increased ductility by 14%.",
+      "evidence_ref_ids": ["evref_..."]
+    }
+  }
+}
+```
+
+Check the draft before giving it to a human expert:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_agent_review_draft.py \
+  reviewed-findings.jsonl \
+  --format text
+```
+
+This checker never writes labels. It fails if an agent draft changes `action`
+away from `skip`, if an agent reviewer does not use an `ai-reviewer*` or
+`agent-*` id, or if an agent recommends `accept` while `acceptance_gate` blocks
+direct acceptance. A human expert must verify the `agent_review` suggestions and
+copy only confirmed decisions into `action` before import.
+
 ```bash
 python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
   reviewed-findings.jsonl \

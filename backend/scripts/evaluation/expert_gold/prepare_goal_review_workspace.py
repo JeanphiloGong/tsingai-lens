@@ -293,27 +293,35 @@ def render_workspace_readme(
             "   Use review-priority.md first when many candidates remain.",
             "   Use review-unlock-plan.md to see what each decision unlocks.",
             (
-                "2. Edit reviewed-findings.template.jsonl only for rows a human "
-                "expert has checked."
+                "2. Fill the empty expert_* / corrected_* columns in "
+                "expert-decision-board.tsv, or edit reviewed-findings.template.jsonl "
+                "directly for rows a human expert has checked."
             ),
             (
                 "3. Keep unchecked rows at action=skip; use accept, reject, or "
                 "correct only with an expert note when required."
             ),
-            "4. Validate before writing labels:",
+            "4. If the TSV board was filled, merge it into a JSONL import candidate:",
+            (
+                "   ./.venv/bin/python "
+                "scripts/evaluation/expert_gold/merge_expert_decision_board.py "
+                "reviewed-findings.template.jsonl expert-decision-board.tsv "
+                "--output-path reviewed-findings.from-board.jsonl"
+            ),
+            "5. Validate before writing labels:",
             (
                 "   ./.venv/bin/python "
                 "scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-                "reviewed-findings.template.jsonl "
+                "reviewed-findings.from-board.jsonl "
                 "--reviewer materials-expert@example.com "
                 "--dry-run --fail-on-warnings --format text"
             ),
             "   Or run the matching command from review-commands.sh.",
-            "5. Import only after the dry-run passes and the reviewer approves it:",
+            "6. Import only after the dry-run passes and the reviewer approves it:",
             (
                 "   ./.venv/bin/python "
                 "scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-                "reviewed-findings.template.jsonl "
+                "reviewed-findings.from-board.jsonl "
                 "--reviewer materials-expert@example.com --format text"
             ),
             "",
@@ -321,6 +329,7 @@ def render_workspace_readme(
             "------",
             "- This workspace has not written expert labels.",
             "- Agent-review prompts are input packets, not importable decisions.",
+            "- expert-decision-board.tsv is a spreadsheet aid; merge and dry-run it before import.",
             "- training_ready is created only by explicit human expert decisions.",
             "- review-commands.sh leaves the real import command commented out.",
             "",
@@ -346,6 +355,8 @@ def render_review_commands(summary: dict[str, Any]) -> str:
             'PYTHON="$BACKEND_DIR/.venv/bin/python"',
             'SCRIPTS="$BACKEND_DIR/scripts/evaluation/expert_gold"',
             "REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}",
+            "DECISION_BOARD=${DECISION_BOARD:-expert-decision-board.tsv}",
+            "MERGED_REVIEW_FILE=${MERGED_REVIEW_FILE:-reviewed-findings.from-board.jsonl}",
             "REVIEWER=${REVIEWER:-materials-expert@example.com}",
             "API_BASE_URL=${API_BASE_URL:-}",
             "",
@@ -354,25 +365,31 @@ def render_review_commands(summary: dict[str, Any]) -> str:
             "#   (cd /tmp/lens-goal-review-... && bash review-commands.sh)",
             "# Set API_BASE_URL=http://localhost:5173 to check the running app contract.",
             "",
-            "echo '1. Validate human-reviewed decisions without writing labels'",
+            "echo '1. Merge human-filled expert decision board into JSONL template'",
             (
-                '"$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE" '
+                '"$PYTHON" "$SCRIPTS/merge_expert_decision_board.py" '
+                '"$REVIEW_FILE" "$DECISION_BOARD" --output-path "$MERGED_REVIEW_FILE"'
+            ),
+            "",
+            "echo '2. Validate human-reviewed decisions without writing labels'",
+            (
+                '"$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$MERGED_REVIEW_FILE" '
                 "--reviewer \"$REVIEWER\" --dry-run --fail-on-warnings --format text"
             ),
             "",
-            "echo '2. Import only after a human reviewer approves the dry-run output'",
+            "echo '3. Import only after a human reviewer approves the dry-run output'",
             (
-                '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE" '
+                '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$MERGED_REVIEW_FILE" '
                 "--reviewer \"$REVIEWER\" --format text"
             ),
             "",
-            "echo '3. Check the three-layer expert loop after import'",
+            "echo '4. Check the three-layer expert loop after import'",
             (
                 '"$PYTHON" "$SCRIPTS/check_goal_expert_loop.py" --collection-id '
                 f"{_shell_quote(collection_id)}{prepare_goal_args} --format text"
             ),
             "if [ -n \"$API_BASE_URL\" ]; then",
-            "  echo '3b. Check running API experiment-plan routes without writing data'",
+            "  echo '4b. Check running API experiment-plan routes without writing data'",
             (
                 '  "$PYTHON" "$SCRIPTS/check_goal_expert_loop.py" --collection-id '
                 f"{_shell_quote(collection_id)}{prepare_goal_args} "
@@ -380,14 +397,14 @@ def render_review_commands(summary: dict[str, Any]) -> str:
             ),
             "fi",
             "",
-            "echo '4. Export training messages once labels are training-ready'",
+            "echo '5. Export training messages once labels are training-ready'",
             (
                 '"$PYTHON" "$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
                 f"{_shell_quote(collection_id)}{prepare_goal_args} "
                 "--format messages-jsonl --require-training-ready"
             ),
             "",
-            "echo '5. Export traceable training JSONL once labels are training-ready'",
+            "echo '6. Export traceable training JSONL once labels are training-ready'",
             (
                 '"$PYTHON" "$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
                 f"{_shell_quote(collection_id)}{prepare_goal_args} "
@@ -510,6 +527,18 @@ def render_review_priority_report(summary: dict[str, Any]) -> str:
 
 def render_expert_decision_board(summary: dict[str, Any]) -> str:
     header = [
+        "expert_action",
+        "issue_type",
+        "expert_note",
+        "corrected_statement",
+        "corrected_variables",
+        "corrected_mediators",
+        "corrected_outcomes",
+        "corrected_direction",
+        "corrected_scope_summary",
+        "corrected_support_grade",
+        "corrected_evidence_ref_ids",
+        "collection_id",
         "priority",
         "goal_id",
         "goal",
@@ -567,6 +596,18 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
         rows.append(
             _tsv_row(
                 [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    _text(summary.get("collection_id")),
                     _text(row.get("priority")),
                     goal_id,
                     _text(row.get("goal")),
@@ -919,7 +960,14 @@ def render_text_summary(result: dict[str, Any]) -> str:
         [
             "Next:",
             "- Review review-packet.txt and source links.",
-            "- Fill reviewed-findings.template.jsonl with human-confirmed decisions.",
+            (
+                "- Fill expert-decision-board.tsv or "
+                "reviewed-findings.template.jsonl with human-confirmed decisions."
+            ),
+            (
+                "- Merge expert-decision-board.tsv into "
+                "reviewed-findings.from-board.jsonl if using the board."
+            ),
             "- Dry-run import_goal_review_decisions.py before writing labels.",
         ]
     )
@@ -969,7 +1017,8 @@ def _workspace_manifest(
         "files": files,
         "next_steps": [
             "review review-packet.txt and source links",
-            "fill reviewed-findings.template.jsonl with human-confirmed decisions",
+            "fill expert-decision-board.tsv or reviewed-findings.template.jsonl with human-confirmed decisions",
+            "merge expert-decision-board.tsv into reviewed-findings.from-board.jsonl if using the board",
             "dry-run import_goal_review_decisions.py before writing labels",
         ],
     }

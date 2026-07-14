@@ -270,11 +270,22 @@ and fill explicit decisions.
 Use `review-priority.md` to decide which candidates to inspect first, then use
 `expert-decision-board.tsv` when the reviewer wants a spreadsheet-style board
 with priority, allowed actions, required checks, source quote, and open links.
+The board includes empty `expert_action`, `issue_type`, `expert_note`, and
+`corrected_*` columns for human input. It is not imported directly; merge it
+back into the JSONL template first:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/merge_expert_decision_board.py \
+  reviewed-findings.template.jsonl \
+  expert-decision-board.tsv \
+  --output-path reviewed-findings.from-board.jsonl
+```
+
 Use `review-unlock-plan.md` to see which decision unlocks training export or
 protocol inputs. Run `review-commands.sh` from the workspace directory for the
-matching dry-run, gate, and export commands. The real import command in that
-script is commented out and must be enabled only after a human expert approves
-the dry-run.
+matching TSV merge, dry-run, gate, and export commands. The real import command
+in that script is commented out and must be enabled only after a human expert
+approves the dry-run.
 By default, the script creates a unique directory under `/tmp`; pass
 `--output-dir <empty_dir>` only when a fixed destination is required.
 
@@ -321,6 +332,13 @@ written as labels. `reject` rows need an `issue_type` such as `wrong_variable`,
 cannot be imported as `accept`; change them to `correct` after filling the
 missing fields/evidence, `reject`, or leave them as `skip`. Validate first,
 then import with a human reviewer id:
+
+If the reviewer used `expert-decision-board.tsv`, run
+`merge_expert_decision_board.py` first and use the merged
+`reviewed-findings.from-board.jsonl` in the dry-run/import commands below.
+The merge step refuses blocked accepts, rejects without `issue_type`, and
+corrections without corrected statement and evidence refs before the stricter
+import validation runs.
 
 For agent-assisted review, keep every exported row at `"action": "skip"` and
 write the agent's suggestion under `agent_review` instead. To prepare a safe

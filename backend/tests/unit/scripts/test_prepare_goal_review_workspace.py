@@ -192,7 +192,8 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert manifest["training_message_ready_count"] == 0
     assert manifest["next_steps"] == [
         "review review-packet.txt and source links",
-        "fill reviewed-findings.template.jsonl with human-confirmed decisions",
+        "fill expert-decision-board.tsv or reviewed-findings.template.jsonl with human-confirmed decisions",
+        "merge expert-decision-board.tsv into reviewed-findings.from-board.jsonl if using the board",
         "dry-run import_goal_review_decisions.py before writing labels",
     ]
     assert (workspace / "review-packet.txt").read_text(encoding="utf-8") == (
@@ -215,6 +216,18 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     )
     decision_rows = decision_board.splitlines()
     assert decision_rows[0].split("\t") == [
+        "expert_action",
+        "issue_type",
+        "expert_note",
+        "corrected_statement",
+        "corrected_variables",
+        "corrected_mediators",
+        "corrected_outcomes",
+        "corrected_direction",
+        "corrected_scope_summary",
+        "corrected_support_grade",
+        "corrected_evidence_ref_ids",
+        "collection_id",
         "priority",
         "goal_id",
         "goal",
@@ -233,6 +246,18 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "source_open",
     ]
     assert decision_rows[1].split("\t") == [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "col-1",
         "P1 correct/reject: accept blocked",
         "goal-1",
         "How does preheating affect ductility? (goal-1)",
@@ -299,10 +324,22 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     commands = (workspace / "review-commands.sh").read_text(encoding="utf-8")
     assert "set -euo pipefail" in commands
     assert 'REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}' in commands
+    assert 'DECISION_BOARD=${DECISION_BOARD:-expert-decision-board.tsv}' in commands
+    assert (
+        'MERGED_REVIEW_FILE=${MERGED_REVIEW_FILE:-reviewed-findings.from-board.jsonl}'
+        in commands
+    )
     assert "API_BASE_URL=${API_BASE_URL:-}" in commands
-    assert '"$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE"' in commands
+    assert (
+        '"$SCRIPTS/merge_expert_decision_board.py" "$REVIEW_FILE" "$DECISION_BOARD" '
+        '--output-path "$MERGED_REVIEW_FILE"'
+    ) in commands
+    assert '"$SCRIPTS/import_goal_review_decisions.py" "$MERGED_REVIEW_FILE"' in commands
     assert "--dry-run --fail-on-warnings --format text" in commands
-    assert '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$REVIEW_FILE"' in commands
+    assert (
+        '# "$PYTHON" "$SCRIPTS/import_goal_review_decisions.py" "$MERGED_REVIEW_FILE"'
+        in commands
+    )
     assert (
         '"$SCRIPTS/check_goal_expert_loop.py" --collection-id '
         "'col-1' --goal-id 'goal-1' --format text"
@@ -322,6 +359,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     readme = (workspace / "README.txt").read_text(encoding="utf-8")
     assert "Expert satisfaction: blocked" in readme
     assert "This workspace has not written expert labels." in readme
+    assert "expert-decision-board.tsv is a spreadsheet aid" in readme
     assert "training_ready is created only by explicit human expert decisions." in readme
     assert "Or run the matching command from review-commands.sh." in readme
     assert "review-commands.sh leaves the real import command commented out." in readme
@@ -382,6 +420,14 @@ def test_render_text_summary_lists_next_review_steps(tmp_path):
     assert "Review candidates: 2" in text
     assert "Expert satisfaction: blocked" in text
     assert "- review-packet.txt (10 lines)" in text
+    assert (
+        "- Fill expert-decision-board.tsv or reviewed-findings.template.jsonl "
+        "with human-confirmed decisions."
+    ) in text
+    assert (
+        "- Merge expert-decision-board.tsv into reviewed-findings.from-board.jsonl "
+        "if using the board."
+    ) in text
     assert "- Dry-run import_goal_review_decisions.py before writing labels." in text
 
 
@@ -460,18 +506,37 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
     rows = board.splitlines()
 
     assert len(rows) == 2
-    assert "\t".join(rows[0].split("\t")[:4]) == "priority\tgoal_id\tgoal\tfinding_id"
+    header = rows[0].split("\t")
+    assert header[:4] == [
+        "expert_action",
+        "issue_type",
+        "expert_note",
+        "corrected_statement",
+    ]
+    assert header[11:16] == [
+        "collection_id",
+        "priority",
+        "goal_id",
+        "goal",
+        "finding_id",
+    ]
     values = rows[1].split("\t")
-    assert values[0] == "P1 correct/reject: accept blocked"
-    assert values[1] == "goal-1"
-    assert values[3] == "finding-1"
-    assert values[6] == "no"
-    assert values[7] == "reject; correct; skip"
-    assert values[8] == "accept"
-    assert values[9] == "Check table rows; Inspect quote"
-    assert values[10] == "correct creates a training-ready target"
-    assert values[11] == "blocked: accept blockers: verify parsed table rows, table row alignment uncertain"
-    assert values[13] == "Preheating increased ductility by 14%."
+    row = dict(zip(header, values, strict=True))
+    assert row["expert_action"] == ""
+    assert row["collection_id"] == "col-1"
+    assert row["priority"] == "P1 correct/reject: accept blocked"
+    assert row["goal_id"] == "goal-1"
+    assert row["finding_id"] == "finding-1"
+    assert row["accept_allowed"] == "no"
+    assert row["allowed_actions"] == "reject; correct; skip"
+    assert row["blocked_actions"] == "accept"
+    assert row["required_checks"] == "Check table rows; Inspect quote"
+    assert row["training_unlock"] == "correct creates a training-ready target"
+    assert row["protocol_unlock"] == (
+        "blocked: accept blockers: verify parsed table rows, "
+        "table row alignment uncertain"
+    )
+    assert row["quote"] == "Preheating increased ductility by 14%."
 
 
 def test_render_review_checklist_gives_expert_decision_steps():

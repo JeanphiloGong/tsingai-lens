@@ -368,11 +368,13 @@ blocked accepts still fail and must be corrected, rejected, or left skipped.
   human-confirmed-findings.jsonl \
   --reviewer materials-expert@example.com \
   --dry-run \
-  --fail-on-warnings
+  --fail-on-warnings \
+  --format text
 
 ./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py \
   human-confirmed-findings.jsonl \
-  --reviewer materials-expert@example.com
+  --reviewer materials-expert@example.com \
+  --format text
 ```
 
 The import writes only explicit human expert decisions. It rejects AI/agent
@@ -393,6 +395,11 @@ that unchanged template fails validation.
 Every dry-run and import summary includes `review_progress`, which reports how
 many rows are actionable, how many remain skipped, whether the file is ready to
 write, and the next steps needed before import.
+Use `--format text` for the pre-import expert loop when you want a compact
+readiness report instead of the full JSON payload. The text output shows the
+current goal counts, pending accept/correct/reject decisions, projected
+`training_ready`, remaining review candidates, rejected counts, and the first
+readiness issues that still block fine-tuning messages or protocol inputs.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

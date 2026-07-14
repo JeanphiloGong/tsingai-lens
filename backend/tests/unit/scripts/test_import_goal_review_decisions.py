@@ -228,6 +228,16 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                         "missing_protocol_input": ["training_messages"],
                     }
                 ],
+                "pending_actionable_count": 3,
+                "pending_accept_count": 1,
+                "pending_reject_count": 1,
+                "pending_correct_count": 1,
+                "pending_training_ready_count": 2,
+                "pending_rejected_count": 1,
+                "pending_review_candidate_resolved_count": 3,
+                "projected_training_ready_count": 4,
+                "projected_review_candidate_count": 0,
+                "projected_rejected_count": 2,
             }
         ],
     }
@@ -316,9 +326,81 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
         "ready_to_write": True,
         "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
     }
-    assert summary["affected_goals"] == []
+    assert summary["affected_goals"] == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-1",
+            "item_count": 4,
+            "training_ready_count": 2,
+            "training_message_count": 1,
+            "protocol_ready_count": 1,
+            "review_candidate_count": 1,
+            "rejected_count": 1,
+            "next_review_finding_id": "finding-next",
+            "readiness_issues": [
+                {
+                    "finding_id": "finding-accept",
+                    "claim_id": "claim-1",
+                    "missing_training_message": ["message_pair"],
+                    "missing_protocol_input": ["training_messages"],
+                }
+            ],
+            "pending_actionable_count": 1,
+            "pending_accept_count": 1,
+            "pending_reject_count": 0,
+            "pending_correct_count": 0,
+            "pending_training_ready_count": 1,
+            "pending_rejected_count": 0,
+            "pending_review_candidate_resolved_count": 1,
+            "projected_training_ready_count": 3,
+            "projected_review_candidate_count": 0,
+            "projected_rejected_count": 1,
+        }
+    ]
     assert service.feedback == []
     assert service.curations == []
+
+
+def test_import_review_decisions_renders_text_summary(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(action="accept", finding_id="finding-accept"),
+            _base_row(
+                action="correct",
+                finding_id="finding-correct",
+                suggested_target={
+                    "statement": "Preheating increased ductility by 14%.",
+                    "evidence_ref_ids": ["ev-1"],
+                },
+            ),
+            _base_row(action="skip", finding_id="finding-skip"),
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+    text = module.render_text_summary(summary)
+
+    assert "Review decision import: pass (dry-run)" in text
+    assert "Rows: total=3 written=0 skipped=1" in text
+    assert "Decisions: accept=1, correct=1, skip=1" in text
+    assert "Review progress: actionable=2 needs_review=1 ready_to_write=True" in text
+    assert "- col-1/goal-1" in text
+    assert (
+        "now: training_ready=2 training_messages=1 protocol_ready=1 "
+        "review_candidates=1 rejected=1"
+    ) in text
+    assert "pending: accept=1 correct=1 reject=0" in text
+    assert "after import: training_ready=4 review_candidates=0 rejected=1" in text
+    assert "finding-accept: training=message_pair; protocol=training_messages" in text
 
 
 def test_import_review_decisions_warns_when_all_rows_are_skipped(tmp_path):

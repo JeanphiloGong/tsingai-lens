@@ -36,6 +36,12 @@ def parse_args() -> argparse.Namespace:
             "warnings without expert_note, such as paper-level or table-row checks."
         ),
     )
+    parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default="json",
+        help="Output format. JSON is stable for automation; text is for expert review loops.",
+    )
     return parser.parse_args()
 
 
@@ -47,7 +53,10 @@ def main() -> None:
         dry_run=args.dry_run,
         fail_on_warnings=args.fail_on_warnings,
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.format == "text":
+        print(render_text_summary(summary))
+    else:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
         raise SystemExit(1)
 
@@ -74,6 +83,122 @@ def import_review_decisions(
         dry_run=dry_run,
         fail_on_warnings=fail_on_warnings,
     )
+
+
+def render_text_summary(summary: dict) -> str:
+    mode = "dry-run" if summary.get("dry_run") else "import"
+    lines = [
+        f"Review decision import: {summary.get('status', 'unknown')} ({mode})",
+        (
+            "Rows: "
+            f"total={summary.get('total_rows', 0)} "
+            f"written={summary.get('written_count', 0)} "
+            f"skipped={summary.get('skipped_count', 0)}"
+        ),
+    ]
+    counts = summary.get("counts")
+    if isinstance(counts, dict) and counts:
+        lines.append(
+            "Decisions: "
+            + ", ".join(f"{key}={counts[key]}" for key in sorted(counts))
+        )
+    progress = summary.get("review_progress")
+    if isinstance(progress, dict):
+        lines.append(
+            "Review progress: "
+            f"actionable={progress.get('actionable_count', 0)} "
+            f"needs_review={progress.get('needs_review_count', 0)} "
+            f"ready_to_write={bool(progress.get('ready_to_write'))}"
+        )
+        next_steps = progress.get("next_steps")
+        if isinstance(next_steps, list) and next_steps:
+            lines.append("Next steps:")
+            lines.extend(f"- {step}" for step in next_steps)
+    warnings = summary.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        lines.append(f"Warnings: {len(warnings)}")
+        lines.extend(
+            "- "
+            + _line_ref(warning)
+            + str(warning.get("message", ""))
+            for warning in warnings[:5]
+            if isinstance(warning, dict)
+        )
+    errors = summary.get("errors")
+    if isinstance(errors, list) and errors:
+        lines.append(f"Errors: {len(errors)}")
+        lines.extend(
+            "- "
+            + _line_ref(error)
+            + str(error.get("message", ""))
+            for error in errors[:5]
+            if isinstance(error, dict)
+        )
+    affected_goals = summary.get("affected_goals")
+    if isinstance(affected_goals, list) and affected_goals:
+        lines.append("Affected goals:")
+        for goal in affected_goals:
+            if isinstance(goal, dict):
+                lines.extend(_render_goal_summary(goal))
+    else:
+        lines.append("Affected goals: none")
+    return "\n".join(lines)
+
+
+def _render_goal_summary(goal: dict) -> list[str]:
+    collection_id = goal.get("collection_id", "")
+    goal_id = goal.get("goal_id", "")
+    lines = [
+        f"- {collection_id}/{goal_id}",
+        (
+            "  now: "
+            f"training_ready={goal.get('training_ready_count', 0)} "
+            f"training_messages={goal.get('training_message_count', 0)} "
+            f"protocol_ready={goal.get('protocol_ready_count', 0)} "
+            f"review_candidates={goal.get('review_candidate_count', 0)} "
+            f"rejected={goal.get('rejected_count', 0)}"
+        ),
+        (
+            "  pending: "
+            f"accept={goal.get('pending_accept_count', 0)} "
+            f"correct={goal.get('pending_correct_count', 0)} "
+            f"reject={goal.get('pending_reject_count', 0)}"
+        ),
+        (
+            "  after import: "
+            f"training_ready={goal.get('projected_training_ready_count', 0)} "
+            f"review_candidates={goal.get('projected_review_candidate_count', 0)} "
+            f"rejected={goal.get('projected_rejected_count', 0)}"
+        ),
+    ]
+    next_review = goal.get("next_review_finding_id")
+    if next_review:
+        lines.append(f"  next_review_finding_id={next_review}")
+    issues = goal.get("readiness_issues")
+    if isinstance(issues, list) and issues:
+        lines.append(f"  readiness issues: {len(issues)} shown")
+        for issue in issues[:3]:
+            if isinstance(issue, dict):
+                missing = []
+                training = issue.get("missing_training_message")
+                protocol = issue.get("missing_protocol_input")
+                if isinstance(training, list) and training:
+                    missing.append("training=" + ",".join(str(item) for item in training))
+                if isinstance(protocol, list) and protocol:
+                    missing.append("protocol=" + ",".join(str(item) for item in protocol))
+                lines.append(
+                    "  - "
+                    f"{issue.get('finding_id', '')}: "
+                    + ("; ".join(missing) if missing else "missing readiness details")
+                )
+    return lines
+
+
+def _line_ref(row: dict) -> str:
+    line = row.get("line")
+    if line:
+        return f"line {line}: "
+    return ""
 
 
 if __name__ == "__main__":

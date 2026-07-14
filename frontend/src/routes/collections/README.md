@@ -29,7 +29,9 @@ This node owns the collection workspace route family in the frontend.
 - render global comparison review as a More / All Comparisons surface
 - render the collection-bound AI research copilot as a top-level collection tab
   with explicit answer source modes and clickable document/evidence source links
-  back to Core-owned surfaces
+  back to Core-owned surfaces; goal-scoped experiment readiness links send
+  experts back to the review queue, training-ready findings, or protocol draft
+  action according to the current curated Finding state
 - render document detail as a Markdown-first paper reader from parsed Source
   artifacts as soon as document content exists, with PDF/source preview kept as
   an optional reference view and structured extraction details available as an

@@ -86,6 +86,11 @@
 		goalTrainingReadyCount,
 		goalProtocolReady
 	);
+	$: goalReviewLinkLabel = goalReviewActionLabel(
+		goalReviewCandidateCount,
+		goalTrainingReadyCount,
+		goalProtocolReady
+	);
 	$: readinessStatus = goalProtocolReady
 		? 'ready'
 		: goalTrainingReadyCount > 0
@@ -402,6 +407,20 @@
 		return baseHref;
 	}
 
+	function goalReviewActionLabel(
+		reviewCandidateCount: number,
+		trainingReadyCount: number,
+		protocolReady: boolean
+	) {
+		if (reviewCandidateCount > 0 && !protocolReady) {
+			return $t('goalCopilot.experimentReadiness.reviewFindings');
+		}
+		if (trainingReadyCount > 0 && !protocolReady) {
+			return $t('goalCopilot.experimentReadiness.checkReadiness');
+		}
+		return $t('goalCopilot.experimentReadiness.openGoal');
+	}
+
 	function messageText(message: GoalSessionMessage) {
 		return message.answer ?? message.content ?? '';
 	}
@@ -699,7 +718,7 @@
 						</button>
 					{/if}
 					<a href={goalReviewLinkHref}>
-						{$t('goalCopilot.experimentReadiness.openGoal')}
+						{goalReviewLinkLabel}
 					</a>
 				</div>
 			</section>

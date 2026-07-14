@@ -507,6 +507,11 @@ def build_goal_review_packet(
             review_action=review_action,
             protocol_readiness=protocol_readiness,
         )
+        decision_hint = _review_decision_hint(
+            acceptance_gate=acceptance_gate,
+            protocol_readiness=protocol_readiness,
+            recommended_action_code=_text(review_action.get("code")),
+        )
         candidates.append(
             {
                 "sample_id": _text(item.get("sample_id")),
@@ -540,6 +545,7 @@ def build_goal_review_packet(
                 "recommended_action_code": _text(review_action.get("code")),
                 "protocol_readiness": protocol_readiness,
                 "acceptance_gate": acceptance_gate,
+                "review_decision_hint": decision_hint,
                 "suggested_target": {
                     "source": _text(expert_target.get("source")),
                     "review_status": _text(expert_target.get("review_status")),
@@ -704,6 +710,18 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                 review_checks = _text_list(acceptance_gate.get("review_checks"))
                 if review_checks:
                     lines.append(f"     expert checks: {_join(review_checks)}")
+            decision_hint = _mapping(candidate.get("review_decision_hint"))
+            if decision_hint:
+                lines.append(
+                    f"     decision hint: {_text(decision_hint.get('summary'))}"
+                )
+                blocked_reasons = _text_list(
+                    decision_hint.get("why_accept_blocked")
+                )
+                if blocked_reasons:
+                    lines.append(
+                        f"     why accept blocked: {_join(blocked_reasons)}"
+                    )
             review_reasons = _text_list(candidate.get("review_reasons"))
             warnings = _text_list(candidate.get("warnings"))
             if review_reasons:
@@ -817,6 +835,9 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
                     "acceptance_gate": dict(
                         _mapping(candidate.get("acceptance_gate"))
                     ),
+                    "review_decision_hint": dict(
+                        _mapping(candidate.get("review_decision_hint"))
+                    ),
                     "action": "skip",
                     "allowed_actions": list(REVIEW_ACTION_OPTIONS),
                     "issue_type": "",
@@ -878,6 +899,9 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                     "review_reasons": _text_list(candidate.get("review_reasons")),
                     "acceptance_gate": dict(
                         _mapping(candidate.get("acceptance_gate"))
+                    ),
+                    "review_decision_hint": dict(
+                        _mapping(candidate.get("review_decision_hint"))
                     ),
                     "protocol_blocking_missing": _text_list(
                         _mapping(candidate.get("protocol_readiness")).get(
@@ -980,6 +1004,9 @@ def render_agent_review_prompt_jsonl_summary(summary: dict[str, Any]) -> str:
                     ],
                     "finding": _agent_review_finding(candidate),
                     "acceptance_gate": dict(_mapping(candidate.get("acceptance_gate"))),
+                    "review_decision_hint": dict(
+                        _mapping(candidate.get("review_decision_hint"))
+                    ),
                     "protocol_readiness": dict(
                         _mapping(candidate.get("protocol_readiness"))
                     ),
@@ -1043,6 +1070,81 @@ def _review_risk_flags(
         if value in REVIEW_RISK_FLAGS and REVIEW_RISK_FLAGS[value] not in flags:
             flags.append(REVIEW_RISK_FLAGS[value])
     return flags
+
+
+def _review_decision_hint(
+    *,
+    acceptance_gate: dict[str, Any],
+    protocol_readiness: dict[str, Any],
+    recommended_action_code: str,
+) -> dict[str, Any]:
+    accept_allowed = bool(acceptance_gate.get("accept_allowed"))
+    review_checks = _text_list(acceptance_gate.get("review_checks"))
+    accept_blockers = _text_list(acceptance_gate.get("accept_blockers"))
+    blocking_missing = (
+        _text_list(acceptance_gate.get("blocking_missing"))
+        or _text_list(protocol_readiness.get("blocking_missing"))
+    )
+    if not accept_allowed:
+        reasons = []
+        if accept_blockers:
+            reasons.append(f"accept_blockers={_join(accept_blockers)}")
+        if blocking_missing:
+            reasons.append(f"blocking_missing={_join(blocking_missing)}")
+        if not reasons:
+            reasons.append("acceptance_gate blocks direct accept")
+        return {
+            "summary": (
+                "Do not accept directly; correct the row or reject it after "
+                "source review."
+            ),
+            "preferred_next_action": "correct_or_reject",
+            "allowed_actions": ["reject", "correct", "skip"],
+            "blocked_actions": ["accept"],
+            "why_accept_blocked": reasons,
+            "required_checks": review_checks,
+            "import_note": "accept is rejected while acceptance_gate.accept_allowed=false",
+        }
+    action_summaries = {
+        "accept_as_paper_level": (
+            "Accept only as paper-level evidence after checking the quote; "
+            "correct if the scope should be narrower."
+        ),
+        "review_table_rows": (
+            "Verify the selected table rows and then accept or correct the "
+            "finding."
+        ),
+        "review_table_variables": (
+            "Check whether other table variables changed; correct if this is "
+            "not a single-variable effect."
+        ),
+        "check_mechanism_requirement": (
+            "Decide whether mechanism evidence is required; accept only if the "
+            "final scope matches that decision."
+        ),
+        "resolve_conflict": (
+            "Resolve the conflicting evidence direction before accepting."
+        ),
+    }
+    summary = action_summaries.get(
+        recommended_action_code,
+        "Accept, reject, or correct after checking the cited evidence.",
+    )
+    preferred_next_action = (
+        "verify_then_accept_or_correct"
+        if recommended_action_code
+        in {"review_table_rows", "review_table_variables", "check_mechanism_requirement"}
+        else "accept_after_checks"
+    )
+    return {
+        "summary": summary,
+        "preferred_next_action": preferred_next_action,
+        "allowed_actions": list(REVIEW_ACTION_OPTIONS),
+        "blocked_actions": [],
+        "why_accept_blocked": [],
+        "required_checks": review_checks,
+        "import_note": "accept imports only after the reviewer changes action from skip",
+    }
 
 
 def render_messages_jsonl_summary(summary: dict[str, Any]) -> str:

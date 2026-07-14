@@ -273,6 +273,9 @@ Use `review-jsonl` when the reviewer needs the full candidate payload and
 evidence records. Use `decision-template` when the reviewer needs a compact
 editable import file. Each decision-template row also carries `acceptance_gate`
 with `accept_allowed`, `blocking_missing`, and expert `review_checks`, plus an
+expert-facing `review_decision_hint` that summarizes whether direct accept is
+allowed, which actions remain valid, and why accept is blocked when correction
+is required. It also includes an
 `evidence` summary with `evidence_ref_id`, source label, page, quote, and
 source-open link so the reviewer can audit the row before changing the action.
 Each exported row defaults to `"action": "skip"`. The reviewer changes only rows they have checked

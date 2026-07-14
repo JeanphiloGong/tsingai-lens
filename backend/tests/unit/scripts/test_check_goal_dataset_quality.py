@@ -286,6 +286,22 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "recommended_action_code": "review_table_rows",
         "guidance": "Accept only after the listed checks and source evidence match.",
     }
+    assert candidate["review_decision_hint"] == {
+        "summary": (
+            "Verify the selected table rows and then accept or correct the finding."
+        ),
+        "preferred_next_action": "verify_then_accept_or_correct",
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "blocked_actions": [],
+        "why_accept_blocked": [],
+        "required_checks": [
+            "Verify the selected table rows, variable columns, and outcome values.",
+            "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+        ],
+        "import_note": (
+            "accept imports only after the reviewer changes action from skip"
+        ),
+    }
     assert candidate["protocol_readiness"] == {
         "status": "ready_after_review",
         "ready_after_review": True,
@@ -336,6 +352,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         in text
     )
     assert "acceptance gate: review_required; accept_allowed=true" in text
+    assert (
+        "decision hint: Verify the selected table rows and then accept or correct the finding."
+        in text
+    )
     assert (
         "expert checks: Verify the selected table rows, variable columns, and outcome values., "
         "Confirm the finding is only paper-level unless cross-paper evidence is present."
@@ -418,6 +438,11 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert rows[0]["protocol_readiness"]["missing"] == ["expert_review_decision"]
     assert rows[0]["protocol_readiness"]["blocking_missing"] == []
     assert rows[0]["protocol_readiness"]["checks"]["variables"] is True
+    assert rows[0]["review_decision_hint"]["summary"] == (
+        "Accept only as paper-level evidence after checking the quote; correct "
+        "if the scope should be narrower."
+    )
+    assert rows[0]["review_decision_hint"]["blocked_actions"] == []
     assert rows[0]["action"] == "skip"
     assert rows[0]["allowed_actions"] == ["accept", "reject", "correct", "skip"]
     assert "wrong_direction" in rows[0]["reject_issue_options"]
@@ -586,6 +611,23 @@ def test_render_decision_template_exports_editable_import_rows():
     rows = [json.loads(line) for line in body.splitlines()]
 
     assert len(rows) == 1
+    assert rows[0]["review_decision_hint"] == {
+        "summary": (
+            "Accept only as paper-level evidence after checking the quote; "
+            "correct if the scope should be narrower."
+        ),
+        "preferred_next_action": "accept_after_checks",
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "blocked_actions": [],
+        "why_accept_blocked": [],
+        "required_checks": [
+            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+        ],
+        "import_note": (
+            "accept imports only after the reviewer changes action from skip"
+        ),
+    }
+    del rows[0]["review_decision_hint"]
     assert rows[0] == {
         "collection_id": "col-1",
         "goal_id": "goal-1",
@@ -909,10 +951,20 @@ def test_build_goal_review_packet_marks_protocol_blocking_gaps():
         "direction_or_scope",
     ]
     assert candidate["acceptance_gate"]["accept_blockers"] == []
+    assert candidate["review_decision_hint"]["blocked_actions"] == ["accept"]
+    assert candidate["review_decision_hint"]["allowed_actions"] == [
+        "reject",
+        "correct",
+        "skip",
+    ]
+    assert candidate["review_decision_hint"]["why_accept_blocked"] == [
+        "blocking_missing=variables, direction_or_scope"
+    ]
     assert (
         "protocol readiness gaps: variables, direction_or_scope"
         in text
     )
+    assert "why accept blocked: blocking_missing=variables, direction_or_scope" in text
 
 
 def test_render_messages_jsonl_skips_review_candidates():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -212,6 +213,99 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "code": "review_table_rows",
         "label": "review selected table rows before accepting or correcting",
     }
+
+
+def test_render_review_jsonl_exports_candidate_rows():
+    check = _load_goal_dataset_check_module()
+
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "presentation_bucket": "review_queue",
+            "trace_status": "evidence_derived",
+            "system_prediction": {
+                "statement": "Preheating increased ductility by 14%.",
+                "variables": ["preheating"],
+                "mediators": ["grain refinement"],
+                "outcomes": ["ductility"],
+                "direction": "increase",
+                "scope_summary": "LPBF 316L at 150 C",
+                "support_grade": "strong",
+                "review_status": "needs_review",
+                "review_reasons": ["single_paper_evidence"],
+                "warnings": ["needs_expert_review"],
+            },
+            "review_action": {
+                "code": "accept_as_paper_level",
+                "label": "accept only as paper-level evidence unless another paper confirms it",
+            },
+            "expert_target": {
+                "source": "ai_review_feedback",
+                "statement": "Preheating increased ductility by 14%.",
+                "review_status": "correct",
+                "note": "AI suggestion; human review still required.",
+            },
+        }
+    )
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+
+    body = check.render_review_jsonl_summary(
+        {"status": "pass", "collection_id": "col-1", "goals": [{"review_packet": packet}]}
+    )
+    rows = [json.loads(line) for line in body.splitlines()]
+
+    assert len(rows) == 1
+    assert rows[0]["collection_id"] == "col-1"
+    assert rows[0]["goal_id"] == "goal-1"
+    assert rows[0]["finding_id"] == "finding-1"
+    assert rows[0]["statement"] == "Preheating increased ductility by 14%."
+    assert rows[0]["variables"] == ["preheating"]
+    assert rows[0]["mediators"] == ["grain refinement"]
+    assert rows[0]["outcomes"] == ["ductility"]
+    assert rows[0]["recommended_action_code"] == "accept_as_paper_level"
+    assert rows[0]["suggested_target"]["review_status"] == "correct"
+    assert rows[0]["evidence"][0]["href"] == "/collections/col-1/documents/doc-1?source_ref=blk-1"
+
+
+def test_render_messages_jsonl_exports_training_ready_messages():
+    check = _load_goal_dataset_check_module()
+
+    export = check.build_goal_training_message_export(_dataset_payload())
+    body = check.render_messages_jsonl_summary({"goals": [{"training_export": export}]})
+    rows = [json.loads(line) for line in body.splitlines()]
+
+    assert export["row_count"] == 1
+    assert rows == [
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Extract one evidence-grounded materials finding.",
+                },
+                {
+                    "role": "assistant",
+                    "content": '{"statement": "Preheating increased ductility by 14%."}',
+                },
+            ]
+        }
+    ]
+
+
+def test_render_messages_jsonl_skips_review_candidates():
+    check = _load_goal_dataset_check_module()
+
+    export = check.build_goal_training_message_export(
+        _dataset_payload(
+            item_overrides={
+                "dataset_use_status": "review_candidate",
+                "expert_target": None,
+                "training_messages": [],
+            }
+        )
+    )
+
+    assert export["row_count"] == 0
+    assert check.render_messages_jsonl_summary({"goals": [{"training_export": export}]}) == ""
 
 
 def test_evaluate_goal_dataset_payload_requires_training_ready_when_requested():

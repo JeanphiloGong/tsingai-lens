@@ -65,11 +65,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("json", "review-packet"),
+        choices=("json", "review-packet", "review-jsonl", "messages-jsonl"),
         default="json",
         help=(
             "Output format. JSON is stable for automation; review-packet is a "
-            "human-readable queue of candidate findings, evidence, and links."
+            "human-readable queue of candidate findings, evidence, and links; "
+            "review-jsonl emits one candidate per line; messages-jsonl emits "
+            "fine-tuning-compatible rows for training-ready samples."
         ),
     )
     return parser.parse_args()
@@ -82,10 +84,15 @@ def main() -> None:
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
         require_training_ready=args.require_training_ready,
-        include_review_packet=args.format == "review-packet",
+        include_review_packet=args.format in {"review-packet", "review-jsonl"},
+        include_training_export=args.format == "messages-jsonl",
     )
     if args.format == "review-packet":
         print(render_review_packet_summary(summary))
+    elif args.format == "review-jsonl":
+        sys.stdout.write(render_review_jsonl_summary(summary))
+    elif args.format == "messages-jsonl":
+        sys.stdout.write(render_messages_jsonl_summary(summary))
     else:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["status"] == "fail":
@@ -99,6 +106,7 @@ def check_goal_dataset_quality(
     api_base_url: str | None = None,
     require_training_ready: bool = False,
     include_review_packet: bool = False,
+    include_training_export: bool = False,
 ) -> dict[str, Any]:
     backend_root = str(DEFAULT_BACKEND_ROOT)
     if backend_root not in sys.path:
@@ -127,6 +135,10 @@ def check_goal_dataset_quality(
             goal_summary["review_packet"] = build_goal_review_packet(
                 dataset,
                 collection_id=collection_id,
+            )
+        if include_training_export:
+            goal_summary["training_export"] = build_goal_training_message_export(
+                dataset,
             )
         goal_summaries.append(goal_summary)
         checks.extend(goal_summary["checks"])
@@ -424,6 +436,32 @@ def build_goal_review_packet(
     }
 
 
+def build_goal_training_message_export(dataset: dict[str, Any]) -> dict[str, Any]:
+    rows = []
+    for item in _mapping_list(dataset.get("items")):
+        if _text(item.get("dataset_use_status")) != "training_ready":
+            continue
+        if not _has_fine_tuning_messages(item):
+            continue
+        rows.append(
+            {
+                "messages": [
+                    {
+                        "role": _text(message.get("role")),
+                        "content": _text(message.get("content")),
+                    }
+                    for message in _mapping_list(item.get("training_messages"))
+                    if _text(message.get("role")) and _text(message.get("content"))
+                ]
+            }
+        )
+    return {
+        "goal_id": _text(dataset.get("scope_id")),
+        "row_count": len(rows),
+        "rows": rows,
+    }
+
+
 def render_review_packet_summary(summary: dict[str, Any]) -> str:
     lines = [
         f"Lens review packet: {summary.get('status')}",
@@ -506,6 +544,54 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
         lines.append("")
         lines.append("No review candidates found.")
     return "\n".join(lines)
+
+
+def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
+    rows = []
+    collection_id = _text(summary.get("collection_id"))
+    for goal in _mapping_list(summary.get("goals")):
+        packet = _mapping(goal.get("review_packet"))
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        for candidate in _mapping_list(packet.get("candidates")):
+            rows.append(
+                {
+                    "collection_id": collection_id,
+                    "goal_id": goal_id,
+                    "sample_id": _text(candidate.get("sample_id")),
+                    "finding_id": _text(candidate.get("finding_id")),
+                    "open_url": _text(candidate.get("open_url"))
+                    or _text(packet.get("review_url")),
+                    "statement": _text(candidate.get("statement")),
+                    "variables": _text_list(candidate.get("variables")),
+                    "mediators": _text_list(candidate.get("mediators")),
+                    "outcomes": _text_list(candidate.get("outcomes")),
+                    "direction": _text(candidate.get("direction")),
+                    "scope_summary": _text(candidate.get("scope_summary")),
+                    "support_grade": _text(candidate.get("support_grade")),
+                    "review_status": _text(candidate.get("review_status")),
+                    "presentation_bucket": _text(candidate.get("presentation_bucket")),
+                    "trace_status": _text(candidate.get("trace_status")),
+                    "review_reasons": _text_list(candidate.get("review_reasons")),
+                    "warnings": _text_list(candidate.get("warnings")),
+                    "recommended_action": _text(candidate.get("recommended_action")),
+                    "recommended_action_code": _text(
+                        candidate.get("recommended_action_code")
+                    ),
+                    "suggested_target": dict(
+                        _mapping(candidate.get("suggested_target"))
+                    ),
+                    "evidence": _mapping_list(candidate.get("evidence")),
+                }
+            )
+    return _jsonl(rows)
+
+
+def render_messages_jsonl_summary(summary: dict[str, Any]) -> str:
+    rows = []
+    for goal in _mapping_list(summary.get("goals")):
+        export = _mapping(goal.get("training_export"))
+        rows.extend(_mapping_list(export.get("rows")))
+    return _jsonl(rows)
 
 
 def _has_text_input_block(item: dict[str, Any]) -> bool:
@@ -675,6 +761,11 @@ def _text(value: Any) -> str:
 
 def _normalized_text(value: Any) -> str:
     return " ".join(_text(value).casefold().split())
+
+
+def _jsonl(rows: list[dict[str, Any]]) -> str:
+    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    return f"{body}\n" if body else ""
 
 
 def _check(goal_id: str, name: str, passed: bool, detail: str) -> dict[str, str]:

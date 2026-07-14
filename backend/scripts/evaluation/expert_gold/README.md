@@ -257,6 +257,22 @@ python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
 This packet is read-only. It is meant to help a human expert decide whether to
 accept, reject, or correct each candidate in the goal review UI; it does not
 promote any sample to `training_ready`.
+For batch handoff to an independent reviewer or review agent, emit one pending
+candidate per line:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format review-jsonl
+```
+
+After expert acceptance or curation creates `training_ready` samples, export the
+fine-tuning-compatible message rows with:
+
+```bash
+python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format messages-jsonl \
+  --require-training-ready
+```
 
 To run the combined three-layer gate for expert review, dataset accumulation,
 and experiment-planning readiness:

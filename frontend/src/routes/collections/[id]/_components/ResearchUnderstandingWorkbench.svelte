@@ -3341,6 +3341,25 @@
 		});
 	}
 
+	function reviewImportAffectedGoalReadinessText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedGoalReadiness', {
+			training: Number(record.training_ready_count ?? 0),
+			messages: Number(record.training_message_count ?? 0),
+			protocol: Number(record.protocol_ready_count ?? 0),
+			review: Number(record.review_candidate_count ?? 0),
+			rejected: Number(record.rejected_count ?? 0)
+		});
+	}
+
+	function reviewImportAffectedGoalPendingText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedGoalPending', {
+			actionable: Number(record.pending_actionable_count ?? 0),
+			accept: Number(record.pending_accept_count ?? 0),
+			reject: Number(record.pending_reject_count ?? 0),
+			correct: Number(record.pending_correct_count ?? 0)
+		});
+	}
+
 	function reviewImportGoalLabel(record: Record<string, unknown>) {
 		return typeof record.goal_id === 'string' && record.goal_id
 			? formatShortIdentifier(record.goal_id)
@@ -4215,6 +4234,20 @@
 																	})}
 																</small>
 															{/if}
+														</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if reviewImportSummary.affected_goals.length}
+											<div class="research-understanding-workbench__review-import-progress">
+												<strong>{$t('research.understanding.reviewImportAffectedGoalsTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.affected_goals as goalReadiness, index (`goal-readiness-${index}`)}
+														<li>
+															<span>{reviewImportGoalLabel(goalReadiness)}</span>
+															<small>{reviewImportAffectedGoalReadinessText(goalReadiness)}</small>
+															<small>{reviewImportAffectedGoalPendingText(goalReadiness)}</small>
 														</li>
 													{/each}
 												</ul>

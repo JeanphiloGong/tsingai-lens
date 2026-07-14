@@ -51,4 +51,7 @@ artifacts.
   records. CLI and future API entry points should call this service so
   accept/reject/correct rules, stale finding checks, evidence-ref validation,
   acceptance-gate enforcement, warning handling, and review-progress summaries
-  remain consistent.
+  remain consistent. Dry-run responses include the current readiness counts for
+  affected goals, plus pending accept/reject/correct counts, so experts can see
+  whether a batch of decisions will move the dataset toward training export or
+  protocol drafting before writing labels.

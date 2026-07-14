@@ -124,7 +124,10 @@ class ResearchUnderstandingReviewImportService:
                 warnings=warnings,
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=[],
+                affected_goals=_affected_goal_summaries(
+                    self.feedback_service,
+                    valid_decisions,
+                ),
             )
         if dry_run:
             return _summary(
@@ -140,7 +143,10 @@ class ResearchUnderstandingReviewImportService:
                 warnings=warnings,
                 review_progress=review_progress,
                 decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=[],
+                affected_goals=_affected_goal_summaries(
+                    self.feedback_service,
+                    valid_decisions,
+                ),
             )
 
         written = 0
@@ -706,9 +712,23 @@ def _affected_goal_summaries(
     decisions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     datasets = _datasets_for_decisions(service, decisions)
+    pending_by_goal = {
+        (_text(progress.get("collection_id")), _text(progress.get("goal_id"))): progress
+        for progress in _decision_progress_by_goal(decisions)
+    }
     summaries = []
-    for dataset in datasets.values():
-        summaries.append(_goal_readiness_summary(dataset))
+    for key, dataset in datasets.items():
+        summary = _goal_readiness_summary(dataset)
+        pending = pending_by_goal.get(key, {})
+        summary.update(
+            {
+                "pending_actionable_count": int(pending.get("actionable_count") or 0),
+                "pending_accept_count": int(pending.get("accept_count") or 0),
+                "pending_reject_count": int(pending.get("reject_count") or 0),
+                "pending_correct_count": int(pending.get("correct_count") or 0),
+            }
+        )
+        summaries.append(summary)
     return summaries
 
 

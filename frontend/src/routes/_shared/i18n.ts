@@ -392,6 +392,11 @@ const translations: Record<Language, Translations> = {
 					'{actionable} actionable, {skipped} skipped · accept {accept}, reject {reject}, correct {correct}',
 				reviewImportNextFinding: 'Next finding: {finding}',
 				reviewImportUnknownGoal: 'Unknown goal',
+				reviewImportAffectedGoalsTitle: 'Affected goal readiness',
+				reviewImportAffectedGoalReadiness:
+					'Current: {training} training-ready, {messages} message-exportable, {protocol} protocol-ready, {review} review-candidate, {rejected} rejected.',
+				reviewImportAffectedGoalPending:
+					'Pending write: {actionable} actionable ({accept} accept, {reject} reject, {correct} correct).',
 				reviewImportWarningsTitle: 'Import warnings',
 				reviewImportErrorsTitle: 'Import errors',
 				datasetNoTrainingReady: 'No training-ready samples',
@@ -3729,6 +3734,11 @@ const translations: Record<Language, Translations> = {
 					'{actionable} 行可写入，{skipped} 行待复核 · accept {accept}，reject {reject}，correct {correct}',
 				reviewImportNextFinding: '下一条 Finding：{finding}',
 				reviewImportUnknownGoal: '未知研究目标',
+				reviewImportAffectedGoalsTitle: '受影响研究目标状态',
+				reviewImportAffectedGoalReadiness:
+					'当前：{training} 条可训练，{messages} 条可导出 messages，{protocol} 条可生成方案输入，{review} 条待复核，{rejected} 条已拒绝。',
+				reviewImportAffectedGoalPending:
+					'即将写入：{actionable} 行可写入（accept {accept}，reject {reject}，correct {correct}）。',
 				reviewImportWarningsTitle: '导入警告',
 				reviewImportErrorsTitle: '导入错误',
 				datasetNoTrainingReady: '暂无可训练样本',

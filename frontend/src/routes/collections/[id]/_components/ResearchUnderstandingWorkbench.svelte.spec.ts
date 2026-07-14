@@ -3826,7 +3826,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 								next_review_finding_id: ''
 							}
 						],
-						affected_goals: []
+						affected_goals: [
+							{
+								goal_id: 'goal_1a7a26d850b9',
+								training_ready_count: 1,
+								training_message_count: 1,
+								protocol_ready_count: 1,
+								review_candidate_count: 14,
+								rejected_count: 0,
+								pending_actionable_count: 1,
+								pending_accept_count: 1,
+								pending_reject_count: 0,
+								pending_correct_count: 0
+							}
+						]
 					})
 				);
 			}
@@ -3860,9 +3873,21 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 0 written.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Goal review progress')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('goal_1a7a26d850b9')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('goal_1a7a26d850b9').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('1 actionable, 0 skipped · accept 1, reject 0, correct 0'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Current: 1 training-ready, 1 message-exportable, 1 protocol-ready, 14 review-candidate, 0 rejected.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Pending write: 1 actionable (1 accept, 0 reject, 0 correct).')
+			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Import warnings')).toBeInTheDocument();
 		await expect

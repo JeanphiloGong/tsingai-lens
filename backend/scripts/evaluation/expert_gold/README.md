@@ -261,6 +261,7 @@ This creates one read-only handoff directory with `review-packet.txt`,
 `review-unlock-plan.md`,
 `dataset-readiness.md`, `expert-satisfaction.md`, `training-ready.messages.jsonl`,
 `training-ready.dataset.jsonl`, `optimization-summary.md`,
+`error-statistics.tsv`,
 `review-commands.sh`, `dataset-quality-summary.json`, `manifest.json`, and
 `README.txt`. It does not
 import labels or mutate collection data; it only packages the current Findings
@@ -286,6 +287,9 @@ protocol inputs. Run `review-commands.sh` from the workspace directory for the
 matching TSV merge, dry-run, gate, and export commands. The real import command
 in that script is commented out and must be enabled only after a human expert
 approves the dry-run.
+Use `error-statistics.tsv` after expert labels exist to sort issue types,
+review risks, system warnings, and optimization hotspots in a spreadsheet or
+dataset registry. Unconfirmed review risks are not yet model-quality failures.
 By default, the script creates a unique directory under `/tmp`; pass
 `--output-dir <empty_dir>` only when a fixed destination is required.
 

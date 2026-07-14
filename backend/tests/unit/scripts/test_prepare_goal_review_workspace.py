@@ -184,6 +184,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "training-ready.messages.jsonl",
         "training-ready.dataset.jsonl",
         "optimization-summary.md",
+        "error-statistics.tsv",
         "review-commands.sh",
         "README.txt",
         "manifest.json",
@@ -321,6 +322,14 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     )
     assert "wrong_variable: 1" in optimization
     assert "by_variable:preheating" in optimization
+    error_stats = (workspace / "error-statistics.tsv").read_text(encoding="utf-8")
+    assert "issue_type\tcollection\twrong_variable\t1\t" in error_stats
+    assert "review_risk\tcollection\tsingle_paper_evidence\t1\t" in error_stats
+    assert (
+        "system_warning\tcollection\ttable_row_alignment_uncertain\t1\t"
+        in error_stats
+    )
+    assert "hotspot_error_category\tby_variable:preheating\tvariable_error\t1\t" in error_stats
     commands = (workspace / "review-commands.sh").read_text(encoding="utf-8")
     assert "set -euo pipefail" in commands
     assert 'REVIEW_FILE=${REVIEW_FILE:-reviewed-findings.template.jsonl}' in commands
@@ -648,6 +657,49 @@ def test_render_optimization_summary_lists_error_and_risk_stats():
     assert "table_row_alignment_uncertain: 1" in report
     assert "by_variable:preheating" in report
     assert "issue_type:wrong_variable=1" in report
+
+
+def test_render_error_statistics_tsv_exports_grouped_counts():
+    module = _load_workspace_module()
+
+    text = module.render_error_statistics_tsv(_summary())
+    rows = [line.split("\t") for line in text.splitlines()]
+
+    assert rows[0] == [
+        "category",
+        "scope",
+        "name",
+        "count",
+        "optimization_hint",
+    ]
+    assert [
+        "issue_type",
+        "collection",
+        "wrong_variable",
+        "1",
+        "Use confirmed expert labels to prioritize prompt or model fixes.",
+    ] in rows
+    assert [
+        "review_risk",
+        "collection",
+        "single_paper_evidence",
+        "1",
+        "Finish expert review before treating this as a model error.",
+    ] in rows
+    assert [
+        "system_warning",
+        "collection",
+        "table_row_alignment_uncertain",
+        "1",
+        "Inspect parser, evidence construction, or trace binding first.",
+    ] in rows
+    assert [
+        "hotspot_error_category",
+        "by_variable:preheating",
+        "variable_error",
+        "1",
+        "Group recurring errors before changing extraction prompts.",
+    ] in rows
 
 
 def test_enrich_goal_questions_adds_question_to_matching_goals(monkeypatch):

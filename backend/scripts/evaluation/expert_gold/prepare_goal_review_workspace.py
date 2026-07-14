@@ -225,6 +225,11 @@ def _write_workspace_files(
             "Error, review-risk, and optimization statistics.",
         ),
         (
+            "error-statistics.tsv",
+            render_error_statistics_tsv(summary),
+            "Spreadsheet-friendly error, review-risk, warning, and hotspot counts.",
+        ),
+        (
             "review-commands.sh",
             render_review_commands(summary),
             "Copyable dry-run, import, export, and gate-check commands.",
@@ -944,6 +949,47 @@ def render_optimization_summary(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_error_statistics_tsv(summary: dict[str, Any]) -> str:
+    aggregate = _aggregate_goal_stats(summary)
+    rows = [
+        _tsv_row(
+            [
+                "category",
+                "scope",
+                "name",
+                "count",
+                "optimization_hint",
+            ]
+        )
+    ]
+    for category, scope, stats in (
+        ("issue_type", "collection", aggregate["issue_types"]),
+        ("review_risk", "collection", aggregate["review_reasons"]),
+        ("system_warning", "collection", aggregate["system_warnings"]),
+    ):
+        for name, count in _ranked_counts(stats):
+            rows.append(
+                _tsv_row(
+                    [category, scope, name, str(count), _optimization_hint(category)]
+                )
+            )
+    for scope, _score, metrics in _ranked_hotspots(aggregate["hotspots"]):
+        for metric, count in _ranked_counts(metrics):
+            metric_category, _, name = metric.partition(":")
+            rows.append(
+                _tsv_row(
+                    [
+                        f"hotspot_{metric_category}",
+                        scope,
+                        name,
+                        str(count),
+                        _optimization_hint(metric_category),
+                    ]
+                )
+            )
+    return "\n".join(rows) + "\n"
+
+
 def render_text_summary(result: dict[str, Any]) -> str:
     lines = [
         f"Prepared Lens goal review workspace: {result['output_dir']}",
@@ -1485,14 +1531,8 @@ def _stats_lines(stats: dict[str, int], *, empty: str) -> list[str]:
 
 
 def _hotspot_lines(hotspots: dict[str, dict[str, int]]) -> list[str]:
-    scored = []
-    for name, metrics in hotspots.items():
-        score = sum(metrics.values())
-        if score:
-            scored.append((name, score, metrics))
-    scored.sort(key=lambda item: (-item[1], item[0]))
     lines = []
-    for name, _score, metrics in scored[:10]:
+    for name, _score, metrics in _ranked_hotspots(hotspots)[:10]:
         top_metrics = ", ".join(
             f"{metric}={count}" for metric, count in _ranked_counts(metrics)[:3]
         )
@@ -1500,8 +1540,30 @@ def _hotspot_lines(hotspots: dict[str, dict[str, int]]) -> list[str]:
     return lines
 
 
+def _ranked_hotspots(
+    hotspots: dict[str, dict[str, int]],
+) -> list[tuple[str, int, dict[str, int]]]:
+    scored = []
+    for name, metrics in hotspots.items():
+        score = sum(metrics.values())
+        if score:
+            scored.append((name, score, metrics))
+    return sorted(scored, key=lambda item: (-item[1], item[0]))
+
+
 def _ranked_counts(stats: dict[str, int]) -> list[tuple[str, int]]:
     return sorted(stats.items(), key=lambda item: (-int(item[1] or 0), item[0]))
+
+
+def _optimization_hint(category: str) -> str:
+    hints = {
+        "issue_type": "Use confirmed expert labels to prioritize prompt or model fixes.",
+        "review_risk": "Finish expert review before treating this as a model error.",
+        "system_warning": "Inspect parser, evidence construction, or trace binding first.",
+        "error_category": "Group recurring errors before changing extraction prompts.",
+        "review_candidate_reason": "Resolve unconfirmed review candidates before training.",
+    }
+    return hints.get(category, "Inspect affected findings and source evidence.")
 
 
 def _line_count(value: str) -> int:

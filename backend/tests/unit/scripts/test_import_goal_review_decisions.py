@@ -196,6 +196,19 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 "rerun dry-run with --fail-on-warnings before import",
             ],
         },
+        "decision_progress_by_goal": [
+            {
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "total_rows": 4,
+                "actionable_count": 3,
+                "skipped_count": 1,
+                "accept_count": 1,
+                "reject_count": 1,
+                "correct_count": 1,
+                "next_review_finding_id": "finding-skip",
+            }
+        ],
         "affected_goals": [
             {
                 "collection_id": "col-1",

@@ -102,6 +102,19 @@ def test_review_import_service_writes_feedback_and_curation():
     assert summary["written_count"] == 2
     assert summary["counts"] == {"accept": 1, "correct": 1, "skip": 1}
     assert summary["review_progress"]["ready_to_write"] is True
+    assert summary["decision_progress_by_goal"] == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-1",
+            "total_rows": 3,
+            "actionable_count": 2,
+            "skipped_count": 1,
+            "accept_count": 1,
+            "reject_count": 0,
+            "correct_count": 1,
+            "next_review_finding_id": "finding-skip",
+        }
+    ]
     assert feedback_service.feedback == [
         {
             "collection_id": "col-1",
@@ -140,6 +153,19 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
             "leave unchecked rows as skip or review them later",
         ],
     }
+    assert summary["decision_progress_by_goal"] == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-1",
+            "total_rows": 1,
+            "actionable_count": 0,
+            "skipped_count": 1,
+            "accept_count": 0,
+            "reject_count": 0,
+            "correct_count": 0,
+            "next_review_finding_id": "finding-accept",
+        }
+    ]
 
 
 def test_review_import_service_rejects_agent_reviewer():

@@ -78,6 +78,7 @@ class ResearchUnderstandingReviewImportService:
             decision for decision in decisions if decision["status"] == "ready"
         ]
         review_progress = _review_progress(valid_decisions)
+        decision_progress_by_goal = _decision_progress_by_goal(valid_decisions)
         if not errors:
             errors.extend(
                 _dataset_validation_errors(self.feedback_service, valid_decisions)
@@ -95,6 +96,7 @@ class ResearchUnderstandingReviewImportService:
                 errors=errors,
                 warnings=[],
                 review_progress=review_progress,
+                decision_progress_by_goal=decision_progress_by_goal,
                 affected_goals=[],
             )
         warnings = _review_warnings(valid_decisions)
@@ -119,6 +121,7 @@ class ResearchUnderstandingReviewImportService:
                 ],
                 warnings=warnings,
                 review_progress=review_progress,
+                decision_progress_by_goal=decision_progress_by_goal,
                 affected_goals=[],
             )
         if dry_run:
@@ -134,6 +137,7 @@ class ResearchUnderstandingReviewImportService:
                 errors=[],
                 warnings=warnings,
                 review_progress=review_progress,
+                decision_progress_by_goal=decision_progress_by_goal,
                 affected_goals=[],
             )
 
@@ -162,6 +166,7 @@ class ResearchUnderstandingReviewImportService:
             errors=[],
             warnings=warnings,
             review_progress=review_progress,
+            decision_progress_by_goal=decision_progress_by_goal,
             affected_goals=affected_goals,
         )
 
@@ -209,7 +214,17 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
     if action not in ACTION_VALUES:
         return _error(line_number, action, "action must be accept, reject, correct, or skip")
     if action == "skip":
-        return {"status": "ready", "line": line_number, "action": "skip", "payload": {}}
+        return {
+            "status": "ready",
+            "line": line_number,
+            "action": "skip",
+            "payload": {
+                "collection_id": _text(row.get("collection_id")),
+                "scope_id": _text(row.get("goal_id")),
+                "finding_id": _text(row.get("finding_id")),
+                "claim_id": _optional_text(row.get("claim_id")),
+            },
+        }
 
     required = ["collection_id", "goal_id", "finding_id"]
     missing = [field for field in required if not _text(row.get(field))]
@@ -520,6 +535,49 @@ def _review_progress(decisions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _decision_progress_by_goal(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    goals: dict[tuple[str, str], dict[str, Any]] = {}
+    for decision in decisions:
+        payload = _mapping(decision.get("payload"))
+        collection_id = _text(payload.get("collection_id"))
+        goal_id = _text(payload.get("scope_id"))
+        if not collection_id:
+            collection_id = _text(decision.get("collection_id"))
+        if not goal_id:
+            goal_id = _text(decision.get("goal_id"))
+        key = (collection_id, goal_id)
+        if key not in goals:
+            goals[key] = {
+                "collection_id": collection_id,
+                "goal_id": goal_id,
+                "total_rows": 0,
+                "actionable_count": 0,
+                "skipped_count": 0,
+                "accept_count": 0,
+                "reject_count": 0,
+                "correct_count": 0,
+                "next_review_finding_id": "",
+            }
+        goal = goals[key]
+        action = _text(decision.get("action"))
+        goal["total_rows"] += 1
+        if action == "skip":
+            goal["skipped_count"] += 1
+            if not goal["next_review_finding_id"]:
+                goal["next_review_finding_id"] = _text(payload.get("finding_id"))
+            continue
+        if action in {"accept", "reject", "correct"}:
+            goal["actionable_count"] += 1
+            goal[f"{action}_count"] += 1
+    return [
+        goal
+        for goal in sorted(
+            goals.values(),
+            key=lambda item: (_text(item.get("collection_id")), _text(item.get("goal_id"))),
+        )
+    ]
+
+
 def _dataset_validation_errors(
     service: Any,
     decisions: list[dict[str, Any]],
@@ -767,6 +825,7 @@ def _summary(
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
     review_progress: dict[str, Any],
+    decision_progress_by_goal: list[dict[str, Any]],
     affected_goals: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -779,6 +838,7 @@ def _summary(
         "errors": errors,
         "warnings": warnings,
         "review_progress": review_progress,
+        "decision_progress_by_goal": decision_progress_by_goal,
         "affected_goals": affected_goals,
     }
 

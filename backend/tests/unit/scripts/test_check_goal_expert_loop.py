@@ -280,6 +280,15 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "single_paper_evidence: 2" in text
     assert "needs_cross_paper_confirmation: 1" in text
     assert "table_row_alignment_uncertain: 1" in text
+    assert "Gate diagnosis:" in text
+    assert (
+        "2 finding(s) still need expert accept, reject, or correct decisions before the dataset can become training-ready."
+        in text
+    )
+    assert (
+        "Do not rerun goal analysis for this state; export the decision template, review it, then dry-run and import human-confirmed decisions."
+        in text
+    )
     assert "Next commands:" in text
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format review-packet"
@@ -375,6 +384,11 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
             "next_review_finding_id": "",
         }
     ]
+    text = check.render_text_summary(summary)
+    assert (
+        "1 goal(s) have training-ready findings but no exportable training messages. "
+        "Inspect training-ready samples for missing target fields or evidence text."
+    ) in text
 
 
 def test_check_goal_expert_loop_require_complete_passes_when_no_work_remains(monkeypatch):

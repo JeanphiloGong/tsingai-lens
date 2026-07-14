@@ -809,6 +809,10 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         lines.append("- system warnings:")
         for warning, count in system_warnings.items():
             lines.append(f"  - {warning}: {count}")
+    diagnosis = _gate_diagnosis(remaining_work)
+    if diagnosis:
+        lines.extend(["", "Gate diagnosis:"])
+        lines.extend(f"- {item}" for item in diagnosis)
     pending_goals = _mapping_list(remaining_work.get("pending_goals"))
     if pending_goals:
         lines.extend(["", "Pending goals:"])
@@ -845,6 +849,46 @@ def render_text_summary(summary: dict[str, Any]) -> str:
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _gate_diagnosis(remaining_work: dict[str, Any]) -> list[str]:
+    review_candidates = int(remaining_work.get("review_candidate_count") or 0)
+    missing_training = len(_list(remaining_work.get("goals_without_training_ready")))
+    missing_messages = len(_list(remaining_work.get("goals_without_training_messages")))
+    missing_protocol = len(_list(remaining_work.get("goals_without_protocol_ready")))
+    if not any((review_candidates, missing_training, missing_messages, missing_protocol)):
+        return []
+    if review_candidates:
+        return [
+            (
+                f"{review_candidates} finding(s) still need expert accept, reject, "
+                "or correct decisions before the dataset can become training-ready."
+            ),
+            (
+                "Do not rerun goal analysis for this state; export the decision "
+                "template, review it, then dry-run and import human-confirmed decisions."
+            ),
+        ]
+    if missing_training:
+        return [
+            (
+                f"{missing_training} goal(s) have no training-ready finding after review. "
+                "Check whether every remaining finding was rejected or corrected without usable evidence."
+            )
+        ]
+    if missing_messages:
+        return [
+            (
+                f"{missing_messages} goal(s) have training-ready findings but no exportable "
+                "training messages. Inspect training-ready samples for missing target fields or evidence text."
+            )
+        ]
+    return [
+        (
+            f"{missing_protocol} goal(s) have training messages but no protocol-ready "
+            "inputs. Inspect variables, outcomes, direction or scope, and evidence refs."
+        )
+    ]
 
 
 def _next_step_commands(summary: dict[str, Any]) -> list[str]:

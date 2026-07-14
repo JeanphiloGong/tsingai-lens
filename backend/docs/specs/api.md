@@ -847,7 +847,8 @@ resolved evidence quote/source text 重建 `input_blocks`。
 训练 message readiness 会校验 assistant JSON 的 statement、variables、outcomes、
 direction/scope、support_grade、generalization_status 和 evidence_ref_ids 与
 `expert_target` / `system_prediction` / `training_evidence_refs` 对齐，避免只含
-一句自然语言结论的样本进入微调导出。
+一句自然语言结论的样本进入微调导出。不通过时，sample metadata 中的
+`training_message_diagnostic` 会列出缺失或不匹配的字段，供专家修正和导出排查。
 `model_output` 仍保留
 bounded `raw_output` 和 `parsed_output` 摘要用于诊断，不包含 API key、Authorization
 header、完整环境变量或 client 配置。该接口只从已持久化 understanding artifact、

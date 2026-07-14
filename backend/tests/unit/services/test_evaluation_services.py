@@ -2150,6 +2150,9 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
     assert "training_messages" in dataset["items"][0]["protocol_readiness"][
         "blocking_missing"
     ]
+    diagnostic = dataset["items"][0]["metadata"]["training_message_diagnostic"]
+    assert "mismatched_assistant_statement" in diagnostic
+    assert "mismatched_assistant_generalization_status" in diagnostic
     assert dataset["quality_summary"]["training_ready_sample_count"] == 1
     assert dataset["quality_summary"]["training_message_sample_count"] == 0
     assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0
@@ -2261,6 +2264,9 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
     assert dataset["items"][0]["protocol_readiness"]["blocking_missing"] == [
         "training_messages",
         "support_grade",
+    ]
+    assert dataset["items"][0]["metadata"]["training_message_diagnostic"] == [
+        "missing_expected_generalization_status"
     ]
     assert dataset["items"][0]["protocol_readiness"]["checks"]["variables"] is True
     assert dataset["items"][0]["protocol_readiness"]["checks"]["outcomes"] is True

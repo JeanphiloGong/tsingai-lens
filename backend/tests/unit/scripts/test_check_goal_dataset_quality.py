@@ -134,6 +134,13 @@ def _failed_check_names(summary):
     return {item["name"] for item in summary["checks"] if item["status"] == "fail"}
 
 
+def _failed_check(summary, name):
+    for item in summary["checks"]:
+        if item["name"] == name and item["status"] == "fail":
+            return item
+    raise AssertionError(f"missing failed check: {name}")
+
+
 def test_write_stdout_exits_cleanly_on_broken_pipe(monkeypatch):
     check = _load_goal_dataset_check_module()
 
@@ -561,6 +568,10 @@ def test_evaluate_goal_dataset_payload_fails_missing_training_messages():
     assert "training-ready samples include fine-tuning messages" in _failed_check_names(
         summary
     )
+    assert "missing_message_pair" in _failed_check(
+        summary,
+        "training-ready samples include fine-tuning messages",
+    )["detail"]
 
 
 def test_evaluate_goal_dataset_payload_fails_missing_protocol_inputs():
@@ -622,6 +633,10 @@ def test_evaluate_goal_dataset_payload_fails_mismatched_training_message_target(
     assert "training-ready samples include fine-tuning messages" in _failed_check_names(
         summary
     )
+    assert "mismatched_assistant_generalization_status" in _failed_check(
+        summary,
+        "training-ready samples include fine-tuning messages",
+    )["detail"]
 
 
 def test_evaluate_goal_dataset_payload_fails_training_message_without_scope_boundary():

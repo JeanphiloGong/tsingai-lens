@@ -359,11 +359,7 @@ def evaluate_goal_dataset_payload(
             goal_id,
             "training-ready samples include fine-tuning messages",
             all(_has_fine_tuning_messages(item) for item in training_ready_items),
-            _sample_failure_detail(
-                item
-                for item in training_ready_items
-                if not _has_fine_tuning_messages(item)
-            ),
+            _training_message_failure_detail(training_ready_items),
         ),
         _check(
             goal_id,
@@ -732,28 +728,39 @@ def _has_traceable_training_evidence(item: dict[str, Any]) -> bool:
 
 
 def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
+    return not _training_message_diagnostic(item)
+
+
+def _training_message_diagnostic(item: dict[str, Any]) -> list[str]:
     expected = _training_message_expected_payload(item)
-    if not _training_message_expected_payload_is_complete(expected):
-        return False
+    missing_expected = _training_message_missing_expected_fields(expected)
+    if missing_expected:
+        return [f"missing_expected_{field}" for field in missing_expected]
     messages = _mapping_list(item.get("training_messages"))
     if len(messages) < 2:
-        return False
+        return ["missing_message_pair"]
     if _text(messages[0].get("role")) != "user" or not _text(
         messages[0].get("content")
     ):
-        return False
+        return ["invalid_user_message"]
     if _text(messages[-1].get("role")) != "assistant":
-        return False
+        return ["missing_assistant_message"]
     assistant_content = _text(messages[-1].get("content"))
     if not assistant_content:
-        return False
+        return ["missing_assistant_content"]
     try:
         assistant_payload = json.loads(assistant_content)
     except json.JSONDecodeError:
-        return False
+        return ["invalid_assistant_json"]
     if not isinstance(assistant_payload, dict):
-        return False
-    return _training_message_payload_matches_expected(assistant_payload, expected)
+        return ["invalid_assistant_json_object"]
+    return [
+        f"mismatched_assistant_{field}"
+        for field in _training_message_payload_mismatch_fields(
+            assistant_payload,
+            expected,
+        )
+    ]
 
 
 def _training_message_expected_payload(item: dict[str, Any]) -> dict[str, Any]:
@@ -793,55 +800,78 @@ def _training_message_expected_payload(item: dict[str, Any]) -> dict[str, Any]:
 def _training_message_expected_payload_is_complete(
     expected: dict[str, Any],
 ) -> bool:
-    return bool(
-        _text(expected.get("statement"))
-        and _text_list(expected.get("variables"))
-        and _text_list(expected.get("outcomes"))
-        and (
-            _text(expected.get("direction"))
-            or _text(expected.get("scope_summary"))
-        )
-        and _text(expected.get("support_grade"))
-        and _text(expected.get("generalization_status"))
-        and _text_list(expected.get("evidence_ref_ids"))
-    )
+    return not _training_message_missing_expected_fields(expected)
+
+
+def _training_message_missing_expected_fields(
+    expected: dict[str, Any],
+) -> list[str]:
+    missing = []
+    if not _text(expected.get("statement")):
+        missing.append("statement")
+    if not _text_list(expected.get("variables")):
+        missing.append("variables")
+    if not _text_list(expected.get("outcomes")):
+        missing.append("outcomes")
+    if not (
+        _text(expected.get("direction"))
+        or _text(expected.get("scope_summary"))
+    ):
+        missing.append("direction_or_scope")
+    if not _text(expected.get("support_grade")):
+        missing.append("support_grade")
+    if not _text(expected.get("generalization_status")):
+        missing.append("generalization_status")
+    if not _text_list(expected.get("evidence_ref_ids")):
+        missing.append("evidence_ref_ids")
+    return missing
 
 
 def _training_message_payload_matches_expected(
     assistant_payload: dict[str, Any],
     expected: dict[str, Any],
 ) -> bool:
+    return not _training_message_payload_mismatch_fields(assistant_payload, expected)
+
+
+def _training_message_payload_mismatch_fields(
+    assistant_payload: dict[str, Any],
+    expected: dict[str, Any],
+) -> list[str]:
+    mismatches = []
     if _normalized_text(assistant_payload.get("statement")) != _normalized_text(
         expected.get("statement")
     ):
-        return False
+        mismatches.append("statement")
     if _normalized_text_list(assistant_payload.get("variables")) != _normalized_text_list(
         expected.get("variables")
     ):
-        return False
+        mismatches.append("variables")
     if _normalized_text_list(assistant_payload.get("outcomes")) != _normalized_text_list(
         expected.get("outcomes")
     ):
-        return False
+        mismatches.append("outcomes")
     if _text(expected.get("direction")) and _normalized_text(
         assistant_payload.get("direction")
     ) != _normalized_text(expected.get("direction")):
-        return False
+        mismatches.append("direction")
     if _text(expected.get("scope_summary")) and _normalized_text(
         assistant_payload.get("scope_summary")
     ) != _normalized_text(expected.get("scope_summary")):
-        return False
+        mismatches.append("scope_summary")
     if _normalized_text(assistant_payload.get("support_grade")) != _normalized_text(
         expected.get("support_grade")
     ):
-        return False
+        mismatches.append("support_grade")
     if _normalized_text(
         assistant_payload.get("generalization_status")
     ) != _normalized_text(expected.get("generalization_status")):
-        return False
-    return _normalized_text_list(
+        mismatches.append("generalization_status")
+    if _normalized_text_list(
         assistant_payload.get("evidence_ref_ids")
-    ) == _normalized_text_list(expected.get("evidence_ref_ids"))
+    ) != _normalized_text_list(expected.get("evidence_ref_ids")):
+        mismatches.append("evidence_ref_ids")
+    return mismatches
 
 
 def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
@@ -987,6 +1017,22 @@ def _sample_failure_detail(items: Any) -> str:
     if not failures:
         return "none"
     return "samples=" + json.dumps(failures[:10], ensure_ascii=False)
+
+
+def _training_message_failure_detail(items: list[dict[str, Any]]) -> str:
+    failures = []
+    for item in items:
+        diagnostic = _training_message_diagnostic(item)
+        if not diagnostic:
+            continue
+        sample_id = _text(item.get("sample_id")) or _text(item.get("finding_id")) or "unknown"
+        failures.append({"sample": sample_id, "diagnostic": diagnostic})
+    if not failures:
+        return "none"
+    return "training_message_diagnostic=" + json.dumps(
+        failures[:10],
+        ensure_ascii=False,
+    )
 
 
 def _mapping(value: Any) -> dict[str, Any]:

@@ -3888,6 +3888,19 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 0 written.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Goal review progress')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Readiness after import')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 goal(s): 1 training-ready, 1 message-ready, 1 protocol-ready, 13 review-candidate, 0 rejected.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Training export: ready. Protocol drafting: ready.')
+			)
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('goal_1a7a26d850b9').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('1 actionable, 0 skipped · accept 1, reject 0, correct 0'))

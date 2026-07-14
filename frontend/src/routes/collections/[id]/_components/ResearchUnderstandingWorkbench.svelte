@@ -3368,6 +3368,40 @@
 		});
 	}
 
+	function reviewImportHasReadinessSummary(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		return Object.keys(summary.readiness_summary).length > 0;
+	}
+
+	function reviewImportReadinessCountsText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.readiness_summary;
+		return $t('research.understanding.reviewImportReadinessCounts', {
+			goals: Number(record.goal_count ?? 0),
+			training: Number(record.projected_training_ready_goal_count ?? 0),
+			messages: Number(record.projected_training_message_goal_count ?? 0),
+			protocol: Number(record.projected_protocol_ready_goal_count ?? 0),
+			review: Number(record.projected_review_candidate_count ?? 0),
+			rejected: Number(record.projected_rejected_count ?? 0)
+		});
+	}
+
+	function reviewImportReadinessGateText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.readiness_summary;
+		return $t('research.understanding.reviewImportReadinessGates', {
+			trainingStatus: record.ready_for_training_export
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady'),
+			protocolStatus: record.ready_for_protocol_drafting
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady')
+		});
+	}
+
 	function reviewImportGoalLabel(record: Record<string, unknown>) {
 		return typeof record.goal_id === 'string' && record.goal_id
 			? formatShortIdentifier(record.goal_id)
@@ -4227,6 +4261,16 @@
 												<strong>{reviewImportSummary.errors.length}</strong>
 											</span>
 										</div>
+										{#if reviewImportHasReadinessSummary(reviewImportSummary)}
+											<div
+												class="research-understanding-workbench__review-import-readiness"
+												aria-label={$t('research.understanding.reviewImportReadinessTitle')}
+											>
+												<strong>{$t('research.understanding.reviewImportReadinessTitle')}</strong>
+												<small>{reviewImportReadinessCountsText(reviewImportSummary)}</small>
+												<small>{reviewImportReadinessGateText(reviewImportSummary)}</small>
+											</div>
+										{/if}
 										{#if reviewImportSummary.decision_progress_by_goal.length}
 											<div class="research-understanding-workbench__review-import-progress">
 												<strong>{$t('research.understanding.reviewImportGoalProgressTitle')}</strong>

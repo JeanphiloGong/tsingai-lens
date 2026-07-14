@@ -387,6 +387,13 @@ const translations: Record<Language, Translations> = {
 				reviewImportSkipped: 'Skipped',
 				reviewImportWarnings: 'Warnings',
 				reviewImportErrors: 'Errors',
+				reviewImportReadinessTitle: 'Readiness after import',
+				reviewImportReadinessCounts:
+					'{goals} goal(s): {training} training-ready, {messages} message-ready, {protocol} protocol-ready, {review} review-candidate, {rejected} rejected.',
+				reviewImportReadinessGates:
+					'Training export: {trainingStatus}. Protocol drafting: {protocolStatus}.',
+				reviewImportReady: 'ready',
+				reviewImportNotReady: 'not ready',
 				reviewImportGoalProgressTitle: 'Goal review progress',
 				reviewImportGoalProgress:
 					'{actionable} actionable, {skipped} skipped · accept {accept}, reject {reject}, correct {correct}',
@@ -3731,6 +3738,13 @@ const translations: Record<Language, Translations> = {
 				reviewImportSkipped: '已跳过',
 				reviewImportWarnings: '警告',
 				reviewImportErrors: '错误',
+				reviewImportReadinessTitle: '导入后可用性',
+				reviewImportReadinessCounts:
+					'{goals} 个研究目标：{training} 个可训练，{messages} 个可导出 messages，{protocol} 个可生成方案输入，{review} 条待复核，{rejected} 条已拒绝。',
+				reviewImportReadinessGates:
+					'训练导出：{trainingStatus}。实验方案草拟：{protocolStatus}。',
+				reviewImportReady: '已就绪',
+				reviewImportNotReady: '未就绪',
 				reviewImportGoalProgressTitle: '研究目标复核进度',
 				reviewImportGoalProgress:
 					'{actionable} 行可写入，{skipped} 行待复核 · accept {accept}，reject {reject}，correct {correct}',

@@ -453,6 +453,7 @@ export type ResearchUnderstandingDataset = {
 		next_review_finding_id: string;
 		by_dataset_use_status: Record<ResearchUnderstandingDatasetUseStatus, number>;
 		by_presentation_bucket: Record<string, number>;
+		by_issue_type: Record<string, number>;
 		by_error_category: Record<string, number>;
 		by_review_reason: Record<string, number>;
 		by_system_warning: Record<string, number>;
@@ -1164,6 +1165,7 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 				rejected: toNumber(rawUseCounts.rejected)
 			},
 			by_presentation_bucket: toNumberRecord(qualitySummary.by_presentation_bucket),
+			by_issue_type: toNumberRecord(qualitySummary.by_issue_type),
 			by_error_category: toNumberRecord(qualitySummary.by_error_category),
 			by_review_reason: toNumberRecord(qualitySummary.by_review_reason),
 			by_system_warning: toNumberRecord(qualitySummary.by_system_warning),

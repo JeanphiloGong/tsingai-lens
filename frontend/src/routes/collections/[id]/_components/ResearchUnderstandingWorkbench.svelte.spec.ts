@@ -80,6 +80,7 @@ function datasetResponse(overrides: {
 	protocolReady?: number;
 	itemCount?: number;
 	labelCounts?: Record<string, number>;
+	issueTypes?: Record<string, number>;
 	errorCategories?: Record<string, number>;
 	presentationBuckets?: Record<string, number>;
 	reviewReasons?: Record<string, number>;
@@ -138,6 +139,11 @@ function datasetResponse(overrides: {
 			by_presentation_bucket: overrides.presentationBuckets ?? {
 				primary: trainingReady,
 				review_queue: reviewCandidate
+			},
+			by_issue_type: overrides.issueTypes ?? {
+				wrong_variable: 2,
+				wrong_direction: 1,
+				none: trainingReady
 			},
 			by_error_category: errorCategories,
 			by_review_reason: reviewReasons,
@@ -3410,6 +3416,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Common error categories');
 		expect(datasetText).toContain('Variable error 2');
 		expect(datasetText).toContain('Direction error 1');
+		expect(datasetText).toContain('Expert issue types');
+		expect(datasetText).toContain('Wrong variable 2');
+		expect(datasetText).toContain('Wrong direction 1');
 		expect(datasetText).toContain('Review priorities');
 		expect(datasetText).toContain('Single-paper evidence 2');
 		expect(datasetText).toContain('Partial support 1');
@@ -3639,6 +3648,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Rejected 0');
 		expect(datasetText).toContain('Variable error 3');
 		expect(datasetText).toContain('Evidence error 2');
+		expect(datasetText).toContain('Wrong variable 2');
+		expect(datasetText).toContain('Wrong direction 1');
 		expect(datasetText).toContain('Primary findings 5');
 		expect(datasetText).toContain('Review queue 10');
 		expect(datasetText).toContain('Single-paper evidence 9');

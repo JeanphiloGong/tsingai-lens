@@ -302,6 +302,12 @@
 				datasetSummary.quality_summary.by_error_category
 			).filter(([category]) => !['none', 'unreviewed'].includes(category))
 		: [];
+	$: datasetIssueTypes = datasetSummary
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_issue_types,
+				datasetSummary.quality_summary.by_issue_type
+			).filter(([issue]) => !['none', 'unreviewed'].includes(issue))
+		: [];
 	$: datasetReviewReasons = datasetSummary
 		? preferredTopDiagnostics(
 				datasetSummary.quality_summary.top_review_reasons,
@@ -341,6 +347,12 @@
 				collectionDatasetSummary.quality_summary.top_error_categories,
 				collectionDatasetSummary.quality_summary.by_error_category
 			).filter(([category]) => !['none', 'unreviewed'].includes(category))
+		: [];
+	$: collectionDatasetIssueTypes = collectionDatasetSummary
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_issue_types,
+				collectionDatasetSummary.quality_summary.by_issue_type
+			).filter(([issue]) => !['none', 'unreviewed'].includes(issue))
 		: [];
 	$: collectionDatasetBucketCounts = collectionDatasetSummary
 		? Object.entries(collectionDatasetSummary.quality_summary.by_presentation_bucket)
@@ -799,6 +811,10 @@
 
 	function datasetErrorCategoryLabel(category: string) {
 		return translatedCatalogLabel('research.understanding.datasetErrorCategories', category);
+	}
+
+	function datasetIssueTypeLabel(issue: string) {
+		return translatedCatalogLabel('research.understanding.feedbackIssues', issue);
 	}
 
 	function datasetReviewReasonLabel(reason: string) {
@@ -4376,6 +4392,12 @@
 														<strong>{count}</strong>
 													</span>
 												{/each}
+												{#each collectionDatasetIssueTypes as [issue, count] (issue)}
+													<span>
+														{datasetIssueTypeLabel(issue)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
 												{#each collectionDatasetBucketCounts as [bucket, count] (bucket)}
 													<span>
 														{datasetPresentationBucketLabel(bucket)}
@@ -4416,6 +4438,19 @@
 											{#each datasetErrorCategories as [category, count] (category)}
 												<span>
 													{datasetErrorCategoryLabel(category)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if datasetIssueTypes.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetIssueTypesTitle')}</strong>
+										<div>
+											{#each datasetIssueTypes as [issue, count] (issue)}
+												<span>
+													{datasetIssueTypeLabel(issue)}
 													<strong>{count}</strong>
 												</span>
 											{/each}

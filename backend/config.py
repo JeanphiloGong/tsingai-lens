@@ -7,9 +7,6 @@ from dotenv import load_dotenv
 ROOT_DIR = Path(__file__).resolve().parent
 DATA_DIR = ROOT_DIR / "data"
 LOG_DIR = DATA_DIR / "logs"
-SOURCE_DEFAULT_CONFIG_FILE = (
-    ROOT_DIR / "infra" / "source" / "config" / "default.yaml"
-)
 
 # 环境变量文件
 ENV_FILE_PATH = ROOT_DIR / ".env"

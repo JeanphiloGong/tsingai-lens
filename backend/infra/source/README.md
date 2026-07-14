@@ -78,7 +78,7 @@ complete table artifact.
 ## Key Areas
 
 - `config/`
-  Runtime configuration models and config loading.
+  Runtime configuration models.
 - `contracts/`
   Artifact schema column definitions.
 - `ingestion/`

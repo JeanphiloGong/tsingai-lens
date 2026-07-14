@@ -5,8 +5,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from config import DATA_DIR, SOURCE_DEFAULT_CONFIG_FILE
 from infra.source.config.pipeline_mode import IndexingMethod
+from infra.source.config.source_runtime_config import (
+    CacheConfig,
+    InputConfig,
+    InputStorageConfig,
+    SourceRuntimeConfig,
+    StorageConfig,
+)
 
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.research_objective_service import (
@@ -43,12 +49,6 @@ try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
     )
 except Exception:  # noqa: BLE001
     build_source_artifacts = None
-
-try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
-    from infra.source.config.load_config import load_config  # type: ignore
-except Exception:  # noqa: BLE001
-    load_config = None
-
 
 _OBJECTIVE_PROGRESS_STAGE_PERCENT = {
     "objective_paper_skim_started": 72,
@@ -88,14 +88,6 @@ class CollectionBuildPipelineService:
             )
         )
 
-    def _resolve_load_config(self):
-        global load_config
-        if load_config is None:
-            from infra.source.config.load_config import load_config as resolved_load_config
-
-            load_config = resolved_load_config
-        return load_config
-
     def _resolve_build_source_artifacts(self):
         global build_source_artifacts
         if build_source_artifacts is None:
@@ -106,19 +98,22 @@ class CollectionBuildPipelineService:
             build_source_artifacts = resolved_build_source_artifacts
         return build_source_artifacts
 
-    def _load_collection_config(self, collection_id: str) -> tuple[Any, Path]:
-        default_config = SOURCE_DEFAULT_CONFIG_FILE
-        if not default_config.is_file():
-            raise FileNotFoundError(
-                "默认 Source 配置不存在，请提供 backend/infra/source/config/default.yaml"
-            )
-
-        resolved_load_config = self._resolve_load_config()
-        config = resolved_load_config(DATA_DIR, config_filepath=default_config)
+    def _build_collection_config(
+        self,
+        collection_id: str,
+    ) -> tuple[SourceRuntimeConfig, Path]:
         paths = self.collection_service.get_paths(collection_id)
-        config.input.storage.base_dir = str(paths.input_dir)
-        config.output.base_dir = str(paths.output_dir)
-        config.root_dir = str(paths.collection_dir)
+        config = SourceRuntimeConfig(
+            root_dir=str(paths.collection_dir),
+            input=InputConfig(
+                storage=InputStorageConfig(base_dir=str(paths.input_dir)),
+                file_type="document",
+                encoding="utf-8",
+                file_pattern=r".*\.(txt|pdf)$",
+            ),
+            output=StorageConfig(base_dir=str(paths.output_dir)),
+            cache=CacheConfig(base_dir="../cache"),
+        )
         return config, paths.output_dir
 
     def run_task_blocking(
@@ -152,7 +147,7 @@ class CollectionBuildPipelineService:
     ) -> dict:
         request_token = bind_request_id(request_id) if request_id else None
         try:
-            config, output_dir = self._load_collection_config(collection_id)
+            config, output_dir = self._build_collection_config(collection_id)
             self.collection_service.update_collection(collection_id, status="running")
             task = self.task_service.get_task(task_id)
             if not task.get("started_at"):

@@ -678,7 +678,6 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks_controller, "task_service", task_service)
     monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(tasks_controller, "build_pipeline_service", runner)
-    monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
     monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
     monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)

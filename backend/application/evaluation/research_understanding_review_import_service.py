@@ -566,6 +566,19 @@ def _review_progress(decisions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _decision_progress_by_goal(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            key: value
+            for key, value in goal.items()
+            if key != "decisions"
+        }
+        for goal in _decision_progress_by_goal_internal(decisions)
+    ]
+
+
+def _decision_progress_by_goal_internal(
+    decisions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     goals: dict[tuple[str, str], dict[str, Any]] = {}
     for decision in decisions:
         payload = _mapping(decision.get("payload"))
@@ -587,10 +600,12 @@ def _decision_progress_by_goal(decisions: list[dict[str, Any]]) -> list[dict[str
                 "reject_count": 0,
                 "correct_count": 0,
                 "next_review_finding_id": "",
+                "decisions": [],
             }
         goal = goals[key]
         action = _text(decision.get("action"))
         goal["total_rows"] += 1
+        goal["decisions"].append(decision)
         if action == "skip":
             goal["skipped_count"] += 1
             if not goal["next_review_finding_id"]:
@@ -717,7 +732,7 @@ def _affected_goal_summaries(
     datasets = _datasets_for_decisions(service, decisions)
     pending_by_goal = {
         (_text(progress.get("collection_id")), _text(progress.get("goal_id"))): progress
-        for progress in _decision_progress_by_goal(decisions)
+        for progress in _decision_progress_by_goal_internal(decisions)
     }
     summaries = []
     for key, dataset in datasets.items():
@@ -726,11 +741,21 @@ def _affected_goal_summaries(
         pending_accept = int(pending.get("accept_count") or 0)
         pending_reject = int(pending.get("reject_count") or 0)
         pending_correct = int(pending.get("correct_count") or 0)
-        pending_training_ready = pending_accept + pending_correct
-        pending_resolved = pending_training_ready + pending_reject
+        projection = _projection_deltas(dataset, pending) if include_pending else {}
+        pending_training_ready = int(projection.get("training_ready_count") or 0)
+        pending_rejected = int(projection.get("rejected_count") or 0)
+        pending_resolved = int(projection.get("review_candidate_resolved_count") or 0)
         training_ready_count = int(summary.get("training_ready_count") or 0)
+        training_message_count = int(summary.get("training_message_count") or 0)
+        protocol_ready_count = int(summary.get("protocol_ready_count") or 0)
         review_candidate_count = int(summary.get("review_candidate_count") or 0)
         rejected_count = int(summary.get("rejected_count") or 0)
+        projected_training_messages = (
+            training_message_count + int(projection.get("training_message_count") or 0)
+        )
+        projected_protocol_ready = (
+            protocol_ready_count + int(projection.get("protocol_ready_count") or 0)
+        )
         summary.update(
             {
                 "pending_actionable_count": int(pending.get("actionable_count") or 0),
@@ -738,20 +763,81 @@ def _affected_goal_summaries(
                 "pending_reject_count": pending_reject,
                 "pending_correct_count": pending_correct,
                 "pending_training_ready_count": pending_training_ready,
-                "pending_rejected_count": pending_reject,
+                "pending_rejected_count": pending_rejected,
                 "pending_review_candidate_resolved_count": pending_resolved,
                 "projected_training_ready_count": (
                     training_ready_count + pending_training_ready
                 ),
+                "projected_training_message_count": projected_training_messages,
+                "projected_protocol_ready_count": projected_protocol_ready,
                 "projected_review_candidate_count": max(
                     0,
                     review_candidate_count - pending_resolved,
                 ),
-                "projected_rejected_count": rejected_count + pending_reject,
+                "projected_rejected_count": rejected_count + pending_rejected,
             }
         )
         summaries.append(summary)
     return summaries
+
+
+def _projection_deltas(
+    dataset: dict[str, Any],
+    pending: dict[str, Any],
+) -> dict[str, int]:
+    if not pending:
+        return {
+            "training_ready_count": 0,
+            "training_message_count": 0,
+            "protocol_ready_count": 0,
+            "review_candidate_resolved_count": 0,
+            "rejected_count": 0,
+        }
+    items = {
+        _text(item.get("finding_id")): item
+        for item in _mapping_list(dataset.get("items"))
+        if _text(item.get("finding_id"))
+    }
+    training_ready_count = 0
+    training_message_count = 0
+    protocol_ready_count = 0
+    review_candidate_resolved_count = 0
+    rejected_count = 0
+    seen: set[str] = set()
+    for decision in _mapping_list(pending.get("decisions")):
+        action = _text(decision.get("action"))
+        payload = _mapping(decision.get("payload"))
+        finding_id = _text(payload.get("finding_id"))
+        if not finding_id or finding_id in seen:
+            continue
+        seen.add(finding_id)
+        item = items.get(finding_id, {})
+        current_status = _text(item.get("dataset_use_status"))
+        if action == "reject":
+            if current_status != "rejected":
+                rejected_count += 1
+            if current_status == "review_candidate":
+                review_candidate_resolved_count += 1
+            continue
+        if action not in {"accept", "correct"}:
+            continue
+        if current_status != "training_ready":
+            training_ready_count += 1
+        if current_status == "review_candidate":
+            review_candidate_resolved_count += 1
+        if _will_have_training_messages_after_review(item, payload):
+            if not _has_training_messages(item):
+                training_message_count += 1
+            if _will_be_protocol_ready_after_review(item, payload):
+                if not _has_protocol_design_inputs(item):
+                    protocol_ready_count += 1
+    return {
+        "training_ready_count": training_ready_count,
+        "training_message_count": training_message_count,
+        "protocol_ready_count": protocol_ready_count,
+        "review_candidate_resolved_count": review_candidate_resolved_count,
+        "rejected_count": rejected_count,
+    }
 
 
 def _goal_readiness_summary(dataset: dict[str, Any]) -> dict[str, Any]:
@@ -802,6 +888,68 @@ def _has_training_messages(item: dict[str, Any]) -> bool:
         _text(message.get("role")) and _text(message.get("content"))
         for message in messages
     )
+
+
+def _will_have_training_messages_after_review(
+    item: dict[str, Any],
+    payload: dict[str, Any],
+) -> bool:
+    if _has_training_messages(item):
+        return True
+    target = _projected_target(item, payload)
+    evidence = _mapping_list(item.get("training_evidence_refs"))
+    return bool(
+        _text(target.get("statement"))
+        and _strings(target.get("variables"))
+        and _strings(target.get("outcomes"))
+        and (_text(target.get("direction")) or _text(target.get("scope_summary")))
+        and any(_text(ref.get("evidence_ref_id")) and _text(ref.get("quote")) for ref in evidence)
+    )
+
+
+def _will_be_protocol_ready_after_review(
+    item: dict[str, Any],
+    payload: dict[str, Any],
+) -> bool:
+    readiness = _mapping(item.get("protocol_readiness"))
+    blocking = _strings(readiness.get("blocking_missing"))
+    if blocking:
+        return False
+    if _text(readiness.get("status")) in {"protocol_ready", "ready_after_review"}:
+        return True
+    return _will_have_training_messages_after_review(item, payload)
+
+
+def _projected_target(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    target = _mapping(item.get("expert_target"))
+    prediction = _mapping(item.get("system_prediction"))
+    return {
+        "statement": (
+            _text(payload.get("curated_statement"))
+            or _text(target.get("statement"))
+            or _text(prediction.get("statement"))
+        ),
+        "variables": (
+            _strings(payload.get("curated_variables"))
+            or _strings(target.get("variables"))
+            or _strings(prediction.get("variables"))
+        ),
+        "outcomes": (
+            _strings(payload.get("curated_outcomes"))
+            or _strings(target.get("outcomes"))
+            or _strings(prediction.get("outcomes"))
+        ),
+        "direction": (
+            _text(payload.get("curated_direction"))
+            or _text(target.get("direction"))
+            or _text(prediction.get("direction"))
+        ),
+        "scope_summary": (
+            _text(payload.get("curated_scope_summary"))
+            or _text(target.get("scope_summary"))
+            or _text(prediction.get("scope_summary"))
+        ),
+    }
 
 
 def _readiness_issues(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

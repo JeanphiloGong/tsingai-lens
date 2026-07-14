@@ -398,8 +398,9 @@ write, and the next steps needed before import.
 Use `--format text` for the pre-import expert loop when you want a compact
 readiness report instead of the full JSON payload. The text output shows the
 current goal counts, pending accept/correct/reject decisions, projected
-`training_ready`, remaining review candidates, rejected counts, and the first
-readiness issues that still block fine-tuning messages or protocol inputs.
+`training_ready`, projected training-message and protocol-ready counts, remaining
+review candidates, rejected counts, and the first readiness issues that still
+block fine-tuning messages or protocol inputs.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for

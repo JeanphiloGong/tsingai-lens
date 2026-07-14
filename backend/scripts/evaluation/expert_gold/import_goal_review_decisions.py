@@ -167,6 +167,8 @@ def _render_goal_summary(goal: dict) -> list[str]:
         (
             "  after import: "
             f"training_ready={goal.get('projected_training_ready_count', 0)} "
+            f"training_messages={goal.get('projected_training_message_count', 0)} "
+            f"protocol_ready={goal.get('projected_protocol_ready_count', 0)} "
             f"review_candidates={goal.get('projected_review_candidate_count', 0)} "
             f"rejected={goal.get('projected_rejected_count', 0)}"
         ),

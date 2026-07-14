@@ -95,7 +95,24 @@ class FakeFeedbackService:
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "dataset_use_status": "review_candidate",
-                    "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
+                    "protocol_readiness": {
+                        "status": "ready_after_review",
+                        "ready_after_review": True,
+                        "blocking_missing": [],
+                    },
+                    "system_prediction": {
+                        "statement": "Preheating improved ductility.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "support_grade": "partial",
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev-1",
+                            "quote": "Preheating increased ductility by 14%.",
+                        }
+                    ],
                 },
                 {
                     "finding_id": "finding-reject",
@@ -236,6 +253,8 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 "pending_rejected_count": 0,
                 "pending_review_candidate_resolved_count": 0,
                 "projected_training_ready_count": 2,
+                "projected_training_message_count": 1,
+                "projected_protocol_ready_count": 1,
                 "projected_review_candidate_count": 1,
                 "projected_rejected_count": 1,
             }
@@ -353,6 +372,8 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
             "pending_rejected_count": 0,
             "pending_review_candidate_resolved_count": 1,
             "projected_training_ready_count": 3,
+            "projected_training_message_count": 2,
+            "projected_protocol_ready_count": 2,
             "projected_review_candidate_count": 0,
             "projected_rejected_count": 1,
         }
@@ -368,15 +389,7 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     _write_jsonl(
         input_path,
         [
-            _base_row(action="accept", finding_id="finding-accept"),
-            _base_row(
-                action="correct",
-                finding_id="finding-correct",
-                suggested_target={
-                    "statement": "Preheating increased ductility by 14%.",
-                    "evidence_ref_ids": ["ev-1"],
-                },
-            ),
+            _base_row(action="accept", finding_id="finding-1"),
             _base_row(action="skip", finding_id="finding-skip"),
         ],
     )
@@ -390,16 +403,19 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     text = module.render_text_summary(summary)
 
     assert "Review decision import: pass (dry-run)" in text
-    assert "Rows: total=3 written=0 skipped=1" in text
-    assert "Decisions: accept=1, correct=1, skip=1" in text
-    assert "Review progress: actionable=2 needs_review=1 ready_to_write=True" in text
+    assert "Rows: total=2 written=0 skipped=1" in text
+    assert "Decisions: accept=1, skip=1" in text
+    assert "Review progress: actionable=1 needs_review=1 ready_to_write=True" in text
     assert "- col-1/goal-1" in text
     assert (
         "now: training_ready=2 training_messages=1 protocol_ready=1 "
         "review_candidates=1 rejected=1"
     ) in text
-    assert "pending: accept=1 correct=1 reject=0" in text
-    assert "after import: training_ready=4 review_candidates=0 rejected=1" in text
+    assert "pending: accept=1 correct=0 reject=0" in text
+    assert (
+        "after import: training_ready=3 training_messages=2 protocol_ready=2 "
+        "review_candidates=0 rejected=1"
+    ) in text
     assert "finding-accept: training=message_pair; protocol=training_messages" in text
 
 

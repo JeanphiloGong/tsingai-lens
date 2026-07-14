@@ -53,7 +53,22 @@ class FakeFeedbackService:
                     "finding_id": "finding-correct",
                     "claim_id": "claim-2",
                     "dataset_use_status": "review_candidate",
-                    "training_evidence_refs": [{"evidence_ref_id": "ev-2"}],
+                    "protocol_readiness": {
+                        "status": "ready_after_review",
+                        "ready_after_review": True,
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev-2",
+                            "quote": "Preheating increased ductility by 14%.",
+                        }
+                    ],
+                    "expert_target": {
+                        "statement": "Preheating increases ductility by 14%.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                    },
                 },
             ],
         }
@@ -172,7 +187,7 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
     service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
 
     summary = service.import_rows(
-        rows=[_row(action="accept")],
+        rows=[_row(action="accept", finding_id="finding-correct", claim_id="claim-2")],
         reviewer="materials-expert@example.com",
         dry_run=True,
     )
@@ -198,6 +213,8 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
             "pending_rejected_count": 0,
             "pending_review_candidate_resolved_count": 1,
             "projected_training_ready_count": 2,
+            "projected_training_message_count": 2,
+            "projected_protocol_ready_count": 2,
             "projected_review_candidate_count": 0,
             "projected_rejected_count": 0,
             "readiness_issues": [],
@@ -234,6 +251,8 @@ def test_review_import_service_post_import_reports_current_readiness_not_pending
             "pending_rejected_count": 0,
             "pending_review_candidate_resolved_count": 0,
             "projected_training_ready_count": 1,
+            "projected_training_message_count": 1,
+            "projected_protocol_ready_count": 1,
             "projected_review_candidate_count": 1,
             "projected_rejected_count": 0,
             "readiness_issues": [],

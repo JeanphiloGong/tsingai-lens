@@ -316,6 +316,24 @@ export type ResearchUnderstandingCurationFilters = {
 	finding_id?: string;
 	claim_id?: string;
 };
+export type ResearchUnderstandingReviewDecisionImportRequest = {
+	rows: Record<string, unknown>[];
+	reviewer?: string | null;
+	dry_run?: boolean;
+	fail_on_warnings?: boolean;
+};
+export type ResearchUnderstandingReviewDecisionImportResponse = {
+	status: string;
+	dry_run: boolean;
+	total_rows: number;
+	written_count: number;
+	skipped_count: number;
+	counts: Record<string, number>;
+	errors: Record<string, unknown>[];
+	warnings: Record<string, unknown>[];
+	review_progress: Record<string, unknown>;
+	affected_goals: Record<string, unknown>[];
+};
 export type ResearchUnderstandingGoldDraftItem = {
 	gold_item_id: string;
 	document_id: string;
@@ -2800,6 +2818,20 @@ export async function fetchResearchUnderstandingCurations(
 		`/collections/${encodedCollection}/research-understanding/curations${suffix}`
 	)) as { items?: ResearchUnderstandingCuration[] };
 	return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function importResearchUnderstandingReviewDecisions(
+	collectionId: string,
+	payload: ResearchUnderstandingReviewDecisionImportRequest
+): Promise<ResearchUnderstandingReviewDecisionImportResponse> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	return requestJson(
+		`/collections/${encodedCollection}/research-understanding/review-decisions/import`,
+		{
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}
+	) as Promise<ResearchUnderstandingReviewDecisionImportResponse>;
 }
 
 export async function exportResearchUnderstandingGoldDraft(

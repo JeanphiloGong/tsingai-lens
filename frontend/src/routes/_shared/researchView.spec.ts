@@ -14,6 +14,7 @@ const {
 	exportResearchUnderstandingGoldDraft,
 	fetchResearchUnderstandingFeedback,
 	fetchResearchUnderstandingCurations,
+	importResearchUnderstandingReviewDecisions,
 	fetchResearchUnderstandingDataset,
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
@@ -593,6 +594,43 @@ describe('research view shared helpers', () => {
 			}
 		);
 		expect(feedback.feedback_id).toBe('ruf_1');
+	});
+
+	it('posts research understanding review decisions through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			status: 'pass',
+			dry_run: true,
+			total_rows: 1,
+			written_count: 0,
+			skipped_count: 0,
+			counts: { accept: 1 },
+			errors: [],
+			warnings: [],
+			review_progress: { ready_to_write: true },
+			affected_goals: []
+		});
+
+		const payload = {
+			dry_run: true,
+			fail_on_warnings: true,
+			rows: [
+				{
+					goal_id: 'goal_1',
+					finding_id: 'finding_1',
+					action: 'accept'
+				}
+			]
+		};
+		const summary = await importResearchUnderstandingReviewDecisions('col 123', payload);
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col%20123/research-understanding/review-decisions/import',
+			{
+				method: 'POST',
+				body: JSON.stringify(payload)
+			}
+		);
+		expect(summary.review_progress.ready_to_write).toBe(true);
 	});
 
 	it('lists research understanding feedback through the same-origin collection contract', async () => {

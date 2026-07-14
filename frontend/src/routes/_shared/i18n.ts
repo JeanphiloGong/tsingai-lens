@@ -483,6 +483,8 @@ const translations: Record<Language, Translations> = {
 				reviewLoopDraftProtocolBlocked: 'Protocol needs reviewed findings',
 				reviewLoopDraftProtocolMessagesBlocked: 'Protocol needs training messages',
 				reviewLoopDraftProtocolInputsBlocked: 'Protocol needs structured inputs',
+				reviewLoopNextCandidate: 'Next review candidate',
+				reviewLoopNextReasonCount: '{count} review reason(s)',
 				coverageGaps: 'Coverage gaps',
 				coverageGapsBody:
 					'Requested axes not backed by primary findings yet. Treat these as missing evidence or review work before using the goal result.',
@@ -3654,6 +3656,8 @@ const translations: Record<Language, Translations> = {
 				reviewLoopDraftProtocolBlocked: '实验方案需要已复核发现',
 				reviewLoopDraftProtocolMessagesBlocked: '实验方案需要训练 messages',
 				reviewLoopDraftProtocolInputsBlocked: '实验方案需要结构化输入',
+				reviewLoopNextCandidate: '下一条待复核发现',
+				reviewLoopNextReasonCount: '{count} 个复核原因',
 				coverageGaps: '覆盖缺口',
 				coverageGapsBody:
 					'这些研究目标轴尚未被主发现支撑，使用该目标结果前需要补证据或完成复核。',

@@ -419,7 +419,17 @@
 		(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
 	);
 	$: nextReviewCandidateFinding =
-		reviewCandidateFindingRows[0] ?? null;
+		(datasetSummary?.quality_summary.next_review_finding_id
+			? reviewCandidateFindingRows.find(
+					(finding) =>
+						finding.finding_id === datasetSummary?.quality_summary.next_review_finding_id
+				)
+			: null) ??
+		reviewCandidateFindingRows[0] ??
+		null;
+	$: nextReviewCandidateSample = nextReviewCandidateFinding
+		? findingDatasetSampleFor(nextReviewCandidateFinding)
+		: null;
 	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
 	$: selectableEffects = usesFindings
 		? filteredFindings
@@ -3170,6 +3180,62 @@
 							{/if}
 						{/if}
 					</div>
+					{#if datasetSummary && nextReviewCandidateFinding && !reviewQueueOnly && !datasetReviewCandidatesOnly}
+						{@const nextDisplayFinding = findingForDisplay(nextReviewCandidateFinding)}
+						{@const nextUsagePreview = findingUsagePreview(nextDisplayFinding)}
+						<div
+							class="research-understanding-workbench__review-loop-next"
+							aria-label={$t('research.understanding.reviewLoopNextCandidate')}
+						>
+							<div>
+								<span>{$t('research.understanding.reviewLoopNextCandidate')}</span>
+								<strong>{nextDisplayFinding.statement || nextDisplayFinding.title}</strong>
+								<p>{findingReviewReasonActionLabel(nextDisplayFinding, nextReviewCandidateSample)}</p>
+							</div>
+							<div class="research-understanding-workbench__review-loop-next-fields">
+								<span>
+									{$t('research.understanding.variablesColumn')}
+									<strong>{findingListLabel(nextDisplayFinding.variables)}</strong>
+								</span>
+								<span>
+									{$t('research.understanding.resultColumn')}
+									<strong>
+										{[
+											nextDisplayFinding.direction
+												? relationLabel(nextDisplayFinding.direction)
+												: '',
+											findingListLabel(nextDisplayFinding.outcomes)
+										]
+											.filter(Boolean)
+											.join(' · ')}
+									</strong>
+								</span>
+								<span>
+									{$t('research.understanding.evidenceGradeColumn')}
+									<strong>{supportGradeLabel(nextDisplayFinding.support_grade)}</strong>
+								</span>
+								<span>
+									{$t('research.understanding.evidenceBasisColumn')}
+									<strong>{nextUsagePreview.title}</strong>
+								</span>
+							</div>
+							<div class="research-understanding-workbench__review-loop-next-reasons">
+								<span>
+									{$t('research.understanding.reviewLoopNextReasonCount', {
+										count: findingReviewReasonValues(nextDisplayFinding).length
+									})}
+								</span>
+							</div>
+							<div class="research-understanding-workbench__review-loop-next-actions">
+								<button
+									type="button"
+									on:click={() => openFindingDetail(nextReviewCandidateFinding.finding_id)}
+								>
+									{$t('research.understanding.openFindingDetail')}
+								</button>
+							</div>
+						</div>
+					{/if}
 					{#if feedbackMessage}
 						<p class="research-understanding-workbench__feedback-state" role="status">
 							{feedbackMessage}
@@ -5086,6 +5152,7 @@
 	}
 
 	.research-understanding-workbench__review-loop-actions button,
+	.research-understanding-workbench__review-loop-next-actions button,
 	.research-understanding-workbench__review-loop-link {
 		display: inline-flex;
 		align-items: center;
@@ -5106,6 +5173,8 @@
 
 	.research-understanding-workbench__review-loop-actions button:hover,
 	.research-understanding-workbench__review-loop-actions button:focus-visible,
+	.research-understanding-workbench__review-loop-next-actions button:hover,
+	.research-understanding-workbench__review-loop-next-actions button:focus-visible,
 	.research-understanding-workbench__review-loop-link:hover,
 	.research-understanding-workbench__review-loop-link:focus-visible {
 		border-color: var(--color-accent);
@@ -5113,6 +5182,7 @@
 	}
 
 	.research-understanding-workbench__review-loop-actions button:disabled,
+	.research-understanding-workbench__review-loop-next-actions button:disabled,
 	.research-understanding-workbench__review-loop-link--disabled {
 		color: var(--text-secondary);
 		cursor: not-allowed;
@@ -5121,6 +5191,80 @@
 
 	.research-understanding-workbench__review-loop-link--disabled {
 		pointer-events: none;
+	}
+
+	.research-understanding-workbench__review-loop-next {
+		grid-column: 1 / -1;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
+		gap: 10px;
+		min-width: 0;
+		border: 1px solid rgba(217, 119, 6, 0.28);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-loop-next > div:first-child {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-next > div:first-child > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__review-loop-next strong,
+	.research-understanding-workbench__review-loop-next p {
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields,
+	.research-understanding-workbench__review-loop-next-reasons,
+	.research-understanding-workbench__review-loop-next-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields {
+		justify-content: flex-end;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields span,
+	.research-understanding-workbench__review-loop-next-reasons span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		max-width: 100%;
+		min-height: 28px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 4px 8px;
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-next-reasons {
+		grid-column: 1 / -1;
+	}
+
+	.research-understanding-workbench__review-loop-next-actions {
+		grid-column: 1 / -1;
 	}
 
 	.research-understanding-workbench__review-loop-checklist {
@@ -6523,6 +6667,7 @@
 
 		.research-understanding-workbench__answer-boundary,
 		.research-understanding-workbench__review-loop,
+		.research-understanding-workbench__review-loop-next,
 		.research-understanding-workbench__axis-coverage-grid {
 			grid-template-columns: 1fr;
 		}
@@ -6548,7 +6693,8 @@
 		.research-understanding-workbench__dataset-counts,
 		.research-understanding-workbench__dataset-actions,
 		.research-understanding-workbench__review-loop-metrics,
-		.research-understanding-workbench__review-loop-actions {
+		.research-understanding-workbench__review-loop-actions,
+		.research-understanding-workbench__review-loop-next-fields {
 			justify-content: flex-start;
 		}
 	}

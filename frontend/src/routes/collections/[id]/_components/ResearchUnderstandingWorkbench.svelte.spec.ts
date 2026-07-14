@@ -1787,6 +1787,68 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingsTable.getByText('Verify 1 direct evidence link(s) against the parsed source text.')).not.toBeInTheDocument();
 	});
 
+	it('surfaces the next review candidate in the review loop', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							reviewCandidate: 1,
+							items: [
+								{
+									sample_id: 'rud_sample_strength_supported',
+									finding_id: 'finding_strength_supported',
+									label_status: 'silver',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'accept_as_paper_level',
+										label: 'Accept as paper-level evidence'
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const reviewLoop = browserPage.getByLabelText('Review loop');
+		await expect.element(reviewLoop.getByText('Next review candidate')).toBeInTheDocument();
+		await expect
+			.element(reviewLoop.getByText('Heat treatment changes LPBF 316L tensile response.'))
+			.toBeInTheDocument();
+		await expect.element(reviewLoop.getByText('Accept as paper-level evidence')).toBeInTheDocument();
+		await expect.element(reviewLoop.getByText('5 review reason(s)')).toBeInTheDocument();
+		await expect.element(reviewLoop.getByText('heat treatment', { exact: true })).toBeInTheDocument();
+		await expect.element(reviewLoop.getByText('yield strength', { exact: true })).toBeInTheDocument();
+		await expect.element(reviewLoop.getByRole('button', { name: 'Review evidence' })).toBeInTheDocument();
+		await expect
+			.element(reviewLoop.getByRole('button', { name: 'Accept paper-level' }))
+			.not.toBeInTheDocument();
+		await expect.element(reviewLoop.getByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+		await expect.element(reviewLoop.getByRole('button', { name: 'Correct' })).not.toBeInTheDocument();
+	});
+
 	it('labels selected paper-level accept actions without implying cross-paper acceptance', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

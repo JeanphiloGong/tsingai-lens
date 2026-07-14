@@ -1994,6 +1994,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.getByLabelText('Finding detail')
 			.getByLabelText('Protocol readiness');
 		const gatePanel = browserPage.getByLabelText('Finding detail').getByLabelText('Acceptance gate');
+		const findingDetail = browserPage.getByLabelText('Finding detail');
 		await expect.element(gatePanel.getByText('Correct before accept')).toBeInTheDocument();
 		await expect
 			.element(
@@ -2012,6 +2013,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(protocolPanel.getByText('traceable source evidence', { exact: true }))
 			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept paper-level', exact: true }))
+			.toBeDisabled();
+		await expect
+			.element(findingDetail.getByRole('button', { name: 'Accept paper-level and next' }))
+			.toBeDisabled();
+		expect(
+			fetchMock.mock.calls.some(([input, init]) => {
+				return (
+					requestPath(input as string | URL | Request).endsWith('/research-understanding/feedback') &&
+					(init as RequestInit | undefined)?.method === 'POST'
+				);
+			})
+		).toBe(false);
 	});
 
 	it('shows the backend dataset review action in the findings table', async () => {

@@ -1277,6 +1277,11 @@
 			: $t('research.understanding.quickAccept');
 	}
 
+	function findingCanAccept(finding: ResearchUnderstandingPresentationFinding) {
+		const gate = findingDatasetSampleFor(finding)?.acceptance_gate;
+		return !gate || (gate.accept_allowed && !gate.requires_correction);
+	}
+
 	function findingReviewReasonActionLabel(
 		finding: ResearchUnderstandingPresentationFinding,
 		datasetSample: ResearchUnderstandingDatasetSample | null = findingDatasetSampleFor(finding)
@@ -1806,7 +1811,8 @@
 		finding: ResearchUnderstandingPresentationFinding,
 		options: { openNext?: boolean } = {}
 	) {
-		if (!understanding || !collectionId || !selectedScopeId || !reviewerReady) return;
+		if (!understanding || !collectionId || !selectedScopeId || !reviewerReady || !findingCanAccept(finding))
+			return;
 		feedbackSubmitting = true;
 		feedbackMessage = '';
 		feedbackError = '';
@@ -4303,7 +4309,10 @@
 															<button
 																type="button"
 																aria-describedby={findingSummaryId(displayFinding)}
-																disabled={feedbackSubmitting || !reviewerReady || trust.datasetUseStatus === 'training_ready'}
+																disabled={feedbackSubmitting ||
+																	!reviewerReady ||
+																	trust.datasetUseStatus === 'training_ready' ||
+																	!findingCanAccept(finding)}
 																on:click={() => acceptFinding(finding)}
 															>
 																{feedbackSubmitting
@@ -4444,7 +4453,10 @@
 										<button
 											type="button"
 											class="research-understanding-workbench__review-action--accept"
-											disabled={feedbackSubmitting || !collectionId || !reviewerReady}
+											disabled={feedbackSubmitting ||
+												!collectionId ||
+												!reviewerReady ||
+												!findingCanAccept(selectedFinding)}
 											on:click={acceptSelectedFinding}
 										>
 											{feedbackSubmitting
@@ -4453,7 +4465,11 @@
 										</button>
 										<button
 											type="button"
-											disabled={feedbackSubmitting || !collectionId || !reviewerReady || !nextReviewCandidateAfter(selectedFinding.finding_id, feedbackByTargetId)}
+											disabled={feedbackSubmitting ||
+												!collectionId ||
+												!reviewerReady ||
+												!findingCanAccept(selectedFinding) ||
+												!nextReviewCandidateAfter(selectedFinding.finding_id, feedbackByTargetId)}
 											on:click={acceptSelectedFindingAndOpenNext}
 										>
 											{feedbackSubmitting

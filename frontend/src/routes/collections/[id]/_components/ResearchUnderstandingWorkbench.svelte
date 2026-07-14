@@ -272,6 +272,8 @@
 		datasetSummary?.quality_summary.training_ready_sample_count ?? 0;
 	$: datasetTrainingMessageSampleCount =
 		datasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: datasetProtocolReadySampleCount =
+		datasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
 	$: datasetReviewCandidateSampleCount =
 		datasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
 	$: expertReviewCandidateCount = datasetSummary
@@ -312,6 +314,8 @@
 		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
 	$: collectionDatasetTrainingMessageSampleCount =
 		collectionDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: collectionDatasetProtocolReadySampleCount =
+		collectionDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
 	$: collectionDatasetReviewCandidateSampleCount =
 		collectionDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
 	$: collectionDatasetLabelCounts = collectionDatasetSummary?.label_counts ?? {
@@ -366,6 +370,7 @@
 				reviewerReady,
 				datasetTrainingReadySampleCount,
 				datasetTrainingMessageSampleCount,
+				datasetProtocolReadySampleCount,
 				datasetReviewCandidateSampleCount
 			)
 		: '';
@@ -375,6 +380,7 @@
 				reviewerReady,
 				datasetTrainingReadySampleCount,
 				datasetTrainingMessageSampleCount,
+				datasetProtocolReadySampleCount,
 				datasetReviewCandidateSampleCount
 			)
 		: [];
@@ -384,6 +390,7 @@
 				Boolean(datasetSummary),
 				datasetTrainingReadySampleCount,
 				datasetTrainingMessageSampleCount,
+				datasetProtocolReadySampleCount,
 				datasetReviewCandidateSampleCount,
 				reviewLoopFindingCount,
 				reviewLoopMissingDirectEvidenceCount
@@ -2330,6 +2337,7 @@
 		hasReviewer: boolean,
 		trainingReady: number,
 		trainingMessages: number,
+		protocolReady: number,
 		reviewCandidates: number
 	) {
 		if (isDatasetLoading) return 'loading';
@@ -2338,7 +2346,8 @@
 		if (!hasReviewer) return 'needs_reviewer';
 		if (reviewCandidates > 0 && trainingReady === 0) return 'needs_review';
 		if (reviewCandidates > 0) return 'continue_review';
-		if (trainingReady > 0 && trainingMessages > 0) return 'export_ready';
+		if (protocolReady > 0) return 'export_ready';
+		if (trainingMessages > 0) return 'protocol_inputs_pending';
 		if (trainingReady > 0) return 'messages_pending';
 		return 'needs_review';
 	}
@@ -2351,11 +2360,13 @@
 		status: string,
 		trainingReady: number,
 		trainingMessages: number,
+		protocolReady: number,
 		reviewCandidates: number
 	) {
 		return $t(`research.understanding.reviewLoopBodies.${status}`, {
 			training: trainingReady,
 			messages: trainingMessages,
+			protocol: protocolReady,
 			review: reviewCandidates
 		});
 	}
@@ -2365,6 +2376,7 @@
 		hasReviewer: boolean,
 		trainingReady: number,
 		trainingMessages: number,
+		protocolReady: number,
 		reviewCandidates: number
 	) {
 		const steps: string[] = [];
@@ -2393,10 +2405,18 @@
 				})
 			);
 		}
-		if (trainingMessages) {
+		if (trainingMessages && protocolReady === 0) {
+			steps.push(
+				$t('research.understanding.reviewLoopStepProtocolInputs', {
+					messages: trainingMessages,
+					protocol: protocolReady
+				})
+			);
+		}
+		if (protocolReady) {
 			steps.push(
 				$t('research.understanding.reviewLoopStepExport', {
-					count: trainingMessages
+					count: protocolReady
 				})
 			);
 		}
@@ -2409,6 +2429,7 @@
 		hasDatasetSummary: boolean,
 		trainingReady: number,
 		trainingMessages: number,
+		protocolReady: number,
 		reviewCandidates: number,
 		findingCount: number,
 		missingDirectEvidenceCount: number
@@ -2417,6 +2438,7 @@
 		const hasEvidence = missingDirectEvidenceCount === 0 && findingCount > 0;
 		const reviewComplete = hasDatasetSummary && reviewCandidates === 0 && trainingReady > 0;
 		const messagesReady = trainingMessages > 0 && trainingMessages >= trainingReady;
+		const protocolInputsReady = protocolReady > 0;
 		return [
 			{
 				key: 'findings',
@@ -2465,11 +2487,15 @@
 			},
 			{
 				key: 'protocol',
-				status: messagesReady ? 'done' : 'blocked',
+				status: protocolInputsReady ? 'done' : 'blocked',
 				label: $t('research.understanding.reviewLoopChecklistProtocol'),
-				detail: messagesReady
-					? $t('research.understanding.reviewLoopChecklistProtocolDone')
-					: $t('research.understanding.reviewLoopChecklistProtocolBlocked')
+				detail: protocolInputsReady
+					? $t('research.understanding.reviewLoopChecklistProtocolDone', {
+							count: protocolReady
+						})
+					: $t('research.understanding.reviewLoopChecklistProtocolBlocked', {
+							protocol: protocolReady
+						})
 			}
 		];
 	}
@@ -2878,6 +2904,7 @@
 			id,
 			training: dataset.quality_summary.training_ready_sample_count,
 			messages: dataset.quality_summary.training_message_sample_count,
+			protocol: dataset.quality_summary.protocol_ready_sample_count,
 			review: dataset.quality_summary.review_candidate_sample_count
 		})}`;
 	}
@@ -3072,6 +3099,7 @@
 								reviewLoopStatus,
 								datasetTrainingReadySampleCount,
 								datasetTrainingMessageSampleCount,
+								datasetProtocolReadySampleCount,
 								datasetReviewCandidateSampleCount
 							)}
 						</p>
@@ -3084,6 +3112,10 @@
 						<span>
 							{$t('research.understanding.datasetTrainingMessages')}
 							<strong>{datasetTrainingMessageSampleCount}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.datasetProtocolReady')}
+							<strong>{datasetProtocolReadySampleCount}</strong>
 						</span>
 						<span>
 							{$t('research.understanding.datasetReviewCandidate')}
@@ -3121,14 +3153,16 @@
 							{$t('research.understanding.reviewLoopOpenDataset')}
 						</button>
 						{#if goalCopilotHref}
-							{#if datasetTrainingReadySampleCount > 0 && datasetTrainingMessageSampleCount > 0}
+							{#if datasetProtocolReadySampleCount > 0}
 								<a class="research-understanding-workbench__review-loop-link" href={goalCopilotHref}>
 									{$t('research.understanding.reviewLoopDraftProtocol')}
 								</a>
 							{:else}
 								<span class="research-understanding-workbench__review-loop-link research-understanding-workbench__review-loop-link--disabled">
 									{$t(
-										datasetTrainingReadySampleCount > 0
+										datasetTrainingMessageSampleCount > 0
+											? 'research.understanding.reviewLoopDraftProtocolInputsBlocked'
+										: datasetTrainingReadySampleCount > 0
 											? 'research.understanding.reviewLoopDraftProtocolMessagesBlocked'
 											: 'research.understanding.reviewLoopDraftProtocolBlocked'
 									)}
@@ -3445,6 +3479,10 @@
 										<strong>{datasetTrainingMessageSampleCount}</strong>
 									</span>
 									<span>
+										{$t('research.understanding.datasetProtocolReady')}
+										<strong>{datasetProtocolReadySampleCount}</strong>
+									</span>
+									<span>
 										{$t('research.understanding.datasetReviewCandidate')}
 										<strong>{datasetReviewCandidateSampleCount}</strong>
 									</span>
@@ -3516,6 +3554,7 @@
 												{$t('research.understanding.collectionDatasetReady', {
 													training: collectionDatasetTrainingReadySampleCount,
 													messages: collectionDatasetTrainingMessageSampleCount,
+													protocol: collectionDatasetProtocolReadySampleCount,
 													review: collectionDatasetReviewCandidateSampleCount
 												})}
 											</p>
@@ -3527,6 +3566,10 @@
 												<span>
 													{$t('research.understanding.datasetTrainingMessages')}
 													<strong>{collectionDatasetTrainingMessageSampleCount}</strong>
+												</span>
+												<span>
+													{$t('research.understanding.datasetProtocolReady')}
+													<strong>{collectionDatasetProtocolReadySampleCount}</strong>
 												</span>
 												<span>
 													{$t('research.understanding.datasetReviewCandidate')}

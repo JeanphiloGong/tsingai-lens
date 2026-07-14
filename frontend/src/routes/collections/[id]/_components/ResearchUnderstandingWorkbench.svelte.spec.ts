@@ -40,6 +40,7 @@ function datasetResponse(overrides: {
 	reviewCandidate?: number;
 	rejected?: number;
 	trainingMessages?: number;
+	protocolReady?: number;
 	itemCount?: number;
 	labelCounts?: Record<string, number>;
 	errorCategories?: Record<string, number>;
@@ -55,6 +56,7 @@ function datasetResponse(overrides: {
 } = {}) {
 	const trainingReady = overrides.trainingReady ?? 2;
 	const trainingMessages = overrides.trainingMessages ?? trainingReady;
+	const protocolReady = overrides.protocolReady ?? trainingMessages;
 	const reviewCandidate = overrides.reviewCandidate ?? 1;
 	const rejected = overrides.rejected ?? 1;
 	const errorCategories = overrides.errorCategories ?? {
@@ -89,6 +91,7 @@ function datasetResponse(overrides: {
 		quality_summary: {
 			training_ready_sample_count: trainingReady,
 			training_message_sample_count: trainingMessages,
+			protocol_ready_sample_count: protocolReady,
 			review_candidate_sample_count: reviewCandidate,
 			by_dataset_use_status: {
 				training_ready: trainingReady,
@@ -1895,6 +1898,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 						datasetResponse({
 							trainingReady: 1,
 							trainingMessages: 0,
+							protocolReady: 0,
 							reviewCandidate: 2,
 							itemCount: 3,
 							labelCounts: { candidate: 2, silver: 0, gold: 1, rejected: 0 }
@@ -1931,6 +1935,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetRegion?.open).toBe(true);
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Training messages 0');
+		expect(datasetText).toContain('Protocol ready 0');
 		const messagesLink = browserPage.getByRole('link', { name: 'Training messages JSONL' });
 		await expect.element(messagesLink).toBeInTheDocument();
 		const messagesUrl = new URL(messagesLink.element().getAttribute('href') ?? '', 'http://localhost');
@@ -2065,7 +2070,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'Dataset now has 2 training-ready, 2 message-exportable, and 1 review-candidate sample(s).',
+					'Dataset now has 2 training-ready, 2 message-exportable, 2 protocol-ready, and 1 review-candidate sample(s).',
 					{ exact: false }
 				)
 			)
@@ -2865,15 +2870,16 @@ describe('ResearchUnderstandingWorkbench', () => {
 		clickDatasetSummary(datasetRegion);
 		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain(
-			'1 training-ready, 1 message-exportable, and 15 review-candidate goal sample(s) in this collection.'
+			'1 training-ready, 1 message-exportable, 1 protocol-ready, and 15 review-candidate goal sample(s) in this collection.'
 		);
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Collection dataset');
 		expect(datasetText).toContain(
-			'1 training-ready, 1 message-exportable, and 15 review-candidate goal sample(s) in this collection.'
+			'1 training-ready, 1 message-exportable, 1 protocol-ready, and 15 review-candidate goal sample(s) in this collection.'
 		);
 		expect(datasetText).toContain('Training ready 1');
 		expect(datasetText).toContain('Training messages 1');
+		expect(datasetText).toContain('Protocol ready 1');
 		expect(datasetText).toContain('Needs review 15');
 		expect(datasetText).toContain('Candidate 4');
 		expect(datasetText).toContain('Silver 10');

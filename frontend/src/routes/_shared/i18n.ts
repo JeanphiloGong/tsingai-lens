@@ -287,6 +287,8 @@ const translations: Record<Language, Translations> = {
 				noGoal: 'Select a confirmed goal before saving protocol drafts.',
 				ready:
 					'{training} training-ready finding(s) and {messages} message-ready sample(s) are available for traceable protocol drafts.',
+				protocolInputsPending:
+					'{training} training-ready finding(s) and {messages} message-ready sample(s) exist, but {protocol} protocol-ready input(s) are available. Review variables, outcomes, direction or scope, and evidence before drafting a protocol.',
 				messagesPending:
 					'{training} training-ready finding(s) exist, but only {messages} training message sample(s) are exportable. Check dataset export quality before drafting a protocol.',
 				needsReview:
@@ -359,9 +361,10 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: 'Dataset',
 				collectionDatasetSummary: 'Collection dataset',
 				collectionDatasetReady:
-					'{training} training-ready, {messages} message-exportable, and {review} review-candidate goal sample(s) in this collection.',
+					'{training} training-ready, {messages} message-exportable, {protocol} protocol-ready, and {review} review-candidate goal sample(s) in this collection.',
 				datasetTrainingReady: 'Training ready',
 				datasetTrainingMessages: 'Training messages',
+				datasetProtocolReady: 'Protocol ready',
 				datasetReviewCandidate: 'Needs review',
 				datasetErrorCategoriesTitle: 'Common error categories',
 				datasetReviewReasonsTitle: 'Review priorities',
@@ -404,6 +407,7 @@ const translations: Record<Language, Translations> = {
 					needs_review: 'Review needed before use',
 					continue_review: 'Continue expert review',
 					messages_pending: 'Training messages pending',
+					protocol_inputs_pending: 'Protocol inputs pending',
 					export_ready: 'Training export ready'
 				},
 				reviewLoopBodies: {
@@ -421,8 +425,10 @@ const translations: Record<Language, Translations> = {
 						'{training} sample(s) are training-ready; {review} candidate finding(s) still need a final expert decision.',
 					messages_pending:
 						'{training} training-ready sample(s) exist, but only {messages} training message sample(s) are exportable. Inspect dataset export quality before using this goal downstream.',
+					protocol_inputs_pending:
+						'{messages} training message sample(s) exist, but only {protocol} protocol-ready sample(s) have variables, outcomes, direction or scope, and traceable evidence for experiment drafting.',
 					export_ready:
-						'{messages} training message sample(s) are ready for evaluation or fine-tuning preparation.'
+						'{protocol} protocol-ready sample(s) are ready for traceable experiment drafting and training export.'
 				},
 				reviewLoopStepLogin: 'Sign in with an expert account so labels become human training-ready data.',
 				reviewLoopStepEvidence:
@@ -431,8 +437,10 @@ const translations: Record<Language, Translations> = {
 					'Review {count} candidate finding(s): accept if grounded, reject if wrong, or correct the statement and evidence.',
 				reviewLoopStepMessages:
 					'{training} training-ready sample(s) exist, but only {messages} have valid training messages; inspect dataset export quality.',
+				reviewLoopStepProtocolInputs:
+					'{messages} message-ready sample(s) exist, but {protocol} protocol-ready sample(s) are available. Review variables, outcomes, direction or scope, and evidence before drafting.',
 				reviewLoopStepExport:
-					'Export {count} training message sample(s) after the current review pass.',
+					'Export or draft from {count} protocol-ready sample(s) after the current review pass.',
 				reviewLoopStepDone:
 					'All visible findings for this goal have a usable review path. Keep evidence links attached when using them downstream.',
 				reviewLoopChecklist: 'Expert acceptance checklist',
@@ -463,9 +471,9 @@ const translations: Record<Language, Translations> = {
 					'{training} training-ready sample(s), {messages} message sample(s). Check export quality before downstream use.',
 				reviewLoopChecklistProtocol: 'Protocol drafting is safe',
 				reviewLoopChecklistProtocolDone:
-					'Goal Copilot can draft a protocol from reviewed findings while preserving source links.',
+					'{count} reviewed finding sample(s) have protocol-ready inputs and source links.',
 				reviewLoopChecklistProtocolBlocked:
-					'Protocol drafting remains blocked until reviewed findings and training messages exist.',
+					'Protocol drafting remains blocked until a reviewed sample has variables, outcomes, direction or scope, and traceable evidence.',
 				reviewLoopOpenQueue: 'Open review queue',
 				reviewLoopOpenNextFinding: 'Review next finding',
 				reviewLoopOpenTraining: 'Show training-ready',
@@ -474,6 +482,7 @@ const translations: Record<Language, Translations> = {
 				reviewLoopDraftProtocol: 'Draft protocol with Copilot',
 				reviewLoopDraftProtocolBlocked: 'Protocol needs reviewed findings',
 				reviewLoopDraftProtocolMessagesBlocked: 'Protocol needs training messages',
+				reviewLoopDraftProtocolInputsBlocked: 'Protocol needs structured inputs',
 				coverageGaps: 'Coverage gaps',
 				coverageGapsBody:
 					'Requested axes not backed by primary findings yet. Treat these as missing evidence or review work before using the goal result.',
@@ -782,7 +791,7 @@ const translations: Record<Language, Translations> = {
 				feedbackSaving: 'Saving...',
 				feedbackSaved: 'Feedback saved: {id}',
 				reviewSaveDatasetStatus:
-					'Dataset now has {training} training-ready, {messages} message-exportable, and {review} review-candidate sample(s).',
+					'Dataset now has {training} training-ready, {messages} message-exportable, {protocol} protocol-ready, and {review} review-candidate sample(s).',
 				feedbackCount: 'Feedback {count}',
 				noFeedback: 'No feedback has been recorded for this claim.',
 				noFeedbackNote: 'No note.',
@@ -980,27 +989,29 @@ const translations: Record<Language, Translations> = {
 				goalReviewTitle: 'Confirmed goal review',
 				goalReviewLoading: 'Checking confirmed goal review progress...',
 				goalReviewBody:
-					'{goals} confirmed goal(s): {training} training-ready sample(s), {messages} training message(s), {review} review candidate(s).',
+					'{goals} confirmed goal(s): {training} training-ready sample(s), {messages} training message(s), {protocol} protocol-ready input(s), {review} review candidate(s).',
 				goalReviewGoals: 'Confirmed goals',
 				refreshGoalReview: 'Refresh review status',
 				goalReviewIncompleteTitle: 'Expert loop incomplete',
 				goalReviewIncompleteBody:
-					'{goals} goal(s) still need expert action: {review} finding(s) need accept/reject/correct, and {messages} goal(s) are missing exportable training messages.',
+					'{goals} goal(s) still need expert action: {review} finding(s) need accept/reject/correct, {messages} goal(s) are missing exportable training messages, and {protocol} goal(s) are missing protocol-ready inputs.',
 				goalReviewOpenFirstPending: 'Review next goal',
 				goalReviewCompleteTitle: 'Expert loop complete',
 				goalReviewCompleteBody:
-					'All confirmed goals are training-ready and have exportable training messages.',
+					'All confirmed goals have protocol-ready inputs for traceable experiment drafts.',
 				goalReviewEmpty:
 					'No confirmed goals yet. Confirm and analyze an objective before expert review can begin.',
 				goalReviewError: 'Goal review status is unavailable: {message}',
 				goalReviewDatasetPending: 'Dataset status is not available for this goal yet.',
 				goalReviewDatasetBody:
-					'{training} training-ready · {messages} messages · {review} needs review',
+					'{training} training-ready · {messages} messages · {protocol} protocol-ready · {review} needs review',
 				goalReviewErrorCategories: 'Common expert correction types',
 				goalReviewActionReview: 'Review findings',
 				goalReviewActionReviewCount: 'Review {count} finding(s)',
 				goalReviewActionProtocol: 'Draft protocol',
-				goalReviewActionProtocolCount: 'Draft from {count} reviewed finding(s)',
+				goalReviewActionProtocolCount: 'Draft from {count} protocol-ready input(s)',
+				goalReviewActionProtocolInputs: 'Check protocol inputs',
+				goalReviewActionProtocolInputsCount: 'Check {count} message-ready sample(s)',
 				goalReviewActionMessages: 'Check messages',
 				goalReviewActionMessagesCount: 'Check {count} training sample(s)',
 				goalReviewActionRepair: 'Open and repair',
@@ -1025,7 +1036,8 @@ const translations: Record<Language, Translations> = {
 					dataset_pending: 'Dataset pending',
 					needs_review: 'Needs expert review',
 					messages_pending: 'Messages pending',
-					training_ready: 'Training-ready'
+					protocol_inputs_pending: 'Protocol inputs pending',
+					protocol_ready: 'Protocol-ready'
 				},
 				paperFrames: 'Paper frames',
 				routes: 'Routes',
@@ -3460,6 +3472,8 @@ const translations: Record<Language, Translations> = {
 				noGoal: '请选择一个已确认研究目标后，再保存实验方案草稿。',
 				ready:
 					'当前有 {training} 条可训练 Finding，{messages} 条可导出 messages，可用于带证据的实验方案草稿。',
+				protocolInputsPending:
+					'当前有 {training} 条可训练 Finding、{messages} 条可导出 messages，但只有 {protocol} 条具备实验方案输入。生成方案前需要检查变量、结果、方向或范围以及证据。',
 				messagesPending:
 					'当前有 {training} 条可训练 Finding，但只有 {messages} 条训练 messages 可导出。生成实验方案前需要检查数据集导出质量。',
 				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
@@ -3529,9 +3543,10 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: '数据集',
 				collectionDatasetSummary: '全集合数据集',
 				collectionDatasetReady:
-					'当前集合有 {training} 条可训练 goal 样本，{messages} 条可导出 messages，{review} 条待复核 goal 样本。',
+					'当前集合有 {training} 条可训练 goal 样本，{messages} 条可导出 messages，{protocol} 条可用于实验方案，{review} 条待复核 goal 样本。',
 				datasetTrainingReady: '可用于训练',
 				datasetTrainingMessages: '可导出 messages',
+				datasetProtocolReady: '可生成方案',
 				datasetReviewCandidate: '待复核',
 				datasetErrorCategoriesTitle: '常见错误类型',
 				datasetReviewReasonsTitle: '复核优先原因',
@@ -3571,6 +3586,7 @@ const translations: Record<Language, Translations> = {
 					needs_review: '使用前需要复核',
 					continue_review: '继续专家复核',
 					messages_pending: '训练 messages 待生成',
+					protocol_inputs_pending: '实验方案输入待补齐',
 					export_ready: '训练导出已就绪'
 				},
 				reviewLoopBodies: {
@@ -3585,7 +3601,9 @@ const translations: Record<Language, Translations> = {
 						'{training} 条样本已经可训练；还有 {review} 条候选研究发现需要专家给出最终判断。',
 					messages_pending:
 						'已有 {training} 条可训练样本，但只有 {messages} 条训练 messages 可导出。下游使用前需要检查数据集导出质量。',
-					export_ready: '{messages} 条训练 messages 已可用于评价或微调准备。'
+					protocol_inputs_pending:
+						'已有 {messages} 条训练 messages，但只有 {protocol} 条具备变量、结果、方向或范围以及可追溯证据，才能用于实验方案生成。',
+					export_ready: '{protocol} 条样本已具备实验方案输入，可用于带证据的方案草稿和训练导出。'
 				},
 				reviewLoopStepLogin: '使用专家账号登录，让标注成为人工 training-ready 数据。',
 				reviewLoopStepEvidence: '修复或拒绝 {count} 条缺少直接证据绑定的研究发现。',
@@ -3593,7 +3611,9 @@ const translations: Record<Language, Translations> = {
 					'复核 {count} 条候选研究发现：证据充分就接受，结论错误就拒绝，表述或证据需调整就校正。',
 				reviewLoopStepMessages:
 					'已有 {training} 条可训练样本，但只有 {messages} 条具备有效 training messages；需要检查数据集导出质量。',
-				reviewLoopStepExport: '本轮复核完成后导出 {count} 条训练 message 样本。',
+				reviewLoopStepProtocolInputs:
+					'当前有 {messages} 条 message-ready 样本，但只有 {protocol} 条可用于实验方案；生成方案前需要复核变量、结果、方向或范围和证据。',
+				reviewLoopStepExport: '本轮复核完成后导出或使用 {count} 条可生成方案的样本。',
 				reviewLoopStepDone:
 					'该目标当前可见研究发现都有可用复核路径。下游使用时继续保留证据链接。',
 				reviewLoopChecklist: '专家验收检查清单',
@@ -3622,9 +3642,9 @@ const translations: Record<Language, Translations> = {
 					'当前有 {training} 条 training-ready 样本、{messages} 条 message 样本；下游使用前需要检查导出质量。',
 				reviewLoopChecklistProtocol: '实验方案生成可用',
 				reviewLoopChecklistProtocolDone:
-					'目标助手可以基于已复核发现生成带来源链接的实验方案草稿。',
+					'{count} 条已复核样本具备实验方案输入和来源链接。',
 				reviewLoopChecklistProtocolBlocked:
-					'需要先具备已复核发现和训练 messages，才能安全生成实验方案。',
+					'需要至少一条已复核样本同时具备变量、结果、方向或范围和可追溯证据，才能安全生成实验方案。',
 				reviewLoopOpenQueue: '打开复核队列',
 				reviewLoopOpenNextFinding: '复核下一条发现',
 				reviewLoopOpenTraining: '查看可训练样本',
@@ -3633,6 +3653,7 @@ const translations: Record<Language, Translations> = {
 				reviewLoopDraftProtocol: '用助手生成实验方案',
 				reviewLoopDraftProtocolBlocked: '实验方案需要已复核发现',
 				reviewLoopDraftProtocolMessagesBlocked: '实验方案需要训练 messages',
+				reviewLoopDraftProtocolInputsBlocked: '实验方案需要结构化输入',
 				coverageGaps: '覆盖缺口',
 				coverageGapsBody:
 					'这些研究目标轴尚未被主发现支撑，使用该目标结果前需要补证据或完成复核。',
@@ -3919,7 +3940,7 @@ const translations: Record<Language, Translations> = {
 				feedbackSaving: '保存中...',
 				feedbackSaved: '反馈已保存：{id}',
 				reviewSaveDatasetStatus:
-					'当前数据集有 {training} 条可训练样本、{messages} 条可导出 messages、{review} 条待复核样本。',
+					'当前数据集有 {training} 条可训练样本、{messages} 条可导出 messages、{protocol} 条可生成方案输入、{review} 条待复核样本。',
 				feedbackCount: '反馈 {count}',
 				noFeedback: '当前 Claim 暂无反馈记录。',
 				noFeedbackNote: '无备注。',
@@ -4110,25 +4131,27 @@ const translations: Record<Language, Translations> = {
 				goalReviewTitle: '已确认目标复核',
 				goalReviewLoading: '正在检查已确认目标的复核进度...',
 				goalReviewBody:
-					'{goals} 个已确认目标：{training} 条可训练样本，{messages} 条训练 messages，{review} 条待复核样本。',
+					'{goals} 个已确认目标：{training} 条可训练样本，{messages} 条训练 messages，{protocol} 条可生成方案输入，{review} 条待复核样本。',
 				goalReviewGoals: '已确认目标',
 				refreshGoalReview: '刷新复核状态',
 				goalReviewIncompleteTitle: '专家闭环未完成',
 				goalReviewIncompleteBody:
-					'{goals} 个目标仍需专家处理：{review} 条发现需要接受、拒绝或修正，{messages} 个目标缺少可导出的训练 messages。',
+					'{goals} 个目标仍需专家处理：{review} 条发现需要接受、拒绝或修正，{messages} 个目标缺少可导出的训练 messages，{protocol} 个目标缺少实验方案输入。',
 				goalReviewOpenFirstPending: '复核下一个目标',
 				goalReviewCompleteTitle: '专家闭环已完成',
-				goalReviewCompleteBody: '所有已确认目标都已进入可训练状态，并生成了可导出的训练 messages。',
+				goalReviewCompleteBody: '所有已确认目标都已有可生成带证据实验方案的输入。',
 				goalReviewEmpty: '还没有已确认目标。先确认并分析一个目标后，才能开始专家复核。',
 				goalReviewError: '目标复核状态不可用：{message}',
 				goalReviewDatasetPending: '该目标的数据集状态暂不可用。',
 				goalReviewDatasetBody:
-					'{training} 条可训练 · {messages} 条 messages · {review} 条待复核',
+					'{training} 条可训练 · {messages} 条 messages · {protocol} 条可生成方案 · {review} 条待复核',
 				goalReviewErrorCategories: '常见专家纠错类型',
 				goalReviewActionReview: '复核发现',
 				goalReviewActionReviewCount: '复核 {count} 条发现',
 				goalReviewActionProtocol: '生成实验方案',
-				goalReviewActionProtocolCount: '基于 {count} 条已复核发现生成方案',
+				goalReviewActionProtocolCount: '基于 {count} 条可生成方案输入生成方案',
+				goalReviewActionProtocolInputs: '检查方案输入',
+				goalReviewActionProtocolInputsCount: '检查 {count} 条 message-ready 样本',
 				goalReviewActionMessages: '检查 messages',
 				goalReviewActionMessagesCount: '检查 {count} 条训练样本',
 				goalReviewActionRepair: '打开并修复',
@@ -4153,7 +4176,8 @@ const translations: Record<Language, Translations> = {
 					dataset_pending: '数据集待生成',
 					needs_review: '需要专家复核',
 					messages_pending: 'Messages 待生成',
-					training_ready: '可用于训练'
+					protocol_inputs_pending: '方案输入待补齐',
+					protocol_ready: '可生成方案'
 				},
 				paperFrames: '文献框架',
 				routes: '证据路由',

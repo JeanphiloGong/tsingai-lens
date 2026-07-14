@@ -685,6 +685,7 @@ describe('research view shared helpers', () => {
 			quality_summary: {
 				training_ready_sample_count: 0,
 				training_message_sample_count: 0,
+				protocol_ready_sample_count: 0,
 				review_candidate_sample_count: 2,
 				next_review_finding_id: 'finding_1',
 				by_dataset_use_status: {
@@ -740,6 +741,7 @@ describe('research view shared helpers', () => {
 			single_paper_evidence: 2,
 			partial_support: 1
 		});
+		expect(dataset.quality_summary.protocol_ready_sample_count).toBe(0);
 		expect(dataset.quality_summary.by_system_warning).toEqual({
 			table_row_alignment_uncertain: 1
 		});

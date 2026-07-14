@@ -74,9 +74,10 @@
 	$: goalTrainingReadyCount = goalDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
 	$: goalTrainingMessageCount =
 		goalDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: goalProtocolReadyCount = goalDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
 	$: goalReviewCandidateCount =
 		goalDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
-	$: goalProtocolReady = goalTrainingReadyCount > 0 && goalTrainingMessageCount > 0;
+	$: goalProtocolReady = goalProtocolReadyCount > 0;
 	$: nextReviewAction = nextReviewActionForDisplay(goalDatasetSummary);
 	$: goalReviewLinkHref = goalReviewHref(
 		collectionId,
@@ -107,6 +108,12 @@
 			readinessText = $t('goalCopilot.experimentReadiness.ready', {
 				training: goalTrainingReadyCount,
 				messages: goalTrainingMessageCount
+			});
+		} else if (goalTrainingMessageCount > 0) {
+			readinessText = $t('goalCopilot.experimentReadiness.protocolInputsPending', {
+				training: goalTrainingReadyCount,
+				messages: goalTrainingMessageCount,
+				protocol: goalProtocolReadyCount
 			});
 		} else if (goalTrainingReadyCount > 0) {
 			readinessText = $t('goalCopilot.experimentReadiness.messagesPending', {

@@ -48,13 +48,16 @@
 	$: goalReviewErrorCategories = buildGoalReviewErrorCategories(goalDatasetById);
 	$: goalReviewRows = buildGoalReviewRows(confirmedGoals, goalDatasetById);
 	$: goalReviewOpenGoalCount = goalReviewRows.filter(
-		(row) => row.status !== 'training_ready'
+		(row) => row.status !== 'protocol_ready'
 	).length;
 	$: goalReviewMessagePendingGoalCount = goalReviewRows.filter(
 		(row) => row.status === 'messages_pending'
 	).length;
+	$: goalReviewProtocolPendingGoalCount = goalReviewRows.filter(
+		(row) => row.status === 'protocol_inputs_pending'
+	).length;
 	$: firstGoalReviewAction =
-		goalReviewRows.find((row) => row.status !== 'training_ready') ?? null;
+		goalReviewRows.find((row) => row.status !== 'protocol_ready') ?? null;
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		void loadObjectives();
@@ -160,17 +163,20 @@
 	) {
 		let trainingReady = 0;
 		let trainingMessages = 0;
+		let protocolReady = 0;
 		let reviewCandidates = 0;
 		for (const goal of goals) {
 			const dataset = datasets.get(goal.goal_id);
 			trainingReady += dataset?.quality_summary.training_ready_sample_count ?? 0;
 			trainingMessages += dataset?.quality_summary.training_message_sample_count ?? 0;
+			protocolReady += dataset?.quality_summary.protocol_ready_sample_count ?? 0;
 			reviewCandidates += dataset?.quality_summary.review_candidate_sample_count ?? 0;
 		}
 		return {
 			goalCount: goals.length,
 			trainingReady,
 			trainingMessages,
+			protocolReady,
 			reviewCandidates
 		};
 	}
@@ -220,7 +226,10 @@
 		if (!dataset) return 'dataset_pending';
 		if (dataset.quality_summary.review_candidate_sample_count > 0) return 'needs_review';
 		if (dataset.quality_summary.training_ready_sample_count > 0) {
-			if (dataset.quality_summary.training_message_sample_count > 0) return 'training_ready';
+			if (dataset.quality_summary.protocol_ready_sample_count > 0) return 'protocol_ready';
+			if (dataset.quality_summary.training_message_sample_count > 0) {
+				return 'protocol_inputs_pending';
+			}
 			return 'messages_pending';
 		}
 		return 'needs_review';
@@ -230,10 +239,11 @@
 		if (status === 'needs_review') return 0;
 		if (status === 'dataset_pending') return 1;
 		if (status === 'messages_pending') return 2;
-		if (status === 'failed') return 3;
-		if (status === 'running' || status === 'pending') return 4;
-		if (status === 'training_ready') return 5;
-		return 5;
+		if (status === 'protocol_inputs_pending') return 3;
+		if (status === 'failed') return 4;
+		if (status === 'running' || status === 'pending') return 5;
+		if (status === 'protocol_ready') return 6;
+		return 6;
 	}
 
 	function goalReviewCandidateCount(dataset: ResearchUnderstandingDataset | null) {
@@ -254,6 +264,7 @@
 		return $t('research.objectives.goalReviewDatasetBody', {
 			training: dataset.quality_summary.training_ready_sample_count,
 			messages: dataset.quality_summary.training_message_sample_count,
+			protocol: dataset.quality_summary.protocol_ready_sample_count,
 			review: dataset.quality_summary.review_candidate_sample_count
 		});
 	}
@@ -269,9 +280,14 @@
 				count: dataset?.quality_summary.review_candidate_sample_count ?? 0
 			});
 		}
-		if (status === 'training_ready') {
+		if (status === 'protocol_ready') {
 			return $t('research.objectives.goalReviewActionProtocolCount', {
-				count: dataset?.quality_summary.training_ready_sample_count ?? 0
+				count: dataset?.quality_summary.protocol_ready_sample_count ?? 0
+			});
+		}
+		if (status === 'protocol_inputs_pending') {
+			return $t('research.objectives.goalReviewActionProtocolInputsCount', {
+				count: dataset?.quality_summary.training_message_sample_count ?? 0
 			});
 		}
 		if (status === 'messages_pending') {
@@ -321,6 +337,7 @@
 			return `${href}?${params.toString()}`;
 		}
 		if (row.status === 'messages_pending') return `${href}?review=training_ready`;
+		if (row.status === 'protocol_inputs_pending') return `${href}?review=training_ready`;
 		return href;
 	}
 
@@ -426,12 +443,13 @@
 				<div>
 					<h3>{$t('research.objectives.goalReviewTitle')}</h3>
 					<p>
-						{goalReviewLoading
+								{goalReviewLoading
 							? $t('research.objectives.goalReviewLoading')
 							: $t('research.objectives.goalReviewBody', {
 									goals: goalReviewSummary.goalCount,
 									training: goalReviewSummary.trainingReady,
 									messages: goalReviewSummary.trainingMessages,
+									protocol: goalReviewSummary.protocolReady,
 									review: goalReviewSummary.reviewCandidates
 								})}
 					</p>
@@ -463,6 +481,10 @@
 						<strong>{goalReviewSummary.trainingMessages}</strong>
 					</span>
 					<span>
+						{$t('research.understanding.datasetProtocolReady')}
+						<strong>{goalReviewSummary.protocolReady}</strong>
+					</span>
+					<span>
 						{$t('research.understanding.datasetReviewCandidate')}
 						<strong>{goalReviewSummary.reviewCandidates}</strong>
 					</span>
@@ -478,7 +500,8 @@
 								{$t('research.objectives.goalReviewIncompleteBody', {
 									goals: goalReviewOpenGoalCount,
 									review: goalReviewSummary.reviewCandidates,
-									messages: goalReviewMessagePendingGoalCount
+									messages: goalReviewMessagePendingGoalCount,
+									protocol: goalReviewProtocolPendingGoalCount
 								})}
 							</span>
 						</div>
@@ -903,6 +926,7 @@
 	.goal-review-item__status--needs_review,
 	.goal-review-item__status--dataset_pending,
 	.goal-review-item__status--messages_pending,
+	.goal-review-item__status--protocol_inputs_pending,
 	.goal-review-item__status--pending,
 	.goal-review-item__status--running {
 		border-color: rgba(217, 119, 6, 0.36);
@@ -910,7 +934,7 @@
 		color: #92400e;
 	}
 
-	.goal-review-item__status--training_ready {
+	.goal-review-item__status--protocol_ready {
 		border-color: rgba(22, 163, 74, 0.34);
 		background: rgba(22, 163, 74, 0.08);
 		color: #166534;

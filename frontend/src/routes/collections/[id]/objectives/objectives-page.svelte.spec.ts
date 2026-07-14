@@ -70,11 +70,21 @@ function requestUrl(input: string | URL | Request) {
 function researchUnderstandingDatasetResponse({
 	trainingReady = 0,
 	trainingMessages = 0,
+	protocolReady = trainingMessages,
 	reviewCandidate = 0,
 	scopeId = 'goal_1',
 	errorCategories = {},
 	nextReviewFindingId = '',
 	reviewActionCode = ''
+}: {
+	trainingReady?: number;
+	trainingMessages?: number;
+	protocolReady?: number;
+	reviewCandidate?: number;
+	scopeId?: string;
+	errorCategories?: Record<string, number>;
+	nextReviewFindingId?: string;
+	reviewActionCode?: string;
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -94,6 +104,7 @@ function researchUnderstandingDatasetResponse({
 		quality_summary: {
 			training_ready_sample_count: trainingReady,
 			training_message_sample_count: trainingMessages,
+			protocol_ready_sample_count: protocolReady,
 			review_candidate_sample_count: reviewCandidate,
 			next_review_finding_id: nextReviewFindingId,
 			by_dataset_use_status: {
@@ -159,6 +170,21 @@ function confirmedGoalsResponse() {
 				updated_at: null
 			},
 			{
+				goal_id: 'goal_protocol_inputs_pending',
+				collection_id: 'col_4c54ffe568ec',
+				question: 'Which reviewed finding still needs protocol inputs?',
+				source_type: 'objective_candidate',
+				material_hints: ['316L stainless steel'],
+				process_hints: ['scan speed'],
+				property_hints: ['density'],
+				source_objective_id: 'obj_protocol_inputs_pending',
+				status: 'ready',
+				analysis_error: null,
+				analysis_progress: null,
+				created_at: null,
+				updated_at: null
+			},
+			{
 				goal_id: 'goal_heat_strength',
 				collection_id: 'col_4c54ffe568ec',
 				question: 'How does heat treatment affect strength?',
@@ -190,10 +216,22 @@ function goalReviewResponse(input: string | URL | Request) {
 		return jsonResponse(
 			researchUnderstandingDatasetResponse({
 				trainingReady:
-					scopeId === 'goal_protocol_ready' || scopeId === 'goal_messages_pending' ? 1 : 0,
-				trainingMessages: scopeId === 'goal_protocol_ready' ? 1 : 0,
+					scopeId === 'goal_protocol_ready' ||
+					scopeId === 'goal_protocol_inputs_pending' ||
+					scopeId === 'goal_messages_pending'
+						? 1
+						: 0,
+				trainingMessages:
+					scopeId === 'goal_protocol_ready' || scopeId === 'goal_protocol_inputs_pending'
+						? 1
+						: 0,
+				protocolReady: scopeId === 'goal_protocol_ready' ? 1 : 0,
 				reviewCandidate:
-					scopeId === 'goal_protocol_ready' || scopeId === 'goal_messages_pending' ? 0 : 2,
+					scopeId === 'goal_protocol_ready' ||
+					scopeId === 'goal_protocol_inputs_pending' ||
+					scopeId === 'goal_messages_pending'
+						? 0
+						: 2,
 				scopeId,
 				errorCategories:
 					scopeId === 'goal_heat_strength'
@@ -428,7 +466,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'3 confirmed goal(s): 2 training-ready sample(s), 1 training message(s), 2 review candidate(s).'
+					'4 confirmed goal(s): 3 training-ready sample(s), 2 training message(s), 1 protocol-ready input(s), 2 review candidate(s).'
 				)
 			)
 			.toBeInTheDocument();
@@ -438,7 +476,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'2 goal(s) still need expert action: 2 finding(s) need accept/reject/correct, and 1 goal(s) are missing exportable training messages.'
+					'3 goal(s) still need expert action: 2 finding(s) need accept/reject/correct, 1 goal(s) are missing exportable training messages, and 1 goal(s) are missing protocol-ready inputs.'
 				)
 			)
 			.toBeInTheDocument();
@@ -475,10 +513,16 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		expect(reviewRows[1].text).toContain('Messages pending');
 		expect(reviewRows[1].text).toContain('Check 1 training sample(s)');
 		expect(reviewRows[2]).toMatchObject({
+			href: '/collections/col_4c54ffe568ec/goals/goal_protocol_inputs_pending?review=training_ready'
+		});
+		expect(reviewRows[2].text).toContain('Which reviewed finding still needs protocol inputs?');
+		expect(reviewRows[2].text).toContain('Protocol inputs pending');
+		expect(reviewRows[2].text).toContain('Check 1 message-ready sample(s)');
+		expect(reviewRows[3]).toMatchObject({
 			href: '/collections/col_4c54ffe568ec/goals/goal_protocol_ready'
 		});
-		expect(reviewRows[2].text).toContain('Which reviewed finding can support a protocol?');
-		expect(reviewRows[2].text).toContain('Draft from 1 reviewed finding(s)');
+		expect(reviewRows[3].text).toContain('Which reviewed finding can support a protocol?');
+		expect(reviewRows[3].text).toContain('Draft from 1 protocol-ready input(s)');
 	});
 
 	it('confirms an objective without existing routed evidence and lets analysis build coverage', async () => {

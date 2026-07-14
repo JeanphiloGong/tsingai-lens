@@ -63,9 +63,17 @@ function requestMethod(input: string | URL | Request, init?: RequestInit) {
 function datasetResponse({
 	trainingReady = 1,
 	trainingMessages = 1,
+	protocolReady = trainingMessages,
 	reviewCandidate = 0,
 	nextReviewFindingId = '',
 	reviewActionCode = ''
+}: {
+	trainingReady?: number;
+	trainingMessages?: number;
+	protocolReady?: number;
+	reviewCandidate?: number;
+	nextReviewFindingId?: string;
+	reviewActionCode?: string;
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
@@ -87,6 +95,7 @@ function datasetResponse({
 		quality_summary: {
 			training_ready_sample_count: trainingReady,
 			training_message_sample_count: trainingMessages,
+			protocol_ready_sample_count: protocolReady,
 			review_candidate_sample_count: reviewCandidate,
 			next_review_finding_id: nextReviewFindingId,
 			by_dataset_use_status: {
@@ -240,6 +249,63 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
 			.toBeInTheDocument();
+	});
+
+	it('shows pending protocol inputs before protocol drafts are ready', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/collections/col_123/research-understanding/dataset' && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							trainingMessages: 1,
+							protocolReady: 0,
+							reviewCandidate: 0
+						})
+					)
+				);
+			}
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 training-ready finding(s) and 1 message-ready sample(s) exist, but 0 protocol-ready input(s) are available. Review variables, outcomes, direction or scope, and evidence before drafting a protocol.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
+			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=training_ready');
+		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
 	});
 
 	it('shows review backlog before protocol drafts are ready', async () => {

@@ -135,6 +135,8 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 						},
 						quality_summary: {
 							training_ready_sample_count: 1,
+							training_message_sample_count: 1,
+							protocol_ready_sample_count: 1,
 							review_candidate_sample_count: 0,
 							by_dataset_use_status: {
 								training_ready: 1,

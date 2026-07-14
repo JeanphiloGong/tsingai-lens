@@ -257,7 +257,8 @@ frontend finding review entry, run:
 This creates one read-only handoff directory with `review-packet.txt`,
 `review-candidates.jsonl`, `reviewed-findings.template.jsonl`,
 `agent-review-prompts.jsonl`, `review-dashboard.md`,
-`review-priority.md`, `review-checklist.md`, `review-unlock-plan.md`,
+`review-priority.md`, `expert-decision-board.tsv`, `review-checklist.md`,
+`review-unlock-plan.md`,
 `dataset-readiness.md`, `expert-satisfaction.md`, `training-ready.messages.jsonl`,
 `training-ready.dataset.jsonl`, `optimization-summary.md`,
 `review-commands.sh`, `dataset-quality-summary.json`, `manifest.json`, and
@@ -266,8 +267,10 @@ import labels or mutate collection data; it only packages the current Findings
 review queue, current training-ready exports, and error/risk statistics so an
 expert can inspect source links, see which goals are not yet training-ready,
 and fill explicit decisions.
-Use `review-priority.md` to decide which candidates to inspect first, then run
-`review-unlock-plan.md` to see which decision unlocks training export or
+Use `review-priority.md` to decide which candidates to inspect first, then use
+`expert-decision-board.tsv` when the reviewer wants a spreadsheet-style board
+with priority, allowed actions, required checks, source quote, and open links.
+Use `review-unlock-plan.md` to see which decision unlocks training export or
 protocol inputs. Run `review-commands.sh` from the workspace directory for the
 matching dry-run, gate, and export commands. The real import command in that
 script is commented out and must be enabled only after a human expert approves

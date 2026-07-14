@@ -185,6 +185,11 @@ def _write_workspace_files(
             "Cross-goal expert work order sorted by review risk.",
         ),
         (
+            "expert-decision-board.tsv",
+            render_expert_decision_board(summary),
+            "Spreadsheet-friendly review board; read-only aid, not an import file.",
+        ),
+        (
             "review-checklist.md",
             render_review_checklist(summary),
             "Expert checklist for deciding accept, reject, correct, or skip.",
@@ -501,6 +506,87 @@ def render_review_priority_report(summary: dict[str, Any]) -> str:
     for label, count in _priority_counts(ranked):
         lines.append(f"- {label}: {count}")
     return "\n".join(lines) + "\n"
+
+
+def render_expert_decision_board(summary: dict[str, Any]) -> str:
+    header = [
+        "priority",
+        "goal_id",
+        "goal",
+        "finding_id",
+        "finding",
+        "recommended_action",
+        "accept_allowed",
+        "allowed_actions",
+        "blocked_actions",
+        "required_checks",
+        "training_unlock",
+        "protocol_unlock",
+        "evidence",
+        "quote",
+        "open_finding",
+        "source_open",
+    ]
+    rows = [_tsv_row(header)]
+    for row in _ranked_review_candidates(summary):
+        candidate = _mapping(row.get("candidate"))
+        goal_id = _text(row.get("goal_id"))
+        work_order = _mapping(candidate.get("review_work_order"))
+        hint = _mapping(candidate.get("review_decision_hint"))
+        gate = _mapping(candidate.get("acceptance_gate"))
+        evidence = _mapping_list(candidate.get("evidence"))
+        first_evidence = evidence[0] if evidence else {}
+        required_checks = _text_list(work_order.get("required_checks")) or _text_list(
+            hint.get("required_checks")
+        )
+        allowed_actions = _text_list(work_order.get("allowed_actions")) or [
+            "accept",
+            "reject",
+            "correct",
+            "skip",
+        ]
+        blocked_actions = _text_list(work_order.get("blocked_actions"))
+        training_unlock = _text(work_order.get("training_unlock"))
+        if not training_unlock:
+            training_unlock = _training_unlock_text(candidate)
+        protocol_unlock = _text(work_order.get("protocol_unlock"))
+        if not protocol_unlock:
+            blocking = _text_list(candidate.get("protocol_blocking_missing"))
+            if not blocking and not bool(gate.get("accept_allowed")):
+                blocking = (
+                    _text_list(hint.get("why_accept_blocked"))
+                    or _text_list(gate.get("accept_blockers"))
+                    or _text_list(gate.get("blocking_missing"))
+                )
+            protocol_unlock = (
+                "blocked: " + ", ".join(blocking)
+                if blocking
+                else _protocol_unlock_text(_mapping(candidate.get("protocol_readiness")))
+            )
+        protocol_unlock = _format_unlock_text(protocol_unlock)
+        rows.append(
+            _tsv_row(
+                [
+                    _text(row.get("priority")),
+                    goal_id,
+                    _text(row.get("goal")),
+                    _text(candidate.get("finding_id")),
+                    _text(candidate.get("statement")),
+                    _text(candidate.get("recommended_action")) or _text(row.get("action")),
+                    "yes" if bool(gate.get("accept_allowed")) else "no",
+                    "; ".join(allowed_actions),
+                    "; ".join(blocked_actions),
+                    "; ".join(required_checks),
+                    training_unlock,
+                    protocol_unlock,
+                    _evidence_label(candidate),
+                    _text(first_evidence.get("quote")),
+                    _text(candidate.get("open_url")),
+                    _text(first_evidence.get("open")) or _text(first_evidence.get("href")),
+                ]
+            )
+        )
+    return "\n".join(rows) + "\n"
 
 
 def render_review_checklist(summary: dict[str, Any]) -> str:
@@ -1014,7 +1100,7 @@ def _candidate_note_prompt(candidate: dict[str, Any]) -> str:
     return _text(candidate.get("expert_note_prompt")) or "required"
 
 
-def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, str]]:
+def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for goal in _mapping_list(summary.get("goals")):
         packet = _mapping(goal.get("review_packet"))
@@ -1028,11 +1114,13 @@ def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "rank": f"{rank:02d}",
                     "priority": priority,
+                    "goal_id": goal_id,
                     "goal": _goal_heading(goal_id, question),
                     "finding": _text(candidate.get("statement")),
                     "action": _text(candidate.get("recommended_action")) or "review",
                     "evidence": _evidence_label(candidate),
                     "open_url": open_url,
+                    "candidate": candidate,
                 }
             )
     rows.sort(key=lambda row: (row["rank"], row["goal"], row["finding"]))
@@ -1377,6 +1465,13 @@ def _shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def _tsv_row(values: list[str]) -> str:
+    return "\t".join(
+        _text(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+        for value in values
+    )
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -1420,6 +1515,16 @@ def _format_review_label(value: str) -> str:
         ]
         return f"{REVIEW_LABELS.get(key, key.replace('_', ' '))}: {', '.join(items)}"
     return REVIEW_LABELS.get(value, value.replace("_", " "))
+
+
+def _format_unlock_text(value: str) -> str:
+    text = _text(value)
+    if not text:
+        return ""
+    prefix, sep, suffix = text.partition(": ")
+    if sep and "=" in suffix:
+        return f"{prefix}: {_format_review_label(suffix)}"
+    return text
 
 
 if __name__ == "__main__":

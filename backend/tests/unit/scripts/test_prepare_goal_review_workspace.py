@@ -176,6 +176,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "agent-review-prompts.jsonl",
         "review-dashboard.md",
         "review-priority.md",
+        "expert-decision-board.tsv",
         "review-checklist.md",
         "review-unlock-plan.md",
         "dataset-readiness.md",
@@ -209,6 +210,46 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "How does preheating affect ductility? (goal-1)" in priority
     assert "Preheating increased ductility." in priority
     assert "accept as paper-level" in priority
+    decision_board = (workspace / "expert-decision-board.tsv").read_text(
+        encoding="utf-8"
+    )
+    decision_rows = decision_board.splitlines()
+    assert decision_rows[0].split("\t") == [
+        "priority",
+        "goal_id",
+        "goal",
+        "finding_id",
+        "finding",
+        "recommended_action",
+        "accept_allowed",
+        "allowed_actions",
+        "blocked_actions",
+        "required_checks",
+        "training_unlock",
+        "protocol_unlock",
+        "evidence",
+        "quote",
+        "open_finding",
+        "source_open",
+    ]
+    assert decision_rows[1].split("\t") == [
+        "P1 correct/reject: accept blocked",
+        "goal-1",
+        "How does preheating affect ductility? (goal-1)",
+        "finding-1",
+        "Preheating increased ductility.",
+        "accept as paper-level",
+        "no",
+        "accept; reject; correct; skip",
+        "",
+        "",
+        "correct/reject first",
+        "blocked: table row alignment",
+        "Paper A / p. 4",
+        "Preheating increased ductility by 14%.",
+        "/collections/col-1/goals/goal-1?finding_id=finding-1",
+        "/collections/col-1/documents/doc-1",
+    ]
     checklist = (workspace / "review-checklist.md").read_text(encoding="utf-8")
     assert "# Lens Expert Review Checklist" in checklist
     assert "### How does preheating affect ductility? (goal-1)" in checklist
@@ -400,6 +441,37 @@ def test_render_review_priority_report_orders_accept_blockers_first():
     assert report.index("P1 correct/reject") < report.index("P4 confirm")
     assert "- P1 correct/reject: accept blocked: 1" in report
     assert "- P4 confirm paper-level scope: 1" in report
+
+
+def test_render_expert_decision_board_exports_spreadsheet_rows():
+    module = _load_workspace_module()
+    summary = _summary()
+    summary["goals"][0]["question"] = "How does preheating affect ductility?"
+    candidate = summary["goals"][0]["review_packet"]["candidates"][0]
+    candidate["review_work_order"] = {
+        "allowed_actions": ["reject", "correct", "skip"],
+        "blocked_actions": ["accept"],
+        "required_checks": ["Check\ttable rows", "Inspect\nquote"],
+        "training_unlock": "correct creates a training-ready target",
+        "protocol_unlock": "blocked: accept_blockers=verify_table_rows, table_row_alignment_uncertain",
+    }
+
+    board = module.render_expert_decision_board(summary)
+    rows = board.splitlines()
+
+    assert len(rows) == 2
+    assert "\t".join(rows[0].split("\t")[:4]) == "priority\tgoal_id\tgoal\tfinding_id"
+    values = rows[1].split("\t")
+    assert values[0] == "P1 correct/reject: accept blocked"
+    assert values[1] == "goal-1"
+    assert values[3] == "finding-1"
+    assert values[6] == "no"
+    assert values[7] == "reject; correct; skip"
+    assert values[8] == "accept"
+    assert values[9] == "Check table rows; Inspect quote"
+    assert values[10] == "correct creates a training-ready target"
+    assert values[11] == "blocked: accept blockers: verify parsed table rows, table row alignment uncertain"
+    assert values[13] == "Preheating increased ductility by 14%."
 
 
 def test_render_review_checklist_gives_expert_decision_steps():

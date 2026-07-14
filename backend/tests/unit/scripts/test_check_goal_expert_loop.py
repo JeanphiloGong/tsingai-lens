@@ -257,7 +257,11 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format messages-jsonl"
+        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format messages-jsonl --require-training-ready"
+        in text
+    )
+    assert (
+        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format training-jsonl --require-training-ready"
         in text
     )
 

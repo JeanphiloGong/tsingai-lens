@@ -832,9 +832,19 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
     layers = _mapping(summary.get("layers"))
     experiment_layer = _mapping(layers.get("experiment_design"))
     if experiment_layer.get("status") == "pass":
-        commands.append(
-            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-            f"--collection-id {collection_id} --format messages-jsonl"
+        commands.extend(
+            [
+                (
+                    "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+                    f"--collection-id {collection_id} --format messages-jsonl "
+                    "--require-training-ready"
+                ),
+                (
+                    "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+                    f"--collection-id {collection_id} --format training-jsonl "
+                    "--require-training-ready"
+                ),
+            ]
         )
     else:
         commands.append(

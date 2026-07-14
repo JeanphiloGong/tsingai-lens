@@ -61,6 +61,25 @@ REVIEW_RISK_FLAGS = {
     "check_mechanism_requirement": "Mechanism evidence may be missing; decide whether the final label needs mechanism support.",
     "resolve_conflict": "Conflicting direction; resolve evidence conflict before downstream use.",
 }
+ACCEPTANCE_REVIEW_CHECKS = {
+    "accept_as_paper_level": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+    "needs_cross_paper_confirmation": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+    "single_paper_evidence": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+    "review_table_rows": "Verify the selected table rows, variable columns, and outcome values.",
+    "table_row_needs_expert_review": "Verify the selected table rows, variable columns, and outcome values.",
+    "verify_table_rows": "Verify parsed table-row alignment against the source table.",
+    "table_row_alignment_uncertain": "Verify parsed table-row alignment against the source table.",
+    "review_table_variables": "Check whether multiple table variables changed before assigning a single-variable effect.",
+    "non_single_variable_table_comparison": "Check whether multiple table variables changed before assigning a single-variable effect.",
+    "check_mechanism_requirement": "Decide whether mechanism evidence is required for this reviewed finding.",
+    "missing_mechanism_evidence": "Decide whether mechanism evidence is required for this reviewed finding.",
+    "resolve_conflict": "Resolve conflicting evidence direction before downstream use.",
+    "conflicting_direction": "Resolve conflicting evidence direction before downstream use.",
+    "repair_evidence_binding": "Repair or reject the evidence binding before accepting.",
+    "missing_direct_result_evidence": "Repair or reject the evidence binding before accepting.",
+    "validate_model_evidence": "Validate the model-prediction or validation evidence before accepting.",
+    "model_validation_finding": "Validate the model-prediction or validation evidence before accepting.",
+}
 
 
 def _dataset_jsonl_response(
@@ -172,6 +191,7 @@ def _decision_template_row(row: dict[str, Any]) -> dict[str, Any]:
         "support_grade": row["support_grade"],
         "recommended_action_code": row["recommended_action_code"],
         "review_reasons": row["review_reasons"],
+        "acceptance_gate": dict(row["acceptance_gate"]),
         "protocol_blocking_missing": _strings(
             row["protocol_readiness"].get("blocking_missing")
         ),
@@ -233,6 +253,15 @@ def _dataset_review_packet_response(
                 ),
             ]
         )
+        acceptance_gate = row["acceptance_gate"]
+        lines.append(
+            "   acceptance gate: "
+            f"{acceptance_gate.get('status') or 'n/a'}; "
+            f"accept_allowed={str(bool(acceptance_gate.get('accept_allowed'))).lower()}"
+        )
+        review_checks = _strings(acceptance_gate.get("review_checks"))
+        if review_checks:
+            lines.append(f"   expert checks: {_join(review_checks)}")
         blocking_missing = _strings(protocol_readiness.get("blocking_missing"))
         if blocking_missing:
             lines.append(f"   protocol gaps: {_join(blocking_missing)}")
@@ -273,6 +302,12 @@ def _review_jsonl_row(
     evidence = item.training_evidence_refs or item.evidence_refs or item.input_blocks
     review_action = item.review_action or {}
     protocol_readiness = _protocol_readiness_for_item(item)
+    acceptance_gate = _acceptance_gate_for_item(
+        item,
+        prediction=prediction,
+        review_action=review_action,
+        protocol_readiness=protocol_readiness,
+    )
     return {
         "collection_id": collection_id,
         "goal_id": item.scope_id if item.scope_type == "goal" else "",
@@ -303,6 +338,7 @@ def _review_jsonl_row(
             _strings(prediction.get("warnings")),
         ),
         "protocol_readiness": protocol_readiness,
+        "acceptance_gate": acceptance_gate,
         "action": "skip",
         "allowed_actions": list(REVIEW_ACTION_OPTIONS),
         "issue_type": "",
@@ -325,6 +361,67 @@ def _review_risk_flags(
         if value in REVIEW_RISK_FLAGS and REVIEW_RISK_FLAGS[value] not in flags:
             flags.append(REVIEW_RISK_FLAGS[value])
     return flags
+
+
+def _acceptance_gate_for_item(
+    item: Any,
+    *,
+    prediction: dict[str, Any],
+    review_action: dict[str, Any],
+    protocol_readiness: dict[str, Any],
+) -> dict[str, Any]:
+    existing = getattr(item, "acceptance_gate", None)
+    if isinstance(existing, dict) and existing:
+        return existing
+    blocking_missing = _strings(protocol_readiness.get("blocking_missing"))
+    review_checks = _acceptance_review_checks(
+        prediction=prediction,
+        review_action=review_action,
+    )
+    if _text(item.dataset_use_status) == "training_ready":
+        status = "accepted"
+        accept_allowed = False
+        requires_correction = False
+        guidance = "Already accepted for training use."
+    elif blocking_missing:
+        status = "correction_required"
+        accept_allowed = False
+        requires_correction = True
+        guidance = "Do not accept directly; correct or reject the blocking gaps first."
+    else:
+        status = "review_required"
+        accept_allowed = True
+        requires_correction = False
+        guidance = "Accept only after the listed checks and source evidence match."
+    return {
+        "status": status,
+        "accept_allowed": accept_allowed,
+        "requires_correction": requires_correction,
+        "blocking_missing": blocking_missing,
+        "review_checks": review_checks,
+        "recommended_action_code": _text(review_action.get("code")),
+        "guidance": guidance,
+    }
+
+
+def _acceptance_review_checks(
+    *,
+    prediction: dict[str, Any],
+    review_action: dict[str, Any],
+) -> list[str]:
+    checks: list[str] = []
+    action_code = _text(review_action.get("code"))
+    if action_code in ACCEPTANCE_REVIEW_CHECKS:
+        checks.append(ACCEPTANCE_REVIEW_CHECKS[action_code])
+    for value in [
+        *_strings(prediction.get("review_reasons")),
+        *_strings(prediction.get("warnings")),
+    ]:
+        if value in ACCEPTANCE_REVIEW_CHECKS:
+            check = ACCEPTANCE_REVIEW_CHECKS[value]
+            if check not in checks:
+                checks.append(check)
+    return checks
 
 
 def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:

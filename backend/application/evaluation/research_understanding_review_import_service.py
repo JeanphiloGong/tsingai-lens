@@ -343,6 +343,11 @@ def _review_warning(row: dict[str, Any]) -> str:
 
 
 def _protocol_blocking_missing(row: dict[str, Any]) -> list[str]:
+    acceptance_gate = row.get("acceptance_gate")
+    if isinstance(acceptance_gate, dict):
+        blocking = _strings(acceptance_gate.get("blocking_missing"))
+        if blocking:
+            return blocking
     readiness = row.get("protocol_readiness")
     if not isinstance(readiness, dict):
         return _strings(row.get("protocol_blocking_missing"))

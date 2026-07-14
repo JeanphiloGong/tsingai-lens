@@ -731,17 +731,21 @@ envelope，`jsonl` 返回 newline-delimited 完整 sample，
 `messages_jsonl` 返回 newline-delimited `{"messages": [...]}` 行，便于常见
 chat evaluation/fine-tuning 工具直接消费。`review_jsonl` 返回可编辑的人工复核模板，
 每行默认 `action=skip`，并包含 `allowed_actions`、`reject_issue_options`、
-`review_instructions`、`review_risk_flags`、候选 Finding 字段、推荐动作、证据片段和
-`protocol_readiness`。`decision_template` 返回更紧凑的 newline-delimited
+`review_instructions`、`review_risk_flags`、候选 Finding 字段、推荐动作、证据片段、
+`acceptance_gate` 和 `protocol_readiness`。`decision_template` 返回更紧凑的 newline-delimited
 导入模板，保留 `action`、`issue_type`、`expert_note`、`suggested_target`、
 `curated_evidence_ref_ids` 和可审计的 `evidence` 摘要（source label、page、quote、
 open link），适合专家或复核 agent 编辑后直接交给导入脚本预检。
 `review_packet` 返回 `text/plain` 人工可读复核包，包含同一批
-`review_candidate` 的 statement、变量/结果/方向、推荐动作、复核原因、protocol
-readiness、证据 quote 和打开来源的链接，适合专家先快速浏览再决定是否导入
+`review_candidate` 的 statement、变量/结果/方向、推荐动作、acceptance gate、复核原因、
+protocol readiness、证据 quote 和打开来源的链接，适合专家先快速浏览再决定是否导入
 `review_jsonl` 或 `decision_template`。`protocol_readiness` 给出 `status`、`missing`、
 `blocking_missing` 和逐项 `checks`，用于判断该候选在专家接受/校正后是否具备
 实验方案输入所需的 statement、variables、outcomes、direction/scope 和可追溯证据；
+`acceptance_gate` 把 `protocol_readiness` 与 `review_action` 合并成行级复核门槛，
+包含 `status`、`accept_allowed`、`requires_correction`、`blocking_missing`、
+`review_checks` 和 `guidance`。当 `acceptance_gate.accept_allowed=false` 时，
+专家不应把模板行直接改为 `accept`，而应先 `correct` 补齐缺口或 `reject`。
 专家填写 `accept | reject | correct` 后可交给
 `scripts/evaluation/expert_gold/import_goal_review_decisions.py` 导入。前端下载训练集时应使用
 `dataset_use_status=training_ready`，避免把未复核候选样本混入训练输入。
@@ -833,7 +837,7 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 `label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、
 `input_blocks`、`prompt_version`、`model_output`、`system_prediction`、
 `review_action`、`expert_target`、`evidence_refs`、`training_evidence_refs`、
-`training_messages`、`protocol_readiness`、`context_refs`、
+`training_messages`、`protocol_readiness`、`acceptance_gate`、`context_refs`、
 `feedback_refs` 和 `metadata`。`evidence_refs` 保留完整审计证据链，包含
 direct、mechanism、condition context、background 等角色；`training_evidence_refs`
 只保留应作为监督输入的 direct/mechanism 证据，若旧样本没有角色分桶则回退到

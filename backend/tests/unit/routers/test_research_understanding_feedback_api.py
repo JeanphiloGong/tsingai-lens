@@ -1034,6 +1034,17 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
         "support_grade": "partial",
         "recommended_action_code": "accept_as_paper_level",
         "review_reasons": ["single_paper_evidence"],
+        "acceptance_gate": {
+            "status": "review_required",
+            "accept_allowed": True,
+            "requires_correction": False,
+            "blocking_missing": [],
+            "review_checks": [
+                "Confirm the finding is only paper-level unless cross-paper evidence is present."
+            ],
+            "recommended_action_code": "accept_as_paper_level",
+            "guidance": "Accept only after the listed checks and source evidence match.",
+        },
         "protocol_blocking_missing": [],
         "curated_evidence_ref_ids": ["ev-1"],
         "evidence": [
@@ -1096,6 +1107,11 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
     assert "Preheating improves ductility." in body
     assert "recommended action: Accept as paper-level evidence" in body
     assert "protocol readiness: ready_after_review" in body
+    assert "acceptance gate: review_required; accept_allowed=true" in body
+    assert (
+        "expert checks: Confirm the finding is only paper-level unless cross-paper evidence is present."
+        in body
+    )
     assert "review reasons: single_paper_evidence" in body
     assert "quote: Preheating increased ductility by 14%." in body
     assert "open: /collections/col-1/documents/doc-1?source_ref=blk_1" in body
@@ -1148,6 +1164,13 @@ def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
     assert row["protocol_readiness"]["status"] == "needs_correction"
     assert row["protocol_readiness"]["ready_after_review"] is False
     assert row["protocol_readiness"]["blocking_missing"] == [
+        "variables",
+        "direction_or_scope",
+    ]
+    assert row["acceptance_gate"]["status"] == "correction_required"
+    assert row["acceptance_gate"]["accept_allowed"] is False
+    assert row["acceptance_gate"]["requires_correction"] is True
+    assert row["acceptance_gate"]["blocking_missing"] == [
         "variables",
         "direction_or_scope",
     ]
@@ -1359,6 +1382,8 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     assert line["goal_id"] == "goal-1"
     assert line["action"] == "skip"
     assert line["curated_evidence_ref_ids"] == ["ev-1"]
+    assert line["acceptance_gate"]["status"] == "review_required"
+    assert line["acceptance_gate"]["accept_allowed"] is True
     assert line["evidence"][0] == {
         "evidence_ref_id": "ev-1",
         "label": "P001 Section 3.2",

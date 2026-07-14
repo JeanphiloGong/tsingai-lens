@@ -22,6 +22,25 @@ DATASET_SCHEMA_VERSION = "research_understanding_dataset.v1"
 DATASET_TASK_TYPE = "research_understanding_finding"
 DATASET_LABEL_STATUSES = ("candidate", "silver", "gold", "rejected")
 DATASET_USE_STATUSES = ("training_ready", "review_candidate", "rejected")
+_ACCEPTANCE_REVIEW_CHECKS = {
+    "accept_as_paper_level": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+    "needs_cross_paper_confirmation": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+    "single_paper_evidence": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+    "review_table_rows": "Verify the selected table rows, variable columns, and outcome values.",
+    "table_row_needs_expert_review": "Verify the selected table rows, variable columns, and outcome values.",
+    "verify_table_rows": "Verify parsed table-row alignment against the source table.",
+    "table_row_alignment_uncertain": "Verify parsed table-row alignment against the source table.",
+    "review_table_variables": "Check whether multiple table variables changed before assigning a single-variable effect.",
+    "non_single_variable_table_comparison": "Check whether multiple table variables changed before assigning a single-variable effect.",
+    "check_mechanism_requirement": "Decide whether mechanism evidence is required for this reviewed finding.",
+    "missing_mechanism_evidence": "Decide whether mechanism evidence is required for this reviewed finding.",
+    "resolve_conflict": "Resolve conflicting evidence direction before downstream use.",
+    "conflicting_direction": "Resolve conflicting evidence direction before downstream use.",
+    "repair_evidence_binding": "Repair or reject the evidence binding before accepting.",
+    "missing_direct_result_evidence": "Repair or reject the evidence binding before accepting.",
+    "validate_model_evidence": "Validate the model-prediction or validation evidence before accepting.",
+    "model_validation_finding": "Validate the model-prediction or validation evidence before accepting.",
+}
 _REJECTING_ISSUE_TYPES = frozenset(
     {
         "evidence_not_grounded",
@@ -669,6 +688,13 @@ class ResearchUnderstandingFeedbackService:
             system_prediction=system_prediction,
             evidence_records=evidence_records,
         )
+        protocol_readiness = _protocol_readiness_for_sample(
+            dataset_use_status=dataset_use_status,
+            system_prediction=system_prediction,
+            expert_target=_mapping(expert_target),
+            training_evidence_records=training_evidence_records,
+            training_messages=training_messages,
+        )
         return {
             "sample_id": _sample_id(
                 "rus",
@@ -699,12 +725,12 @@ class ResearchUnderstandingFeedbackService:
             "evidence_refs": evidence_records,
             "training_evidence_refs": training_evidence_records,
             "training_messages": training_messages,
-            "protocol_readiness": _protocol_readiness_for_sample(
+            "protocol_readiness": protocol_readiness,
+            "acceptance_gate": _acceptance_gate_for_sample(
                 dataset_use_status=dataset_use_status,
                 system_prediction=system_prediction,
-                expert_target=_mapping(expert_target),
-                training_evidence_records=training_evidence_records,
-                training_messages=training_messages,
+                review_action=review_action,
+                protocol_readiness=protocol_readiness,
             ),
             "context_refs": context_records,
             "feedback_refs": [item.to_record() for item in feedback],
@@ -1744,6 +1770,64 @@ def _protocol_readiness_for_sample(
         "checks": checks,
         "guidance": guidance,
     }
+
+
+def _acceptance_gate_for_sample(
+    *,
+    dataset_use_status: str,
+    system_prediction: Mapping[str, Any],
+    review_action: Mapping[str, str],
+    protocol_readiness: Mapping[str, Any],
+) -> dict[str, Any]:
+    blocking_missing = list(_strings(protocol_readiness.get("blocking_missing")))
+    review_checks = _acceptance_review_checks(
+        system_prediction=system_prediction,
+        review_action=review_action,
+    )
+    if dataset_use_status == "training_ready":
+        status = "accepted"
+        accept_allowed = False
+        requires_correction = False
+        guidance = "Already accepted for training use."
+    elif blocking_missing:
+        status = "correction_required"
+        accept_allowed = False
+        requires_correction = True
+        guidance = "Do not accept directly; correct or reject the blocking gaps first."
+    else:
+        status = "review_required"
+        accept_allowed = True
+        requires_correction = False
+        guidance = "Accept only after the listed checks and source evidence match."
+    return {
+        "status": status,
+        "accept_allowed": accept_allowed,
+        "requires_correction": requires_correction,
+        "blocking_missing": blocking_missing,
+        "review_checks": review_checks,
+        "recommended_action_code": _text(review_action.get("code")),
+        "guidance": guidance,
+    }
+
+
+def _acceptance_review_checks(
+    *,
+    system_prediction: Mapping[str, Any],
+    review_action: Mapping[str, str],
+) -> list[str]:
+    checks: list[str] = []
+    action_code = _text(review_action.get("code"))
+    if action_code in _ACCEPTANCE_REVIEW_CHECKS:
+        checks.append(_ACCEPTANCE_REVIEW_CHECKS[action_code])
+    for value in [
+        *_strings(system_prediction.get("review_reasons")),
+        *_strings(system_prediction.get("warnings")),
+    ]:
+        if value in _ACCEPTANCE_REVIEW_CHECKS:
+            check = _ACCEPTANCE_REVIEW_CHECKS[value]
+            if check not in checks:
+                checks.append(check)
+    return checks
 
 
 def _training_messages_match_target(

@@ -266,6 +266,18 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         == "review selected table rows before accepting or correcting"
     )
     assert candidate["recommended_action_code"] == "review_table_rows"
+    assert candidate["acceptance_gate"] == {
+        "status": "review_required",
+        "accept_allowed": True,
+        "requires_correction": False,
+        "blocking_missing": [],
+        "review_checks": [
+            "Verify the selected table rows, variable columns, and outcome values.",
+            "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+        ],
+        "recommended_action_code": "review_table_rows",
+        "guidance": "Accept only after the listed checks and source evidence match.",
+    }
     assert candidate["protocol_readiness"] == {
         "status": "ready_after_review",
         "ready_after_review": True,
@@ -310,6 +322,11 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "recommended action: review selected table rows before accepting or correcting"
         in text
     )
+    assert "acceptance gate: review_required; accept_allowed=true" in text
+    assert (
+        "expert checks: Verify the selected table rows, variable columns, and outcome values., "
+        "Confirm the finding is only paper-level unless cross-paper evidence is present."
+    ) in text
     assert (
         "Risk summary: action:review_table_rows=1, reason:single_paper_evidence=1, "
         "reason:table_row_needs_expert_review=1"
@@ -446,6 +463,17 @@ def test_render_decision_template_exports_editable_import_rows():
         "support_grade": "strong",
         "recommended_action_code": "accept_as_paper_level",
         "review_reasons": ["single_paper_evidence"],
+        "acceptance_gate": {
+            "status": "review_required",
+            "accept_allowed": True,
+            "requires_correction": False,
+            "blocking_missing": [],
+            "review_checks": [
+                "Confirm the finding is only paper-level unless cross-paper evidence is present."
+            ],
+            "recommended_action_code": "accept_as_paper_level",
+            "guidance": "Accept only after the listed checks and source evidence match.",
+        },
         "protocol_blocking_missing": [],
         "curated_evidence_ref_ids": ["ev-1"],
         "evidence": [
@@ -590,6 +618,13 @@ def test_build_goal_review_packet_marks_protocol_blocking_gaps():
     assert candidate["protocol_readiness"]["status"] == "needs_correction"
     assert candidate["protocol_readiness"]["ready_after_review"] is False
     assert candidate["protocol_readiness"]["blocking_missing"] == [
+        "variables",
+        "direction_or_scope",
+    ]
+    assert candidate["acceptance_gate"]["status"] == "correction_required"
+    assert candidate["acceptance_gate"]["accept_allowed"] is False
+    assert candidate["acceptance_gate"]["requires_correction"] is True
+    assert candidate["acceptance_gate"]["blocking_missing"] == [
         "variables",
         "direction_or_scope",
     ]

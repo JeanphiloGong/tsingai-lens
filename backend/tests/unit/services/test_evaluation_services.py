@@ -761,6 +761,15 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["protocol_readiness"]["checks"][
         "traceable_training_evidence"
     ] is True
+    assert by_finding["finding-1"]["acceptance_gate"] == {
+        "status": "accepted",
+        "accept_allowed": False,
+        "requires_correction": False,
+        "blocking_missing": [],
+        "review_checks": [],
+        "recommended_action_code": "review_evidence",
+        "guidance": "Already accepted for training use.",
+    }
     assert by_finding["finding-1"]["system_prediction"]["presentation_bucket"] == (
         "unbucketed"
     )
@@ -1197,6 +1206,18 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
     assert by_finding["finding-1"]["review_action"] == {
         "code": "verify_table_rows",
         "label": "verify parsed table rows before accepting or correcting",
+    }
+    assert by_finding["finding-1"]["acceptance_gate"] == {
+        "status": "review_required",
+        "accept_allowed": True,
+        "requires_correction": False,
+        "blocking_missing": [],
+        "review_checks": [
+            "Verify parsed table-row alignment against the source table.",
+            "Confirm the finding is only paper-level unless cross-paper evidence is present.",
+        ],
+        "recommended_action_code": "verify_table_rows",
+        "guidance": "Accept only after the listed checks and source evidence match.",
     }
     assert by_finding["finding-2"]["review_action"] == {
         "code": "review_table_rows",

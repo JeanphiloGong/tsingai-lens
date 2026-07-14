@@ -447,6 +447,9 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     assert "Rows: total=2 written=0 skipped=1" in text
     assert "Decisions: accept=1, skip=1" in text
     assert "Review progress: actionable=1 needs_review=1 ready_to_write=True" in text
+    assert "Decision progress by goal:" in text
+    assert "decisions: total=2 actionable=1 skipped=1 accept=1 correct=0 reject=0" in text
+    assert "next_review_finding_id=finding-skip" in text
     assert "- col-1/goal-1" in text
     assert (
         "now: training_ready=2 training_messages=1 protocol_ready=1 "

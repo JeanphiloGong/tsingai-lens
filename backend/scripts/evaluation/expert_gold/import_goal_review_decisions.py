@@ -134,6 +134,12 @@ def render_text_summary(summary: dict) -> str:
             for error in errors[:5]
             if isinstance(error, dict)
         )
+    decision_progress = summary.get("decision_progress_by_goal")
+    if isinstance(decision_progress, list) and decision_progress:
+        lines.append("Decision progress by goal:")
+        for goal in decision_progress:
+            if isinstance(goal, dict):
+                lines.extend(_render_decision_progress(goal))
     affected_goals = summary.get("affected_goals")
     if isinstance(affected_goals, list) and affected_goals:
         lines.append("Affected goals:")
@@ -193,6 +199,27 @@ def _render_review_scope_gate(gate: dict) -> list[str]:
     reasons = gate.get("blocking_reasons")
     if isinstance(reasons, list) and reasons:
         lines.append("- blocking_reasons=" + ", ".join(str(reason) for reason in reasons))
+    return lines
+
+
+def _render_decision_progress(goal: dict) -> list[str]:
+    collection_id = goal.get("collection_id", "")
+    goal_id = goal.get("goal_id", "")
+    lines = [
+        f"- {collection_id}/{goal_id}",
+        (
+            "  decisions: "
+            f"total={goal.get('total_rows', 0)} "
+            f"actionable={goal.get('actionable_count', 0)} "
+            f"skipped={goal.get('skipped_count', 0)} "
+            f"accept={goal.get('accept_count', 0)} "
+            f"correct={goal.get('correct_count', 0)} "
+            f"reject={goal.get('reject_count', 0)}"
+        ),
+    ]
+    next_review = goal.get("next_review_finding_id")
+    if next_review:
+        lines.append(f"  next_review_finding_id={next_review}")
     return lines
 
 

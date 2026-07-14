@@ -833,6 +833,14 @@ class GoalSessionService:
             "support_grade": _clean_text(
                 target.get("support_grade") or prediction.get("support_grade")
             ),
+            "generalization_status": _clean_text(
+                target.get("generalization_status")
+                or prediction.get("generalization_status")
+            ),
+            "generalization_note": _clean_text(
+                target.get("generalization_note")
+                or prediction.get("generalization_note")
+            ),
             "evidence": [ref for ref in evidence_refs if ref][:4],
         }
 

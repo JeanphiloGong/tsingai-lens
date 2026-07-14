@@ -237,6 +237,12 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
                         "direction": "increase",
                         "scope_summary": "LPBF 316L stainless steel",
                         "support_grade": "strong",
+                        "generalization_status": "paper_level_only",
+                        "generalization_note": (
+                            "Accepted as a source-backed paper-level finding; "
+                            "design validation instead of treating it as a "
+                            "cross-paper conclusion."
+                        ),
                     },
                     "expert_target": {
                         "statement": "150 C preheating improves LPBF 316L ductility through microstructure/GND changes.",
@@ -246,6 +252,12 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
                         "direction": "increase",
                         "scope_summary": "LPBF 316L stainless steel",
                         "support_grade": "strong",
+                        "generalization_status": "paper_level_only",
+                        "generalization_note": (
+                            "Accepted as a source-backed paper-level finding; "
+                            "design validation instead of treating it as a "
+                            "cross-paper conclusion."
+                        ),
                     },
                     "training_evidence_refs": [
                         {
@@ -869,6 +881,8 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert "curated_research_findings" in prompt
     assert "150 C preheating improves LPBF 316L ductility" in prompt
     assert "The sample preheated at 150 C shows a 14% improvement" in prompt
+    assert "paper_level_only" in prompt
+    assert "design validation instead of treating it as a cross-paper conclusion" in prompt
     assert "ev_unreviewed_fact" not in prompt
     assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt

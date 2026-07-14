@@ -31,7 +31,9 @@ own database connections, SQL, schema initialization, or row encoding.
   Findings for goal-focused experiment or protocol questions, filters out
   unsupported/conflicted/insufficient reviewed findings as protocol sources,
   limits cited protocol sources to curated Findings when they are available,
-  and labels general fallback separately from collection evidence.
+  preserves each Finding's paper-level or cross-paper generalization boundary
+  in the prompt context, and labels general fallback separately from collection
+  evidence.
 - `experiment_plan_service.py`
   Persists goal-scoped experiment plan drafts generated from chat answers. When
   a draft references a chat message, the service verifies that the message is a

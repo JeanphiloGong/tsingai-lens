@@ -12,6 +12,7 @@
 		fetchResearchUnderstandingFeedback,
 		fetchResearchUnderstandingCurations,
 		formatShortIdentifier,
+		importResearchUnderstandingReviewDecisions,
 		researchUnderstandingCollectionDatasetUrl,
 		researchUnderstandingDatasetUrl,
 		type ResearchUnderstanding,
@@ -31,7 +32,8 @@
 		type ResearchUnderstandingRelation,
 		type ResearchUnderstandingFeedbackIssueType,
 		type ResearchUnderstandingFeedback,
-		type ResearchUnderstandingFeedbackStatus
+		type ResearchUnderstandingFeedbackStatus,
+		type ResearchUnderstandingReviewDecisionImportResponse
 	} from '../../../_shared/researchView';
 
 	export let understanding: ResearchUnderstanding | null = null;
@@ -188,6 +190,12 @@
 	let collectionDatasetLoading = false;
 	let collectionDatasetError = '';
 	let collectionDatasetRequestSequence = 0;
+	let reviewImportText = '';
+	let reviewImportSubmitting = false;
+	let reviewImportMode: 'dry_run' | 'import' = 'dry_run';
+	let reviewImportMessage = '';
+	let reviewImportError = '';
+	let reviewImportSummary: ResearchUnderstandingReviewDecisionImportResponse | null = null;
 	let appliedInitialFocusKey = '';
 	let appliedInitialFindingKey = '';
 
@@ -3036,6 +3044,82 @@
 		}
 	}
 
+	function parseReviewImportRows(text: string): Record<string, unknown>[] {
+		const rows: Record<string, unknown>[] = [];
+		for (const [index, line] of text.split(/\r?\n/).entries()) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+			try {
+				const parsed = JSON.parse(trimmed);
+				if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+					throw new Error($t('research.understanding.reviewImportInvalidRow'));
+				}
+				rows.push(parsed as Record<string, unknown>);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : $t('error.unexpected');
+				throw new Error(
+					$t('research.understanding.reviewImportParseError', {
+						line: index + 1,
+						message
+					})
+				);
+			}
+		}
+		return rows;
+	}
+
+	function reviewImportProgressText(summary: ResearchUnderstandingReviewDecisionImportResponse) {
+		const progress = summary.review_progress;
+		return $t('research.understanding.reviewImportProgress', {
+			actionable: Number(progress.actionable_count ?? 0),
+			skipped: Number(progress.skipped_count ?? 0),
+			written: summary.written_count
+		});
+	}
+
+	function reviewImportIssueText(record: Record<string, unknown>) {
+		const parts = [
+			record.line ? `line ${record.line}` : '',
+			typeof record.action === 'string' ? record.action : '',
+			typeof record.message === 'string' ? record.message : ''
+		].filter(Boolean);
+		return parts.length ? parts.join(' · ') : JSON.stringify(record);
+	}
+
+	async function submitReviewImport(dryRun: boolean) {
+		if (!collectionId || !reviewerReady) return;
+		reviewImportSubmitting = true;
+		reviewImportMode = dryRun ? 'dry_run' : 'import';
+		reviewImportMessage = '';
+		reviewImportError = '';
+		reviewImportSummary = null;
+		try {
+			const rows = parseReviewImportRows(reviewImportText);
+			if (!rows.length) {
+				throw new Error($t('research.understanding.reviewImportEmpty'));
+			}
+			const summary = await importResearchUnderstandingReviewDecisions(collectionId, {
+				rows,
+				reviewer: currentReviewer,
+				dry_run: dryRun,
+				fail_on_warnings: dryRun
+			});
+			reviewImportSummary = summary;
+			if (!dryRun && summary.written_count > 0) {
+				await refreshDatasetSummaryForCurrentScope();
+				if (curationScopeKey) {
+					await loadFeedbackForScope(curationScopeKey);
+					await loadCurationsForScope(curationScopeKey);
+				}
+			}
+			reviewImportMessage = reviewImportProgressText(summary);
+		} catch (error) {
+			reviewImportError = error instanceof Error ? error.message : $t('error.unexpected');
+		} finally {
+			reviewImportSubmitting = false;
+		}
+	}
+
 	async function submitClaimFeedback(options: { openNext?: boolean } = {}) {
 		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
 		if (!reviewerReady) return;
@@ -3753,6 +3837,107 @@
 										<a href={collectionDatasetDownloadUrl('review_packet', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadCollectionReviewPacket')}
 										</a>
+									{/if}
+								</div>
+								<div class="research-understanding-workbench__review-import">
+									<div class="research-understanding-workbench__review-import-heading">
+										<div>
+											<strong>{$t('research.understanding.reviewImportTitle')}</strong>
+											<p>{$t('research.understanding.reviewImportBody')}</p>
+										</div>
+										<span>
+											{$t('research.understanding.reviewImportReviewer')}
+											<strong>{currentReviewer || $t('research.understanding.reviewerUnavailable')}</strong>
+										</span>
+									</div>
+									<label>
+										<span>{$t('research.understanding.reviewImportTextareaLabel')}</span>
+										<textarea
+											rows="5"
+											bind:value={reviewImportText}
+											placeholder={$t('research.understanding.reviewImportTextareaPlaceholder')}
+											disabled={reviewImportSubmitting}
+										></textarea>
+									</label>
+									<div class="research-understanding-workbench__review-import-actions">
+										<button
+											type="button"
+											disabled={reviewImportSubmitting || !reviewImportText.trim() || !reviewerReady}
+											on:click={() => submitReviewImport(true)}
+										>
+											{reviewImportSubmitting && reviewImportMode === 'dry_run'
+												? $t('research.understanding.reviewImportSubmitting')
+												: $t('research.understanding.reviewImportDryRun')}
+										</button>
+										<button
+											type="button"
+											disabled={reviewImportSubmitting || !reviewImportText.trim() || !reviewerReady}
+											on:click={() => submitReviewImport(false)}
+										>
+											{reviewImportSubmitting && reviewImportMode === 'import'
+												? $t('research.understanding.reviewImportSubmitting')
+												: $t('research.understanding.reviewImportSubmit')}
+										</button>
+										{#if !reviewerReady}
+											<small>{$t('research.understanding.reviewImportRequiresReviewer')}</small>
+										{/if}
+									</div>
+									{#if reviewImportMessage}
+										<p class="research-understanding-workbench__feedback-state" role="status">
+											{reviewImportMessage}
+										</p>
+									{/if}
+									{#if reviewImportError}
+										<p
+											class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+											role="alert"
+										>
+											{reviewImportError}
+										</p>
+									{/if}
+									{#if reviewImportSummary}
+										<div class="research-understanding-workbench__review-import-summary">
+											<span>
+												{$t('research.understanding.reviewImportRows')}
+												<strong>{reviewImportSummary.total_rows}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportWritten')}
+												<strong>{reviewImportSummary.written_count}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportSkipped')}
+												<strong>{reviewImportSummary.skipped_count}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportWarnings')}
+												<strong>{reviewImportSummary.warnings.length}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportErrors')}
+												<strong>{reviewImportSummary.errors.length}</strong>
+											</span>
+										</div>
+										{#if reviewImportSummary.warnings.length}
+											<div class="research-understanding-workbench__review-import-issues">
+												<strong>{$t('research.understanding.reviewImportWarningsTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.warnings as warning, index (`warning-${index}`)}
+														<li>{reviewImportIssueText(warning)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if reviewImportSummary.errors.length}
+											<div class="research-understanding-workbench__review-import-issues">
+												<strong>{$t('research.understanding.reviewImportErrorsTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.errors as error, index (`error-${index}`)}
+														<li>{reviewImportIssueText(error)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
 									{/if}
 								</div>
 								{#if datasetTrainingReadySampleCount > 0}
@@ -5825,6 +6010,150 @@
 		padding-top: 10px;
 	}
 
+	.research-understanding-workbench__review-import {
+		display: grid;
+		flex-basis: 100%;
+		gap: 10px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__review-import-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-heading > div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-heading strong,
+	.research-understanding-workbench__review-import label span,
+	.research-understanding-workbench__review-import-issues strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-heading > span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		max-width: 46%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-heading > span strong {
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+	}
+
+	.research-understanding-workbench__review-import label {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import textarea {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 8px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+		font-size: 12px;
+		line-height: 18px;
+		resize: vertical;
+	}
+
+	.research-understanding-workbench__review-import-actions,
+	.research-understanding-workbench__review-import-summary {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-actions button {
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__review-import-actions button:hover:not(:disabled),
+	.research-understanding-workbench__review-import-actions button:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__review-import-actions button:disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
+	}
+
+	.research-understanding-workbench__review-import-actions small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-summary span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 26px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-summary strong {
+		color: var(--text-primary);
+	}
+
+	.research-understanding-workbench__review-import-issues {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-issues ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
 	.research-understanding-workbench__dataset-collection {
 		display: grid;
 		flex-basis: 100%;
@@ -6959,6 +7288,14 @@
 		.research-understanding-workbench__dataset-body {
 			align-items: flex-start;
 			flex-direction: column;
+		}
+
+		.research-understanding-workbench__review-import-heading {
+			flex-direction: column;
+		}
+
+		.research-understanding-workbench__review-import-heading > span {
+			max-width: none;
 		}
 
 		.research-understanding-workbench__usage-path {

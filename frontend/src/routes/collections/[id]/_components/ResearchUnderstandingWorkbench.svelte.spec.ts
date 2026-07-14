@@ -3361,6 +3361,245 @@ describe('ResearchUnderstandingWorkbench', () => {
 		);
 	});
 
+	it('dry-runs pasted review decisions before import', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						status: 'ok',
+						dry_run: true,
+						total_rows: 1,
+						written_count: 0,
+						skipped_count: 0,
+						counts: { accept: 1 },
+						errors: [],
+						warnings: [
+							{
+								line: 1,
+								action: 'accept',
+								message: 'Rerun dry-run with fail-on-warnings before import.'
+							}
+						],
+						review_progress: {
+							actionable_count: 1,
+							skipped_count: 0,
+							needs_review_count: 0,
+							ready_to_write: true,
+							next_steps: []
+						},
+						affected_goals: []
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = datasetSummaryLocator();
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+		await expect.element(browserPage.getByText('Import reviewed decisions')).toBeInTheDocument();
+
+		const row = {
+			sample_id: 'sample_1',
+			finding_id: 'finding_strength_supported',
+			action: 'accept',
+			review_status: 'correct',
+			issue_type: 'none'
+		};
+		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByRole('button', { name: 'Dry run' }).click();
+
+		await expect
+			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 0 written.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Import warnings')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('line 1 · accept · Rerun dry-run with fail-on-warnings before import.')
+			)
+			.toBeInTheDocument();
+
+		const importCall = fetchMock.mock.calls.find(([input, init]) => {
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof (init as RequestInit | undefined)?.method === 'string'
+						? (init as RequestInit).method
+						: 'GET';
+			return (
+				requestPath(input as string | URL | Request).endsWith(
+					'/research-understanding/review-decisions/import'
+				) && method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(importCall).toBeTruthy();
+		const [input, init] = importCall!;
+		expect(requestPath(input)).toBe(
+			'/api/v1/collections/col_123/research-understanding/review-decisions/import'
+		);
+		expect(JSON.parse(String(init.body))).toEqual({
+			rows: [row],
+			reviewer: 'materials-expert@example.com',
+			dry_run: true,
+			fail_on_warnings: true
+		});
+	});
+
+	it('imports reviewed decisions and refreshes dataset readiness', async () => {
+		let datasetRequestCount = 0;
+		let feedbackGetCount = 0;
+		let curationGetCount = 0;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				datasetRequestCount += 1;
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse(
+							datasetRequestCount === 1
+								? {
+										trainingReady: 0,
+										reviewCandidate: 1,
+										rejected: 0,
+										itemCount: 1,
+										labelCounts: {
+											candidate: 0,
+											silver: 1,
+											gold: 0,
+											rejected: 0
+										}
+									}
+								: {
+										trainingReady: 1,
+										reviewCandidate: 0,
+										rejected: 0,
+										itemCount: 1,
+										labelCounts: {
+											candidate: 0,
+											silver: 0,
+											gold: 1,
+											rejected: 0
+										}
+									}
+						)
+					)
+				);
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				feedbackGetCount += 1;
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				curationGetCount += 1;
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						status: 'ok',
+						dry_run: false,
+						total_rows: 1,
+						written_count: 1,
+						skipped_count: 0,
+						counts: { accept: 1 },
+						errors: [],
+						warnings: [],
+						review_progress: {
+							actionable_count: 1,
+							skipped_count: 0,
+							needs_review_count: 0,
+							ready_to_write: true,
+							next_steps: []
+						},
+						affected_goals: [{ goal_id: 'obj_1', written_count: 1 }]
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = datasetSummaryLocator();
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+		await expect.poll(() => datasetRegion?.textContent ?? '').toContain('No training-ready samples');
+
+		const row = {
+			sample_id: 'sample_1',
+			finding_id: 'finding_strength_supported',
+			action: 'accept',
+			review_status: 'correct',
+			issue_type: 'none'
+		};
+		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByRole('button', { name: 'Import decisions' }).click();
+
+		await expect
+			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 1 written.'))
+			.toBeInTheDocument();
+		await expect.poll(() => datasetRequestCount).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => feedbackGetCount).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => curationGetCount).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => currentDatasetRegionText()).toContain('Training ready 1');
+
+		const importCall = fetchMock.mock.calls.find(([input, init]) => {
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof (init as RequestInit | undefined)?.method === 'string'
+						? (init as RequestInit).method
+						: 'GET';
+			const body = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}'));
+			return (
+				requestPath(input as string | URL | Request).endsWith(
+					'/research-understanding/review-decisions/import'
+				) &&
+				method === 'POST' &&
+				body.dry_run === false
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(importCall).toBeTruthy();
+		expect(JSON.parse(String(importCall![1].body))).toEqual({
+			rows: [row],
+			reviewer: 'materials-expert@example.com',
+			dry_run: false,
+			fail_on_warnings: false
+		});
+	});
+
 	it('keeps collection review export visible when the current goal has no review candidates', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

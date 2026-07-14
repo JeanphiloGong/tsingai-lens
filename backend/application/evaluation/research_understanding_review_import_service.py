@@ -163,6 +163,7 @@ class ResearchUnderstandingReviewImportService:
         affected_goals = _affected_goal_summaries(
             self.feedback_service,
             valid_decisions,
+            include_pending=False,
         )
         return _summary(
             status="pass",
@@ -710,6 +711,8 @@ def _dataset_evidence_ref_ids(item: dict[str, Any]) -> set[str]:
 def _affected_goal_summaries(
     service: Any,
     decisions: list[dict[str, Any]],
+    *,
+    include_pending: bool = True,
 ) -> list[dict[str, Any]]:
     datasets = _datasets_for_decisions(service, decisions)
     pending_by_goal = {
@@ -719,7 +722,7 @@ def _affected_goal_summaries(
     summaries = []
     for key, dataset in datasets.items():
         summary = _goal_readiness_summary(dataset)
-        pending = pending_by_goal.get(key, {})
+        pending = pending_by_goal.get(key, {}) if include_pending else {}
         pending_accept = int(pending.get("accept_count") or 0)
         pending_reject = int(pending.get("reject_count") or 0)
         pending_correct = int(pending.get("correct_count") or 0)

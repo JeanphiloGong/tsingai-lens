@@ -205,6 +205,42 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
     ]
 
 
+def test_review_import_service_post_import_reports_current_readiness_not_pending():
+    service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
+
+    summary = service.import_rows(
+        rows=[_row(action="accept")],
+        reviewer="materials-expert@example.com",
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 1
+    assert summary["affected_goals"] == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-1",
+            "item_count": 2,
+            "training_ready_count": 1,
+            "training_message_count": 1,
+            "protocol_ready_count": 1,
+            "review_candidate_count": 1,
+            "rejected_count": 0,
+            "next_review_finding_id": "",
+            "pending_actionable_count": 0,
+            "pending_accept_count": 0,
+            "pending_reject_count": 0,
+            "pending_correct_count": 0,
+            "pending_training_ready_count": 0,
+            "pending_rejected_count": 0,
+            "pending_review_candidate_resolved_count": 0,
+            "projected_training_ready_count": 1,
+            "projected_review_candidate_count": 1,
+            "projected_rejected_count": 0,
+            "readiness_issues": [],
+        }
+    ]
+
+
 def test_review_import_service_blocks_accept_when_acceptance_gate_denies_it():
     service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
 

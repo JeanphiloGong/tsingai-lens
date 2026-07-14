@@ -6802,6 +6802,32 @@ class ResearchUnderstandingService:
             or " table-row comparison changes " in normalized
         )
 
+    def _review_candidate_table_row_statement(self, statement: str) -> str:
+        text = (_text(statement) or "").strip()
+        if not text:
+            return ""
+        if text.startswith("Selected source table rows show:"):
+            return text
+        if text[-1] not in ".!?":
+            text = f"{text}."
+        return (
+            f"Selected source table rows show: {text} "
+            "Expert review is required before treating this as a material effect."
+        )
+
+    def _finding_table_row_statement_text(self, finding: Mapping[str, Any]) -> str:
+        statements = [
+            _text(finding.get("statement")) or "",
+            *[
+                _text(item.get("statement")) or ""
+                for item in _mapping_list(finding.get("relation_chain"))
+            ],
+        ]
+        for statement in statements:
+            if self._finding_statement_is_table_row_comparison(statement):
+                return statement
+        return ""
+
     def _partition_presentation_findings(
         self,
         findings: list[dict[str, Any]],
@@ -7326,6 +7352,11 @@ class ResearchUnderstandingService:
         updated = dict(finding)
         statement = self._finding_statement_text(updated)
         reasons = [reason]
+        table_row_statement = self._finding_table_row_statement_text(updated)
+        if table_row_statement:
+            updated["statement"] = self._review_candidate_table_row_statement(
+                table_row_statement
+            )
         if self._finding_statement_is_confounded_table_row_comparison(statement):
             reasons.append("confounded_table_row_comparison")
             updated["title"] = self._finding_title(

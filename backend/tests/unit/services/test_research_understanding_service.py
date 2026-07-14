@@ -11642,9 +11642,11 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
     }
     assert "laser power -> density" not in review_by_title
     assert review_by_title["scan speed -> density"]["statement"] == (
+        "Selected source table rows show: "
         "With laser power 100 and heat treatment type Furnace HT, "
         "changing scan speed from 100 to 200 decreased density "
-        "from 98.70 % to 93.67 %."
+        "from 98.70 % to 93.67 %. "
+        "Expert review is required before treating this as a material effect."
     )
 
 
@@ -11778,7 +11780,16 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
         for finding in review_scan_density
     } == {("evref_scan_density_a",), ("evref_scan_density_b",)}
     assert all(
+        finding["statement"].startswith("Selected source table rows show:")
+        for finding in review_scan_density
+    )
+    assert all(
         "changing scan speed from 100 to 200 decreased density" in finding["statement"]
+        for finding in review_scan_density
+    )
+    assert all(
+        "Expert review is required before treating this as a material effect."
+        in finding["statement"]
         for finding in review_scan_density
     )
 

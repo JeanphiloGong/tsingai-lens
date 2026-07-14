@@ -295,8 +295,14 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
-        "python3 scripts/evaluation/expert_gold/prepare_agent_review_draft.py "
-        "reviewed-findings.jsonl --output-path agent-reviewed-findings.jsonl"
+        "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format agent-review-prompt-jsonl "
+        "> agent-review-prompts.jsonl"
+        in text
+    )
+    assert (
+        "python3 scripts/evaluation/expert_gold/merge_agent_review_results.py "
+        "reviewed-findings.jsonl agent-review-results.jsonl "
+        "--output-path agent-reviewed-findings.jsonl"
         in text
     )
     assert (

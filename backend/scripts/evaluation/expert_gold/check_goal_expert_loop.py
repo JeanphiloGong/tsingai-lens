@@ -865,8 +865,14 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
             "> reviewed-findings.jsonl"
         ),
         (
-            "python3 scripts/evaluation/expert_gold/prepare_agent_review_draft.py "
-            "reviewed-findings.jsonl --output-path agent-reviewed-findings.jsonl"
+            "python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format agent-review-prompt-jsonl "
+            "> agent-review-prompts.jsonl"
+        ),
+        (
+            "python3 scripts/evaluation/expert_gold/merge_agent_review_results.py "
+            "reviewed-findings.jsonl agent-review-results.jsonl "
+            "--output-path agent-reviewed-findings.jsonl"
         ),
         (
             "python3 scripts/evaluation/expert_gold/check_agent_review_draft.py "

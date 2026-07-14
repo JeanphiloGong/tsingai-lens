@@ -301,16 +301,19 @@ readiness, evidence quotes and source links, suggested target, and the expected
 `agent_review` output schema. It intentionally does not include a top-level
 `action` field and does not set `human_confirmed`; it is a prompt/input packet,
 not an import file.
+After the agent writes one `agent_review` result per `finding_id`, merge those
+results back into the decision-template rows without making them importable:
 
 ```bash
-python3 scripts/evaluation/expert_gold/prepare_agent_review_draft.py \
+python3 scripts/evaluation/expert_gold/merge_agent_review_results.py \
   reviewed-findings.jsonl \
+  agent-review-results.jsonl \
   --output-path agent-reviewed-findings.jsonl
 ```
 
-The prepared draft keeps every import action at `skip`; it only adds an
-`agent_review` object with an agent reviewer id, an `unclear` recommendation,
-the current suggested target, and the expert checks the agent must resolve.
+The merge output keeps every row at `action=skip` and forces
+`agent_review.human_confirmed=false`. It is still only a review draft until a
+human expert confirms individual rows.
 After the agent reviews the source evidence, it may change only
 `agent_review.recommendation`, `agent_review.issue_type`,
 `agent_review.note`, and `agent_review.suggested_target`. Example:

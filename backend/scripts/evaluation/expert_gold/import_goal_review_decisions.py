@@ -548,6 +548,7 @@ def _goal_readiness_summary(dataset: dict[str, Any]) -> dict[str, Any]:
             )
         ),
         "next_review_finding_id": _text(quality.get("next_review_finding_id")),
+        "readiness_issues": _readiness_issues(training_ready),
     }
 
 
@@ -557,6 +558,65 @@ def _has_training_messages(item: dict[str, Any]) -> bool:
         _text(message.get("role")) and _text(message.get("content"))
         for message in messages
     )
+
+
+def _readiness_issues(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues = []
+    for item in items:
+        missing_training = _training_message_missing(item)
+        missing_protocol = _protocol_missing(item)
+        if not missing_training and not missing_protocol:
+            continue
+        issues.append(
+            {
+                "finding_id": _text(item.get("finding_id")),
+                "claim_id": _optional_text(item.get("claim_id")),
+                "missing_training_message": missing_training,
+                "missing_protocol_input": missing_protocol,
+            }
+        )
+    return issues[:10]
+
+
+def _training_message_missing(item: dict[str, Any]) -> list[str]:
+    messages = _mapping_list(item.get("training_messages"))
+    if len(messages) < 2:
+        return ["message_pair"]
+    missing = []
+    if not any(
+        _text(message.get("role")) == "user" and _text(message.get("content"))
+        for message in messages
+    ):
+        missing.append("user_message")
+    if not any(
+        _text(message.get("role")) == "assistant" and _text(message.get("content"))
+        for message in messages
+    ):
+        missing.append("assistant_message")
+    return missing
+
+
+def _protocol_missing(item: dict[str, Any]) -> list[str]:
+    target = item.get("expert_target")
+    target = target if isinstance(target, dict) else {}
+    prediction = item.get("system_prediction")
+    prediction = prediction if isinstance(prediction, dict) else {}
+    missing = []
+    if not _has_training_messages(item):
+        missing.append("training_messages")
+    if not _text(target.get("statement") or prediction.get("statement")):
+        missing.append("statement")
+    if not _strings(target.get("variables") or prediction.get("variables")):
+        missing.append("variables")
+    if not _strings(target.get("outcomes") or prediction.get("outcomes")):
+        missing.append("outcomes")
+    if not _text(target.get("direction") or prediction.get("direction")) and not _text(
+        target.get("scope_summary") or prediction.get("scope_summary")
+    ):
+        missing.append("direction_or_scope")
+    if not _mapping_list(item.get("training_evidence_refs")):
+        missing.append("training_evidence_refs")
+    return missing
 
 
 def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:

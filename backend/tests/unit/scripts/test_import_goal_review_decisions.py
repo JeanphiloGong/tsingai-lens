@@ -62,6 +62,12 @@ class FakeFeedbackService:
                     "finding_id": "finding-accept",
                     "claim_id": "claim-1",
                     "dataset_use_status": "training_ready",
+                    "system_prediction": {
+                        "statement": "Preheating increased ductility by 14%.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                    },
                     "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
                 },
                 {
@@ -191,6 +197,14 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 "review_candidate_count": 1,
                 "rejected_count": 1,
                 "next_review_finding_id": "finding-next",
+                "readiness_issues": [
+                    {
+                        "finding_id": "finding-accept",
+                        "claim_id": "claim-1",
+                        "missing_training_message": ["message_pair"],
+                        "missing_protocol_input": ["training_messages"],
+                    }
+                ],
             }
         ],
     }

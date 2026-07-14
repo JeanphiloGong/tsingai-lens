@@ -306,7 +306,9 @@ that unchanged template fails validation.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for
-training export or protocol drafting.
+training export or protocol drafting. Each affected goal also lists up to 10
+`readiness_issues` for training-ready samples that still lack fine-tuning
+messages or protocol inputs.
 Dataset quality summaries also include top diagnostic lists for error
 categories, issue types, review reasons, and system warnings. Use these counts
 after imports to identify whether the model is mostly failing on variables,

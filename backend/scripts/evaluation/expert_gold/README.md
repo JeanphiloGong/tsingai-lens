@@ -299,6 +299,9 @@ confirmation candidates. These warnings do not block import; they tell the
 expert which promoted rows deserve one more look before training export. Add
 `--fail-on-warnings` during dry-run to make those warnings block until the
 expert changes the row to `correct`, `reject`, or leaves it as `skip`.
+If every row is still `skip`, dry-run reports a `no_actionable_decisions`
+warning because no expert labels will be written; with `--fail-on-warnings`,
+that unchanged template fails validation.
 Successful non-dry-run imports include `affected_goals` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
 rejected counts so reviewers can immediately see whether the goal is ready for
@@ -347,6 +350,10 @@ running API exposes the goal-scoped experiment-plan list, create, and update
 routes required to save traceable protocol drafts. This default runtime check
 is read-only: it inspects the running OpenAPI contract but does not create a
 plan.
+If the source app exposes those routes but the running API does not, the text
+summary reports `running_api_not_current_backend`; restart or update the
+backend process, or point `--api-base-url` at the current Lens app before
+validating protocol-draft saving.
 To prove that the running API can actually create and edit goal-scoped plans,
 run an explicit write smoke check with an authenticated operator account:
 

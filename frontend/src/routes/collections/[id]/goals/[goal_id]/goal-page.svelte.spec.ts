@@ -629,7 +629,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Edited validation matrix').first()).toBeInTheDocument();
 	});
 
-	it('shows an empty experiment plan state when saved plans are unavailable', async () => {
+	it('shows an experiment plan error when the plan endpoint is missing', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
@@ -679,8 +679,8 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('No experiment plans saved yet.')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('404 Not Found - Not Found')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('404 Not Found - Not Found')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('No experiment plans saved yet.')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Plan content')).not.toBeInTheDocument();
 	});
 

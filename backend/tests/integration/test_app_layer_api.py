@@ -704,6 +704,21 @@ def app_client(monkeypatch, tmp_path):
     return client
 
 
+def test_goal_experiment_plan_routes_are_registered(app_client):
+    openapi = app_client.get("/api/openapi.json")
+    assert openapi.status_code == 200
+    paths = openapi.json()["paths"]
+    plan_list_path = (
+        f"{API_V1_PREFIX}/collections/{{collection_id}}/goals/{{goal_id}}/"
+        "experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+
+    assert "get" in paths[plan_list_path]
+    assert "post" in paths[plan_list_path]
+    assert "patch" in paths[plan_detail_path]
+
+
 def test_collection_task_flow(app_client):
     collection_id, task_id = _create_built_collection(app_client)
 

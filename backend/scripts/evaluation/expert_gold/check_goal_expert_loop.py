@@ -190,6 +190,9 @@ def _dataset_layer(
     message_ready_goal_count = sum(
         1 for goal in goals if int(goal.get("training_message_ready_count") or 0) > 0
     )
+    protocol_ready_goal_count = sum(
+        1 for goal in goals if int(goal.get("protocol_ready_count") or 0) > 0
+    )
     minimum_training_ready_met = (
         message_ready_goal_count == len(goals)
         if require_all_training_ready
@@ -201,6 +204,7 @@ def _dataset_layer(
         "active_goal_count": active_goal_count,
         "training_ready_goal_count": training_ready_goal_count,
         "training_message_ready_goal_count": message_ready_goal_count,
+        "protocol_ready_goal_count": protocol_ready_goal_count,
         "requirement": (
             "Goals export active review samples; training-ready samples expose "
             "valid fine-tuning messages when expert labels exist."
@@ -216,7 +220,7 @@ def _experiment_layer(
     eligible_goal_ids = [
         str(goal.get("goal_id"))
         for goal in goals
-        if int(goal.get("training_message_ready_count") or 0) > 0
+        if int(goal.get("protocol_ready_count") or 0) > 0
     ]
     runtime_status = _text(runtime_contract.get("status")) or "not_checked"
     runtime_ready = runtime_status in {"pass", "not_checked"}
@@ -225,9 +229,10 @@ def _experiment_layer(
         "eligible_goal_ids": eligible_goal_ids,
         "runtime_contract": runtime_contract,
         "requirement": (
-            "At least one goal has training-ready, message-ready findings that "
-            "Goal Copilot can use for traceable protocol drafts, and the running "
-            "API can save goal-scoped experiment plans when --api-base-url is used."
+            "At least one goal has training-ready findings with protocol design "
+            "inputs that Goal Copilot can use for traceable protocol drafts, and "
+            "the running API can save goal-scoped experiment plans when "
+            "--api-base-url is used."
         ),
     }
 
@@ -343,6 +348,7 @@ def _goal_rollup(
                 "training_message_ready_count": int(
                     dataset_goal.get("training_message_ready_count") or 0
                 ),
+                "protocol_ready_count": int(dataset_goal.get("protocol_ready_count") or 0),
                 "review_candidate_count": int(dataset_goal.get("review_candidate_count") or 0),
                 "by_error_category": dict(_mapping(dataset_goal.get("by_error_category"))),
                 "by_review_reason": dict(_mapping(dataset_goal.get("by_review_reason"))),
@@ -370,6 +376,11 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
         for goal in goals
         if int(goal.get("training_message_ready_count") or 0) == 0
     ]
+    goals_without_protocol_ready = [
+        str(goal.get("goal_id"))
+        for goal in goals
+        if int(goal.get("protocol_ready_count") or 0) == 0
+    ]
     pending_goals = [
         {
             "goal_id": str(goal.get("goal_id")),
@@ -379,6 +390,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "training_message_ready_count": int(
                 goal.get("training_message_ready_count") or 0
             ),
+            "protocol_ready_count": int(goal.get("protocol_ready_count") or 0),
             "next_action": _pending_goal_action(goal),
             "next_review_action": dict(_mapping(goal.get("next_review_action"))),
             "href": _pending_goal_href(goal),
@@ -389,6 +401,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             int(goal.get("review_candidate_count") or 0) > 0
             or int(goal.get("training_ready_count") or 0) == 0
             or int(goal.get("training_message_ready_count") or 0) == 0
+            or int(goal.get("protocol_ready_count") or 0) == 0
         )
     ]
     review_candidate_count = sum(int(goal.get("review_candidate_count") or 0) for goal in goals)
@@ -424,6 +437,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
         total_goals > 0
         and not goals_without_training_ready
         and not goals_without_training_messages
+        and not goals_without_protocol_ready
         and review_candidate_count == 0
     )
     return {
@@ -432,6 +446,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "review_candidate_count": review_candidate_count,
             "goals_without_training_ready": goals_without_training_ready,
             "goals_without_training_messages": goals_without_training_messages,
+            "goals_without_protocol_ready": goals_without_protocol_ready,
             "pending_goals": pending_goals,
             "by_error_category": dict(
                 sorted(
@@ -509,6 +524,7 @@ def render_text_summary(summary: dict[str, Any]) -> str:
             f"- review candidates: {int(remaining_work.get('review_candidate_count') or 0)}",
             f"- goals without training-ready samples: {len(_list(remaining_work.get('goals_without_training_ready')))}",
             f"- goals without training messages: {len(_list(remaining_work.get('goals_without_training_messages')))}",
+            f"- goals without protocol-ready inputs: {len(_list(remaining_work.get('goals_without_protocol_ready')))}",
         ]
     )
     error_categories = _mapping(remaining_work.get("by_error_category"))
@@ -547,7 +563,8 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                         "   counts: "
                         f"review={int(goal.get('review_candidate_count') or 0)}, "
                         f"training_ready={int(goal.get('training_ready_count') or 0)}, "
-                        f"messages={int(goal.get('training_message_ready_count') or 0)}"
+                        f"messages={int(goal.get('training_message_ready_count') or 0)}, "
+                        f"protocol={int(goal.get('protocol_ready_count') or 0)}"
                     ),
                     f"   open: {_text(goal.get('href'))}",
                 ]
@@ -619,11 +636,16 @@ def _pending_goal_action(goal: dict[str, Any]) -> str:
         return "accept_reject_or_correct_findings"
     if int(goal.get("training_message_ready_count") or 0) == 0:
         return "inspect_training_messages"
+    if int(goal.get("protocol_ready_count") or 0) == 0:
+        return "inspect_protocol_inputs"
     return "open_goal"
 
 
 def _pending_goal_href(goal: dict[str, Any]) -> str:
-    if _pending_goal_action(goal) == "inspect_training_messages":
+    if _pending_goal_action(goal) in {
+        "inspect_training_messages",
+        "inspect_protocol_inputs",
+    }:
         return _text(goal.get("training_ready_url"))
     finding_id = _text(goal.get("next_review_finding_id"))
     if finding_id:

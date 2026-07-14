@@ -56,6 +56,13 @@ def _dataset_payload(**overrides):
             "source": "curation",
             "statement": "Preheating increased ductility by 14%.",
         },
+        "system_prediction": {
+            "statement": "Preheating increased ductility by 14%.",
+            "variables": ["preheating"],
+            "outcomes": ["ductility"],
+            "direction": "increase",
+            "scope_summary": "LPBF 316L at 150 C",
+        },
         "training_messages": [
             {
                 "role": "user",
@@ -105,6 +112,7 @@ def test_evaluate_goal_dataset_payload_passes_training_ready_sample():
     assert summary["item_count"] == 1
     assert summary["training_ready_count"] == 1
     assert summary["training_message_ready_count"] == 1
+    assert summary["protocol_ready_count"] == 1
     assert summary["by_error_category"] == {
         "variable_error": 1,
         "evidence_error": 1,
@@ -413,6 +421,29 @@ def test_evaluate_goal_dataset_payload_fails_missing_training_messages():
     )
 
     assert "training-ready samples include fine-tuning messages" in _failed_check_names(
+        summary
+    )
+
+
+def test_evaluate_goal_dataset_payload_fails_missing_protocol_inputs():
+    check = _load_goal_dataset_check_module()
+
+    summary = check.evaluate_goal_dataset_payload(
+        _dataset_payload(
+            item_overrides={
+                "system_prediction": {
+                    "statement": "Preheating increased ductility by 14%.",
+                    "variables": [],
+                    "outcomes": ["ductility"],
+                    "direction": "increase",
+                    "scope_summary": "LPBF 316L at 150 C",
+                }
+            }
+        )
+    )
+
+    assert summary["protocol_ready_count"] == 0
+    assert "training-ready samples include protocol design inputs" in _failed_check_names(
         summary
     )
 

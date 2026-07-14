@@ -52,6 +52,7 @@ def _dataset_payload(status: str = "pass"):
                 "item_count": 1,
                 "training_ready_count": 1,
                 "training_message_ready_count": 1,
+                "protocol_ready_count": 1,
                 "review_candidate_count": 0,
                 "by_error_category": {"none": 1},
                 "by_review_reason": {},
@@ -64,6 +65,7 @@ def _dataset_payload(status: str = "pass"):
                 "item_count": 2,
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
+                "protocol_ready_count": 0,
                 "review_candidate_count": 2,
                 "next_review_finding_id": "finding-review-1",
                 "next_review_action": {
@@ -91,6 +93,7 @@ def _completed_dataset_payload(status: str = "pass"):
     for goal in payload["goals"]:
         goal["training_ready_count"] = max(1, goal["training_ready_count"])
         goal["training_message_ready_count"] = max(1, goal["training_message_ready_count"])
+        goal["protocol_ready_count"] = max(1, goal["protocol_ready_count"])
         goal["review_candidate_count"] = 0
     return payload
 
@@ -125,6 +128,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     assert summary["completion_status"] == "incomplete"
     assert summary["layers"]["expert_review"]["status"] == "pass"
     assert summary["layers"]["dataset_accumulation"]["training_ready_goal_count"] == 1
+    assert summary["layers"]["dataset_accumulation"]["protocol_ready_goal_count"] == 1
     assert summary["layers"]["experiment_design"]["eligible_goal_ids"] == ["goal-1"]
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == (
         "not_checked"
@@ -133,6 +137,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
         "review_candidate_count": 2,
         "goals_without_training_ready": ["goal-2"],
         "goals_without_training_messages": ["goal-2"],
+        "goals_without_protocol_ready": ["goal-2"],
         "pending_goals": [
             {
                 "goal_id": "goal-2",
@@ -140,6 +145,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
                 "review_candidate_count": 2,
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
+                "protocol_ready_count": 0,
                 "next_action": "review_candidates",
                 "next_review_action": {
                     "code": "verify_table_rows",
@@ -257,6 +263,7 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
     check = _load_goal_expert_loop_module()
     dataset = _completed_dataset_payload()
     dataset["goals"][1]["training_message_ready_count"] = 0
+    dataset["goals"][1]["protocol_ready_count"] = 0
 
     monkeypatch.setattr(
         check,
@@ -289,6 +296,7 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
             "review_candidate_count": 0,
             "training_ready_count": 1,
             "training_message_ready_count": 0,
+            "protocol_ready_count": 0,
             "next_action": "inspect_training_messages",
             "next_review_action": {},
             "href": "/collections/col-1/goals/goal-2?review=training_ready",
@@ -363,12 +371,61 @@ def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypa
     assert summary["layers"]["experiment_design"]["status"] == "pass"
 
 
+def test_check_goal_expert_loop_points_protocol_gaps_to_training_samples(monkeypatch):
+    check = _load_goal_expert_loop_module()
+    dataset = _completed_dataset_payload()
+    dataset["goals"][1]["protocol_ready_count"] = 0
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: dataset)},
+            )
+        ),
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        require_complete=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["layers"]["experiment_design"]["status"] == "pass"
+    assert summary["completion_status"] == "incomplete"
+    assert summary["remaining_work"]["pending_goals"] == [
+        {
+            "goal_id": "goal-2",
+            "question": "How does porosity affect corrosion?",
+            "review_candidate_count": 0,
+            "training_ready_count": 1,
+            "training_message_ready_count": 1,
+            "protocol_ready_count": 0,
+            "next_action": "inspect_protocol_inputs",
+            "next_review_action": {},
+            "href": "/collections/col-1/goals/goal-2?review=training_ready",
+            "next_review_finding_id": "",
+        }
+    ]
+
+
 def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
     check = _load_goal_expert_loop_module()
     dataset = _dataset_payload()
     for goal in dataset["goals"]:
         goal["training_ready_count"] = 0
         goal["training_message_ready_count"] = 0
+        goal["protocol_ready_count"] = 0
 
     monkeypatch.setattr(
         check,

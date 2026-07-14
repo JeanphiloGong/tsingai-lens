@@ -296,6 +296,12 @@ python3 scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
   --require-training-ready
 ```
 
+The dataset quality summary also reports `protocol_ready_count`. A sample is
+protocol-ready only when it is `training_ready`, has valid fine-tuning messages,
+contains a statement plus variable/outcome/direction-or-scope fields, and keeps
+traceable training evidence. This is the stricter subset that Goal Copilot can
+use as grounded input for experiment protocol drafts.
+
 To run the combined three-layer gate for expert review, dataset accumulation,
 and experiment-planning readiness:
 
@@ -305,11 +311,11 @@ python3 scripts/evaluation/expert_gold/check_goal_expert_loop.py
 
 The combined check passes only when the expert-facing Findings are reviewable,
 the dataset exports active samples, and at least one goal has a
-`training_ready` sample with valid message rows that Goal Copilot can use for
-traceable protocol drafting. Its `completion_status` can still be
+`training_ready` sample with protocol-ready inputs that Goal Copilot can use
+for traceable protocol drafting. Its `completion_status` can still be
 `incomplete`; use `remaining_work` to see how many review candidates and
-goal-level training/message gaps remain before calling the full expert loop
-finished.
+goal-level training, message, and protocol-input gaps remain before calling the
+full expert loop finished.
 `remaining_work.pending_goals` is the human review queue for the next expert
 loop: each row includes the research question, review candidate count, the next
 action, and a frontend `href` that opens the goal review queue or

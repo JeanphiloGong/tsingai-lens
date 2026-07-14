@@ -267,6 +267,9 @@ def evaluate_goal_dataset_payload(
     training_message_ready_items = [
         item for item in training_ready_items if _has_fine_tuning_messages(item)
     ]
+    protocol_ready_items = [
+        item for item in training_message_ready_items if _has_protocol_design_inputs(item)
+    ]
     active_items = [
         item
         for item in items
@@ -336,6 +339,16 @@ def evaluate_goal_dataset_payload(
                 if not _has_fine_tuning_messages(item)
             ),
         ),
+        _check(
+            goal_id,
+            "training-ready samples include protocol design inputs",
+            all(_has_protocol_design_inputs(item) for item in training_ready_items),
+            _sample_failure_detail(
+                item
+                for item in training_ready_items
+                if not _has_protocol_design_inputs(item)
+            ),
+        ),
     ]
     if require_training_ready:
         checks.insert(
@@ -352,6 +365,7 @@ def evaluate_goal_dataset_payload(
         "item_count": len(items),
         "training_ready_count": len(training_ready_items),
         "training_message_ready_count": len(training_message_ready_items),
+        "protocol_ready_count": len(protocol_ready_items),
         "review_candidate_count": len(
             [
                 item
@@ -652,6 +666,29 @@ def _has_fine_tuning_messages(item: dict[str, Any]) -> bool:
         return False
     return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
         target_statement
+    )
+
+
+def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
+    if not _has_fine_tuning_messages(item):
+        return False
+    target = _mapping(item.get("expert_target"))
+    prediction = _mapping(item.get("system_prediction"))
+    statement = _text(target.get("statement") or prediction.get("statement"))
+    variables = _text_list(target.get("variables")) or _text_list(
+        prediction.get("variables")
+    )
+    outcomes = _text_list(target.get("outcomes")) or _text_list(
+        prediction.get("outcomes")
+    )
+    direction = _text(target.get("direction") or prediction.get("direction"))
+    scope = _text(target.get("scope_summary") or prediction.get("scope_summary"))
+    return (
+        bool(statement)
+        and bool(variables)
+        and bool(outcomes)
+        and bool(direction or scope)
+        and _has_traceable_training_evidence(item)
     )
 
 

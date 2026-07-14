@@ -14,7 +14,11 @@ RISKY_ACCEPT_ACTION_CODES = frozenset(
     {
         "accept_as_paper_level",
         "review_table_rows",
+        "verify_table_rows",
+        "review_table_variables",
         "check_mechanism_evidence",
+        "check_mechanism_requirement",
+        "resolve_conflict",
     }
 )
 RISKY_ACCEPT_REASONS = frozenset(

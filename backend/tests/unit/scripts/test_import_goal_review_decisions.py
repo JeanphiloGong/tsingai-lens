@@ -437,6 +437,20 @@ def test_import_review_decisions_warns_on_risky_accepts(tmp_path):
                     "evidence_ref_ids": ["ev-1"],
                 },
             ),
+            _base_row(
+                action="accept",
+                finding_id="finding-accept",
+                recommended_action_code="verify_table_rows",
+            ),
+            _base_row(
+                action="correct",
+                finding_id="finding-correct",
+                recommended_action_code="review_table_variables",
+                suggested_target={
+                    "statement": "Preheating increased ductility by 14%.",
+                    "evidence_ref_ids": ["ev-1"],
+                },
+            ),
         ],
     )
 
@@ -467,6 +481,18 @@ def test_import_review_decisions_warns_on_risky_accepts(tmp_path):
                 "recommended_action_code=review_table_rows; "
                 "review_reasons=table_row_needs_expert_review"
             ),
+        },
+        {
+            "line": 3,
+            "action": "accept",
+            "finding_id": "finding-accept",
+            "message": "recommended_action_code=verify_table_rows",
+        },
+        {
+            "line": 4,
+            "action": "correct",
+            "finding_id": "finding-correct",
+            "message": "recommended_action_code=review_table_variables",
         },
     ]
     assert service.feedback == []

@@ -474,6 +474,7 @@ def build_goal_review_packet(
         "goal_id": goal_id,
         "review_url": _goal_review_url(collection_id, goal_id),
         "candidate_count": len(candidates),
+        "risk_summary": _review_risk_summary(candidates),
         "candidates": candidates,
     }
 
@@ -504,6 +505,22 @@ def build_goal_training_message_export(dataset: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _review_risk_summary(candidates: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        action_code = _text(candidate.get("recommended_action_code"))
+        if action_code:
+            key = f"action:{action_code}"
+            counts[key] = counts.get(key, 0) + 1
+        for reason in _text_list(candidate.get("review_reasons")):
+            key = f"reason:{reason}"
+            counts[key] = counts.get(key, 0) + 1
+        for warning in _text_list(candidate.get("warnings")):
+            key = f"warning:{warning}"
+            counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def render_review_packet_summary(summary: dict[str, Any]) -> str:
     lines = [
         f"Lens review packet: {summary.get('status')}",
@@ -526,6 +543,9 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
                 f"Open: {packet.get('review_url')}",
             ]
         )
+        risk_summary = _mapping(packet.get("risk_summary"))
+        if risk_summary:
+            lines.append(f"Risk summary: {_risk_summary_text(risk_summary)}")
         for index, candidate in enumerate(candidates, start=1):
             lines.extend(
                 [
@@ -586,6 +606,12 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
         lines.append("")
         lines.append("No review candidates found.")
     return "\n".join(lines)
+
+
+def _risk_summary_text(risk_summary: dict[str, Any]) -> str:
+    return ", ".join(
+        f"{key}={value}" for key, value in sorted(risk_summary.items())
+    )
 
 
 def render_review_jsonl_summary(summary: dict[str, Any]) -> str:

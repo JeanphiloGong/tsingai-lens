@@ -193,6 +193,11 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         == "review selected table rows before accepting or correcting"
     )
     assert candidate["recommended_action_code"] == "review_table_rows"
+    assert packet["risk_summary"] == {
+        "action:review_table_rows": 1,
+        "reason:single_paper_evidence": 1,
+        "reason:table_row_needs_expert_review": 1,
+    }
     assert packet["goal_id"] == "goal-1"
     assert (
         candidate["open_url"]
@@ -211,6 +216,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "recommended action: review selected table rows before accepting or correcting"
         in text
     )
+    assert (
+        "Risk summary: action:review_table_rows=1, reason:single_paper_evidence=1, "
+        "reason:table_row_needs_expert_review=1"
+    ) in text
     assert "review reasons: single_paper_evidence, table_row_needs_expert_review" in text
     assert "Paper A / p. 4 / p. 4" not in text
     assert "AI suggestion; human review still required." in text

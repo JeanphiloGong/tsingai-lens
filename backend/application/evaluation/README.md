@@ -43,3 +43,8 @@ artifacts.
   samples. Quality summaries include sorted top diagnostics for error
   categories, issue types, review reasons, and system warnings so expert labels
   can directly guide evaluation, prompt repair, or fine-tuning data selection.
+- `research_understanding_review_import_service.py`
+  Validates and imports expert review decision rows into feedback or curation
+  records. CLI and future API entry points should call this service so
+  accept/reject/correct rules, stale finding checks, evidence-ref validation,
+  warning handling, and review-progress summaries remain consistent.

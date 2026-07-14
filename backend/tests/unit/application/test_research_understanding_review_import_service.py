@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import pytest
+
+from application.evaluation.research_understanding_review_import_service import (
+    ResearchUnderstandingReviewImportService,
+)
+
+
+class FakeFeedbackService:
+    def __init__(self) -> None:
+        self.feedback: list[dict] = []
+        self.curations: list[dict] = []
+
+    def record_feedback(self, **kwargs):  # noqa: ANN003
+        self.feedback.append(kwargs)
+        return kwargs
+
+    def record_curation(self, **kwargs):  # noqa: ANN003
+        self.curations.append(kwargs)
+        return kwargs
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "item_count": 2,
+            "quality_summary": {
+                "training_ready_sample_count": 1,
+                "training_message_sample_count": 1,
+                "review_candidate_sample_count": 1,
+                "rejected_count": 0,
+            },
+            "items": [
+                {
+                    "finding_id": "finding-accept",
+                    "claim_id": "claim-1",
+                    "dataset_use_status": "training_ready",
+                    "training_messages": [
+                        {"role": "user", "content": "Evidence text"},
+                        {"role": "assistant", "content": "Finding text"},
+                    ],
+                    "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
+                    "expert_target": {
+                        "statement": "Preheating increases ductility.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                    },
+                },
+                {
+                    "finding_id": "finding-correct",
+                    "claim_id": "claim-2",
+                    "dataset_use_status": "review_candidate",
+                    "training_evidence_refs": [{"evidence_ref_id": "ev-2"}],
+                },
+            ],
+        }
+
+
+def _row(**overrides):
+    row = {
+        "collection_id": "col-1",
+        "goal_id": "goal-1",
+        "finding_id": "finding-accept",
+        "claim_id": "claim-1",
+        "action": "accept",
+        "statement": "Preheating increases ductility.",
+        "recommended_action_code": "",
+        "review_reasons": [],
+    }
+    row.update(overrides)
+    return row
+
+
+def test_review_import_service_writes_feedback_and_curation():
+    feedback_service = FakeFeedbackService()
+    service = ResearchUnderstandingReviewImportService(feedback_service)
+
+    summary = service.import_rows(
+        rows=[
+            _row(action="accept"),
+            _row(
+                action="correct",
+                finding_id="finding-correct",
+                claim_id="claim-2",
+                suggested_target={
+                    "statement": "Preheating increases ductility by 14%.",
+                    "variables": ["preheating"],
+                    "outcomes": ["ductility"],
+                    "direction": "increase",
+                    "evidence_ref_ids": ["ev-2"],
+                },
+            ),
+            _row(action="skip", finding_id="finding-skip"),
+        ],
+        reviewer="materials-expert@example.com",
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 2
+    assert summary["counts"] == {"accept": 1, "correct": 1, "skip": 1}
+    assert summary["review_progress"]["ready_to_write"] is True
+    assert feedback_service.feedback == [
+        {
+            "collection_id": "col-1",
+            "scope_type": "goal",
+            "scope_id": "goal-1",
+            "finding_id": "finding-accept",
+            "claim_id": "claim-1",
+            "review_status": "correct",
+            "issue_type": "none",
+            "note": "Accepted from expert review JSONL.",
+            "reviewer": "materials-expert@example.com",
+        }
+    ]
+    assert feedback_service.curations[0]["finding_id"] == "finding-correct"
+    assert feedback_service.curations[0]["curated_evidence_ref_ids"] == ["ev-2"]
+
+
+def test_review_import_service_blocks_unreviewed_template_when_strict():
+    service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
+
+    summary = service.import_rows(
+        rows=[_row(action="skip")],
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        fail_on_warnings=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["review_progress"] == {
+        "actionable_count": 0,
+        "skipped_count": 1,
+        "needs_review_count": 1,
+        "ready_to_write": False,
+        "next_steps": [
+            "change at least one reviewed row from skip to accept, reject, or correct",
+            "leave unchecked rows as skip or review them later",
+        ],
+    }
+
+
+def test_review_import_service_rejects_agent_reviewer():
+    service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
+
+    with pytest.raises(ValueError, match="human expert"):
+        service.import_rows(rows=[_row()], reviewer="agent-reviewer")

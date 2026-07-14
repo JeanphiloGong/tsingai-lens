@@ -469,6 +469,32 @@ class ResearchUnderstandingGoldDraftResponse(BaseModel):
     items: list[ResearchUnderstandingGoldDraftItemResponse] = Field(default_factory=list)
 
 
+class ResearchUnderstandingReviewDecisionImportRequest(BaseModel):
+    """Batch import request for explicit expert review decision rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    reviewer: str | None = Field(default=None, max_length=120)
+    dry_run: bool = Field(default=True)
+    fail_on_warnings: bool = Field(default=False)
+
+
+class ResearchUnderstandingReviewDecisionImportResponse(BaseModel):
+    """Batch review decision import summary."""
+
+    status: str
+    dry_run: bool
+    total_rows: int = Field(default=0)
+    written_count: int = Field(default=0)
+    skipped_count: int = Field(default=0)
+    counts: dict[str, int] = Field(default_factory=dict)
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+    review_progress: dict[str, Any] = Field(default_factory=dict)
+    affected_goals: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     """Scope-level quality summary derived from exported dataset samples."""
 

@@ -8,6 +8,7 @@ from controllers.core import research_understanding_feedback as feedback_control
 from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingCurationCreateRequest,
     ResearchUnderstandingFeedbackCreateRequest,
+    ResearchUnderstandingReviewDecisionImportRequest,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
 
@@ -350,6 +351,110 @@ class FakeResearchUnderstandingFeedbackService:
             item["scope_type"] = "goal"
             item["scope_id"] = "goal-1"
         return dataset
+
+
+class FakeResearchUnderstandingReviewImportService:
+    def __init__(self) -> None:
+        self.imported = None
+
+    def import_rows(self, **kwargs):  # noqa: ANN003
+        self.imported = kwargs
+        return {
+            "status": "pass",
+            "dry_run": kwargs["dry_run"],
+            "total_rows": len(kwargs["rows"]),
+            "written_count": 0 if kwargs["dry_run"] else 1,
+            "skipped_count": 0,
+            "counts": {"accept": 1},
+            "errors": [],
+            "warnings": [],
+            "review_progress": {
+                "actionable_count": 1,
+                "skipped_count": 0,
+                "needs_review_count": 0,
+                "ready_to_write": True,
+                "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
+            },
+            "affected_goals": [],
+        }
+
+
+def test_research_understanding_review_decision_import_dry_run(monkeypatch):
+    import_service = FakeResearchUnderstandingReviewImportService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "review_import_service",
+        import_service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.import_research_understanding_review_decisions(
+            "col-1",
+            ResearchUnderstandingReviewDecisionImportRequest(
+                dry_run=True,
+                fail_on_warnings=True,
+                rows=[
+                    {
+                        "goal_id": "goal-1",
+                        "finding_id": "finding-1",
+                        "claim_id": "claim-1",
+                        "action": "accept",
+                    }
+                ],
+            ),
+            request_with_user(email="expert@example.com"),
+        )
+    )
+
+    assert response.status == "pass"
+    assert response.dry_run is True
+    assert response.total_rows == 1
+    assert response.review_progress["ready_to_write"] is True
+    assert import_service.imported == {
+        "rows": [
+            {
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "action": "accept",
+            }
+        ],
+        "reviewer": "expert@example.com",
+        "dry_run": True,
+        "fail_on_warnings": True,
+    }
+
+
+def test_research_understanding_review_decision_import_writes(monkeypatch):
+    import_service = FakeResearchUnderstandingReviewImportService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "review_import_service",
+        import_service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.import_research_understanding_review_decisions(
+            "col-1",
+            ResearchUnderstandingReviewDecisionImportRequest(
+                dry_run=False,
+                rows=[
+                    {
+                        "collection_id": "col-other",
+                        "goal_id": "goal-1",
+                        "finding_id": "finding-1",
+                        "action": "accept",
+                    }
+                ],
+            ),
+            request_with_user(email="expert@example.com"),
+        )
+    )
+
+    assert response.written_count == 1
+    assert import_service.imported["dry_run"] is False
+    assert import_service.imported["rows"][0]["collection_id"] == "col-other"
 
 
 def test_research_understanding_feedback_route_records_contract_payload(monkeypatch):

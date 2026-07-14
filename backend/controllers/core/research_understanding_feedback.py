@@ -8,7 +8,10 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
-from application.evaluation import ResearchUnderstandingFeedbackService
+from application.evaluation import (
+    ResearchUnderstandingFeedbackService,
+    ResearchUnderstandingReviewImportService,
+)
 from controllers.dependencies.auth import require_current_user
 from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingCurationCreateRequest,
@@ -22,11 +25,14 @@ from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingDatasetResponse,
     ResearchUnderstandingDatasetUseStatus,
     ResearchUnderstandingGoldDraftResponse,
+    ResearchUnderstandingReviewDecisionImportRequest,
+    ResearchUnderstandingReviewDecisionImportResponse,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
 
 router = APIRouter(prefix="/collections", tags=["research-understanding-feedback"])
 feedback_service = ResearchUnderstandingFeedbackService()
+review_import_service = ResearchUnderstandingReviewImportService(feedback_service)
 REVIEW_ACTION_OPTIONS = ("accept", "reject", "correct", "skip")
 REJECT_ISSUE_OPTIONS = (
     "evidence_not_grounded",
@@ -471,6 +477,31 @@ def _short_review_href(value: Any) -> str:
             parsed.fragment,
         )
     )
+
+
+@router.post(
+    "/{collection_id}/research-understanding/review-decisions/import",
+    response_model=ResearchUnderstandingReviewDecisionImportResponse,
+    summary="批量预检或导入 research understanding 专家复核决策",
+)
+async def import_research_understanding_review_decisions(
+    collection_id: str,
+    payload: ResearchUnderstandingReviewDecisionImportRequest,
+    request: Request,
+) -> ResearchUnderstandingReviewDecisionImportResponse:
+    reviewer = _reviewer_for_write(request, payload.reviewer)
+    rows = [
+        {**row, "collection_id": _text(row.get("collection_id")) or collection_id}
+        for row in payload.rows
+    ]
+    summary = await run_in_threadpool(
+        review_import_service.import_rows,
+        rows=rows,
+        reviewer=reviewer,
+        dry_run=payload.dry_run,
+        fail_on_warnings=payload.fail_on_warnings,
+    )
+    return ResearchUnderstandingReviewDecisionImportResponse(**summary)
 
 
 @router.post(

@@ -92,6 +92,12 @@ def prepare_goal_review_workspace(
         include_training_export=True,
         include_training_metadata=True,
     )
+    _enrich_goal_questions(
+        summary,
+        collection_id=collection_id,
+        goal_ids=goal_ids,
+        api_base_url=api_base_url,
+    )
     files = _write_workspace_files(
         output_dir=output_dir,
         summary=summary,
@@ -221,6 +227,9 @@ def render_workspace_readme(
         "Files",
         "-----",
     ]
+    question_warning = _text(summary.get("goal_question_warning"))
+    if question_warning:
+        lines.extend(["Goal question warning", "---------------------", question_warning, ""])
     for file_info in files:
         lines.append(
             f"- {file_info['filename']}: {file_info['description']}"
@@ -286,10 +295,11 @@ def render_review_dashboard(summary: dict[str, Any]) -> str:
         if not candidates:
             continue
         goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        question = _text(goal.get("question"))
         review_url = _text(packet.get("review_url"))
         lines.extend(
             [
-                f"### {goal_id}",
+                f"### {_goal_heading(goal_id, question)}",
                 "",
                 f"- Candidates: {len(candidates)}",
                 f"- Open review queue: {review_url or 'n/a'}",
@@ -349,12 +359,13 @@ def render_dataset_readiness_report(summary: dict[str, Any]) -> str:
     ]
     for goal in goals:
         goal_id = _text(goal.get("goal_id"))
+        question = _text(goal.get("question"))
         next_action = _text(_mapping(goal.get("next_review_action")).get("label"))
         if not next_action:
             next_action = _readiness_next_action(goal)
         lines.append(
             "| "
-            f"{_markdown_cell(goal_id, 80)} | "
+            f"{_markdown_cell(_goal_heading(goal_id, question), 120)} | "
             f"{int(goal.get('training_ready_count') or 0)} | "
             f"{int(goal.get('training_message_ready_count') or 0)} | "
             f"{int(goal.get('protocol_ready_count') or 0)} | "
@@ -486,9 +497,20 @@ def _default_output_dir(collection_id: str) -> Path:
 
 
 def _load_dataset_quality_module():
-    script_path = Path(__file__).resolve().with_name("check_goal_dataset_quality.py")
+    return _load_sibling_module("check_goal_dataset_quality.py", "check_goal_dataset_quality")
+
+
+def _load_findings_projection_module():
+    return _load_sibling_module(
+        "check_goal_findings_projection.py",
+        "check_goal_findings_projection",
+    )
+
+
+def _load_sibling_module(filename: str, module_name: str):
+    script_path = Path(__file__).resolve().with_name(filename)
     spec = importlib.util.spec_from_file_location(
-        "check_goal_dataset_quality",
+        module_name,
         script_path,
     )
     if spec is None or spec.loader is None:
@@ -497,6 +519,34 @@ def _load_dataset_quality_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _enrich_goal_questions(
+    summary: dict[str, Any],
+    *,
+    collection_id: str,
+    goal_ids: tuple[str, ...],
+    api_base_url: str | None,
+) -> None:
+    try:
+        findings_module = _load_findings_projection_module()
+        findings_summary = findings_module.check_goal_findings_projection(
+            collection_id=collection_id,
+            goal_ids=goal_ids,
+            api_base_url=api_base_url,
+        )
+    except Exception as exc:  # noqa: BLE001
+        summary["goal_question_warning"] = f"goal question lookup failed: {exc}"
+        return
+    questions = {
+        _text(goal.get("goal_id")): _text(goal.get("question"))
+        for goal in _mapping_list(findings_summary.get("goals"))
+    }
+    for goal in _mapping_list(summary.get("goals")):
+        goal_id = _text(goal.get("goal_id"))
+        question = questions.get(goal_id)
+        if question:
+            goal["question"] = question
 
 
 def _candidate_count(summary: dict[str, Any]) -> int:
@@ -528,6 +578,12 @@ def _evidence_label(candidate: dict[str, Any]) -> str:
     if len(evidence) > 1:
         return f"{label} (+{len(evidence) - 1})"
     return label
+
+
+def _goal_heading(goal_id: str, question: str) -> str:
+    if question:
+        return f"{question} ({goal_id})"
+    return goal_id or "n/a"
 
 
 def _markdown_cell(value: str, limit: int) -> str:

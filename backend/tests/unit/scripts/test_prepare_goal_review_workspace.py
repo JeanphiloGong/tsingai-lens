@@ -114,6 +114,19 @@ def _dataset_module(summary):
     )
 
 
+def _findings_module():
+    return SimpleNamespace(
+        check_goal_findings_projection=lambda **_kwargs: {
+            "goals": [
+                {
+                    "goal_id": "goal-1",
+                    "question": "How does preheating affect ductility?",
+                }
+            ]
+        }
+    )
+
+
 def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch):
     module = _load_workspace_module()
     summary = _summary()
@@ -121,6 +134,11 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         module,
         "_load_dataset_quality_module",
         lambda: _dataset_module(summary),
+    )
+    monkeypatch.setattr(
+        module,
+        "_load_findings_projection_module",
+        _findings_module,
     )
 
     result = module.prepare_goal_review_workspace(
@@ -157,11 +175,14 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "review packet\n\n"
     )
     dashboard = (workspace / "review-dashboard.md").read_text(encoding="utf-8")
-    assert "### goal-1" in dashboard
+    assert "### How does preheating affect ductility? (goal-1)" in dashboard
     assert "Direct accept blocked: 1" in dashboard
     readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
     assert "pending review candidates: 1" in readiness
-    assert "| goal-1 | 0 | 0 | 0 | 1 | accept as paper-level |" in readiness
+    assert (
+        "| How does preheating affect ductility? (goal-1) | 0 | 0 | 0 | 1 | "
+        "accept as paper-level |"
+    ) in readiness
     assert json.loads(
         (workspace / "training-ready.messages.jsonl").read_text(encoding="utf-8")
     ) == {"messages": [{"role": "user", "content": "extract"}]}
@@ -239,12 +260,14 @@ def test_render_text_summary_lists_next_review_steps(tmp_path):
 
 def test_render_review_dashboard_summarizes_goal_risks():
     module = _load_workspace_module()
+    summary = _summary()
+    summary["goals"][0]["question"] = "How does preheating affect ductility?"
 
-    dashboard = module.render_review_dashboard(_summary())
+    dashboard = module.render_review_dashboard(summary)
 
     assert "# Lens Goal Review Dashboard" in dashboard
     assert "Review candidates: 1" in dashboard
-    assert "### goal-1" in dashboard
+    assert "### How does preheating affect ductility? (goal-1)" in dashboard
     assert "Direct accept blocked: 1" in dashboard
     assert (
         "Top risks: reason:single_paper_evidence=1, "
@@ -258,13 +281,18 @@ def test_render_review_dashboard_summarizes_goal_risks():
 
 def test_render_dataset_readiness_report_explains_partial_exports():
     module = _load_workspace_module()
+    summary = _summary()
+    summary["goals"][0]["question"] = "How does preheating affect ductility?"
 
-    report = module.render_dataset_readiness_report(_summary())
+    report = module.render_dataset_readiness_report(summary)
 
     assert "# Lens Dataset Readiness" in report
     assert "training_ready findings: 0" in report
     assert "pending review candidates: 1" in report
-    assert "| goal-1 | 0 | 0 | 0 | 1 | accept as paper-level |" in report
+    assert (
+        "| How does preheating affect ductility? (goal-1) | 0 | 0 | 0 | 1 | "
+        "accept as paper-level |"
+    ) in report
     assert (
         "Existing training-ready rows may still be emitted while the overall command fails"
         in report
@@ -282,3 +310,18 @@ def test_render_optimization_summary_lists_error_and_risk_stats():
     assert "table_row_alignment_uncertain: 1" in report
     assert "by_variable:preheating" in report
     assert "issue_type:wrong_variable=1" in report
+
+
+def test_enrich_goal_questions_adds_question_to_matching_goals(monkeypatch):
+    module = _load_workspace_module()
+    summary = _summary()
+    monkeypatch.setattr(module, "_load_findings_projection_module", _findings_module)
+
+    module._enrich_goal_questions(
+        summary,
+        collection_id="col-1",
+        goal_ids=("goal-1",),
+        api_base_url=None,
+    )
+
+    assert summary["goals"][0]["question"] == "How does preheating affect ductility?"

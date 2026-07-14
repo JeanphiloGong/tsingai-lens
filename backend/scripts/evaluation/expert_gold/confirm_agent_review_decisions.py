@@ -7,8 +7,9 @@ from pathlib import Path
 import sys
 from typing import Any
 
-
-RECOMMENDATIONS = {"accept", "reject", "correct", "skip", "unclear"}
+from application.evaluation.research_understanding_review_import_service import (
+    confirm_agent_review_rows,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,7 +42,11 @@ def main() -> None:
 def confirm_agent_review_decisions(
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    return [_confirmed_row(row, line_number=index + 1) for index, row in enumerate(rows)]
+    confirmed = confirm_agent_review_rows(rows)
+    for row in confirmed:
+        if row.get("action") == "__agent_review_error__":
+            raise ValueError(str(row.get("agent_review_error")))
+    return confirmed
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -61,82 +66,8 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _confirmed_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
-    output = dict(row)
-    output["action"] = "skip"
-    review = _mapping(row.get("agent_review"))
-    if not bool(review.get("human_confirmed")):
-        return output
-    recommendation = _text(review.get("recommendation")).lower()
-    if recommendation not in RECOMMENDATIONS:
-        raise ValueError(
-            f"line {line_number}: agent_review.recommendation is not supported"
-        )
-    if recommendation in {"skip", "unclear"}:
-        return output
-    if recommendation == "accept":
-        _validate_accept(output, line_number=line_number)
-        output["action"] = "accept"
-        output["expert_note"] = _confirmed_note(output, review)
-        return output
-    if recommendation == "reject":
-        issue_type = _text(review.get("issue_type")).lower()
-        if not issue_type:
-            raise ValueError(
-                f"line {line_number}: confirmed reject requires issue_type"
-            )
-        output["action"] = "reject"
-        output["issue_type"] = issue_type
-        output["expert_note"] = _confirmed_note(output, review)
-        return output
-    target = _mapping(review.get("suggested_target"))
-    if not _text(target.get("statement")):
-        raise ValueError(
-            f"line {line_number}: confirmed correct requires suggested_target.statement"
-        )
-    evidence_ref_ids = _strings(target.get("evidence_ref_ids"))
-    if not evidence_ref_ids:
-        raise ValueError(
-            f"line {line_number}: confirmed correct requires evidence_ref_ids"
-        )
-    output["action"] = "correct"
-    output["suggested_target"] = target
-    output["curated_evidence_ref_ids"] = evidence_ref_ids
-    output["expert_note"] = _confirmed_note(output, review)
-    return output
-
-
-def _validate_accept(row: dict[str, Any], *, line_number: int) -> None:
-    gate = _mapping(row.get("acceptance_gate"))
-    blocking = _strings(gate.get("blocking_missing")) or _strings(
-        row.get("protocol_blocking_missing")
-    )
-    if not bool(gate.get("accept_allowed")) or blocking:
-        raise ValueError(
-            f"line {line_number}: confirmed accept is blocked by acceptance_gate"
-        )
-
-
-def _confirmed_note(row: dict[str, Any], review: dict[str, Any]) -> str:
-    note = _text(review.get("note"))
-    existing = _text(row.get("expert_note"))
-    return existing or note or "Human confirmed agent review suggestion."
-
-
 def _jsonl(rows: list[dict[str, Any]]) -> str:
     return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _strings(value: Any) -> list[str]:
-    return [_text(item) for item in value if _text(item)] if isinstance(value, list) else []
-
-
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
 
 
 if __name__ == "__main__":

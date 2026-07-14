@@ -10,6 +10,9 @@ from application.evaluation.research_understanding_feedback_service import (
 
 
 ACTION_VALUES = frozenset({"accept", "reject", "correct", "skip"})
+AGENT_RECOMMENDATION_VALUES = frozenset(
+    {"accept", "reject", "correct", "skip", "unclear"}
+)
 RISKY_ACCEPT_ACTION_CODES = frozenset(
     {
         "accept_as_paper_level",
@@ -64,7 +67,10 @@ class ResearchUnderstandingReviewImportService:
     ) -> dict[str, Any]:
         reviewer = _human_reviewer(reviewer)
         decisions = [
-            _decision_from_row(row, line_number=index + 1)
+            _decision_from_row(
+                _confirmed_agent_review_row(row, line_number=index + 1),
+                line_number=index + 1,
+            )
             for index, row in enumerate(rows)
         ]
         errors = [decision for decision in decisions if decision["status"] == "error"]
@@ -194,6 +200,12 @@ def read_review_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     action = _text(row.get("action")).lower()
+    if action == "__agent_review_error__":
+        return _error(
+            line_number,
+            "skip",
+            _text(row.get("agent_review_error")) or "invalid confirmed agent review",
+        )
     if action not in ACTION_VALUES:
         return _error(line_number, action, "action must be accept, reject, correct, or skip")
     if action == "skip":
@@ -252,6 +264,89 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             },
         }
     return _correct_decision(row, line_number=line_number, action=action)
+
+
+def confirm_agent_review_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        _confirmed_agent_review_row(row, line_number=index + 1)
+        for index, row in enumerate(rows)
+    ]
+
+
+def _confirmed_agent_review_row(
+    row: dict[str, Any],
+    *,
+    line_number: int,
+) -> dict[str, Any]:
+    if "agent_review" not in row:
+        return row
+    review = _mapping(row.get("agent_review"))
+    output = dict(row)
+    output["action"] = "skip"
+    if not bool(review.get("human_confirmed")):
+        return output
+    recommendation = _text(review.get("recommendation")).lower()
+    if recommendation not in AGENT_RECOMMENDATION_VALUES:
+        return _agent_review_error_row(
+            output,
+            f"line {line_number}: agent_review.recommendation is not supported",
+        )
+    if recommendation in {"skip", "unclear"}:
+        return output
+    if recommendation == "accept":
+        blocking_error = _confirmed_accept_error(output)
+        if blocking_error:
+            return _agent_review_error_row(output, f"line {line_number}: {blocking_error}")
+        output["action"] = "accept"
+        output["expert_note"] = _confirmed_note(output, review)
+        return output
+    if recommendation == "reject":
+        issue_type = _text(review.get("issue_type")).lower()
+        if not issue_type:
+            return _agent_review_error_row(
+                output,
+                f"line {line_number}: confirmed reject requires issue_type",
+            )
+        output["action"] = "reject"
+        output["issue_type"] = issue_type
+        output["expert_note"] = _confirmed_note(output, review)
+        return output
+    target = _mapping(review.get("suggested_target"))
+    if not _text(target.get("statement")):
+        return _agent_review_error_row(
+            output,
+            f"line {line_number}: confirmed correct requires suggested_target.statement",
+        )
+    evidence_ref_ids = _strings(target.get("evidence_ref_ids"))
+    if not evidence_ref_ids:
+        return _agent_review_error_row(
+            output,
+            f"line {line_number}: confirmed correct requires evidence_ref_ids",
+        )
+    output["action"] = "correct"
+    output["suggested_target"] = target
+    output["curated_evidence_ref_ids"] = evidence_ref_ids
+    output["expert_note"] = _confirmed_note(output, review)
+    return output
+
+
+def _confirmed_accept_error(row: dict[str, Any]) -> str:
+    gate = _mapping(row.get("acceptance_gate"))
+    blocking = _strings(gate.get("blocking_missing")) or _strings(
+        row.get("protocol_blocking_missing")
+    )
+    if gate and (not bool(gate.get("accept_allowed")) or blocking):
+        return "confirmed accept is blocked by acceptance_gate"
+    if blocking:
+        return "confirmed accept is blocked by acceptance_gate"
+    return ""
+
+
+def _agent_review_error_row(row: dict[str, Any], message: str) -> dict[str, Any]:
+    output = dict(row)
+    output["action"] = "__agent_review_error__"
+    output["agent_review_error"] = message
+    return output
 
 
 def _correct_decision(
@@ -319,6 +414,16 @@ def _human_reviewer(value: str) -> str:
 def _target(row: dict[str, Any]) -> dict[str, Any]:
     target = row.get("suggested_target")
     return target if isinstance(target, dict) else {}
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _confirmed_note(row: dict[str, Any], review: dict[str, Any]) -> str:
+    note = _text(review.get("note"))
+    existing = _text(row.get("expert_note"))
+    return existing or note or "Human confirmed agent review suggestion."
 
 
 def _note(row: dict[str, Any], fallback: str) -> str:

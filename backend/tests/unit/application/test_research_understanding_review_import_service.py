@@ -147,3 +147,100 @@ def test_review_import_service_rejects_agent_reviewer():
 
     with pytest.raises(ValueError, match="human expert"):
         service.import_rows(rows=[_row()], reviewer="agent-reviewer")
+
+
+def test_review_import_service_imports_human_confirmed_agent_accept():
+    feedback_service = FakeFeedbackService()
+    service = ResearchUnderstandingReviewImportService(feedback_service)
+
+    summary = service.import_rows(
+        rows=[
+            _row(
+                action="skip",
+                acceptance_gate={
+                    "accept_allowed": True,
+                    "blocking_missing": [],
+                },
+                agent_review={
+                    "reviewer": "agent-materials-review",
+                    "recommendation": "accept",
+                    "note": "Evidence supports the finding.",
+                    "human_confirmed": True,
+                },
+            )
+        ],
+        reviewer="materials-expert@example.com",
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 1
+    assert summary["counts"] == {"accept": 1}
+    assert feedback_service.feedback[0]["review_status"] == "correct"
+    assert feedback_service.feedback[0]["reviewer"] == "materials-expert@example.com"
+    assert feedback_service.feedback[0]["note"] == "Evidence supports the finding."
+
+
+def test_review_import_service_blocks_human_confirmed_agent_accept_with_gate_gaps():
+    service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
+
+    summary = service.import_rows(
+        rows=[
+            _row(
+                action="skip",
+                acceptance_gate={
+                    "accept_allowed": False,
+                    "blocking_missing": ["variables"],
+                },
+                agent_review={
+                    "reviewer": "agent-materials-review",
+                    "recommendation": "accept",
+                    "note": "Looks right.",
+                    "human_confirmed": True,
+                },
+            )
+        ],
+        reviewer="materials-expert@example.com",
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["errors"][0]["message"] == (
+        "line 1: confirmed accept is blocked by acceptance_gate"
+    )
+
+
+def test_review_import_service_imports_human_confirmed_agent_correction():
+    feedback_service = FakeFeedbackService()
+    service = ResearchUnderstandingReviewImportService(feedback_service)
+
+    summary = service.import_rows(
+        rows=[
+            _row(
+                action="skip",
+                finding_id="finding-correct",
+                claim_id="claim-2",
+                agent_review={
+                    "reviewer": "agent-materials-review",
+                    "recommendation": "correct",
+                    "note": "Use the narrower finding.",
+                    "human_confirmed": True,
+                    "suggested_target": {
+                        "statement": "Preheating increases ductility by 14%.",
+                        "variables": ["preheating"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                        "evidence_ref_ids": ["ev-2"],
+                    },
+                },
+            )
+        ],
+        reviewer="materials-expert@example.com",
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 1
+    assert summary["counts"] == {"correct": 1}
+    assert feedback_service.curations[0]["curated_statement"] == (
+        "Preheating increases ductility by 14%."
+    )
+    assert feedback_service.curations[0]["curated_evidence_ref_ids"] == ["ev-2"]
+    assert feedback_service.curations[0]["note"] == "Use the narrower finding."

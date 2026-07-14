@@ -442,6 +442,7 @@ def build_goal_review_packet(
             {
                 "sample_id": _text(item.get("sample_id")),
                 "finding_id": finding_id,
+                "claim_id": _text(item.get("claim_id")),
                 "open_url": _goal_review_url(
                     collection_id,
                     goal_id,
@@ -650,6 +651,7 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
                     "goal_id": goal_id,
                     "sample_id": _text(candidate.get("sample_id")),
                     "finding_id": _text(candidate.get("finding_id")),
+                    "claim_id": _text(candidate.get("claim_id")),
                     "open_url": _text(candidate.get("open_url"))
                     or _text(packet.get("review_url")),
                     "statement": _text(candidate.get("statement")),

@@ -60,11 +60,13 @@ class FakeFeedbackService:
             "items": [
                 {
                     "finding_id": "finding-accept",
+                    "claim_id": "claim-1",
                     "dataset_use_status": "training_ready",
                     "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
                 },
                 {
                     "finding_id": "finding-correct",
+                    "claim_id": "claim-1",
                     "dataset_use_status": "training_ready",
                     "expert_target": {
                         "statement": "Preheating increased ductility by 14%.",
@@ -85,10 +87,15 @@ class FakeFeedbackService:
                 },
                 {
                     "finding_id": "finding-1",
+                    "claim_id": "claim-1",
                     "dataset_use_status": "review_candidate",
                     "training_evidence_refs": [{"evidence_ref_id": "ev-1"}],
                 },
-                {"finding_id": "finding-reject", "dataset_use_status": "rejected"},
+                {
+                    "finding_id": "finding-reject",
+                    "claim_id": "claim-1",
+                    "dataset_use_status": "rejected",
+                },
             ],
         }
 
@@ -474,6 +481,39 @@ def test_import_review_decisions_validates_current_dataset_refs(tmp_path):
             "correct references evidence_ref_id(s) not present on current "
             "finding: missing-ev"
         ),
+    ]
+    assert service.feedback == []
+    assert service.curations == []
+
+
+def test_import_review_decisions_rejects_mismatched_claim_id(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(
+                action="accept",
+                finding_id="finding-accept",
+                claim_id="claim-other",
+            )
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["written_count"] == 0
+    assert summary["warnings"] == []
+    assert summary["affected_goals"] == []
+    assert [error["message"] for error in summary["errors"]] == [
+        "claim_id does not match current goal dataset finding"
     ]
     assert service.feedback == []
     assert service.curations == []

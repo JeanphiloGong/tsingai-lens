@@ -31,6 +31,7 @@ def _dataset_payload(**overrides):
     item = {
         "sample_id": "sample-1",
         "finding_id": "finding-1",
+        "claim_id": "claim-1",
         "dataset_use_status": "training_ready",
         "trace_status": "evidence_derived",
         "input_blocks": [
@@ -253,6 +254,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
     assert packet["candidate_count"] == 1
     candidate = packet["candidates"][0]
     assert candidate["statement"] == "Preheating increased ductility by 14%."
+    assert candidate["claim_id"] == "claim-1"
     assert candidate["variables"] == ["preheating"]
     assert candidate["review_reasons"] == [
         "single_paper_evidence",
@@ -366,6 +368,7 @@ def test_render_review_jsonl_exports_candidate_rows():
     assert rows[0]["collection_id"] == "col-1"
     assert rows[0]["goal_id"] == "goal-1"
     assert rows[0]["finding_id"] == "finding-1"
+    assert rows[0]["claim_id"] == "claim-1"
     assert rows[0]["statement"] == "Preheating increased ductility by 14%."
     assert rows[0]["variables"] == ["preheating"]
     assert rows[0]["mediators"] == ["grain refinement"]

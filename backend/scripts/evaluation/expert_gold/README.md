@@ -291,8 +291,9 @@ python3 scripts/evaluation/expert_gold/import_goal_review_decisions.py \
 The import writes only explicit human expert decisions. It rejects AI/agent
 reviewer ids and does not promote unreviewed AI suggestions to gold labels.
 Dry-run validation also checks that each reviewed `finding_id` still exists in
-the current goal dataset and that corrected `evidence_ref_id` values belong to
-that finding, so stale or hand-edited rows fail before any label is written.
+the current goal dataset, that an exported `claim_id` still matches that
+finding, and that corrected `evidence_ref_id` values belong to that finding, so
+stale or hand-edited rows fail before any label is written.
 Dry-run and import summaries may include `warnings` for accepted or corrected
 rows that were originally paper-level, table-row, mechanism, or cross-paper
 confirmation candidates. These warnings do not block import; they tell the

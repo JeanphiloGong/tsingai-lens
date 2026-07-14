@@ -424,6 +424,16 @@ def _dataset_validation_errors(
                 )
             )
             continue
+        claim_id = _text(payload.get("claim_id"))
+        if claim_id and _text(item.get("claim_id")) != claim_id:
+            errors.append(
+                _error(
+                    int(decision.get("line") or 0),
+                    _text(action),
+                    "claim_id does not match current goal dataset finding",
+                )
+            )
+            continue
         if action == "correct":
             missing_refs = sorted(
                 set(_strings(payload.get("curated_evidence_ref_ids")))

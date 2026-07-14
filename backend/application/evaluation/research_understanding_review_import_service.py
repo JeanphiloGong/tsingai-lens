@@ -487,12 +487,22 @@ def _review_warnings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "line": int(decision.get("line") or 0),
             "action": decision["action"],
             "finding_id": _text(decision.get("payload", {}).get("finding_id")),
-            "message": decision["review_warning"],
+            "message": _review_warning_message(decision),
         }
         for decision in decisions
         if decision.get("action") in {"accept", "correct"}
-        and _text(decision.get("review_warning"))
+        and _review_warning_message(decision)
     ]
+
+
+def _review_warning_message(decision: dict[str, Any]) -> str:
+    warning = _text(decision.get("review_warning"))
+    if not warning:
+        return ""
+    note = _text(decision.get("payload", {}).get("note"))
+    if note and not note.endswith("from expert review JSONL."):
+        return ""
+    return f"{warning}; expert_note required"
 
 
 def _actionable_decision_warnings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:

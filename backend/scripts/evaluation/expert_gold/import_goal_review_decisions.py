@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Fail when accepted or corrected rows still carry risky review "
-            "warnings, such as paper-level or table-row checks."
+            "warnings without expert_note, such as paper-level or table-row checks."
         ),
     )
     return parser.parse_args()

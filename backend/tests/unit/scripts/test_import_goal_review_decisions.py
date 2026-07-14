@@ -709,7 +709,8 @@ def test_import_review_decisions_warns_on_risky_accepts(tmp_path):
             "finding_id": "finding-accept",
             "message": (
                 "recommended_action_code=accept_as_paper_level; "
-                "review_reasons=needs_cross_paper_confirmation"
+                "review_reasons=needs_cross_paper_confirmation; "
+                "expert_note required"
             ),
         },
         {
@@ -718,20 +719,23 @@ def test_import_review_decisions_warns_on_risky_accepts(tmp_path):
             "finding_id": "finding-correct",
             "message": (
                 "recommended_action_code=review_table_rows; "
-                "review_reasons=table_row_needs_expert_review"
+                "review_reasons=table_row_needs_expert_review; "
+                "expert_note required"
             ),
         },
         {
             "line": 3,
             "action": "accept",
             "finding_id": "finding-accept",
-            "message": "recommended_action_code=verify_table_rows",
+            "message": "recommended_action_code=verify_table_rows; expert_note required",
         },
         {
             "line": 4,
             "action": "correct",
             "finding_id": "finding-correct",
-            "message": "recommended_action_code=review_table_variables",
+            "message": (
+                "recommended_action_code=review_table_variables; expert_note required"
+            ),
         },
     ]
     assert service.feedback == []
@@ -771,7 +775,8 @@ def test_import_review_decisions_can_fail_on_warnings(tmp_path):
             "finding_id": "finding-accept",
             "message": (
                 "recommended_action_code=accept_as_paper_level; "
-                "review_reasons=needs_cross_paper_confirmation"
+                "review_reasons=needs_cross_paper_confirmation; "
+                "expert_note required"
             ),
         }
     ]
@@ -779,8 +784,43 @@ def test_import_review_decisions_can_fail_on_warnings(tmp_path):
         (
             "review warning requires resolution: "
             "recommended_action_code=accept_as_paper_level; "
-            "review_reasons=needs_cross_paper_confirmation"
+            "review_reasons=needs_cross_paper_confirmation; "
+            "expert_note required"
         )
     ]
     assert service.feedback == []
     assert service.curations == []
+
+
+def test_import_review_decisions_accepts_risky_rows_with_expert_note(tmp_path):
+    module = _load_import_module()
+    service = FakeFeedbackService()
+    input_path = tmp_path / "review.jsonl"
+    _write_jsonl(
+        input_path,
+        [
+            _base_row(
+                action="accept",
+                finding_id="finding-accept",
+                recommended_action_code="accept_as_paper_level",
+                review_reasons=["needs_cross_paper_confirmation"],
+                expert_note=(
+                    "Confirmed as paper-level only; not a cross-paper conclusion."
+                ),
+            )
+        ],
+    )
+
+    summary = module.import_review_decisions(
+        input_path=input_path,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+        fail_on_warnings=True,
+        feedback_service=service,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["warnings"] == []
+    assert summary["errors"] == []
+    assert summary["counts"] == {"accept": 1}
+    assert service.feedback == []

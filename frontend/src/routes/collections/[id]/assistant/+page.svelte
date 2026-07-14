@@ -622,7 +622,10 @@
 				source_links: visibleSourceLinks(message),
 				metadata: {
 					source: 'goal_copilot',
-					source_mode: message.source_mode
+					source_mode: message.source_mode,
+					review_gate: message.review_gate ?? null,
+					used_evidence_ids: message.used_evidence_ids ?? [],
+					source_link_count: visibleSourceLinks(message).length
 				}
 			});
 			savedPlanMessageIds = {

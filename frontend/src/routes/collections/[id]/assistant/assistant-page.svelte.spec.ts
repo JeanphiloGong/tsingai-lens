@@ -484,7 +484,10 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		]);
 		expect(payload.metadata).toEqual({
 			source: 'goal_copilot',
-			source_mode: 'collection_grounded'
+			source_mode: 'collection_grounded',
+			review_gate: 'protocol_ready_findings',
+			used_evidence_ids: ['ev_1'],
+			source_link_count: 1
 		});
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open plan' }))

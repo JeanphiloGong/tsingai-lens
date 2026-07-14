@@ -1060,6 +1060,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
     usable_sample_count = 0
     training_ready_sample_count = 0
     training_message_sample_count = 0
+    protocol_ready_sample_count = 0
     review_candidate_sample_count = 0
     needs_review_count = 0
     rejected_count = 0
@@ -1090,6 +1091,8 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
             training_ready_sample_count += 1
             if _has_training_messages_for_expert_target(item):
                 training_message_sample_count += 1
+                if _has_protocol_design_inputs_for_expert_target(item):
+                    protocol_ready_sample_count += 1
         elif dataset_use_status == "review_candidate":
             review_candidate_sample_count += 1
             if not next_review_finding_id:
@@ -1228,6 +1231,7 @@ def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object
         "usable_sample_count": usable_sample_count,
         "training_ready_sample_count": training_ready_sample_count,
         "training_message_sample_count": training_message_sample_count,
+        "protocol_ready_sample_count": protocol_ready_sample_count,
         "review_candidate_sample_count": review_candidate_sample_count,
         "next_review_finding_id": next_review_finding_id,
         "needs_review_count": needs_review_count,
@@ -1600,6 +1604,36 @@ def _has_training_messages_for_expert_target(item: Mapping[str, Any]) -> bool:
         return False
     return _normalized_text(assistant_payload.get("statement")) == _normalized_text(
         target_statement
+    )
+
+
+def _has_protocol_design_inputs_for_expert_target(item: Mapping[str, Any]) -> bool:
+    if not _has_training_messages_for_expert_target(item):
+        return False
+    target = _mapping(item.get("expert_target"))
+    prediction = _mapping(item.get("system_prediction"))
+    status = (
+        _text(target.get("status") or prediction.get("status")) or ""
+    ).lower()
+    support_grade = (
+        _text(target.get("support_grade") or prediction.get("support_grade")) or ""
+    ).lower()
+    if status in {"unsupported", "conflicted"}:
+        return False
+    if support_grade in {"insufficient", "conflict", "conflicted", "weak"}:
+        return False
+    statement = _text(target.get("statement") or prediction.get("statement"))
+    variables = _strings(target.get("variables") or prediction.get("variables"))
+    outcomes = _strings(target.get("outcomes") or prediction.get("outcomes"))
+    direction = _text(target.get("direction") or prediction.get("direction"))
+    scope = _text(target.get("scope_summary") or prediction.get("scope_summary"))
+    evidence = _mapping_list(item.get("training_evidence_refs"))
+    return bool(
+        statement
+        and variables
+        and outcomes
+        and (direction or scope)
+        and any(_text(ref.get("evidence_ref_id")) and _text(ref.get("quote")) for ref in evidence)
     )
 
 

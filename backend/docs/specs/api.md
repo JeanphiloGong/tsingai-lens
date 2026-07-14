@@ -763,7 +763,8 @@ chat-style 训练行。
 
 `quality_summary` 从本次返回的 sample 列表直接派生，用于真实 goal 质量验证和
 优化排查。它包含 `total_samples`、`usable_sample_count`、
-`training_ready_sample_count`、`review_candidate_sample_count`、
+`training_ready_sample_count`、`training_message_sample_count`、
+`protocol_ready_sample_count`、`review_candidate_sample_count`、
 `needs_review_count`、`rejected_count`、`labeled_sample_count`、
 `accepted_system_sample_count`、`accepted_after_curation_match_count`、
 `curated_correction_count`、`system_error_count` 和 `resolved_feedback_count`，
@@ -800,6 +801,9 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 逐行完整 sample，不输出 envelope summary；`messages_jsonl` 只输出带
 `training_messages` 的 `{"messages": [...]}` 行；`review_jsonl` 只输出
 `dataset_use_status=review_candidate` 样本的复核模板行。
+`protocol_ready_sample_count` 是 `training_ready` 的严格子集：样本必须有有效
+`training_messages`、statement、variables、outcomes、direction 或 scope，并保留
+可追溯训练证据；Goal Copilot 只能把这类样本作为带证据实验方案草稿输入。
 
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
 `label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、

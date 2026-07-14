@@ -36,9 +36,10 @@ artifacts.
   evaluation or fine-tuning preparation. The summary separates
   `training_ready_sample_count` from `training_message_sample_count` so review
   UIs can show whether confirmed findings actually have message rows available
-  for export. Dataset export also exposes editable review JSONL templates for
-  human accept/reject/correct review; training message exports remain limited
-  to `training_ready` samples. Quality summaries include sorted top diagnostics
-  for error categories, issue types, review reasons, and system warnings so
-  expert labels can directly guide evaluation, prompt repair, or fine-tuning
-  data selection.
+  for export, and from `protocol_ready_sample_count` so Goal Copilot only
+  drafts experiments from actionable, traceable reviewed findings. Dataset
+  export also exposes editable review JSONL templates for human accept/reject/
+  correct review; training message exports remain limited to `training_ready`
+  samples. Quality summaries include sorted top diagnostics for error
+  categories, issue types, review reasons, and system warnings so expert labels
+  can directly guide evaluation, prompt repair, or fine-tuning data selection.

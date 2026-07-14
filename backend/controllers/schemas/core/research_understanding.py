@@ -473,6 +473,7 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     usable_sample_count: int = Field(default=0)
     training_ready_sample_count: int = Field(default=0)
     training_message_sample_count: int = Field(default=0)
+    protocol_ready_sample_count: int = Field(default=0)
     review_candidate_sample_count: int = Field(default=0)
     next_review_finding_id: str = Field(default="")
     needs_review_count: int = Field(default=0)

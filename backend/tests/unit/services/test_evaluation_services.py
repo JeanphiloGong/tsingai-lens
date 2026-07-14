@@ -652,6 +652,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "usable_sample_count": 2,
         "training_ready_sample_count": 1,
         "training_message_sample_count": 1,
+        "protocol_ready_sample_count": 1,
         "review_candidate_sample_count": 2,
         "next_review_finding_id": "finding-2",
         "needs_review_count": 2,
@@ -2128,6 +2129,48 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
     assert dataset["items"][0]["training_messages"]
     assert dataset["quality_summary"]["training_ready_sample_count"] == 1
     assert dataset["quality_summary"]["training_message_sample_count"] == 0
+    assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0
+
+
+def test_research_understanding_feedback_service_requires_actionable_protocol_inputs():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-1",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-2",
+                "claim_id": "claim-2",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "VED controls density.",
+                "curated_evidence_ref_ids": ["ev-2"],
+                "curated_context_ids": ["ctx-1"],
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        dataset_use_status="training_ready",
+    )
+
+    assert dataset["item_count"] == 1
+    assert dataset["items"][0]["training_messages"]
+    assert dataset["quality_summary"]["training_ready_sample_count"] == 1
+    assert dataset["quality_summary"]["training_message_sample_count"] == 1
+    assert dataset["quality_summary"]["protocol_ready_sample_count"] == 0
 
 
 def test_research_understanding_feedback_service_exports_collection_dataset():

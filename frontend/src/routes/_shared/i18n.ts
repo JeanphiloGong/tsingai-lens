@@ -352,7 +352,9 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadCollectionTrainingJsonl: 'Collection training JSONL',
 				datasetDownloadCollectionTrainingMessagesJsonl: 'Collection training messages JSONL',
 				datasetDownloadCollectionReviewJson: 'Collection review JSON',
+				datasetDownloadCollectionReviewJsonl: 'Collection review JSONL template',
 				datasetDownloadReviewJson: 'Review candidates JSON',
+				datasetDownloadReviewJsonl: 'Review JSONL template',
 				datasetNoTrainingReady: 'No training-ready samples',
 				datasetTrainingMessagesNote:
 					'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.',
@@ -3536,7 +3538,9 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadCollectionTrainingJsonl: '全集合训练 JSONL',
 				datasetDownloadCollectionTrainingMessagesJsonl: '全集合训练 messages JSONL',
 				datasetDownloadCollectionReviewJson: '全集合待复核 JSON',
+				datasetDownloadCollectionReviewJsonl: '全集合待复核 JSONL 模板',
 				datasetDownloadReviewJson: '待复核 JSON',
+				datasetDownloadReviewJsonl: '待复核 JSONL 模板',
 				datasetNoTrainingReady: '暂无可训练样本',
 				datasetTrainingMessagesNote:
 					'训练导出包含基于证据的 user/assistant messages，可用于评价或微调准备。',

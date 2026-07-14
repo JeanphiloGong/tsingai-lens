@@ -2849,6 +2849,21 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(reviewJsonUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
 		expect(reviewJsonUrl.searchParams.get('format')).toBe('json');
 
+		const reviewJsonlUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Review JSONL template' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(reviewJsonlUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(reviewJsonlUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(reviewJsonlUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(reviewJsonlUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
+		expect(reviewJsonlUrl.searchParams.get('format')).toBe('review_jsonl');
+
 		const datasetGetCall = fetchMock.mock.calls.find(([input, init]) => {
 			const url = requestUrl(input as string | URL | Request);
 			return (
@@ -3001,7 +3016,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const collectionReviewUrl = new URL(
 			browserPage
-				.getByRole('link', { name: 'Collection review JSON' })
+				.getByRole('link', { name: 'Collection review JSON', exact: true })
 				.element()
 				.getAttribute('href') ?? '',
 			'http://localhost'
@@ -3012,6 +3027,22 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(collectionReviewUrl.searchParams.get('scope_type')).toBe('goal');
 		expect(collectionReviewUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
 		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
+
+		const collectionReviewJsonlUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection review JSONL template' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionReviewJsonlUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionReviewJsonlUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionReviewJsonlUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(collectionReviewJsonlUrl.searchParams.get('format')).toBe('review_jsonl');
 	});
 
 	it('keeps collection review export visible when the current goal has no review candidates', async () => {
@@ -3064,7 +3095,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.not.toBeInTheDocument();
 		const collectionReviewUrl = new URL(
 			browserPage
-				.getByRole('link', { name: 'Collection review JSON' })
+				.getByRole('link', { name: 'Collection review JSON', exact: true })
 				.element()
 				.getAttribute('href') ?? '',
 			'http://localhost'

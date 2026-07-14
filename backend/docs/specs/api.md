@@ -726,16 +726,19 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `GET /dataset` 需要 query：`scope_type` 和 `scope_id`；可选
 `label_status=candidate | silver | gold | rejected` 过滤标签状态；可选
 `dataset_use_status=training_ready | review_candidate | rejected` 过滤用途状态；
-可选 `format=json | jsonl | messages_jsonl`，默认 `json`。`json` 返回完整数据集
+可选 `format=json | jsonl | messages_jsonl | review_jsonl`，默认 `json`。`json` 返回完整数据集
 envelope，`jsonl` 返回 newline-delimited 完整 sample，
 `messages_jsonl` 返回 newline-delimited `{"messages": [...]}` 行，便于常见
-chat evaluation/fine-tuning 工具直接消费。前端下载训练集时应使用
+chat evaluation/fine-tuning 工具直接消费。`review_jsonl` 返回可编辑的人工复核模板，
+每行默认 `action=skip`，并包含 `allowed_actions`、`reject_issue_options`、候选
+Finding 字段、推荐动作和证据片段；专家填写 `accept | reject | correct` 后可交给
+`scripts/evaluation/expert_gold/import_goal_review_decisions.py` 导入。前端下载训练集时应使用
 `dataset_use_status=training_ready`，避免把未复核候选样本混入训练输入。
 
 `GET /dataset/collection` 用于按 collection 聚合导出多个 research-understanding
 scope 的样本。它不需要 `scope_id`，query 中的 `scope_type` 表示要聚合的 artifact
 类型，默认 `goal`；同样支持 `label_status`、`dataset_use_status` 和
-`format=json | jsonl | messages_jsonl`。返回 envelope 使用 `scope_type=collection`，
+`format=json | jsonl | messages_jsonl | review_jsonl`。返回 envelope 使用 `scope_type=collection`，
 `scope_id=<聚合的 scope_type>`，但每个 sample 仍保留自己的原始
 `scope_type` 和 `scope_id`。专家批量导出训练数据时应优先使用
 `/dataset/collection?scope_type=goal&dataset_use_status=training_ready&format=messages_jsonl`，
@@ -790,7 +793,8 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 未解决 rejected feedback 和 resolved feedback 等诊断信号。若请求带
 `label_status` 过滤，`quality_summary` 只统计过滤后的返回样本；`jsonl` 格式仍只输出
 逐行完整 sample，不输出 envelope summary；`messages_jsonl` 只输出带
-`training_messages` 的 `{"messages": [...]}` 行。
+`training_messages` 的 `{"messages": [...]}` 行；`review_jsonl` 只输出
+`dataset_use_status=review_candidate` 样本的复核模板行。
 
 每个 sample 包含 `sample_id`、scope、`finding_id`、可选 `claim_id`、
 `label_status`、`dataset_use_status`、`presentation_bucket`、`trace_status`、

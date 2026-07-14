@@ -26,6 +26,20 @@ from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandi
 
 router = APIRouter(prefix="/collections", tags=["research-understanding-feedback"])
 feedback_service = ResearchUnderstandingFeedbackService()
+REVIEW_ACTION_OPTIONS = ("accept", "reject", "correct", "skip")
+REJECT_ISSUE_OPTIONS = (
+    "evidence_not_grounded",
+    "missing_evidence",
+    "insufficient_evidence",
+    "wrong_variable",
+    "wrong_outcome",
+    "wrong_direction",
+    "wrong_context",
+    "wrong_relation",
+    "overclaim",
+    "unclear_statement",
+    "other",
+)
 
 
 def _dataset_jsonl_response(
@@ -46,6 +60,95 @@ def _dataset_jsonl_response(
     if body:
         body += "\n"
     return Response(content=body, media_type="application/x-ndjson")
+
+
+def _dataset_review_jsonl_response(
+    response: ResearchUnderstandingDatasetResponse,
+) -> Response:
+    rows = [
+        _review_jsonl_row(response.collection_id, item)
+        for item in response.items
+        if item.dataset_use_status == "review_candidate"
+    ]
+    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    if body:
+        body += "\n"
+    return Response(content=body, media_type="application/x-ndjson")
+
+
+def _review_jsonl_row(
+    collection_id: str,
+    item: Any,
+) -> dict[str, Any]:
+    prediction = item.system_prediction or {}
+    expert_target = item.expert_target or {}
+    evidence = item.training_evidence_refs or item.evidence_refs or item.input_blocks
+    review_action = item.review_action or {}
+    return {
+        "collection_id": collection_id,
+        "goal_id": item.scope_id if item.scope_type == "goal" else "",
+        "scope_type": item.scope_type,
+        "scope_id": item.scope_id,
+        "sample_id": item.sample_id,
+        "finding_id": item.finding_id,
+        "claim_id": item.claim_id or "",
+        "statement": _text(prediction.get("statement"))
+        or _text(expert_target.get("statement")),
+        "variables": _strings(prediction.get("variables")),
+        "mediators": _strings(prediction.get("mediators")),
+        "outcomes": _strings(prediction.get("outcomes")),
+        "direction": _text(prediction.get("direction")),
+        "scope_summary": _text(prediction.get("scope_summary")),
+        "support_grade": _text(prediction.get("support_grade")),
+        "review_status": _text(prediction.get("review_status")),
+        "presentation_bucket": item.presentation_bucket,
+        "trace_status": item.trace_status,
+        "review_reasons": _strings(prediction.get("review_reasons")),
+        "warnings": _strings(prediction.get("warnings")),
+        "recommended_action": _text(review_action.get("label")),
+        "recommended_action_code": _text(review_action.get("code")),
+        "action": "skip",
+        "allowed_actions": list(REVIEW_ACTION_OPTIONS),
+        "issue_type": "",
+        "reject_issue_options": list(REJECT_ISSUE_OPTIONS),
+        "expert_note": "",
+        "suggested_target": expert_target,
+        "evidence": [_review_evidence_record(record) for record in evidence],
+    }
+
+
+def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "evidence_ref_id": _text(record.get("evidence_ref_id")),
+        "label": _text(record.get("label"))
+        or _text(record.get("source_label"))
+        or _text(record.get("source_kind")),
+        "source_ref": _text(record.get("source_ref")),
+        "page": _text(record.get("page")),
+        "href": _text(record.get("href")),
+        "quote": _text(record.get("quote"))
+        or _text(record.get("source_text"))
+        or _text(record.get("training_source_text"))
+        or _text(record.get("text")),
+    }
+
+
+def _strings(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        text = _text(value)
+        return [text] if text else []
+    if isinstance(value, dict):
+        return []
+    try:
+        return [text for item in value if (text := _text(item))]
+    except TypeError:
+        return []
+
+
+def _text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
 
 
 @router.post(
@@ -240,6 +343,8 @@ async def export_research_understanding_dataset(
         return _dataset_jsonl_response(response)
     if format == "messages_jsonl":
         return _dataset_jsonl_response(response, messages_only=True)
+    if format == "review_jsonl":
+        return _dataset_review_jsonl_response(response)
     return response
 
 
@@ -267,4 +372,6 @@ async def export_collection_research_understanding_dataset(
         return _dataset_jsonl_response(response)
     if format == "messages_jsonl":
         return _dataset_jsonl_response(response, messages_only=True)
+    if format == "review_jsonl":
+        return _dataset_review_jsonl_response(response)
     return response

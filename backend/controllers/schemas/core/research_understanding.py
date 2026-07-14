@@ -33,7 +33,12 @@ ResearchUnderstandingDatasetUseStatus = Literal[
     "review_candidate",
     "rejected",
 ]
-ResearchUnderstandingDatasetExportFormat = Literal["json", "jsonl", "messages_jsonl"]
+ResearchUnderstandingDatasetExportFormat = Literal[
+    "json",
+    "jsonl",
+    "messages_jsonl",
+    "review_jsonl",
+]
 ResearchUnderstandingFeedbackIssueType = Literal[
     "none",
     "evidence_not_grounded",

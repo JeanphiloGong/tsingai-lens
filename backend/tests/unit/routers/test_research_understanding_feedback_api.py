@@ -150,6 +150,8 @@ class FakeResearchUnderstandingFeedbackService:
 
     def export_dataset(self, **kwargs):  # noqa: ANN003
         self.dataset_exported = kwargs
+        dataset_use_status = kwargs["dataset_use_status"] or "training_ready"
+        label_status = "silver" if dataset_use_status == "review_candidate" else "gold"
         return {
             "schema_version": "research_understanding_dataset.v1",
             "dataset_id": "dataset_col-1_goal_goal-1_research_understanding",
@@ -163,8 +165,8 @@ class FakeResearchUnderstandingFeedbackService:
             "item_count": 1,
             "label_counts": {
                 "candidate": 0,
-                "silver": 0,
-                "gold": 1,
+                "silver": 1 if label_status == "silver" else 0,
+                "gold": 1 if label_status == "gold" else 0,
                 "rejected": 0,
             },
             "quality_summary": {
@@ -182,13 +184,13 @@ class FakeResearchUnderstandingFeedbackService:
                 "resolved_feedback_count": 0,
                 "by_label_status": {
                     "candidate": 0,
-                    "silver": 0,
-                    "gold": 1,
+                    "silver": 1 if label_status == "silver" else 0,
+                    "gold": 1 if label_status == "gold" else 0,
                     "rejected": 0,
                 },
                 "by_dataset_use_status": {
-                    "training_ready": 1,
-                    "review_candidate": 0,
+                    "training_ready": 1 if dataset_use_status == "training_ready" else 0,
+                    "review_candidate": 1 if dataset_use_status == "review_candidate" else 0,
                     "rejected": 0,
                 },
                 "by_review_status": {"accepted": 1},
@@ -222,8 +224,8 @@ class FakeResearchUnderstandingFeedbackService:
                     "scope_id": kwargs["scope_id"],
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
-                    "label_status": "gold",
-                    "dataset_use_status": "training_ready",
+                    "label_status": label_status,
+                    "dataset_use_status": dataset_use_status,
                     "presentation_bucket": "primary",
                     "trace_status": "unavailable",
                     "input_blocks": [],
@@ -231,15 +233,33 @@ class FakeResearchUnderstandingFeedbackService:
                     "model_output": None,
                     "system_prediction": {
                         "statement": "Preheating improves ductility.",
+                        "variables": ["build platform preheating"],
+                        "mediators": ["homogenized microstructure"],
+                        "outcomes": ["ductility"],
+                        "direction": "increases",
+                        "scope_summary": "LPBF 316L",
+                        "support_grade": "partial",
+                        "review_status": "needs_review",
                         "presentation_bucket": "primary",
+                        "review_reasons": ["single_paper_evidence"],
+                        "warnings": ["needs_expert_review"],
                     },
                     "expert_target": {
                         "source": "curation",
                         "statement": "Preheating improves ductility by 14%.",
+                        "evidence_ref_ids": ["ev-1"],
+                    },
+                    "review_action": {
+                        "code": "accept_as_paper_level",
+                        "label": "Accept as paper-level evidence",
                     },
                     "evidence_refs": [
                         {
                             "evidence_ref_id": "ev-1",
+                            "label": "P001 Section 3.2",
+                            "source_ref": "blk_1",
+                            "page": "9",
+                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1",
                             "quote": "Preheating increased ductility by 14%.",
                             "source_text": (
                                 "Preheating increased ductility by 14% in LPBF 316L."
@@ -250,6 +270,10 @@ class FakeResearchUnderstandingFeedbackService:
                     "training_evidence_refs": [
                         {
                             "evidence_ref_id": "ev-1",
+                            "label": "P001 Section 3.2",
+                            "source_ref": "blk_1",
+                            "page": "9",
+                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1",
                             "quote": "Preheating increased ductility by 14%.",
                             "source_text": (
                                 "Preheating increased ductility by 14% in LPBF 316L."
@@ -718,6 +742,57 @@ def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch
     }
 
 
+def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="review_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert line["finding_id"] == "finding-1"
+    assert line["claim_id"] == "claim-1"
+    assert line["statement"] == "Preheating improves ductility."
+    assert line["variables"] == ["build platform preheating"]
+    assert line["outcomes"] == ["ductility"]
+    assert line["direction"] == "increases"
+    assert line["recommended_action"] == "Accept as paper-level evidence"
+    assert line["action"] == "skip"
+    assert "accept" in line["allowed_actions"]
+    assert "wrong_direction" in line["reject_issue_options"]
+    assert line["issue_type"] == ""
+    assert line["expert_note"] == ""
+    assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert line["evidence"][0]["href"].endswith("source_ref=blk_1")
+    assert line["suggested_target"]["statement"] == (
+        "Preheating improves ductility by 14%."
+    )
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
 def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
     monkeypatch.setattr(
@@ -817,4 +892,41 @@ def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
         "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_review_jsonl(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="review_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert line["scope_type"] == "goal"
+    assert line["action"] == "skip"
+    assert line["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
     }

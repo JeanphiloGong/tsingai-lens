@@ -41,6 +41,23 @@ def _summary():
                 "protocol_ready_count": 0,
                 "review_candidate_count": 1,
                 "next_review_action": {"label": "accept as paper-level"},
+                "top_issue_types": [{"name": "wrong_variable", "count": 1}],
+                "top_review_reasons": [
+                    {"name": "single_paper_evidence", "count": 1}
+                ],
+                "top_system_warnings": [
+                    {"name": "table_row_alignment_uncertain", "count": 1}
+                ],
+                "optimization_breakdown": {
+                    "by_variable": {
+                        "preheating": {
+                            "issue_type": {"wrong_variable": 1},
+                            "error_category": {"variable_error": 1},
+                            "review_candidate_reason": {"single_paper_evidence": 1},
+                            "system_warning": {"table_row_alignment_uncertain": 1},
+                        }
+                    }
+                },
                 "review_packet": {
                     "goal_id": "goal-1",
                     "candidates": [
@@ -88,6 +105,12 @@ def _dataset_module(summary):
             )
             + "\n"
         ),
+        render_messages_jsonl_summary=lambda _summary: (
+            json.dumps({"messages": [{"role": "user", "content": "extract"}]}) + "\n"
+        ),
+        render_training_jsonl_summary=lambda _summary: (
+            json.dumps({"metadata": {"finding_id": "finding-1"}}) + "\n"
+        ),
     )
 
 
@@ -117,6 +140,9 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "agent-review-prompts.jsonl",
         "review-dashboard.md",
         "dataset-readiness.md",
+        "training-ready.messages.jsonl",
+        "training-ready.dataset.jsonl",
+        "optimization-summary.md",
         "README.txt",
         "manifest.json",
     ]
@@ -136,6 +162,17 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
     assert "pending review candidates: 1" in readiness
     assert "| goal-1 | 0 | 0 | 0 | 1 | accept as paper-level |" in readiness
+    assert json.loads(
+        (workspace / "training-ready.messages.jsonl").read_text(encoding="utf-8")
+    ) == {"messages": [{"role": "user", "content": "extract"}]}
+    assert json.loads(
+        (workspace / "training-ready.dataset.jsonl").read_text(encoding="utf-8")
+    ) == {"metadata": {"finding_id": "finding-1"}}
+    optimization = (workspace / "optimization-summary.md").read_text(
+        encoding="utf-8"
+    )
+    assert "wrong_variable: 1" in optimization
+    assert "by_variable:preheating" in optimization
     assert json.loads(
         (workspace / "reviewed-findings.template.jsonl").read_text(encoding="utf-8")
     ) == {"finding_id": "finding-1", "action": "skip"}
@@ -218,3 +255,16 @@ def test_render_dataset_readiness_report_explains_partial_exports():
         "Existing training-ready rows may still be emitted while the overall command fails"
         in report
     )
+
+
+def test_render_optimization_summary_lists_error_and_risk_stats():
+    module = _load_workspace_module()
+
+    report = module.render_optimization_summary(_summary())
+
+    assert "# Lens Optimization Summary" in report
+    assert "wrong_variable: 1" in report
+    assert "single_paper_evidence: 1" in report
+    assert "table_row_alignment_uncertain: 1" in report
+    assert "by_variable:preheating" in report
+    assert "issue_type:wrong_variable=1" in report

@@ -81,6 +81,8 @@ def prepare_goal_review_workspace(
         goal_ids=goal_ids,
         api_base_url=api_base_url,
         include_review_packet=True,
+        include_training_export=True,
+        include_training_metadata=True,
     )
     files = _write_workspace_files(
         output_dir=output_dir,
@@ -148,6 +150,21 @@ def _write_workspace_files(
             "dataset-readiness.md",
             render_dataset_readiness_report(summary),
             "Training export and protocol readiness by goal.",
+        ),
+        (
+            "training-ready.messages.jsonl",
+            dataset_module.render_messages_jsonl_summary(summary),
+            "Fine-tuning-compatible messages for current training-ready findings.",
+        ),
+        (
+            "training-ready.dataset.jsonl",
+            dataset_module.render_training_jsonl_summary(summary),
+            "Training messages plus traceable sample metadata.",
+        ),
+        (
+            "optimization-summary.md",
+            render_optimization_summary(summary),
+            "Error, review-risk, and optimization statistics.",
         ),
     ]
     files: list[dict[str, Any]] = []
@@ -357,6 +374,47 @@ def render_dataset_readiness_report(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_optimization_summary(summary: dict[str, Any]) -> str:
+    aggregate = _aggregate_goal_stats(summary)
+    lines = [
+        "# Lens Optimization Summary",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        "",
+        "## Current Error Types",
+        "",
+    ]
+    lines.extend(_stats_lines(aggregate["issue_types"], empty="- No issue types yet."))
+    lines.extend(["", "## Review Risk Types", ""])
+    lines.extend(_stats_lines(aggregate["review_reasons"], empty="- No review risks."))
+    lines.extend(["", "## System Warnings", ""])
+    lines.extend(_stats_lines(aggregate["system_warnings"], empty="- No system warnings."))
+    lines.extend(["", "## Optimization Hotspots", ""])
+    hotspot_lines = _hotspot_lines(aggregate["hotspots"])
+    lines.extend(hotspot_lines or ["- No grouped hotspots yet."])
+    lines.extend(
+        [
+            "",
+            "## How To Use",
+            "",
+            (
+                "- If issue types dominate, improve labels or prompts for the "
+                "specific error category."
+            ),
+            (
+                "- If review risks dominate, finish expert review before tuning; "
+                "unconfirmed risks are not model-quality failures yet."
+            ),
+            (
+                "- If system warnings dominate, inspect the corresponding parser "
+                "or evidence construction path before fine-tuning."
+            ),
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_text_summary(result: dict[str, Any]) -> str:
     lines = [
         f"Prepared Lens goal review workspace: {result['output_dir']}",
@@ -476,6 +534,75 @@ def _readiness_next_action(goal: dict[str, Any]) -> str:
     if int(goal.get("protocol_ready_count") or 0) == 0:
         return "repair protocol input fields"
     return "ready for training export and protocol drafting"
+
+
+def _aggregate_goal_stats(summary: dict[str, Any]) -> dict[str, Any]:
+    issue_types: dict[str, int] = {}
+    review_reasons: dict[str, int] = {}
+    system_warnings: dict[str, int] = {}
+    hotspots: dict[str, dict[str, int]] = {}
+    for goal in _mapping_list(summary.get("goals")):
+        _merge_top_counts(issue_types, goal.get("top_issue_types"))
+        _merge_top_counts(review_reasons, goal.get("top_review_reasons"))
+        _merge_top_counts(system_warnings, goal.get("top_system_warnings"))
+        for group_key, group in _mapping(
+            goal.get("optimization_breakdown")
+        ).items():
+            for name, metrics in _mapping(group).items():
+                hotspot = hotspots.setdefault(f"{group_key}:{name}", {})
+                for metric_group in (
+                    "issue_type",
+                    "error_category",
+                    "review_candidate_reason",
+                    "system_warning",
+                ):
+                    for metric, count in _mapping(
+                        _mapping(metrics).get(metric_group)
+                    ).items():
+                        if _text(metric) == "none":
+                            continue
+                        key = f"{metric_group}:{metric}"
+                        hotspot[key] = hotspot.get(key, 0) + int(count or 0)
+    return {
+        "issue_types": issue_types,
+        "review_reasons": review_reasons,
+        "system_warnings": system_warnings,
+        "hotspots": hotspots,
+    }
+
+
+def _merge_top_counts(target: dict[str, int], rows: Any) -> None:
+    for row in _mapping_list(rows):
+        name = _text(row.get("name"))
+        if name and name != "none":
+            target[name] = target.get(name, 0) + int(row.get("count") or 0)
+
+
+def _stats_lines(stats: dict[str, int], *, empty: str) -> list[str]:
+    ranked = _ranked_counts(stats)
+    if not ranked:
+        return [empty]
+    return [f"- {name}: {count}" for name, count in ranked[:10]]
+
+
+def _hotspot_lines(hotspots: dict[str, dict[str, int]]) -> list[str]:
+    scored = []
+    for name, metrics in hotspots.items():
+        score = sum(metrics.values())
+        if score:
+            scored.append((name, score, metrics))
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    lines = []
+    for name, _score, metrics in scored[:10]:
+        top_metrics = ", ".join(
+            f"{metric}={count}" for metric, count in _ranked_counts(metrics)[:3]
+        )
+        lines.append(f"- {name}: {top_metrics}")
+    return lines
+
+
+def _ranked_counts(stats: dict[str, int]) -> list[tuple[str, int]]:
+    return sorted(stats.items(), key=lambda item: (-int(item[1] or 0), item[0]))
 
 
 def _line_count(value: str) -> int:

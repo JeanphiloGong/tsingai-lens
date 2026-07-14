@@ -767,6 +767,58 @@ def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch
     }
 
 
+def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            format="training_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert set(line) == {"messages", "metadata"}
+    assert line["messages"][0]["role"] == "user"
+    assert line["metadata"] == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "goal_id": "goal-1",
+        "scope_id": "goal-1",
+        "sample_id": "rus-1",
+        "finding_id": "finding-1",
+        "claim_id": "claim-1",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "trace_status": "unavailable",
+        "reviewer": "",
+        "review_status": "",
+        "issue_type": "",
+        "support_grade": "partial",
+        "generalization_status": "",
+        "evidence_ref_ids": ["ev-1"],
+    }
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+    }
+
+
 def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
     monkeypatch.setattr(
@@ -976,6 +1028,45 @@ def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
     assert list(line) == ["messages"]
     assert line["messages"][0]["role"] == "user"
     assert line["messages"][1]["role"] == "assistant"
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_training_jsonl(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            format="training_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert set(line) == {"messages", "metadata"}
+    assert line["metadata"]["collection_id"] == "col-1"
+    assert line["metadata"]["scope_type"] == "goal"
+    assert line["metadata"]["goal_id"] == "goal-1"
+    assert line["metadata"]["finding_id"] == "finding-1"
+    assert line["metadata"]["claim_id"] == "claim-1"
+    assert line["metadata"]["evidence_ref_ids"] == ["ev-1"]
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",

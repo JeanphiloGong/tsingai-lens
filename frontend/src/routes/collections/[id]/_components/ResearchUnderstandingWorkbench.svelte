@@ -3663,6 +3663,9 @@
 										<a href={datasetDownloadUrl('messages_jsonl', 'training_ready')} download>
 											{$t('research.understanding.datasetDownloadTrainingMessagesJsonl')}
 										</a>
+										<a href={datasetDownloadUrl('training_jsonl', 'training_ready')} download>
+											{$t('research.understanding.datasetDownloadTrainingTraceableJsonl')}
+										</a>
 										{#if understanding.scope.scope_type === 'goal'}
 											<a href={collectionDatasetDownloadUrl('json', 'training_ready')} download>
 												{$t('research.understanding.datasetDownloadCollectionTrainingJson')}
@@ -3673,6 +3676,11 @@
 											<a href={collectionDatasetDownloadUrl('messages_jsonl', 'training_ready')} download>
 												{$t(
 													'research.understanding.datasetDownloadCollectionTrainingMessagesJsonl'
+												)}
+											</a>
+											<a href={collectionDatasetDownloadUrl('training_jsonl', 'training_ready')} download>
+												{$t(
+													'research.understanding.datasetDownloadCollectionTrainingTraceableJsonl'
 												)}
 											</a>
 										{/if}

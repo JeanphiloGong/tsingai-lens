@@ -30,12 +30,42 @@ const {
 	normalizeCollectionAggregation,
 	normalizeEvidenceBackedValue,
 	normalizeObjectiveResearchView,
-	normalizePaperAggregation
+	normalizePaperAggregation,
+	researchUnderstandingCollectionDatasetUrl,
+	researchUnderstandingDatasetUrl
 } = await import('./researchView');
 
 describe('research view shared helpers', () => {
 	beforeEach(() => {
 		requestJson.mockReset();
+	});
+
+	it('builds traceable training dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'training_ready'
+				},
+				'training_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=training_ready&format=training_jsonl'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'training_ready'
+				},
+				'training_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=training_ready&format=training_jsonl'
+		);
 	});
 
 	it('fetches collection and document research views through same-origin api paths', async () => {

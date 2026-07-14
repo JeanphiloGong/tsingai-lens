@@ -60,11 +60,14 @@ def _dataset_jsonl_response(
     response: ResearchUnderstandingDatasetResponse,
     *,
     messages_only: bool = False,
+    include_training_metadata: bool = False,
 ) -> Response:
     rows: list[dict[str, Any]]
     if messages_only:
         rows = [
-            {"messages": item.training_messages}
+            _training_jsonl_row(response.collection_id, item)
+            if include_training_metadata
+            else {"messages": item.training_messages}
             for item in response.items
             if item.training_messages
         ]
@@ -74,6 +77,44 @@ def _dataset_jsonl_response(
     if body:
         body += "\n"
     return Response(content=body, media_type="application/x-ndjson")
+
+
+def _training_jsonl_row(
+    collection_id: str,
+    item: Any,
+) -> dict[str, Any]:
+    target = item.expert_target or {}
+    prediction = item.system_prediction or {}
+    evidence_refs = item.training_evidence_refs or item.evidence_refs
+    return {
+        "messages": item.training_messages,
+        "metadata": {
+            "collection_id": collection_id,
+            "scope_type": item.scope_type,
+            "goal_id": item.scope_id if item.scope_type == "goal" else "",
+            "scope_id": item.scope_id,
+            "sample_id": item.sample_id,
+            "finding_id": item.finding_id,
+            "claim_id": item.claim_id or "",
+            "label_status": item.label_status,
+            "dataset_use_status": item.dataset_use_status,
+            "trace_status": item.trace_status,
+            "reviewer": _text(target.get("reviewer")),
+            "review_status": _text(target.get("review_status")),
+            "issue_type": _text(target.get("issue_type")),
+            "support_grade": _text(
+                target.get("support_grade") or prediction.get("support_grade")
+            ),
+            "generalization_status": _text(
+                target.get("generalization_status")
+                or prediction.get("generalization_status")
+            ),
+            "evidence_ref_ids": _strings(
+                target.get("evidence_ref_ids")
+                or [record.get("evidence_ref_id") for record in evidence_refs]
+            ),
+        },
+    }
 
 
 def _dataset_review_jsonl_response(
@@ -464,6 +505,12 @@ async def export_research_understanding_dataset(
         return _dataset_jsonl_response(response)
     if format == "messages_jsonl":
         return _dataset_jsonl_response(response, messages_only=True)
+    if format == "training_jsonl":
+        return _dataset_jsonl_response(
+            response,
+            messages_only=True,
+            include_training_metadata=True,
+        )
     if format == "review_jsonl":
         return _dataset_review_jsonl_response(response)
     return response
@@ -493,6 +540,12 @@ async def export_collection_research_understanding_dataset(
         return _dataset_jsonl_response(response)
     if format == "messages_jsonl":
         return _dataset_jsonl_response(response, messages_only=True)
+    if format == "training_jsonl":
+        return _dataset_jsonl_response(
+            response,
+            messages_only=True,
+            include_training_metadata=True,
+        )
     if format == "review_jsonl":
         return _dataset_review_jsonl_response(response)
     return response

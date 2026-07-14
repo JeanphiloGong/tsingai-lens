@@ -8,6 +8,8 @@ from pathlib import Path
 import sys
 from typing import Any
 from urllib.parse import urlencode
+from urllib import request as request_url
+from urllib.error import HTTPError, URLError
 
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -117,13 +119,14 @@ def check_goal_expert_loop(
         api_base_url=api_base_url,
         require_training_ready=require_all_training_ready,
     )
+    runtime_contract = _runtime_contract_layer(api_base_url)
     layers = {
         "expert_review": _expert_review_layer(findings),
         "dataset_accumulation": _dataset_layer(
             dataset,
             require_all_training_ready=require_all_training_ready,
         ),
-        "experiment_design": _experiment_layer(dataset),
+        "experiment_design": _experiment_layer(dataset, runtime_contract),
     }
     goals = _goal_rollup(findings, dataset, collection_id=collection_id)
     completion = _completion_summary(goals)
@@ -205,21 +208,102 @@ def _dataset_layer(
     }
 
 
-def _experiment_layer(dataset: dict[str, Any]) -> dict[str, Any]:
+def _experiment_layer(
+    dataset: dict[str, Any],
+    runtime_contract: dict[str, Any],
+) -> dict[str, Any]:
     goals = _mapping_list(dataset.get("goals"))
     eligible_goal_ids = [
         str(goal.get("goal_id"))
         for goal in goals
         if int(goal.get("training_message_ready_count") or 0) > 0
     ]
+    runtime_status = _text(runtime_contract.get("status")) or "not_checked"
+    runtime_ready = runtime_status in {"pass", "not_checked"}
     return {
-        "status": "pass" if eligible_goal_ids else "fail",
+        "status": "pass" if eligible_goal_ids and runtime_ready else "fail",
         "eligible_goal_ids": eligible_goal_ids,
+        "runtime_contract": runtime_contract,
         "requirement": (
             "At least one goal has training-ready, message-ready findings that "
-            "Goal Copilot can use for traceable protocol drafts."
+            "Goal Copilot can use for traceable protocol drafts, and the running "
+            "API can save goal-scoped experiment plans when --api-base-url is used."
         ),
     }
+
+
+def _runtime_contract_layer(api_base_url: str | None) -> dict[str, Any]:
+    if not api_base_url:
+        return {
+            "status": "not_checked",
+            "api_base_url": "",
+            "checks": [],
+            "requirement": "Pass --api-base-url to verify running API routes.",
+        }
+    base_url = api_base_url.rstrip("/")
+    try:
+        paths = _fetch_openapi_paths(base_url)
+    except RuntimeError as exc:
+        return {
+            "status": "fail",
+            "api_base_url": base_url,
+            "checks": [],
+            "error": str(exc),
+            "requirement": "Running API exposes goal experiment-plan routes.",
+        }
+    plan_list_path = (
+        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+    checks = [
+        {
+            "name": "list experiment plans",
+            "path": plan_list_path,
+            "method": "get",
+            "status": "pass"
+            if "get" in _mapping(paths.get(plan_list_path))
+            else "fail",
+        },
+        {
+            "name": "create experiment plan",
+            "path": plan_list_path,
+            "method": "post",
+            "status": "pass"
+            if "post" in _mapping(paths.get(plan_list_path))
+            else "fail",
+        },
+        {
+            "name": "update experiment plan",
+            "path": plan_detail_path,
+            "method": "patch",
+            "status": "pass"
+            if "patch" in _mapping(paths.get(plan_detail_path))
+            else "fail",
+        },
+    ]
+    return {
+        "status": "pass"
+        if all(check["status"] == "pass" for check in checks)
+        else "fail",
+        "api_base_url": base_url,
+        "checks": checks,
+        "requirement": "Running API exposes goal experiment-plan routes.",
+    }
+
+
+def _fetch_openapi_paths(api_base_url: str) -> dict[str, Any]:
+    request = request_url.Request(f"{api_base_url}/api/openapi.json", method="GET")
+    try:
+        with request_url.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+    except HTTPError as exc:
+        raise RuntimeError(f"GET /api/openapi.json failed: {exc.code} {exc.reason}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"GET /api/openapi.json failed: {exc.reason}") from exc
+    paths = _mapping(payload.get("paths"))
+    if not paths:
+        raise RuntimeError("GET /api/openapi.json returned no paths")
+    return paths
 
 
 def _goal_rollup(
@@ -400,6 +484,24 @@ def render_text_summary(summary: dict[str, Any]) -> str:
     for key, layer in _mapping(summary.get("layers")).items():
         layer_mapping = _mapping(layer)
         lines.append(f"- {key}: {layer_mapping.get('status')}")
+        if key == "experiment_design":
+            runtime_contract = _mapping(layer_mapping.get("runtime_contract"))
+            runtime_status = _text(runtime_contract.get("status"))
+            if runtime_status and runtime_status != "not_checked":
+                lines.append(f"  runtime contract: {runtime_status}")
+                runtime_error = _text(runtime_contract.get("error"))
+                if runtime_error:
+                    lines.append(f"  runtime error: {runtime_error}")
+                failed_checks = [
+                    check
+                    for check in _mapping_list(runtime_contract.get("checks"))
+                    if _text(check.get("status")) == "fail"
+                ]
+                for check in failed_checks:
+                    lines.append(
+                        "  missing route: "
+                        f"{_text(check.get('method')).upper()} {_text(check.get('path'))}"
+                    )
     lines.extend(
         [
             "",

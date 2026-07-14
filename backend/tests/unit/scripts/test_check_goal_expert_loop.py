@@ -126,6 +126,9 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     assert summary["layers"]["expert_review"]["status"] == "pass"
     assert summary["layers"]["dataset_accumulation"]["training_ready_goal_count"] == 1
     assert summary["layers"]["experiment_design"]["eligible_goal_ids"] == ["goal-1"]
+    assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == (
+        "not_checked"
+    )
     assert summary["remaining_work"] == {
         "review_candidate_count": 2,
         "goals_without_training_ready": ["goal-2"],
@@ -393,3 +396,113 @@ def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
     assert summary["status"] == "fail"
     assert summary["layers"]["dataset_accumulation"]["status"] == "fail"
     assert summary["layers"]["experiment_design"]["status"] == "fail"
+
+
+def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monkeypatch):
+    check = _load_goal_expert_loop_module()
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {
+                    "check_goal_dataset_quality": staticmethod(
+                        lambda **_: _completed_dataset_payload()
+                    )
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url: {
+            "/api/v1/collections/{collection_id}/goals/{goal_id}/analysis": {
+                "get": {}
+            }
+        },
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        api_base_url="http://localhost:5173",
+        require_complete=True,
+    )
+    text = check.render_text_summary(summary)
+
+    assert summary["status"] == "fail"
+    assert summary["completion_status"] == "complete"
+    assert summary["layers"]["experiment_design"]["status"] == "fail"
+    assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == "fail"
+    assert "runtime contract: fail" in text
+    assert (
+        "missing route: GET /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+        in text
+    )
+    assert (
+        "missing route: POST /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+        in text
+    )
+    assert (
+        "missing route: PATCH /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans/{plan_id}"
+        in text
+    )
+
+
+def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatch):
+    check = _load_goal_expert_loop_module()
+    plan_list_path = (
+        "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    )
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {
+                    "check_goal_dataset_quality": staticmethod(
+                        lambda **_: _completed_dataset_payload()
+                    )
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url: {
+            plan_list_path: {"get": {}, "post": {}},
+            plan_detail_path: {"patch": {}},
+        },
+    )
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        api_base_url="http://localhost:5173",
+        require_complete=True,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["completion_status"] == "complete"
+    assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == "pass"

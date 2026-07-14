@@ -312,6 +312,9 @@ finished.
 loop: each row includes the research question, review candidate count, the next
 action, and a frontend `href` that opens the goal review queue or
 training-ready export view.
+When `--api-base-url` is provided, the combined check also verifies that the
+running API exposes the goal-scoped experiment-plan list, create, and update
+routes required to save traceable protocol drafts.
 For a human-readable queue instead of the full JSON payload, run:
 
 ```bash

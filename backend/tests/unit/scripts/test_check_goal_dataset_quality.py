@@ -639,6 +639,66 @@ def test_render_decision_template_exports_editable_import_rows():
     }
 
 
+def test_review_exports_keep_table_review_prompt_out_of_training_target():
+    check = _load_goal_dataset_check_module()
+
+    review_statement = (
+        "Selected source table rows show: Scan speed 0.239 increased density "
+        "from 93.9 to 96.8. Expert review is required before treating this as "
+        "a material effect."
+    )
+    dataset = _dataset_payload(
+        item_overrides={
+            "dataset_use_status": "review_candidate",
+            "presentation_bucket": "review_queue",
+            "trace_status": "evidence_derived",
+            "system_prediction": {
+                "statement": review_statement,
+                "variables": ["scan speed"],
+                "mediators": [],
+                "outcomes": ["density"],
+                "direction": "condition-dependent",
+                "scope_summary": "SLM 316L",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "review_reasons": ["table_row_needs_expert_review"],
+            },
+            "review_action": {
+                "code": "review_table_rows",
+                "label": "review selected table rows before accepting or correcting",
+            },
+            "expert_target": {
+                "statement": review_statement,
+                "review_status": "correct",
+            },
+        }
+    )
+    packet = check.build_goal_review_packet(dataset, collection_id="col-1")
+    summary = {
+        "status": "pass",
+        "collection_id": "col-1",
+        "goals": [{"review_packet": packet}],
+    }
+
+    review_rows = [
+        json.loads(line) for line in check.render_review_jsonl_summary(summary).splitlines()
+    ]
+    decision_rows = [
+        json.loads(line)
+        for line in check.render_decision_template_summary(summary).splitlines()
+    ]
+
+    assert review_rows[0]["statement"] == review_statement
+    assert decision_rows[0]["statement"] == review_statement
+    assert (
+        review_rows[0]["suggested_target"]["statement"]
+        == "Selected source table rows show: Scan speed 0.239 increased density from 93.9 to 96.8."
+    )
+    assert decision_rows[0]["suggested_target"]["statement"] == review_rows[0][
+        "suggested_target"
+    ]["statement"]
+
+
 def test_render_agent_review_prompt_jsonl_exports_independent_review_tasks():
     check = _load_goal_dataset_check_module()
 

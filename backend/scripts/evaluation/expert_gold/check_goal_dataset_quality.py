@@ -41,6 +41,9 @@ REVIEW_RISK_FLAGS = {
     "check_mechanism_requirement": "Mechanism evidence may be missing; decide whether the final label needs mechanism support.",
     "resolve_conflict": "Conflicting direction; resolve evidence conflict before downstream use.",
 }
+TABLE_ROW_REVIEW_PROMPT = (
+    "Expert review is required before treating this as a material effect."
+)
 ACCEPTANCE_REVIEW_CHECKS = {
     "accept_as_paper_level": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
     "needs_cross_paper_confirmation": "Confirm the finding is only paper-level unless cross-paper evidence is present.",
@@ -527,7 +530,9 @@ def build_goal_review_packet(
                     "source": _text(expert_target.get("source")),
                     "review_status": _text(expert_target.get("review_status")),
                     "issue_type": _text(expert_target.get("issue_type")),
-                    "statement": _text(expert_target.get("statement")),
+                    "statement": _training_target_statement(
+                        _text(expert_target.get("statement"))
+                    ),
                     "note": _text(expert_target.get("note")),
                     "reviewer": _text(expert_target.get("reviewer")),
                 }
@@ -856,7 +861,7 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                     "curated_evidence_ref_ids": evidence_ref_ids,
                     "evidence": evidence_summary,
                     "suggested_target": {
-                        "statement": _text(
+                        "statement": _training_target_statement(
                             suggested.get("statement")
                             or candidate.get("statement")
                         ),
@@ -892,6 +897,16 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
                 }
             )
     return _jsonl(rows)
+
+
+def _training_target_statement(value: Any) -> str:
+    statement = _text(value)
+    if not statement:
+        return ""
+    return statement.replace(f" {TABLE_ROW_REVIEW_PROMPT}", "").replace(
+        TABLE_ROW_REVIEW_PROMPT,
+        "",
+    ).strip()
 
 
 def render_agent_review_prompt_jsonl_summary(summary: dict[str, Any]) -> str:

@@ -131,6 +131,78 @@ def _dataset_review_jsonl_response(
     return Response(content=body, media_type="application/x-ndjson")
 
 
+def _dataset_review_packet_response(
+    response: ResearchUnderstandingDatasetResponse,
+) -> Response:
+    rows = [
+        _review_jsonl_row(response.collection_id, item)
+        for item in response.items
+        if item.dataset_use_status == "review_candidate"
+    ]
+    lines = [
+        f"Lens review packet: {response.collection_id}",
+        f"Scope: {response.scope_type} {response.scope_id}",
+        f"Review candidates: {len(rows)}",
+        "",
+        REVIEW_INSTRUCTIONS,
+    ]
+    for index, row in enumerate(rows, start=1):
+        protocol_readiness = row["protocol_readiness"]
+        evidence_records = row["evidence"]
+        lines.extend(
+            [
+                "",
+                f"{index}. {_clip(row['statement'], 240)}",
+                (
+                    "   fields: "
+                    f"variables={_join(row['variables'])}; "
+                    f"outcomes={_join(row['outcomes'])}; "
+                    f"direction={row['direction'] or 'n/a'}"
+                ),
+                (
+                    "   status: "
+                    f"support={row['support_grade'] or 'n/a'}; "
+                    f"review={row['review_status'] or 'n/a'}; "
+                    f"trace={row['trace_status'] or 'n/a'}"
+                ),
+                f"   recommended action: {row['recommended_action'] or 'review evidence'}",
+                (
+                    "   protocol readiness: "
+                    f"{protocol_readiness.get('status') or 'n/a'}"
+                ),
+            ]
+        )
+        blocking_missing = _strings(protocol_readiness.get("blocking_missing"))
+        if blocking_missing:
+            lines.append(f"   protocol gaps: {_join(blocking_missing)}")
+        if row["review_reasons"]:
+            lines.append(f"   review reasons: {_join(row['review_reasons'])}")
+        if row["warnings"]:
+            lines.append(f"   warnings: {_join(row['warnings'])}")
+        if row["scope_summary"]:
+            lines.append(f"   scope: {_clip(row['scope_summary'], 220)}")
+        if row["finding_id"]:
+            lines.append(f"   finding_id: {row['finding_id']}")
+        if row["claim_id"]:
+            lines.append(f"   claim_id: {row['claim_id']}")
+        if evidence_records:
+            lines.append("   evidence:")
+            for evidence_index, evidence in enumerate(evidence_records, start=1):
+                label = evidence.get("label") or evidence.get("source_ref") or "source"
+                page = evidence.get("page")
+                page_text = f" / p. {page}" if page else ""
+                lines.extend(
+                    [
+                        f"     {evidence_index}. {label}{page_text}",
+                        f"        quote: {_clip(evidence.get('quote'), 360)}",
+                        f"        open: {evidence.get('href') or 'n/a'}",
+                    ]
+                )
+    if not rows:
+        lines.extend(["", "No review candidates found."])
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain")
+
+
 def _review_jsonl_row(
     collection_id: str,
     item: Any,
@@ -311,6 +383,19 @@ def _strings(value: Any) -> list[str]:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _join(value: Any) -> str:
+    items = value if isinstance(value, list) else []
+    text = ", ".join(_text(item) for item in items if _text(item))
+    return text or "n/a"
+
+
+def _clip(value: Any, limit: int) -> str:
+    text = _text(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 @router.post(
@@ -513,6 +598,8 @@ async def export_research_understanding_dataset(
         )
     if format == "review_jsonl":
         return _dataset_review_jsonl_response(response)
+    if format == "review_packet":
+        return _dataset_review_packet_response(response)
     return response
 
 
@@ -548,4 +635,6 @@ async def export_collection_research_understanding_dataset(
         )
     if format == "review_jsonl":
         return _dataset_review_jsonl_response(response)
+    if format == "review_packet":
+        return _dataset_review_packet_response(response)
     return response

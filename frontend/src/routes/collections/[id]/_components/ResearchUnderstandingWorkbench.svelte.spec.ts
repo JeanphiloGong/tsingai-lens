@@ -3114,6 +3114,21 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(reviewJsonlUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
 		expect(reviewJsonlUrl.searchParams.get('format')).toBe('review_jsonl');
 
+		const reviewPacketUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Review packet' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(reviewPacketUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(reviewPacketUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(reviewPacketUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(reviewPacketUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
+		expect(reviewPacketUrl.searchParams.get('format')).toBe('review_packet');
+
 		const datasetGetCall = fetchMock.mock.calls.find(([input, init]) => {
 			const url = requestUrl(input as string | URL | Request);
 			return (
@@ -3293,6 +3308,22 @@ describe('ResearchUnderstandingWorkbench', () => {
 			'review_candidate'
 		);
 		expect(collectionReviewJsonlUrl.searchParams.get('format')).toBe('review_jsonl');
+
+		const collectionReviewPacketUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection review packet' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionReviewPacketUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionReviewPacketUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionReviewPacketUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(collectionReviewPacketUrl.searchParams.get('format')).toBe('review_packet');
 	});
 
 	it('keeps collection review export visible when the current goal has no review candidates', async () => {

@@ -892,6 +892,46 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     }
 
 
+def test_research_understanding_dataset_route_exports_review_packet(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="review_packet",
+        )
+    )
+
+    assert response.media_type == "text/plain"
+    body = response.body.decode("utf-8")
+    assert "Lens review packet: col-1" in body
+    assert "Scope: goal goal-1" in body
+    assert "Review candidates: 1" in body
+    assert "Preheating improves ductility." in body
+    assert "recommended action: Accept as paper-level evidence" in body
+    assert "protocol readiness: ready_after_review" in body
+    assert "review reasons: single_paper_evidence" in body
+    assert "quote: Preheating increased ductility by 14%." in body
+    assert "open: /collections/col-1/documents/doc-1?source_ref=blk_1" in body
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
 def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
     item = SimpleNamespace(
         scope_type="goal",
@@ -1105,6 +1145,42 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
     assert line["action"] == "skip"
     assert line["protocol_readiness"]["status"] == "ready_after_review"
     assert line["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_review_packet(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="review_packet",
+        )
+    )
+
+    assert response.media_type == "text/plain"
+    body = response.body.decode("utf-8")
+    assert "Lens review packet: col-1" in body
+    assert "Scope: collection goal" in body
+    assert "Review candidates: 1" in body
+    assert "recommended action: Accept as paper-level evidence" in body
+    assert "quote: Preheating increased ductility by 14%." in body
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",

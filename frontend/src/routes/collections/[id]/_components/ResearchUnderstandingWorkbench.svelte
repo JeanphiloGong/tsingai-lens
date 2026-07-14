@@ -3733,6 +3733,9 @@
 										<a href={datasetDownloadUrl('review_jsonl', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadReviewJsonl')}
 										</a>
+										<a href={datasetDownloadUrl('review_packet', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadReviewPacket')}
+										</a>
 									{/if}
 									{#if understanding.scope.scope_type === 'goal'}
 										<a href={collectionDatasetDownloadUrl('json', 'review_candidate')} download>
@@ -3740,6 +3743,9 @@
 										</a>
 										<a href={collectionDatasetDownloadUrl('review_jsonl', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadCollectionReviewJsonl')}
+										</a>
+										<a href={collectionDatasetDownloadUrl('review_packet', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadCollectionReviewPacket')}
 										</a>
 									{/if}
 								</div>

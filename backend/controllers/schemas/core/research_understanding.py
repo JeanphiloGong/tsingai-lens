@@ -39,6 +39,7 @@ ResearchUnderstandingDatasetExportFormat = Literal[
     "messages_jsonl",
     "training_jsonl",
     "review_jsonl",
+    "review_packet",
 ]
 ResearchUnderstandingFeedbackIssueType = Literal[
     "none",

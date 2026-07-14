@@ -68,6 +68,34 @@ describe('research view shared helpers', () => {
 		);
 	});
 
+	it('builds review packet dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'review_packet'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=review_packet'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'review_packet'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=review_packet'
+		);
+	});
+
 	it('fetches collection and document research views through same-origin api paths', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',

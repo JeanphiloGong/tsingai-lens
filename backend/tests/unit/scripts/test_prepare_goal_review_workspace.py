@@ -161,6 +161,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "reviewed-findings.template.jsonl",
         "agent-review-prompts.jsonl",
         "review-dashboard.md",
+        "review-checklist.md",
         "dataset-readiness.md",
         "training-ready.messages.jsonl",
         "training-ready.dataset.jsonl",
@@ -184,6 +185,18 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "| Finding | Gate | Action | Note required | Evidence | Open |" in dashboard
     assert "accept blocked: table row alignment" in dashboard
     assert "Required: explain accepted paper-level scope." in dashboard
+    checklist = (workspace / "review-checklist.md").read_text(encoding="utf-8")
+    assert "# Lens Expert Review Checklist" in checklist
+    assert "### How does preheating affect ductility? (goal-1)" in checklist
+    assert (
+        "- `accept`: finding, variables, outcome, direction, scope, and cited "
+        "evidence all match."
+    ) in checklist
+    assert "Training unlock: one accepted or corrected finding" in checklist
+    assert "Finding id: `finding-1`" in checklist
+    assert "[open finding](/collections/col-1/goals/goal-1?finding_id=finding-1)" in checklist
+    assert "- [ ] Source link opens the cited paper/table/block." in checklist
+    assert "- [ ] Direction matches the cited result." in checklist
     readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
     assert "pending review candidates: 1" in readiness
     assert (
@@ -285,6 +298,28 @@ def test_render_review_dashboard_summarizes_goal_risks():
         "accept as paper-level | Required: explain accepted paper-level scope. | "
         "Paper A / p. 4 | [open](/collections/col-1/goals/goal-1?finding_id=finding-1) |"
     ) in dashboard
+
+
+def test_render_review_checklist_gives_expert_decision_steps():
+    module = _load_workspace_module()
+    summary = _summary()
+    summary["goals"][0]["question"] = "How does preheating affect ductility?"
+
+    checklist = module.render_review_checklist(summary)
+
+    assert "# Lens Expert Review Checklist" in checklist
+    assert "Review candidates: 1" in checklist
+    assert "- `reject`: evidence does not support the finding; set a concrete `issue_type`." in checklist
+    assert "### How does preheating affect ductility? (goal-1)" in checklist
+    assert "Training unlock: one accepted or corrected finding" in checklist
+    assert "#### 1. Preheating increased ductility." in checklist
+    assert "Finding id: `finding-1`" in checklist
+    assert "Gate: accept blocked: table row alignment" in checklist
+    assert "Recommended action: accept as paper-level" in checklist
+    assert "Note: Required: explain accepted paper-level scope." in checklist
+    assert "Evidence: Paper A / p. 4" in checklist
+    assert "- [ ] Evidence quote directly supports the finding." in checklist
+    assert "- [ ] Scope/context is narrow enough for downstream experiment design." in checklist
 
 
 def test_render_dataset_readiness_report_explains_partial_exports():

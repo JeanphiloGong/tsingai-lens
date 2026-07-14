@@ -169,6 +169,11 @@ def _write_workspace_files(
             "Short goal-by-goal review queue with risks and source links.",
         ),
         (
+            "review-checklist.md",
+            render_review_checklist(summary),
+            "Expert checklist for deciding accept, reject, correct, or skip.",
+        ),
+        (
             "dataset-readiness.md",
             render_dataset_readiness_report(summary),
             "Training export and protocol readiness by goal.",
@@ -342,6 +347,58 @@ def render_review_dashboard(summary: dict[str, Any]) -> str:
             )
         lines.append("")
     if len(lines) == 6:
+        lines.append("No review candidates found.")
+    return "\n".join(lines) + "\n"
+
+
+def render_review_checklist(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Lens Expert Review Checklist",
+        "",
+        f"Collection: {_text(summary.get('collection_id')) or 'n/a'}",
+        f"Review candidates: {_candidate_count(summary)}",
+        "",
+        "## Decision Rules",
+        "",
+        "- `accept`: finding, variables, outcome, direction, scope, and cited evidence all match.",
+        "- `reject`: evidence does not support the finding; set a concrete `issue_type`.",
+        "- `correct`: finding is partly right; fill `suggested_target.statement` and evidence refs.",
+        "- `skip`: row has not been checked by a human expert yet.",
+        "",
+        "## Review Queue",
+        "",
+    ]
+    goals = _mapping_list(summary.get("goals"))
+    if not goals:
+        lines.append("No goals found.")
+        return "\n".join(lines) + "\n"
+    has_candidates = False
+    for goal in goals:
+        packet = _mapping(goal.get("review_packet"))
+        candidates = _mapping_list(packet.get("candidates"))
+        if not candidates:
+            continue
+        has_candidates = True
+        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        question = _text(goal.get("question"))
+        review_url = _text(packet.get("review_url"))
+        lines.extend(
+            [
+                f"### {_goal_heading(goal_id, question)}",
+                "",
+                f"- Open goal review: {_markdown_link('open goal', review_url)}",
+                (
+                    "- Training unlock: one accepted or corrected finding with "
+                    "valid evidence can become a training-ready sample and a "
+                    "protocol design input."
+                ),
+                "",
+            ]
+        )
+        for index, candidate in enumerate(candidates, start=1):
+            lines.extend(_candidate_checklist_lines(index, candidate, review_url))
+            lines.append("")
+    if not has_candidates:
         lines.append("No review candidates found.")
     return "\n".join(lines) + "\n"
 
@@ -620,6 +677,48 @@ def _candidate_note_prompt(candidate: dict[str, Any]) -> str:
     return _text(candidate.get("expert_note_prompt")) or "required"
 
 
+def _candidate_checklist_lines(
+    index: int,
+    candidate: dict[str, Any],
+    review_url: str,
+) -> list[str]:
+    open_url = _text(candidate.get("open_url")) or review_url
+    lines = [
+        f"#### {index}. {_markdown_cell(_text(candidate.get('statement')), 180)}",
+        "",
+        f"- Finding id: `{_text(candidate.get('finding_id')) or 'n/a'}`",
+        f"- Open finding: {_markdown_link('open finding', open_url)}",
+        f"- Gate: {_candidate_gate_text(candidate)}",
+        f"- Recommended action: {_text(candidate.get('recommended_action')) or 'n/a'}",
+        f"- Note: {_candidate_note_prompt(candidate)}",
+        (
+            "- Fields: "
+            f"variables={_join_text_list(candidate.get('variables'))}; "
+            f"outcomes={_join_text_list(candidate.get('outcomes'))}; "
+            f"direction={_text(candidate.get('direction')) or 'n/a'}"
+        ),
+        f"- Scope: {_markdown_cell(_text(candidate.get('scope_summary')), 180)}",
+        f"- Evidence: {_evidence_label(candidate)}",
+    ]
+    review_reasons = _text_list(candidate.get("review_reasons"))
+    warnings = _text_list(candidate.get("warnings"))
+    if review_reasons:
+        lines.append(f"- Review reasons: {_join_text_list(review_reasons)}")
+    if warnings:
+        lines.append(f"- Warnings: {_join_text_list(warnings)}")
+    lines.extend(
+        [
+            "- Checks:",
+            "  - [ ] Source link opens the cited paper/table/block.",
+            "  - [ ] Evidence quote directly supports the finding.",
+            "  - [ ] Variable and outcome are not swapped or over-generalized.",
+            "  - [ ] Direction matches the cited result.",
+            "  - [ ] Scope/context is narrow enough for downstream experiment design.",
+        ]
+    )
+    return lines
+
+
 def _goal_heading(goal_id: str, question: str) -> str:
     if question:
         return f"{question} ({goal_id})"
@@ -748,6 +847,11 @@ def _text_list(value: Any) -> list[str]:
         if isinstance(value, list)
         else []
     )
+
+
+def _join_text_list(value: Any) -> str:
+    values = _text_list(value)
+    return ", ".join(values) if values else "n/a"
 
 
 if __name__ == "__main__":

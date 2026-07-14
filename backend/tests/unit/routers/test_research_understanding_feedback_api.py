@@ -1036,6 +1036,16 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
         "review_reasons": ["single_paper_evidence"],
         "protocol_blocking_missing": [],
         "curated_evidence_ref_ids": ["ev-1"],
+        "evidence": [
+            {
+                "evidence_ref_id": "ev-1",
+                "label": "P001 Section 3.2",
+                "source_ref": "blk_1",
+                "page": "9",
+                "quote": "Preheating increased ductility by 14%.",
+                "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+            }
+        ],
         "suggested_target": {
             "statement": "Preheating improves ductility by 14%.",
             "status": "limited",
@@ -1349,6 +1359,14 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     assert line["goal_id"] == "goal-1"
     assert line["action"] == "skip"
     assert line["curated_evidence_ref_ids"] == ["ev-1"]
+    assert line["evidence"][0] == {
+        "evidence_ref_id": "ev-1",
+        "label": "P001 Section 3.2",
+        "source_ref": "blk_1",
+        "page": "9",
+        "quote": "Preheating increased ductility by 14%.",
+        "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+    }
     assert line["suggested_target"]["evidence_ref_ids"] == ["ev-1"]
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {

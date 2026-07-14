@@ -176,6 +176,7 @@ def _decision_template_row(row: dict[str, Any]) -> dict[str, Any]:
             row["protocol_readiness"].get("blocking_missing")
         ),
         "curated_evidence_ref_ids": evidence_ref_ids,
+        "evidence": [_decision_template_evidence(record) for record in row["evidence"]],
         "suggested_target": {
             "statement": _text(suggested.get("statement") or row["statement"]),
             "status": _text(suggested.get("status")) or "limited",
@@ -339,6 +340,17 @@ def _review_evidence_record(record: dict[str, Any]) -> dict[str, str]:
         or _text(record.get("source_text"))
         or _text(record.get("training_source_text"))
         or _text(record.get("text")),
+    }
+
+
+def _decision_template_evidence(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "evidence_ref_id": _text(record.get("evidence_ref_id")),
+        "label": _text(record.get("label")),
+        "source_ref": _text(record.get("source_ref")),
+        "page": _text(record.get("page")),
+        "quote": _text(record.get("quote")),
+        "open": _short_review_href(record.get("href")),
     }
 
 

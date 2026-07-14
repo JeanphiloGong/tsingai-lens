@@ -251,8 +251,7 @@ frontend finding review entry, run:
 
 ```bash
 ./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py \
-  --collection-id <collection_id> \
-  --output-dir /tmp/lens-goal-review
+  --collection-id <collection_id>
 ```
 
 This creates one read-only handoff directory with `review-packet.txt`,
@@ -265,6 +264,8 @@ import labels or mutate collection data; it only packages the current Findings
 review queue, current training-ready exports, and error/risk statistics so an
 expert can inspect source links, see which goals are not yet training-ready,
 and fill explicit decisions.
+By default, the script creates a unique directory under `/tmp`; pass
+`--output-dir <empty_dir>` only when a fixed destination is required.
 
 To print the packet directly instead of preparing a workspace, run:
 

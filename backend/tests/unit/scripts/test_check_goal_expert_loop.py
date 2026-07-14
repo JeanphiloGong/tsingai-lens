@@ -292,12 +292,12 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "Next commands:" in text
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
-        "--collection-id col-1 --output-dir /tmp/lens-goal-review"
+        "--collection-id col-1"
         in text
     )
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/merge_agent_review_results.py "
-        "/tmp/lens-goal-review/reviewed-findings.template.jsonl "
+        "<workspace>/reviewed-findings.template.jsonl "
         "agent-review-results.jsonl --output-path agent-reviewed-findings.jsonl"
         in text
     )

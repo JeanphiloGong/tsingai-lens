@@ -6,7 +6,9 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any
+from uuid import uuid4
 
 
 DEFAULT_COLLECTION_ID = "col_0cc5013fdb3c"
@@ -48,8 +50,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        required=True,
-        help="Empty directory where review workspace files will be written.",
+        help=(
+            "Empty directory where review workspace files will be written. "
+            "Defaults to a unique directory under /tmp."
+        ),
     )
     return parser.parse_args()
 
@@ -60,7 +64,11 @@ def main() -> None:
         collection_id=args.collection_id,
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
         api_base_url=args.api_base_url,
-        output_dir=Path(args.output_dir),
+        output_dir=(
+            Path(args.output_dir)
+            if args.output_dir
+            else _default_output_dir(args.collection_id)
+        ),
     )
     print(render_text_summary(result))
     if result["status"] == "fail":
@@ -464,6 +472,17 @@ def _ensure_empty_output_dir(output_dir: Path) -> None:
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"output dir must be empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _default_output_dir(collection_id: str) -> Path:
+    safe_collection_id = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "_"
+        for char in collection_id
+    )[:48]
+    return (
+        Path(tempfile.gettempdir())
+        / f"lens-goal-review-{safe_collection_id or 'collection'}-{uuid4().hex[:8]}"
+    )
 
 
 def _load_dataset_quality_module():

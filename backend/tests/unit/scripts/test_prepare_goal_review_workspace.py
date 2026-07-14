@@ -199,6 +199,20 @@ def test_prepare_goal_review_workspace_refuses_non_empty_output_dir(tmp_path):
         raise AssertionError("expected non-empty output dir to fail")
 
 
+def test_default_output_dir_uses_unique_tmp_path(tmp_path, monkeypatch):
+    module = _load_workspace_module()
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    class FixedUuid:
+        hex = "abcdef1234567890"
+
+    monkeypatch.setattr(module, "uuid4", lambda: FixedUuid())
+
+    output_dir = module._default_output_dir("col:1/with spaces")
+
+    assert output_dir == tmp_path / "lens-goal-review-col_1_with_spaces-abcdef12"
+
+
 def test_render_text_summary_lists_next_review_steps(tmp_path):
     module = _load_workspace_module()
 

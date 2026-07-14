@@ -898,11 +898,11 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
     commands = [
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
-            f"--collection-id {collection_id} --output-dir /tmp/lens-goal-review"
+            f"--collection-id {collection_id}"
         ),
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/merge_agent_review_results.py "
-            "/tmp/lens-goal-review/reviewed-findings.template.jsonl "
+            "<workspace>/reviewed-findings.template.jsonl "
             "agent-review-results.jsonl --output-path agent-reviewed-findings.jsonl"
         ),
         (

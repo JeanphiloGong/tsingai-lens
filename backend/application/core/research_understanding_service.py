@@ -5169,6 +5169,14 @@ class ResearchUnderstandingService:
             for finding in review_queue_findings
         ]
         review_queue_findings = [
+            self._finding_with_coupled_energy_density_context(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
+            for finding in review_queue_findings
+        ]
+        review_queue_findings = [
             self._finding_with_preheating_table_comparison(
                 finding,
                 evidence_by_id=evidence_by_id,
@@ -7278,6 +7286,275 @@ class ResearchUnderstandingService:
         if baseline == 0:
             return None
         return abs(observed - baseline) / abs(baseline) * 100
+
+    def _finding_with_coupled_energy_density_context(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, Any]:
+        if not self._finding_has_only_table_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return dict(finding)
+        summary = _mapping(finding.get("comparison_summary"))
+        variable = self._display_axis_label(_text(summary.get("variable")))
+        if self._axis_key(variable) not in {
+            "hatch spacing",
+            "laser power",
+            "scan speed",
+        }:
+            return dict(finding)
+        coupled_values = self._finding_coupled_energy_density_values(
+            finding,
+            variable=variable,
+            summary=summary,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
+        )
+        if not coupled_values:
+            return dict(finding)
+
+        baseline = _mapping(summary.get("baseline"))
+        observed = _mapping(summary.get("observed"))
+        outcome = self._display_axis_label(_text(summary.get("outcome")))
+        controlled_conditions = _mapping_list(summary.get("controlled_conditions"))
+        condition_text = " and ".join(
+            f"{_text(item.get('axis'))} {_text(item.get('value'))}"
+            for item in controlled_conditions
+            if _text(item.get("axis")) and _text(item.get("value"))
+        )
+        condition_clause = f"under {condition_text}, " if condition_text else ""
+        baseline_axis = self._coupled_axis_display_value(
+            variable,
+            coupled_values["baseline_axis"],
+        )
+        observed_axis = self._coupled_axis_display_value(
+            variable,
+            coupled_values["observed_axis"],
+        )
+        baseline_energy = (
+            f"{coupled_values['baseline_energy_density']} J/mm3"
+        )
+        observed_energy = (
+            f"{coupled_values['observed_energy_density']} J/mm3"
+        )
+        statement = (
+            "Selected source table rows show a coupled parameter contrast: "
+            f"{condition_clause}{variable} changed from {baseline_axis} to "
+            f"{observed_axis} while energy density changed from "
+            f"{baseline_energy} to {observed_energy}; {outcome} changed from "
+            f"{_text(baseline.get('value'))} to {_text(observed.get('value'))}. "
+            f"The rows do not isolate the effect of {variable}."
+        )
+        updated = dict(finding)
+        updated["title"] = f"{variable} + energy density -> {outcome}"
+        updated["statement"] = statement
+        updated["variables"] = [variable, "energy density"]
+        updated["direction"] = "associated"
+        updated["comparison_summary"] = {
+            "variable": f"{variable} + energy density",
+            "direction": "associated",
+            "outcome": outcome,
+            "baseline": {
+                "label": (
+                    f"{variable} {baseline_axis}; energy density {baseline_energy}"
+                ),
+                "value": _text(baseline.get("value")) or "",
+            },
+            "observed": {
+                "label": (
+                    f"{variable} {observed_axis}; energy density {observed_energy}"
+                ),
+                "value": _text(observed.get("value")) or "",
+            },
+            "controlled_conditions": controlled_conditions,
+        }
+        updated["review_reasons"] = _dedupe_strings(
+            [
+                *_strings(updated.get("review_reasons")),
+                "coupled_energy_density_change",
+                "single_variable_effect_not_isolated",
+                "needs_expert_review",
+            ]
+        )
+        updated["warnings"] = _dedupe_strings(
+            [
+                *_strings(updated.get("warnings")),
+                "coupled_energy_density_change",
+                "single_variable_effect_not_isolated",
+            ]
+        )
+        updated["relation_chain"] = [
+            {
+                **segment,
+                "statement": statement,
+                "direction": "associated",
+            }
+            for segment in _mapping_list(finding.get("relation_chain"))
+        ]
+        return updated
+
+    def _finding_coupled_energy_density_values(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        variable: str,
+        summary: Mapping[str, Any],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, str]:
+        baseline = _mapping(summary.get("baseline"))
+        observed = _mapping(summary.get("observed"))
+        baseline_axis = _float_text(baseline.get("label"))
+        observed_axis = _float_text(observed.get("label"))
+        baseline_outcome = _float_text(baseline.get("value"))
+        observed_outcome = _float_text(observed.get("value"))
+        if None in {
+            baseline_axis,
+            observed_axis,
+            baseline_outcome,
+            observed_outcome,
+        }:
+            return {}
+
+        for ref_id in _strings(
+            _mapping(finding.get("evidence_bundle")).get("direct_result")
+        ):
+            ref = evidence_by_id.get(ref_id, {})
+            source_ref = _text(_locator_mapping(ref.get("locator")).get("source_ref"))
+            table = tables_by_id.get(source_ref or "")
+            if table is None:
+                continue
+            headers = [self._display_axis_label(header) for header in table.column_headers]
+            variable_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if self._axis_labels_match(variable, header)
+                ),
+                None,
+            )
+            energy_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if "energy density" in self._axis_key(header)
+                ),
+                None,
+            )
+            outcome = self._display_axis_label(_text(summary.get("outcome")))
+            outcome_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if "energy density" not in self._axis_key(header)
+                    and self._axis_labels_match(outcome, header)
+                ),
+                None,
+            )
+            if None in {variable_index, energy_index, outcome_index}:
+                continue
+            condition_indexes: list[tuple[int, str]] = []
+            for condition in _mapping_list(summary.get("controlled_conditions")):
+                condition_axis = self._display_axis_label(
+                    _text(condition.get("axis"))
+                )
+                condition_value = _text(condition.get("value")) or ""
+                condition_index = next(
+                    (
+                        index
+                        for index, header in enumerate(headers)
+                        if self._axis_labels_match(condition_axis, header)
+                    ),
+                    None,
+                )
+                if condition_index is not None and condition_value:
+                    condition_indexes.append((condition_index, condition_value))
+            required_index = max(
+                variable_index,
+                energy_index,
+                outcome_index,
+                *(index for index, _value in condition_indexes),
+            )
+            baseline_row = self._coupled_comparison_table_row(
+                table,
+                variable_index=variable_index,
+                outcome_index=outcome_index,
+                required_index=required_index,
+                variable_value=baseline_axis,
+                outcome_value=baseline_outcome,
+                condition_indexes=condition_indexes,
+            )
+            observed_row = self._coupled_comparison_table_row(
+                table,
+                variable_index=variable_index,
+                outcome_index=outcome_index,
+                required_index=required_index,
+                variable_value=observed_axis,
+                outcome_value=observed_outcome,
+                condition_indexes=condition_indexes,
+            )
+            if baseline_row is None or observed_row is None:
+                continue
+            baseline_energy = _numeric_text(baseline_row[energy_index])
+            observed_energy = _numeric_text(observed_row[energy_index])
+            if (
+                not baseline_energy
+                or not observed_energy
+                or _float_text(baseline_energy) == _float_text(observed_energy)
+            ):
+                continue
+            return {
+                "baseline_axis": _numeric_text(baseline_row[variable_index]),
+                "observed_axis": _numeric_text(observed_row[variable_index]),
+                "baseline_energy_density": baseline_energy,
+                "observed_energy_density": observed_energy,
+            }
+        return {}
+
+    def _coupled_comparison_table_row(
+        self,
+        table: SourceTable,
+        *,
+        variable_index: int,
+        outcome_index: int,
+        required_index: int,
+        variable_value: float,
+        outcome_value: float,
+        condition_indexes: list[tuple[int, str]],
+    ) -> tuple[str, ...] | None:
+        for row in table.table_matrix:
+            if len(row) <= required_index:
+                continue
+            row_variable = _float_text(row[variable_index])
+            row_outcome = _float_text(row[outcome_index])
+            if row_variable != variable_value or row_outcome != outcome_value:
+                continue
+            if any(
+                not self._coupled_table_condition_matches(row[index], value)
+                for index, value in condition_indexes
+            ):
+                continue
+            return row
+        return None
+
+    def _coupled_table_condition_matches(self, cell: str, expected: str) -> bool:
+        expected_number = _float_text(expected)
+        cell_number = _float_text(cell)
+        if expected_number is not None and cell_number is not None:
+            return expected_number == cell_number
+        return cell.strip().casefold() == expected.strip().casefold()
+
+    def _coupled_axis_display_value(self, axis: str, value: str) -> str:
+        unit = {
+            "hatch spacing": "mm",
+            "laser power": "W",
+            "scan speed": "mm/s",
+        }.get(self._axis_key(axis), "")
+        return f"{value} {unit}".strip()
 
     def _finding_preheating_strength_relative_delta_from_table(
         self,

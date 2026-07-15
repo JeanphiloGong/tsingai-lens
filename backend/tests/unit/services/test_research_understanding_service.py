@@ -12110,6 +12110,166 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
     )
 
 
+def test_with_presentation_marks_energy_density_coupled_table_contrasts():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            tables=[
+                SourceTable(
+                    table_id="tbl-density",
+                    document_id="paper-density",
+                    table_order=2,
+                    caption_text="Process conditions and relative density.",
+                    caption_block_id=None,
+                    page=4,
+                    bbox=None,
+                    heading_path="Results",
+                    column_headers=(
+                        "Laser power (W)",
+                        "Scan speed (mm/s)",
+                        "Laser energy density (J/mm3)",
+                        "Heat treatment type",
+                        "Density (%)",
+                    ),
+                    table_matrix=(
+                        ("100", "100", "278", "-", "97.83"),
+                        ("100", "200", "139", "-", "91.84"),
+                        ("100", "200", "150", "-", "92.63"),
+                        ("100", "200", "139", "HIP", "92.63"),
+                        ("120", "200", "167", "HIP", "95.92"),
+                    ),
+                )
+            ],
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-density",
+                "goal_id": "goal-density",
+                "title": "How do laser power and scan speed affect density?",
+            },
+            "claims": [],
+            "relations": [
+                {
+                    "relation_id": "rel_scan_density",
+                    "relation_type": "decreases",
+                    "subject": "scan speed",
+                    "predicate": "decreases",
+                    "object": "density",
+                    "statement": (
+                        "Under laser power 100, scan speed 200 decreased density "
+                        "from 97.83 % (scan speed 100) to 91.84 %."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_scan_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_scan_density"],
+                    "warnings": ["deterministic_relation"],
+                },
+                {
+                    "relation_id": "rel_power_density",
+                    "relation_type": "increases",
+                    "subject": "laser power",
+                    "predicate": "increases",
+                    "object": "density",
+                    "statement": (
+                        "Under heat treatment type HIP and scan speed 200, laser "
+                        "power 120 increased density from 92.63 % (laser power "
+                        "100) to 95.92 %."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_power_density"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_power_density"],
+                    "warnings": ["deterministic_relation"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_scan_density",
+                    "source_kind": "table",
+                    "document_id": "paper-density",
+                    "label": "P001 Table 2",
+                    "locator": {"source_ref": "tbl-density"},
+                    "fact_ids": ["unit_scan_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": "",
+                },
+                {
+                    "evidence_ref_id": "evref_power_density",
+                    "source_kind": "table",
+                    "document_id": "paper-density",
+                    "label": "P001 Table 2",
+                    "locator": {"source_ref": "tbl-density"},
+                    "fact_ids": ["unit_power_density"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": "",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["stainless steel 316L"],
+                    "process_context": {
+                        "variable_process_axes": ["laser power", "scan speed"],
+                    },
+                    "property_scope": ["density"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    review_by_title = {
+        finding["title"]: finding
+        for finding in understanding["presentation"]["review_queue_findings"]
+    }
+    assert set(review_by_title) == {
+        "laser power + energy density -> density",
+        "scan speed + energy density -> density",
+    }
+    scan_finding = review_by_title["scan speed + energy density -> density"]
+    assert scan_finding["variables"] == ["scan speed", "energy density"]
+    assert scan_finding["direction"] == "associated"
+    assert scan_finding["statement"] == (
+        "Selected source table rows show a coupled parameter contrast: "
+        "under laser power 100, scan speed changed from 100 mm/s to 200 mm/s "
+        "while energy density changed from 278 J/mm3 to 139 J/mm3; density "
+        "changed from 97.83 % to 91.84 %. The rows do not isolate the effect "
+        "of scan speed."
+    )
+    assert scan_finding["comparison_summary"] == {
+        "variable": "scan speed + energy density",
+        "direction": "associated",
+        "outcome": "density",
+        "baseline": {
+            "label": "scan speed 100 mm/s; energy density 278 J/mm3",
+            "value": "97.83 %",
+        },
+        "observed": {
+            "label": "scan speed 200 mm/s; energy density 139 J/mm3",
+            "value": "91.84 %",
+        },
+        "controlled_conditions": [{"axis": "laser power", "value": "100"}],
+    }
+    power_finding = review_by_title["laser power + energy density -> density"]
+    assert power_finding["variables"] == ["laser power", "energy density"]
+    assert power_finding["direction"] == "associated"
+    assert "laser power changed from 100 W to 120 W" in power_finding["statement"]
+    assert "energy density changed from 139 J/mm3 to 167 J/mm3" in power_finding[
+        "statement"
+    ]
+    assert "coupled_energy_density_change" in power_finding["review_reasons"]
+    assert "single_variable_effect_not_isolated" in power_finding["review_reasons"]
+
+
 def test_with_presentation_filters_multi_axis_table_row_comparison_from_findings():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

@@ -4615,17 +4615,18 @@ class ResearchObjectiveService:
         sample_numbers: set[str],
         sample_text: str,
     ) -> int:
-        score = 0
+        candidate_numbers = {
+            token
+            for value in (*sample_context.values(), *process_context.values())
+            for token in self._objective_numeric_match_tokens(value)
+            if token not in {"1", "-1"}
+        }
+        score = len(candidate_numbers & sample_numbers)
         sample_tokens = self._objective_text_label_tokens(sample_text)
         for key, value in (*sample_context.items(), *process_context.items()):
             value_text = str(value).strip()
             if not value_text:
                 continue
-            for token in self._objective_numeric_match_tokens(value_text):
-                if token in {"1", "-1"}:
-                    continue
-                if token in sample_numbers:
-                    score += 1
             normalized_value = self._objective_match_text(value_text)
             if len(normalized_value) >= 3 and normalized_value in sample_text:
                 score += 1
@@ -5471,34 +5472,169 @@ class ResearchObjectiveService:
         objective_context: ObjectiveContext | None,
         allow_multi_axis: bool = False,
     ) -> str | None:
-        axis_pairs = (
-            (
-                self._objective_process_axis_values(
-                    current,
-                    objective_context=objective_context,
-                ),
-                self._objective_process_axis_values(
-                    baseline,
-                    objective_context=objective_context,
-                ),
-            ),
-            (
-                self._objective_sample_axis_values(current),
-                self._objective_sample_axis_values(baseline),
-            ),
-            (
-                self._objective_raw_process_axis_values(current),
-                self._objective_raw_process_axis_values(baseline),
-            ),
+        current_process_axes = self._objective_pairwise_process_axis_values(
+            current,
+            objective_context=objective_context,
         )
-        for current_axes, baseline_axes in axis_pairs:
-            comparison_axis = self._objective_single_changed_axis_from_values(
-                current_axes=current_axes,
-                baseline_axes=baseline_axes,
+        baseline_process_axes = self._objective_pairwise_process_axis_values(
+            baseline,
+            objective_context=objective_context,
+        )
+        changed_process_axes = self._objective_changed_axis_values(
+            current_axes=current_process_axes,
+            baseline_axes=baseline_process_axes,
+        )
+        if changed_process_axes:
+            return self._objective_comparison_axis_from_changed_process_axes(
+                changed_process_axes,
+                objective_context=objective_context,
                 allow_multi_axis=allow_multi_axis,
             )
-            if comparison_axis is not None:
-                return comparison_axis
+
+        return self._objective_single_changed_axis_from_values(
+            current_axes=self._objective_sample_axis_values(current),
+            baseline_axes=self._objective_sample_axis_values(baseline),
+            allow_multi_axis=allow_multi_axis,
+        )
+
+    def _objective_pairwise_process_axis_values(
+        self,
+        unit: ObjectiveEvidenceUnit,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> dict[str, str]:
+        goal_axes = (
+            tuple(objective_context.variable_process_axes)
+            if objective_context is not None
+            else ()
+        )
+        axis_values: dict[str, str] = {}
+        for raw_axis, value in unit.process_context.items():
+            value_text = str(value).strip()
+            if not value_text:
+                continue
+            axis_label = self._label_without_unit_suffix(
+                str(raw_axis).rsplit(">", 1)[-1]
+            )
+            if not axis_label or self._objective_pairwise_axis_is_response(
+                axis_label,
+                unit=unit,
+                objective_context=objective_context,
+            ):
+                continue
+            canonical_axis = next(
+                (
+                    axis
+                    for axis in goal_axes
+                    if self._axis_values_match(axis_label, axis)
+                    or self._axis_label_is_mentioned(axis_label, axis)
+                    or self._objective_preheating_condition_column_matches_axis(
+                        raw_axis,
+                        value_text,
+                        axis_key=self._normalize_property_label(axis) or "",
+                    )
+                ),
+                axis_label,
+            )
+            axis_key = self._normalize_property_label(canonical_axis)
+            if axis_key:
+                axis_values[axis_key] = value_text.casefold()
+        return axis_values
+
+    def _objective_pairwise_axis_is_response(
+        self,
+        axis: str,
+        *,
+        unit: ObjectiveEvidenceUnit,
+        objective_context: ObjectiveContext | None,
+    ) -> bool:
+        response_axes = {
+            *_OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES,
+            *_STRUCTURAL_PROPERTY_AXES,
+            *_MECHANICAL_PROPERTY_AXES,
+            *(
+                expanded
+                for expansions in _BROAD_PROPERTY_AXIS_EXPANSIONS.values()
+                for expanded in expansions
+            ),
+        }
+        unit_property = self._normalize_property_label(unit.property_normalized)
+        if unit_property:
+            response_axes.add(unit_property)
+        if objective_context is not None:
+            response_axes.update(self._objective_target_property_axes(objective_context))
+        return any(self._axis_values_match(axis, response) for response in response_axes)
+
+    def _objective_changed_axis_values(
+        self,
+        *,
+        current_axes: dict[str, str],
+        baseline_axes: dict[str, str],
+    ) -> list[str]:
+        return [
+            axis
+            for axis, current_value in current_axes.items()
+            if axis in baseline_axes and current_value != baseline_axes[axis]
+        ]
+
+    def _objective_comparison_axis_from_changed_process_axes(
+        self,
+        changed_axes: list[str],
+        *,
+        objective_context: ObjectiveContext | None,
+        allow_multi_axis: bool,
+    ) -> str | None:
+        energy_axes = [
+            axis
+            for axis in changed_axes
+            if "energy density" in axis or axis == "ved"
+        ]
+        independent_axes = [axis for axis in changed_axes if axis not in energy_axes]
+        candidate_axes = independent_axes or energy_axes
+        if len(candidate_axes) == 1:
+            return self._objective_goal_axis_label(
+                candidate_axes[0],
+                objective_context=objective_context,
+            )
+        if not allow_multi_axis:
+            return None
+        goal_labels = [
+            self._objective_goal_axis_label(
+                axis,
+                objective_context=objective_context,
+            )
+            for axis in candidate_axes
+        ]
+        if any(label is None for label in goal_labels):
+            return None
+        return ", ".join(str(label) for label in goal_labels)
+
+    def _objective_goal_axis_label(
+        self,
+        axis: str,
+        *,
+        objective_context: ObjectiveContext | None,
+    ) -> str | None:
+        if objective_context is None or not objective_context.variable_process_axes:
+            return axis
+        goal_label = next(
+            (
+                self._normalize_property_label(goal_axis) or goal_axis
+                for goal_axis in objective_context.variable_process_axes
+                if self._axis_values_match(axis, goal_axis)
+                or self._axis_label_is_mentioned(axis, goal_axis)
+            ),
+            None,
+        )
+        if goal_label is not None:
+            return goal_label
+        goal_keys = {
+            goal_key
+            for goal_axis in objective_context.variable_process_axes
+            if (goal_key := self._normalize_property_label(goal_axis))
+        }
+        if self._objective_process_column_axis_keys(axis) & goal_keys:
+            return axis
         return None
 
     def _objective_single_changed_axis_from_values(
@@ -5552,6 +5688,8 @@ class ResearchObjectiveService:
                 "sample_label",
                 "sample_no",
                 "sample_number",
+                "specimen",
+                "specimens",
             }:
                 continue
             axis_values[str(key).strip()] = value_text.casefold()

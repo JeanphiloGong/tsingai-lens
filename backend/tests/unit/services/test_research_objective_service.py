@@ -5730,6 +5730,75 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
     assert resolved_measurement.sample_context["sample_number"] == "11"
 
 
+def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    measurement = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-elongation-hip-140-100",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "measurement",
+            "property_normalized": "elongation",
+            "sample_context": {"Specimens": "HIP-SLM (140/100)"},
+            "value_payload": {
+                "source_value_text": "52.7 ( +/- 3.6)",
+                "value": 52.7,
+            },
+            "unit": "%",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+    wrong_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-hip-100-100",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {"Specimens": "100) HIP-SLM (100/"},
+            "process_context": {
+                "Laser energy density (J/mm3)": "278",
+                "Laser power (W)": "100",
+                "Scan speed (mm/s)": "100",
+                "Type of heat treatment": "HIP",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-process-hip-140-100",
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "unit_kind": "process_context",
+            "sample_context": {"Specimens": "100) HIP-SLM"},
+            "process_context": {
+                "Laser energy density (J/mm3)": "389",
+                "Laser power (W)": "140",
+                "Scan speed (mm/s)": "100",
+                "Type of heat treatment": "HIP",
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.8,
+        }
+    )
+
+    resolved_units = service._resolve_objective_evidence_unit_contexts(
+        (measurement, wrong_process_context, matching_process_context),
+    )
+
+    resolved_measurement = resolved_units[0]
+    assert resolved_measurement.process_context["Laser power (W)"] == "140"
+    assert resolved_measurement.process_context["Laser energy density (J/mm3)"] == "389"
+    assert resolved_measurement.resolved_condition == {
+        "context_unit_id": "oeu-process-hip-140-100",
+        "matched_sample_context": {"Specimens": "100) HIP-SLM"},
+    }
+
+
 def test_research_objective_service_prefers_descriptive_label_over_row_number_context(
     tmp_path,
 ):
@@ -6512,6 +6581,225 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
         ("3", "1", "laser power, scan speed"),
         ("2", "3", "laser power, scan speed"),
     }
+
+
+def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_changes(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "variable_process_axes": [
+                "scanning strategy",
+                "scanning speed",
+                "energy density",
+            ],
+            "target_property_axes": ["elongation"],
+        }
+    )
+
+    def elongation_unit(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        scan_speed: str,
+        hatch_spacing: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "elongation",
+                "sample_context": {"Sample number": sample_number},
+                "process_context": {
+                    "Energy density (J/mm3)": "150",
+                    "Hatch space (mm)": hatch_spacing,
+                    "Scan strategy": "A",
+                    "Scanning speed (mm/s)": scan_speed,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": "%",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            elongation_unit(
+                "oeu-elongation-5",
+                sample_number="5",
+                scan_speed="0.12",
+                hatch_spacing="0.111",
+                value=6.4,
+            ),
+            elongation_unit(
+                "oeu-elongation-14",
+                sample_number="14",
+                scan_speed="0.111",
+                hatch_spacing="0.12",
+                value=41.9,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert comparison_units == ()
+
+
+def test_research_objective_service_skips_pair_when_treatment_and_energy_input_change(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "variable_process_axes": ["energy density", "scanning speed"],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+
+    def yield_unit(
+        evidence_unit_id: str,
+        *,
+        specimen: str,
+        energy_density: str,
+        laser_power: str,
+        treatment: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-mechanical",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "yield strength",
+                "sample_context": {"Specimens": specimen},
+                "process_context": {
+                    "Laser energy density (J/mm3)": energy_density,
+                    "Laser power (W)": laser_power,
+                    "Scan speed (mm/s)": "200",
+                    "Type of heat treatment": treatment,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": "MPa",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            yield_unit(
+                "oeu-yield-as-slm",
+                specimen="as-SLM(140/200)",
+                energy_density="194",
+                laser_power="140",
+                treatment="-",
+                value=426.7,
+            ),
+            yield_unit(
+                "oeu-yield-hip-slm",
+                specimen="HIP-SLM(120/200)",
+                energy_density="167",
+                laser_power="120",
+                treatment="HIP",
+                value=265.1,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert comparison_units == ()
+
+
+def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "variable_process_axes": [
+                "energy density",
+                "laser power",
+                "scan speed",
+            ],
+            "target_property_axes": ["density"],
+        }
+    )
+
+    def density_unit(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        scan_speed: str,
+        energy_density: str,
+        density: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "density",
+                "sample_context": {"sample_number": sample_number},
+                "process_context": {
+                    "Laser energy density (J/mm3)": energy_density,
+                    "Laser power (W)": "100",
+                    "Scan speed (mm/s)": scan_speed,
+                    "Type of heat treatment": "-",
+                },
+                "value_payload": {
+                    "source_value_text": str(density),
+                    "value": density,
+                },
+                "unit": "%",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            density_unit(
+                "oeu-density-fast",
+                sample_number="2",
+                scan_speed="200",
+                energy_density="139",
+                density=91.84,
+            ),
+            density_unit(
+                "oeu-density-slow",
+                sample_number="1",
+                scan_speed="100",
+                energy_density="278",
+                density=97.83,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert len(comparison_units) == 1
+    assert comparison_units[0].value_payload["comparison_axis"] == "scan speed"
 
 
 def test_research_objective_service_generates_pairwise_from_sample_condition_axis(
@@ -7377,14 +7665,13 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
         for unit in fatigue_units
     } == {"L-VED": "50.8", "M-VED": "79.4", "H-VED": "84.3"}
     assert {
-        (
-            unit.value_payload["comparison_axis"],
-            unit.property_normalized,
-        )
+        (unit.value_payload["comparison_axis"], unit.property_normalized)
         for unit in comparison_units
-    } >= {
-        ("volumetric energy density", "fatigue strength"),
-        ("volumetric energy density", "max defect length"),
+    } == {
+        ("laser power, scanning speed", "fatigue strength"),
+        ("laser power, scanning speed", "max defect length"),
+        ("laser power, scanning speed, hatch spacing", "fatigue strength"),
+        ("laser power, scanning speed, hatch spacing", "max defect length"),
     }
 
 
@@ -7533,9 +7820,13 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
     assert {
         (unit.value_payload["comparison_axis"], unit.property_normalized)
         for unit in comparison_units
-    } >= {
-        ("volumetric energy density", "fatigue strength"),
-        ("volumetric energy density", "max defect length"),
+    } == {
+        ("laser power, scanning speed", "fatigue limit"),
+        ("laser power, scanning speed", "fatigue strength"),
+        ("laser power, scanning speed", "max defect length"),
+        ("laser power, scanning speed, hatch spacing", "fatigue limit"),
+        ("laser power, scanning speed, hatch spacing", "fatigue strength"),
+        ("laser power, scanning speed, hatch spacing", "max defect length"),
     }
 
 

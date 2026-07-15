@@ -11830,7 +11830,8 @@ def test_with_presentation_filters_multi_axis_table_row_comparison_from_findings
                     "predicate": "decreases",
                     "object": "density",
                     "statement": (
-                        "Scan speed 0.12 decreased density from 99.45 "
+                        "Under energy density 150 and scanning strategy A, "
+                        "scan speed 0.12 decreased density from 99.45 "
                         "(scan speed 0.111) to 97.14."
                     ),
                     "status": "supported",

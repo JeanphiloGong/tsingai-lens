@@ -167,7 +167,7 @@ def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate
             collection_id="col_1",
             goal_id="goal_1",
             title="Preheating validation matrix",
-            content="Run 25 C and 150 C LPBF 316L builds.",
+            content=_structured_protocol(),
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},
@@ -215,7 +215,7 @@ def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path
             collection_id="col_1",
             goal_id="goal_1",
             title="Preheating validation matrix",
-            content="Run 25 C and 150 C LPBF 316L builds.",
+            content=_structured_protocol(),
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},
@@ -239,7 +239,37 @@ def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
             collection_id="col_1",
             goal_id="goal_1",
             title="Preheating validation matrix",
-            content="Run 25 C and 150 C LPBF 316L builds.",
+            content=_structured_protocol(),
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
+def test_experiment_plan_service_rejects_plan_content_without_source_label(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        content=_structured_protocol(),
+        review_gate="protocol_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+
+    with pytest.raises(ValueError, match="does not cite a visible source label"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="Preheating validation matrix",
+            content=(
+                "Hypothesis: 150 C preheating improves ductility.\n"
+                "Variable matrix: compare 25 C and 150 C builds.\n"
+                "Measurements: elongation and microstructure.\n"
+                "Controls: same LPBF parameters except preheating.\n"
+                "Risks or limits: single-alloy validation."
+            ),
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},
@@ -264,7 +294,7 @@ def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_p
             collection_id="col_1",
             goal_id="goal_1",
             title="Preheating validation matrix",
-            content="Run 25 C and 150 C LPBF 316L builds.",
+            content=_structured_protocol(),
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},
@@ -290,7 +320,7 @@ def test_experiment_plan_service_rejects_used_evidence_without_source_link(tmp_p
             collection_id="col_1",
             goal_id="goal_1",
             title="Preheating validation matrix",
-            content="Run 25 C and 150 C LPBF 316L builds.",
+            content=_structured_protocol(),
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},

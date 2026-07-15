@@ -149,6 +149,12 @@ class ExperimentPlanService:
             raise ValueError(
                 "goal copilot answer does not cite a visible source label"
             )
+        if visible_source_labels and not any(
+            label in content for label in visible_source_labels
+        ):
+            raise ValueError(
+                "goal copilot answer does not cite a visible source label"
+            )
         linked_evidence_ids = {
             evidence_id
             for link in message.source_links

@@ -210,7 +210,8 @@ assistant message。该 message 必须是 `collection_grounded`，包含 evidenc
 `curated_research_findings_empty` 或 `goal_copilot_model_unavailable` warning。
 后端会从已验证的 message 回填权威 `source_links`，并在 `metadata` 中记录
 `source=goal_copilot`、`source_session_id`、`source_mode`、`used_evidence_ids` 和
-`review_gate=protocol_ready_findings`。不带 `source_message_id` 的请求视为专家手写草稿，可以直接保存。
+`review_gate=protocol_ready_findings`。保存的 `content` 必须保留可见 source label
+（例如 `[Source 1]`）和结构化实验方案小节；不带 `source_message_id` 的请求视为专家手写草稿，可以直接保存。
 
 `source_mode` 可选值：
 

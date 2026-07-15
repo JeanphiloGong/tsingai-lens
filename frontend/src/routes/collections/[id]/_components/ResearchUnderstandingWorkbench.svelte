@@ -114,10 +114,10 @@
 	const FINDING_MAIN_EVIDENCE_ROLES: FindingEvidenceRole[] = [
 		'direct_result',
 		'mechanism',
+		'condition_context',
 		'conflict'
 	];
 	const FINDING_SECONDARY_EVIDENCE_ROLES: FindingEvidenceRole[] = [
-		'condition_context',
 		'background',
 		'noise',
 		'uncategorized'

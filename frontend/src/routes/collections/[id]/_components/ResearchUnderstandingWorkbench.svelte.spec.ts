@@ -926,8 +926,8 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 		review_status: 'pending_review',
 		confidence: 0.88,
 		paper_count: 1,
-		evidence_count: 1,
-		evidence_ref_ids: ['ev_density_quote'],
+		evidence_count: 2,
+		evidence_ref_ids: ['ev_density_quote', 'ev_density_condition'],
 		context_ids: [
 			'ctx_density_objective',
 			'ctx_density_noisy_sem',
@@ -939,7 +939,7 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 		evidence_bundle: {
 			direct_result: ['ev_density_quote'],
 			mechanism: [],
-			condition_context: [],
+			condition_context: ['ev_density_condition'],
 			background: [],
 			conflict: [],
 			noise: [],
@@ -1002,6 +1002,26 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 					traceability_status: 'traceable',
 					evidence_role: null,
 					confidence: 0.45,
+					href: null
+				},
+				{
+					evidence_ref_id: 'ev_density_condition',
+					document_id: 'doc_1',
+					title: 'P003 Methods / p. 2',
+					source_label: 'P003 Methods',
+					source_kind: 'text_window',
+					source_ref: 'blk_density_methods',
+					block_type: 'paragraph',
+					heading_path: 'Methods / Processing parameters',
+					page: '2',
+					quote: 'All specimens used the same powder, layer thickness, and scan pattern.',
+					source_text:
+						'All specimens used the same powder, layer thickness, and scan pattern while VED was varied.',
+					value_summary: 'P003 Methods',
+					table_audit: null,
+					traceability_status: 'traceable',
+					evidence_role: 'condition_context',
+					confidence: 0.9,
 					href: null
 				}
 			],
@@ -1066,8 +1086,12 @@ function findingOnlyUnderstandingFixture(): ResearchUnderstanding {
 		}
 	};
 	const relationFinding = returnValue.presentation.findings[0];
-	relationFinding.evidence_count = 2;
-	relationFinding.evidence_ref_ids = ['ev_density_quote', 'ev_density_aim'];
+	relationFinding.evidence_count = 3;
+	relationFinding.evidence_ref_ids = [
+		'ev_density_quote',
+		'ev_density_condition',
+		'ev_density_aim'
+	];
 	relationFinding.evidence_bundle.uncategorized = ['ev_density_aim'];
 	relationFinding.context_ids = [...relationFinding.context_ids, 'ctx_microhardness_off_target'];
 	return returnValue;
@@ -4987,9 +5011,23 @@ describe('ResearchUnderstandingWorkbench', () => {
 			)
 			.toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Direct result evidence')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Condition context evidence')).toBeInTheDocument();
+		const conditionEvidenceCard = findingDetail
+			.getByText('P003 Methods')
+			.first()
+			.element()
+			.closest('.research-understanding-workbench__evidence');
+		expect(conditionEvidenceCard).toBeTruthy();
+		expect(conditionEvidenceCard?.textContent).toContain(
+			'All specimens used the same powder, layer thickness, and scan pattern.'
+		);
+		expect(
+			conditionEvidenceCard?.querySelector('a[href*="source_ref=blk_density_methods"]')
+		).toBeTruthy();
 		await expect.element(findingDetail.getByText('Uncategorized evidence')).not.toBeInTheDocument();
 		const densitySourceBlock = findingDetail
 			.getByText('Parsed source block', { exact: true })
+			.first()
 			.element()
 			.closest('details');
 		expect(densitySourceBlock).toBeTruthy();

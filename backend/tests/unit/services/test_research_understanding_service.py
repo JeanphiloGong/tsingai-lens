@@ -1997,10 +1997,12 @@ def test_objective_understanding_recovers_heat_treatment_density_evidence_withou
     assert finding["support_grade"] == "partial"
     assert finding["review_status"] == "needs_review"
     assert finding["statement"] == (
-        "Heat treatment or HIP increased density and reduced porosity. Heat "
-        "treatment also eliminated the as-SLM cellular microstructure and "
-        "dense dislocation structures through recrystallization."
+        "Heat treatments increased density. Short heat treatments also "
+        "eliminated the as-SLM cellular microstructure and dense dislocation "
+        "structures through recrystallization."
     )
+    assert "HIP" not in finding["statement"]
+    assert "porosity" not in finding["statement"]
     assert "removed porosity, cellular microstructure" not in finding["statement"]
     assert finding["evidence_bundle"]["direct_result"] == [
         "evref_recovered_heat_treatment_microstructure_mechanics_blk-heat-microstructure",
@@ -8229,9 +8231,9 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
 def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     statement = (
-        "Preheating the build plate increased the El% and yield strength of the "
-        "material by approximately 14% and 4%, respectively. This is attributed "
-        "to the microstructure and texture evolution."
+        "Preheating the build plate increased the El% and yield strength ( ı y) "
+        "of the material by approximately 14% and 4%, respectively. This is "
+        "attributed to the microstructure and texture evolution."
     )
     stored = ResearchUnderstanding.from_mapping(
         {
@@ -8331,6 +8333,16 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
         "texture evolution",
     ]
     assert finding["outcomes"] == ["ductility", "yield strength"]
+    assert finding["statement"] == (
+        "Build platform preheating increased elongation by approximately 14% "
+        "and yield strength by approximately 4%; the authors attributed both "
+        "changes to microstructure and texture evolution."
+    )
+    assert all(
+        segment["statement"] == finding["statement"]
+        for segment in finding["relation_chain"]
+    )
+    assert "ı" not in finding["statement"]
     assert not {
         "microstructure evolution",
         "texture evolution",

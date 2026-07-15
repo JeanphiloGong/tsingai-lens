@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from application.core import research_understanding_service as understanding_module
 from application.core.research_understanding_service import (
     ResearchUnderstandingService,
 )
@@ -7043,6 +7044,37 @@ def test_with_presentation_compacts_long_finding_scope_summary():
         "stainless steel 316L, VED, density, selective laser melting"
     )
     assert "+5 more" not in finding["scope_summary"]
+
+
+def test_finding_scope_excludes_unrelated_specific_treatment_condition():
+    scope_summary = understanding_module._compact_finding_scope_summary(
+        "stainless steel 316L, heat treatment type, density, SLM, HIP",
+        variables=["heat treatment type"],
+        outcomes=["density"],
+        statement=(
+            "Under laser power 120 and scan speed 280, heat treatment type "
+            "Furnace HT increased density from 90.04 % in the untreated "
+            "condition to 93.58 %."
+        ),
+    )
+
+    assert scope_summary == (
+        "stainless steel 316L, heat treatment type, density, SLM"
+    )
+
+    untreated_scope = understanding_module._compact_finding_scope_summary(
+        "stainless steel 316L, scan speed, density, SLM, HIP",
+        variables=["scan speed", "energy density"],
+        outcomes=["density"],
+        statement=(
+            "Under heat treatment type - and laser power 100, scan speed "
+            "changed from 100 mm/s to 200 mm/s."
+        ),
+    )
+
+    assert untreated_scope == (
+        "stainless steel 316L, scan speed, energy density, density, SLM"
+    )
 
 
 def test_with_presentation_filters_generic_finding_scope_tokens():

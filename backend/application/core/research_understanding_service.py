@@ -5965,6 +5965,13 @@ class ResearchUnderstandingService:
             primary_findings,
             review_queue_findings=review_queue_findings,
         )
+        for finding in (*primary_findings, *review_queue_findings):
+            finding["scope_summary"] = _compact_finding_scope_summary(
+                _text(finding.get("scope_summary")) or "",
+                variables=list(_strings(finding.get("variables"))),
+                outcomes=list(_strings(finding.get("outcomes"))),
+                statement=_text(finding.get("statement")) or "",
+            )
         visible_findings_by_id = {
             _text(finding.get("finding_id")): finding
             for finding in [*primary_findings, *review_queue_findings]
@@ -10490,6 +10497,7 @@ class ResearchUnderstandingService:
             _text(effect.get("context_summary")) or "",
             variables=display_variables,
             outcomes=outcomes,
+            statement=statement,
         )
         scope_summary = self._finding_scope_summary_with_direct_conditions(
             scope_summary,
@@ -14611,6 +14619,7 @@ def _compact_finding_scope_summary(
     *,
     variables: list[str],
     outcomes: list[str],
+    statement: str,
 ) -> str:
     raw = _text(raw_scope_summary) or ""
     if not raw:
@@ -14631,6 +14640,39 @@ def _compact_finding_scope_summary(
         for token in visible_tokens
         if not _is_generic_finding_scope_token(token)
     ]
+    normalized_statement = f" {_normalize_match_text(statement)} "
+    hip_markers = ("hip", "hot isostatic")
+    furnace_markers = ("furnace ht", "furnace heat")
+    statement_has_hip = any(marker in normalized_statement for marker in hip_markers)
+    statement_has_furnace = any(
+        marker in normalized_statement for marker in furnace_markers
+    )
+    statement_has_untreated = bool(
+        re.search(
+            r"\bheat treatment type\s*(?:-|none|untreated|as[- ]?slm)(?:\s|$)",
+            statement,
+            flags=re.IGNORECASE,
+        )
+    ) or any(
+        marker in normalized_statement
+        for marker in (" untreated ", " as slm ")
+    )
+    if statement_has_hip or statement_has_furnace or statement_has_untreated:
+        visible_tokens = [
+            token
+            for token in visible_tokens
+            if not (
+                any(marker in _normalize_match_text(token) for marker in hip_markers)
+                and not statement_has_hip
+            )
+            and not (
+                any(
+                    marker in _normalize_match_text(token)
+                    for marker in furnace_markers
+                )
+                and not statement_has_furnace
+            )
+        ]
     if not has_more_marker and len(visible_tokens) == len(raw_tokens):
         return raw
 

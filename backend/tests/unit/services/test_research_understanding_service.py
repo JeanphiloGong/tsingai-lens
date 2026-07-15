@@ -2454,7 +2454,25 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
         "strains during deformation."
     )
     service = ResearchUnderstandingService(
-        structured_extractor=_FakeSemanticExtractor(),
+        structured_extractor=_FakeSemanticExtractor(
+            [
+                {
+                    "relation_type": "comparison",
+                    "source_concept": "build platform preheating temperature",
+                    "target_concept": "elongation",
+                    "mediator_concepts": [],
+                    "direction": "increases",
+                    "statement": (
+                        "The source table reports elongation of 72% for the "
+                        "non-preheated condition and 82% for the preheated condition."
+                    ),
+                    "conditions": ["316L stainless steel"],
+                    "evidence_unit_ids": ["oeu-preheat-elongation"],
+                    "confidence": 0.9,
+                    "warnings": [],
+                }
+            ]
+        ),
         source_artifact_repository=_FakeSourceArtifactRepository(
             documents=[
                 SourceDocument(
@@ -2576,7 +2594,7 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     understanding = service.build_objective_understanding(payload)
 
     primary = understanding["presentation"]["primary_findings"]
-    assert primary[0]["title"] == "build platform preheating temperature -> ductility"
+    assert primary[0]["title"] == "build platform preheating temperature -> elongation"
     assert primary[0]["variables"] == ["build platform preheating temperature"]
     assert primary[0]["mediators"] == [
         "microstructure",
@@ -2584,15 +2602,34 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
         "cellular microstructure",
     ]
     assert primary[0]["statement"] == (
-        "Preheating the build platform to 150 °C increased ductility by 14%; "
-        "the authors attributed this increase to a more homogenized cellular "
-        "microstructure and GND-assisted plastic deformation."
+        "The source table reports elongation of 72% for the non-preheated "
+        "condition and 82% for the preheated condition. Preheating the build "
+        "platform to 150 °C increased ductility by 14%; the authors attributed "
+        "this increase to a more homogenized cellular microstructure and "
+        "GND-assisted plastic deformation."
     )
     assert "author_attributed_mechanism" in primary[0]["warnings"]
     assert "author_attributed_mechanism" in primary[0]["review_reasons"]
-    assert primary[0]["evidence_bundle"]["direct_result"] == [
+    direct_result_refs = primary[0]["evidence_bundle"]["direct_result"]
+    assert direct_result_refs[0] == (
+        "evref_recovered_preheating_ductility_blk-preheat-conclusion"
+    )
+    assert len(direct_result_refs) == 2
+    assert primary[0]["evidence_bundle"]["mechanism"] == [
         "evref_recovered_preheating_ductility_blk-preheat-conclusion"
     ]
+    assert primary[0]["comparison_summary"] == {
+        "variable": "build platform preheating temperature",
+        "direction": "increases",
+        "outcome": "elongation",
+        "baseline": {"label": "non-preheated", "value": "72%"},
+        "observed": {"label": "preheated", "value": "82%"},
+        "controlled_conditions": [],
+    }
+    assert all(
+        finding["title"] != "build platform preheating temperature -> elongation"
+        for finding in understanding["presentation"]["review_queue_findings"]
+    )
     evidence_by_id = {
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
@@ -2604,6 +2641,41 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     assert "GNDs" in recovered["quote"]
     assert "quote=" in (recovered["href"] or "")
     assert "150%20%C2%B0C%20increased" in (recovered["href"] or "")
+    table_ref = evidence_by_id[direct_result_refs[1]]
+    assert table_ref["source_ref"] == "tbl-preheat-tensile"
+    assert table_ref["page"] == "8"
+    assert "Non-preheated" in table_ref["quote"]
+    assert "Preheated" in table_ref["quote"]
+    assert "72" in table_ref["quote"]
+    assert "82" in table_ref["quote"]
+    misaligned_narrative = {
+        **primary[0],
+        "claim_id": "claim-unrelated-to-preheating-recovery",
+        "statement": "The treatment increased ductility by 30%.",
+        "outcomes": ["ductility"],
+        "evidence_bundle": {
+            **primary[0]["evidence_bundle"],
+            "direct_result": [recovered["evidence_ref_id"]],
+        },
+    }
+    table_candidate = {
+        **primary[0],
+        "claim_id": "claim-generic-table-comparison",
+        "statement": (
+            "The source table reports elongation of 72% for the non-preheated "
+            "condition and 82% for the preheated condition."
+        ),
+        "outcomes": ["elongation"],
+        "evidence_bundle": {
+            **primary[0]["evidence_bundle"],
+            "direct_result": [table_ref["evidence_ref_id"]],
+        },
+    }
+    assert not service._table_finding_matches_narrative_finding(
+        table_candidate,
+        narrative_finding=misaligned_narrative,
+        evidence_by_id=evidence_by_id,
+    )
 
 
 def test_objective_understanding_does_not_recover_mechanical_finding_for_corrosion_goal():
@@ -14821,7 +14893,10 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     )
     direct_refs = finding["evidence_bundle"]["direct_result"]
     mechanism_refs = finding["evidence_bundle"]["mechanism"]
-    assert mechanism_refs == direct_refs
+    assert mechanism_refs == [
+        "evref_recovered_scan_speed_density_microstructure_"
+        "blk-scan-speed-conclusion"
+    ]
     assert "missing_mechanism_evidence" not in finding["review_reasons"]
     evidence_by_id = {
         item["evidence_ref_id"]: item

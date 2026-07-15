@@ -5935,6 +5935,11 @@ class ResearchUnderstandingService:
             )
             for finding in review_queue_findings
         ]
+        primary_findings, review_queue_findings = self._merge_aligned_table_findings(
+            primary_findings,
+            review_queue_findings=review_queue_findings,
+            evidence_by_id=evidence_by_id,
+        )
         review_queue_findings = self._review_findings_without_low_magnitude_table_rows(
             review_queue_findings,
             evidence_by_id=evidence_by_id,
@@ -8514,6 +8519,168 @@ class ResearchUnderstandingService:
         ]
         return updated
 
+    def _merge_aligned_table_findings(
+        self,
+        primary_findings: list[dict[str, Any]],
+        *,
+        review_queue_findings: list[dict[str, Any]],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        merged_primary = list(primary_findings)
+        retained_review: list[dict[str, Any]] = []
+        for review_finding in review_queue_findings:
+            matching_indexes = [
+                index
+                for index, primary_finding in enumerate(merged_primary)
+                if self._table_finding_matches_narrative_finding(
+                    review_finding,
+                    narrative_finding=primary_finding,
+                    evidence_by_id=evidence_by_id,
+                )
+            ]
+            if len(matching_indexes) == 1:
+                index = matching_indexes[0]
+                merged_primary[index] = self._merged_aligned_table_finding(
+                    merged_primary[index],
+                    table_finding=review_finding,
+                    evidence_by_id=evidence_by_id,
+                )
+                continue
+            retained_review.append(review_finding)
+        return merged_primary, retained_review
+
+    def _table_finding_matches_narrative_finding(
+        self,
+        table_finding: Mapping[str, Any],
+        *,
+        narrative_finding: Mapping[str, Any],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> bool:
+        if not self._finding_has_only_table_direct_result(
+            table_finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if not self._finding_has_non_table_direct_result(
+            narrative_finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if not self._finding_document_ids(
+            table_finding,
+            evidence_by_id=evidence_by_id,
+        ) & self._finding_document_ids(
+            narrative_finding,
+            evidence_by_id=evidence_by_id,
+        ):
+            return False
+        if not any(
+            self._axis_labels_match(left, right)
+            for left in _strings(table_finding.get("variables"))
+            for right in _strings(narrative_finding.get("variables"))
+        ):
+            return False
+        if self._finding_outcome_keys(table_finding) != self._finding_outcome_keys(
+            narrative_finding
+        ):
+            return False
+        table_direction = self._finding_merge_direction(
+            _text(table_finding.get("direction")) or ""
+        )
+        narrative_direction = self._finding_merge_direction(
+            _text(narrative_finding.get("direction")) or ""
+        )
+        if (
+            table_direction
+            and narrative_direction
+            and table_direction != narrative_direction
+        ):
+            return False
+        comparison = _mapping(table_finding.get("comparison_summary"))
+        baseline = _float_text(_mapping(comparison.get("baseline")).get("value"))
+        observed = _float_text(_mapping(comparison.get("observed")).get("value"))
+        stated_change = self._finding_stated_relative_change(narrative_finding)
+        if (
+            baseline is None
+            or observed is None
+            or baseline == 0
+            or stated_change is None
+        ):
+            return False
+        calculated_change = abs(observed - baseline) / abs(baseline) * 100
+        tolerance = max(1.0, abs(stated_change) * 0.1)
+        return abs(calculated_change - abs(stated_change)) <= tolerance
+
+    def _finding_outcome_keys(self, finding: Mapping[str, Any]) -> set[str]:
+        keys: set[str] = set()
+        for outcome in _strings(finding.get("outcomes")):
+            normalized = _normalize_match_text(outcome)
+            if normalized in {"ductility", "elongation", "elongation to failure"}:
+                normalized = "elongation"
+            if normalized:
+                keys.add(normalized)
+        return keys
+
+    def _finding_stated_relative_change(
+        self,
+        finding: Mapping[str, Any],
+    ) -> float | None:
+        match = re.search(
+            r"\b(?:increas\w*|decreas\w*|reduc\w*|improv\w*)\b"
+            r"[^.;]{0,100}?\bby\s+(?:approximately\s+)?"
+            r"(?P<value>\d+(?:\.\d+)?)\s*%",
+            _text(finding.get("statement")) or "",
+            flags=re.IGNORECASE,
+        )
+        return float(match.group("value")) if match is not None else None
+
+    def _merged_aligned_table_finding(
+        self,
+        narrative_finding: Mapping[str, Any],
+        *,
+        table_finding: Mapping[str, Any],
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        merged = self._merge_presentation_finding(
+            narrative_finding,
+            table_finding,
+            evidence_by_id=evidence_by_id,
+        )
+        outcomes = _strings(table_finding.get("outcomes"))
+        outcome = _text(next(iter(outcomes), "")) or ""
+        variables = _strings(merged.get("variables"))
+        variable = _text(next(iter(variables), "")) or ""
+        statements = _dedupe_strings(
+            [
+                _text(table_finding.get("statement")) or "",
+                _text(narrative_finding.get("statement")) or "",
+            ]
+        )
+        merged["title"] = f"{variable} -> {outcome}"
+        merged["statement"] = " ".join(statements)
+        merged["outcomes"] = outcomes
+        merged["direction"] = _text(table_finding.get("direction")) or ""
+        merged["comparison_summary"] = _mapping(
+            table_finding.get("comparison_summary")
+        )
+        merged["scope_summary"] = re.sub(
+            r"\b(?:ductility|elongation(?:\s+to\s+failure)?)\b",
+            outcome,
+            _text(merged.get("scope_summary")) or "",
+            flags=re.IGNORECASE,
+        )
+        merged["relation_chain"] = [
+            {
+                **segment,
+                "outcome": outcome
+                if self._finding_outcome_keys({"outcomes": [segment.get("outcome")]})
+                == {"elongation"}
+                else segment.get("outcome"),
+            }
+            for segment in _mapping_list(merged.get("relation_chain"))
+        ]
+        return self._finding_with_refreshed_use_boundary(merged)
+
     def _finding_preheating_table_comparison_values(
         self,
         finding: Mapping[str, Any],
@@ -9908,6 +10075,11 @@ class ResearchUnderstandingService:
                 blocks_by_id=blocks_by_id,
             )
         )
+        mechanism_ref_ids = self._direct_evidence_mechanism_ref_ids(
+            evidence_by_id=evidence_by_id,
+            evidence_bundle=evidence_bundle,
+            blocks_by_id=blocks_by_id,
+        )
         normalized_outcomes = _normalize_match_text(" ".join(outcomes))
         if (
             "passive film" in _normalize_match_text(mechanism_source_text)
@@ -9924,7 +10096,15 @@ class ResearchUnderstandingService:
             evidence_bundle["mechanism"] = _dedupe_strings(
                 [
                     *evidence_bundle.get("mechanism", []),
-                    *evidence_bundle.get("direct_result", []),
+                    *[
+                        ref_id
+                        for ref_id in evidence_bundle.get("direct_result", [])
+                        if "passive film"
+                        in self._evidence_ref_source_text(
+                            evidence_by_id.get(ref_id, {}),
+                            blocks_by_id=blocks_by_id,
+                        )
+                    ],
                 ]
             )
         evidence_mediators = self._finding_mediators_from_direct_evidence(
@@ -9938,7 +10118,7 @@ class ResearchUnderstandingService:
             evidence_bundle["mechanism"] = _dedupe_strings(
                 [
                     *evidence_bundle.get("mechanism", []),
-                    *evidence_bundle.get("direct_result", []),
+                    *mechanism_ref_ids,
                 ]
             )
         display_variables = self._finding_display_variables(
@@ -11667,6 +11847,24 @@ class ResearchUnderstandingService:
         if " densification " in normalized:
             mediators.append("densification")
         return _dedupe_strings(mediators)
+
+    def _direct_evidence_mechanism_ref_ids(
+        self,
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        evidence_bundle: Mapping[str, list[str]],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> list[str]:
+        return [
+            ref_id
+            for ref_id in _strings(evidence_bundle.get("direct_result"))
+            if self._finding_mediators_from_direct_evidence(
+                self._evidence_ref_source_text(
+                    evidence_by_id.get(ref_id, {}),
+                    blocks_by_id=blocks_by_id,
+                )
+            )
+        ]
 
     def _finding_outcomes(
         self,

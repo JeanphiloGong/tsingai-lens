@@ -272,6 +272,8 @@ const translations: Record<Language, Translations> = {
 					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.',
 				sourceTraceRequired:
 					'This answer is limited because Lens could not verify a visible source citation. Review the findings and evidence before using it for a protocol.',
+				protocolContractInvalid:
+					'This draft failed the source/design contract and cannot be saved. Review the protocol-ready findings and regenerate it.',
 				sourceCitationRequired:
 					'Save is disabled until the answer names the visible source label, such as [Source 1].',
 				sourceLinkRequired:
@@ -3669,6 +3671,8 @@ const translations: Record<Language, Translations> = {
 				evidenceRequired: '该回答还没有引用用于方案的已复核证据，暂不能保存为实验方案。',
 				sourceTraceRequired:
 					'该回答因缺少可验证的可见来源引用而受限。请先检查 Findings 和证据，再用于实验方案。',
+				protocolContractInvalid:
+					'该草稿未通过来源事实与拟议设计边界校验，不能保存。请检查可生成方案的 Findings 后重新生成。',
 				sourceCitationRequired:
 					'该回答还没有写出可见来源标签，例如 [Source 1]，暂不能保存为实验方案。',
 				sourceLinkRequired: '每条已复核证据引用都需要可见来源链接，暂不能保存为实验方案。',

@@ -757,6 +757,72 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		).toBe(false);
 	});
 
+	it('explains when a protocol draft fails the source and design contract', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: null,
+						focused_goal_id: 'goal_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						message_id: 'msg_assistant_invalid_protocol_contract',
+						session_id: 'session_1',
+						role: 'assistant',
+						content:
+							'Lens could not verify the protocol draft contract. Review the protocol-ready findings and source evidence directly, then retry.',
+						answer:
+							'Lens could not verify the protocol draft contract. Review the protocol-ready findings and source evidence directly, then retry.',
+						source_mode: 'collection_limited',
+						used_evidence_ids: [],
+						warnings: ['goal_copilot_protocol_contract_invalid'],
+						links: {},
+						source_links: [],
+						created_at: '2026-07-13T00:01:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect.element(browserPage.getByText(/could not verify the protocol draft contract/)).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This draft failed the source/design contract and cannot be saved. Review the protocol-ready findings and regenerate it.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+	});
+
 	it('does not save grounded answers without evidence citations as experiment plans', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

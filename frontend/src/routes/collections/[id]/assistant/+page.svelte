@@ -489,6 +489,10 @@
 		return (message.warnings ?? []).includes('goal_copilot_missing_source_citation');
 	}
 
+	function invalidProtocolContract(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('goal_copilot_protocol_contract_invalid');
+	}
+
 	function hasEvidenceCitations(message: GoalSessionMessage) {
 		return (message.used_evidence_ids ?? []).length > 0;
 	}
@@ -817,6 +821,10 @@
 									{:else if needsCuratedFindings(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.reviewRequired')}
+										</p>
+									{:else if invalidProtocolContract(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.protocolContractInvalid')}
 										</p>
 									{:else if missingSourceCitation(message)}
 										<p class="review-required-note">

@@ -2584,10 +2584,12 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
         "cellular microstructure",
     ]
     assert primary[0]["statement"] == (
-        "Preheating the build platform to 150 °C increased ductility by 14%, "
-        "through a more homogenized cellular microstructure and GND-assisted "
-        "plastic deformation."
+        "Preheating the build platform to 150 °C increased ductility by 14%; "
+        "the authors attributed this increase to a more homogenized cellular "
+        "microstructure and GND-assisted plastic deformation."
     )
+    assert "author_attributed_mechanism" in primary[0]["warnings"]
+    assert "author_attributed_mechanism" in primary[0]["review_reasons"]
     assert primary[0]["evidence_bundle"]["direct_result"] == [
         "evref_recovered_preheating_ductility_blk-preheat-conclusion"
     ]

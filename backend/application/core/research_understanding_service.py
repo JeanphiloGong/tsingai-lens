@@ -2847,8 +2847,8 @@ class ResearchUnderstandingService:
         quote = _short_text(_text(block.text), limit=420)
         statement = (
             "Preheating the build platform to 150 °C increased ductility by "
-            "14%, through a more homogenized cellular microstructure and "
-            "GND-assisted plastic deformation."
+            "14%; the authors attributed this increase to a more homogenized "
+            "cellular microstructure and GND-assisted plastic deformation."
         )
         material_scope = _strings(
             objective_context.get("material_scope") or objective.get("material_scope")
@@ -2906,14 +2906,14 @@ class ResearchUnderstandingService:
                 "evidence_ref_ids": [evidence_ref_id],
                 "context_ids": [context_id],
                 "source_object_ids": [claim_id],
-                "warnings": [],
+                "warnings": ["author_attributed_mechanism"],
             },
             "relation": {
                 "relation_id": relation_id,
-                "relation_type": "improves",
+                "relation_type": "increases",
                 "subject": "build platform preheating temperature",
                 "predicate": "increases",
-                "object": "microstructure -> GNDs -> ductility",
+                "object": "ductility",
                 "statement": statement,
                 "conditions": material_scope,
                 "status": "supported",
@@ -2921,7 +2921,10 @@ class ResearchUnderstandingService:
                 "evidence_ref_ids": [evidence_ref_id],
                 "context_ids": [context_id],
                 "source_object_ids": [claim_id],
-                "warnings": ["recovered_from_source_text"],
+                "warnings": [
+                    "recovered_from_source_text",
+                    "author_attributed_mechanism",
+                ],
             },
         }
 
@@ -11303,6 +11306,18 @@ class ResearchUnderstandingService:
         if " texture evolution " in normalized:
             mediators.append("texture evolution")
         if (
+            " homogenized microstructure " in normalized
+            or " homogenised microstructure " in normalized
+        ):
+            mediators.append("microstructure")
+        if (
+            " gnd " in normalized
+            or " gnds " in normalized
+            or " geometrically necessary dislocations " in normalized
+            or " geometry necessary dislocations " in normalized
+        ):
+            mediators.append("GNDs")
+        if (
             " cellular microstructure " in normalized
             or " cellular microstructures " in normalized
             or " cellular structure " in normalized
@@ -12135,6 +12150,8 @@ class ResearchUnderstandingService:
             reasons.append("paper_level_association")
         if "process_conditions_not_isolated" in _strings(effect.get("warnings")):
             reasons.append("process_conditions_not_isolated")
+        if "author_attributed_mechanism" in _strings(effect.get("warnings")):
+            reasons.append("author_attributed_mechanism")
         if (
             support_grade == "partial"
             and self._finding_has_direct_support(evidence_bundle)

@@ -48,6 +48,7 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["ductility"],
             ["150", "°c"],
             ["14"],
+            ["the authors attributed"],
         ],
         "evidence_terms": [
             ["preheating", "build platform"],
@@ -239,6 +240,9 @@ GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
 }
 GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
+    "goal_0914003ad572": [
+        ["author_attributed_mechanism"],
+    ],
     "goal_399171646354": [
         ["paper_level_association"],
         ["process_conditions_not_isolated"],
@@ -981,7 +985,7 @@ def evaluate_goal_analysis_payload(
         checks.append(
             _check(
                 goal_id,
-                "primary findings preserve model-validation review warning",
+                "primary findings preserve required expert review warnings",
                 not missing_primary_warning_terms,
                 _missing_terms_detail(missing_primary_warning_terms),
             )

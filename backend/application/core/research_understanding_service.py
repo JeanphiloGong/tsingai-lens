@@ -8485,17 +8485,82 @@ class ResearchUnderstandingService:
             or " table-row comparison changes " in normalized
         )
 
-    def _review_candidate_table_row_statement(self, statement: str) -> str:
+    def _review_candidate_table_row_statement(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        statement: str,
+    ) -> str:
         text = (_text(statement) or "").strip()
         if not text:
             return ""
-        if text.startswith("Selected source table rows show:"):
+        normalized = f" {_normalize_match_text(text)} "
+        if " do not isolate " in normalized or " does not isolate " in normalized:
             return text
-        if text[-1] not in ".!?":
-            text = f"{text}."
+        summary = _mapping(finding.get("comparison_summary"))
+        baseline = _mapping(summary.get("baseline"))
+        observed = _mapping(summary.get("observed"))
+        outcome = _text(summary.get("outcome"))
+        baseline_label = _text(baseline.get("label"))
+        baseline_value = _text(baseline.get("value"))
+        observed_label = _text(observed.get("label"))
+        observed_value = _text(observed.get("value"))
+        if all(
+            (
+                outcome,
+                baseline_label,
+                baseline_value,
+                observed_label,
+                observed_value,
+            )
+        ):
+            conditions = [
+                f"{axis} {value}"
+                for item in _mapping_list(summary.get("controlled_conditions"))
+                if (axis := _text(item.get("axis")))
+                and (value := _text(item.get("value")))
+            ]
+            fixed_clause = (
+                f", with {' and '.join(conditions)} fixed" if conditions else ""
+            )
+            return (
+                f"Selected source table rows report {outcome} of {observed_value} "
+                f"for {observed_label}, versus {baseline_value} for "
+                f"{baseline_label}{fixed_clause}. This row-level contrast is "
+                "condition-specific and does not by itself isolate a material "
+                "effect."
+            )
+        parsed = re.match(
+            r"^(?P<condition>(?:Under|With)\s+.+?,\s+)?"
+            r"(?P<variable>.+?)\s+"
+            r"(?:increased|decreased|reduced|improved|raised|lowered)\s+"
+            r"(?P<outcome>.+?)\s+from\s+(?P<baseline>.+?)\s+to\s+"
+            r"(?P<observed>.+?)[.!?]?$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if parsed:
+            condition = (_text(parsed.group("condition")) or "").rstrip(", ")
+            if condition:
+                condition = f" {condition[0].lower()}{condition[1:]}"
+            variable = re.sub(
+                r"^changing\s+",
+                "",
+                _text(parsed.group("variable")) or "",
+                flags=re.IGNORECASE,
+            )
+            return (
+                f"Selected source table rows report {_text(parsed.group('outcome'))} "
+                f"values of {_text(parsed.group('baseline'))} and "
+                f"{_text(parsed.group('observed'))} for the stated {variable} "
+                f"comparison{condition}. This row-level contrast is "
+                "condition-specific and does not by itself isolate a material "
+                "effect."
+            )
         return (
-            f"Selected source table rows show: {text} "
-            "Expert review is required before treating this as a material effect."
+            "Selected source table rows contain a numeric contrast, but its "
+            "structured baseline or observed condition is incomplete. Expert "
+            "review is required before treating it as a material effect."
         )
 
     def _finding_table_row_statement_text(self, finding: Mapping[str, Any]) -> str:
@@ -8639,12 +8704,16 @@ class ResearchUnderstandingService:
             evidence_by_id=evidence_by_id,
             tables_by_id=tables_by_id,
         )
-        return self._promote_uncovered_goal_axis_findings(
+        primary, review_queue = self._promote_uncovered_goal_axis_findings(
             primary,
             review_queue,
             evidence_by_id=evidence_by_id,
             goal_axes=goal_axes,
         )
+        return primary, [
+            self._finding_with_review_candidate_table_semantics(finding)
+            for finding in review_queue
+        ]
 
     def _review_findings_without_covered_ved_rows(
         self,
@@ -9789,37 +9858,6 @@ class ResearchUnderstandingService:
         updated = dict(finding)
         statement = self._finding_statement_text(updated)
         reasons = [reason]
-        table_row_statement = self._finding_table_row_statement_text(updated)
-        if table_row_statement:
-            review_statement = self._review_candidate_table_row_statement(
-                table_row_statement
-            )
-            updated["statement"] = review_statement
-            updated["direction"] = "condition-dependent"
-            updated["relation_chain"] = [
-                {
-                    **segment,
-                    **(
-                        {
-                            "direction": "condition-dependent",
-                            "statement": self._review_candidate_table_row_statement(
-                                _text(segment.get("statement")) or ""
-                            ),
-                        }
-                        if self._finding_statement_is_table_row_comparison(
-                            _text(segment.get("statement")) or ""
-                        )
-                        else {}
-                    ),
-                }
-                for segment in _mapping_list(updated.get("relation_chain"))
-            ]
-            summary = _mapping(updated.get("comparison_summary"))
-            if summary:
-                updated["comparison_summary"] = {
-                    **summary,
-                    "direction": "condition-dependent",
-                }
         if self._finding_statement_is_confounded_table_row_comparison(statement):
             reasons.append("confounded_table_row_comparison")
             updated["title"] = self._finding_title(
@@ -9858,6 +9896,44 @@ class ResearchUnderstandingService:
             paper_count=int(updated.get("paper_count") or 0),
             evidence_bundle=_mapping(updated.get("evidence_bundle")),
         )
+        return updated
+
+    def _finding_with_review_candidate_table_semantics(
+        self,
+        finding: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        updated = dict(finding)
+        table_row_statement = self._finding_table_row_statement_text(updated)
+        if not table_row_statement:
+            return updated
+        review_statement = self._review_candidate_table_row_statement(
+            updated,
+            statement=table_row_statement,
+        )
+        updated["statement"] = review_statement
+        updated["direction"] = "condition-dependent"
+        updated["relation_chain"] = [
+            {
+                **segment,
+                **(
+                    {
+                        "direction": "condition-dependent",
+                        "statement": review_statement,
+                    }
+                    if self._finding_statement_is_table_row_comparison(
+                        _text(segment.get("statement")) or ""
+                    )
+                    else {}
+                ),
+            }
+            for segment in _mapping_list(updated.get("relation_chain"))
+        ]
+        summary = _mapping(updated.get("comparison_summary"))
+        if summary:
+            updated["comparison_summary"] = {
+                **summary,
+                "direction": "condition-dependent",
+            }
         return updated
 
     def _promote_uncovered_goal_axis_findings(

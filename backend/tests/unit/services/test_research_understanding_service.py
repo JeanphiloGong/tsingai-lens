@@ -4791,10 +4791,10 @@ def test_objective_understanding_keeps_comparison_axis_as_relation_subject():
     finding = _presentation_finding_by_title(understanding, "laser power -> density")
     assert finding["title"] == "laser power -> density"
     assert finding["statement"] == (
-        "Selected source table rows show: "
-        "With scan speed 100 and heat treatment type Furnace HT, changing "
-        "laser power from 120 to 140 decreased density from 98.45 % to 93.33 %. "
-        "Expert review is required before treating this as a material effect."
+        "Selected source table rows report density of 93.33 % for laser "
+        "power=140, versus 98.45 % for laser power=120, with scan speed 100 "
+        "and heat treatment type Furnace HT fixed. This row-level contrast is "
+        "condition-specific and does not by itself isolate a material effect."
     )
     assert finding["comparison_summary"] == {
         "variable": "laser power",
@@ -4925,10 +4925,10 @@ def test_with_presentation_keeps_controlled_axis_out_of_variable_title():
     assert finding["title"] == "volumetric energy density -> fatigue strength"
     assert finding["variables"] == ["volumetric energy density"]
     assert finding["statement"] == (
-        "Selected source table rows show: "
-        "With layer thickness 30, changing volumetric energy density "
-        "from 50.8 to 79.4 increased fatigue strength from 340 MPa to 450 MPa. "
-        "Expert review is required before treating this as a material effect."
+        "Selected source table rows report fatigue strength of 450 MPa for "
+        "volumetric energy density=79.4, versus 340 MPa for volumetric energy "
+        "density=50.8, with layer thickness 30 fixed. This row-level contrast "
+        "is condition-specific and does not by itself isolate a material effect."
     )
     assert finding["comparison_summary"]["controlled_conditions"] == [
         {"axis": "layer thickness", "value": "30"}
@@ -8150,7 +8150,8 @@ def test_with_presentation_corrects_stale_comparison_relation_subject_from_state
     assert finding["title"] == "laser power -> density"
     assert finding["variables"] == ["laser power"]
     assert finding["relation_chain"][0]["variable"] == "laser power"
-    assert "laser power 140 decreased density" in finding["statement"]
+    assert "density of 93.33 % for laser power 140" in finding["statement"]
+    assert " decreased " not in f" {finding['statement'].lower()} "
 
 
 def test_with_presentation_does_not_promote_controlled_axis_to_comparison_subject():
@@ -8257,7 +8258,12 @@ def test_with_presentation_does_not_promote_controlled_axis_to_comparison_subjec
     assert finding["title"] == "heat treatment type -> density"
     assert finding["variables"] == ["heat treatment type"]
     assert finding["relation_chain"][0]["variable"] == "heat treatment type"
-    assert "heat treatment type Furnace HT increased density" in finding["statement"]
+    assert (
+        "density of 99.33 % for heat treatment type Furnace HT"
+        in finding["statement"]
+    )
+    assert "versus 98.16 % for heat treatment type HIP" in finding["statement"]
+    assert " increased " not in f" {finding['statement'].lower()} "
 
 
 def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_targets():
@@ -9699,10 +9705,10 @@ def test_with_presentation_uses_numeric_relation_statement_for_symbol_axis_findi
         "claim_theta_yield",
     )
     assert finding["statement"] == (
-        "Selected source table rows show: "
-        "Under α 0 and β 0, θ increased yield strength experiment "
-        "from 334.2 MPa to 342.5 MPa. "
-        "Expert review is required before treating this as a material effect."
+        "Selected source table rows report yield strength experiment values of "
+        "334.2 MPa and 342.5 MPa for the stated θ comparison under α 0 and β "
+        "0. This row-level contrast is condition-specific and does not by "
+        "itself isolate a material effect."
     )
     assert finding["title"] == (
         "scan strategy rotation angle -> yield strength experiment"
@@ -12614,11 +12620,10 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
         for finding in understanding["presentation"]["review_queue_findings"]
     }
     assert review_by_title["laser power -> density"]["statement"] == (
-        "Selected source table rows show: "
-        "Under heat treatment type furnace ht and scan speed 200, "
-        "laser power 120 increased density from 93.67 % "
-        "(laser power 100) to 96.84 %. "
-        "Expert review is required before treating this as a material effect."
+        "Selected source table rows report density of 96.84 % for laser power "
+        "120, versus 93.67 % for laser power 100, with heat treatment type "
+        "furnace ht and scan speed 200 fixed. This row-level contrast is "
+        "condition-specific and does not by itself isolate a material effect."
     )
     assert review_by_title["laser power -> density"]["comparison_summary"] == {
         "variable": "laser power",
@@ -12695,16 +12700,21 @@ def test_table_row_review_candidate_syncs_projected_relation_semantics():
         "review_reasons": [],
     }
 
-    updated = service._finding_as_review_candidate(
-        finding,
-        reason="table_row_needs_expert_review",
+    updated = service._finding_with_review_candidate_table_semantics(
+        service._finding_as_review_candidate(
+            finding,
+            reason="table_row_needs_expert_review",
+        )
     )
 
     expected_statement = (
-        f"Selected source table rows show: {statement} "
-        "Expert review is required before treating this as a material effect."
+        "Selected source table rows report elongation of 41.9 % for scanning "
+        "strategy A, versus 4.29 % for scanning strategy B, with energy density "
+        "150 fixed. This row-level contrast is condition-specific and does not "
+        "by itself isolate a material effect."
     )
     assert updated["statement"] == expected_statement
+    assert " increased " not in f" {updated['statement'].lower()} "
     assert updated["direction"] == "condition-dependent"
     assert updated["comparison_summary"]["direction"] == "condition-dependent"
     assert updated["relation_chain"] == [
@@ -12829,11 +12839,10 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
     }
     assert "laser power -> density" not in review_by_title
     assert review_by_title["scan speed -> density"]["statement"] == (
-        "Selected source table rows show: "
-        "With laser power 100 and heat treatment type Furnace HT, "
-        "changing scan speed from 100 to 200 decreased density "
-        "from 98.70 % to 93.67 %. "
-        "Expert review is required before treating this as a material effect."
+        "Selected source table rows report density of 93.67 % for scan "
+        "speed=200, versus 98.70 % for scan speed=100, with laser power 100 "
+        "and heat treatment type Furnace HT fixed. This row-level contrast is "
+        "condition-specific and does not by itself isolate a material effect."
     )
 
 
@@ -13163,16 +13172,15 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
         for finding in review_scan_density
     } == {("evref_scan_density_a",), ("evref_scan_density_b",)}
     assert all(
-        finding["statement"].startswith("Selected source table rows show:")
+        finding["statement"].startswith("Selected source table rows report density")
         for finding in review_scan_density
     )
     assert all(
-        "changing scan speed from 100 to 200 decreased density" in finding["statement"]
+        "does not by itself isolate a material effect" in finding["statement"]
         for finding in review_scan_density
     )
     assert all(
-        "Expert review is required before treating this as a material effect."
-        in finding["statement"]
+        " decreased " not in f" {finding['statement'].lower()} "
         for finding in review_scan_density
     )
 

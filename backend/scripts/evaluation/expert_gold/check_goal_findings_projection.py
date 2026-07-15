@@ -47,7 +47,9 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["preheating", "build platform"],
             ["ductility"],
             ["150", "°c"],
-            ["14"],
+            ["10 percentage points"],
+            ["13.9% relative"],
+            ["rounded relative increase as 14%"],
             ["the authors attributed"],
         ],
         "evidence_terms": [

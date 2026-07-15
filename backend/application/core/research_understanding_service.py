@@ -10719,13 +10719,62 @@ class ResearchUnderstandingService:
                 _text(narrative_finding.get("statement")) or "",
             ]
         )
+        merged_statement = " ".join(statements)
+        comparison = _mapping(table_finding.get("comparison_summary"))
+        baseline = _mapping(comparison.get("baseline"))
+        observed = _mapping(comparison.get("observed"))
+        baseline_value = _text(baseline.get("value")) or ""
+        observed_value = _text(observed.get("value")) or ""
+        baseline_number = _float_text(baseline_value)
+        observed_number = _float_text(observed_value)
+        narrative_statement = _text(narrative_finding.get("statement")) or ""
+        stated_change = self._finding_stated_relative_change(narrative_finding)
+        clarified_percentage_change = False
+        if (
+            baseline_number is not None
+            and observed_number is not None
+            and baseline_number != 0
+            and stated_change is not None
+            and baseline_value.strip().endswith("%")
+            and observed_value.strip().endswith("%")
+        ):
+            point_change = abs(observed_number - baseline_number)
+            relative_change = point_change / abs(baseline_number) * 100
+            change_noun = (
+                "increase" if observed_number > baseline_number else "decrease"
+            )
+            baseline_label = _text(baseline.get("label")) or "baseline"
+            replacement = (
+                "by "
+                f"{_normalize_numeric_token(str(point_change))} percentage "
+                "points, "
+                f"or about {relative_change:.1f}% relative to the "
+                f"{baseline_label} value (the authors reported this rounded "
+                f"relative {change_noun} as "
+                f"{_normalize_numeric_token(str(abs(stated_change)))}%)"
+            )
+            clarified_narrative, replacement_count = re.subn(
+                r"\bby\s+(?:approximately\s+)?\d+(?:\.\d+)?\s*%",
+                replacement,
+                narrative_statement,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if replacement_count:
+                merged_statement = " ".join(
+                    _dedupe_strings(
+                        [
+                            _text(table_finding.get("statement")) or "",
+                            clarified_narrative,
+                        ]
+                    )
+                )
+                clarified_percentage_change = True
         merged["title"] = f"{variable} -> {outcome}"
-        merged["statement"] = " ".join(statements)
+        merged["statement"] = merged_statement
         merged["outcomes"] = outcomes
         merged["direction"] = _text(table_finding.get("direction")) or ""
-        merged["comparison_summary"] = _mapping(
-            table_finding.get("comparison_summary")
-        )
+        merged["comparison_summary"] = comparison
         merged["scope_summary"] = re.sub(
             r"\b(?:ductility|elongation(?:\s+to\s+failure)?)\b",
             outcome,
@@ -10739,6 +10788,11 @@ class ResearchUnderstandingService:
                 if self._finding_outcome_keys({"outcomes": [segment.get("outcome")]})
                 == {"elongation"}
                 else segment.get("outcome"),
+                **(
+                    {"statement": merged_statement}
+                    if clarified_percentage_change
+                    else {}
+                ),
             }
             for segment in _mapping_list(merged.get("relation_chain"))
         ]

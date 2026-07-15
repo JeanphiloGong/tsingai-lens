@@ -2932,10 +2932,16 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     assert primary[0]["statement"] == (
         "The source table reports elongation of 72% for the non-preheated "
         "condition and 82% for the preheated condition. Preheating the build "
-        "platform to 150 °C increased ductility by 14%; the authors attributed "
-        "this increase to a more homogenized cellular microstructure and "
+        "platform to 150 °C increased ductility by 10 "
+        "percentage points, or about 13.9% relative to the non-preheated value "
+        "(the authors reported this rounded relative increase as 14%); the "
+        "authors attributed this increase to a more homogenized cellular "
+        "microstructure and "
         "GND-assisted plastic deformation."
     )
+    assert {
+        segment["statement"] for segment in primary[0]["relation_chain"]
+    } == {primary[0]["statement"]}
     assert "author_attributed_mechanism" in primary[0]["warnings"]
     assert "author_attributed_mechanism" in primary[0]["review_reasons"]
     direct_result_refs = primary[0]["evidence_bundle"]["direct_result"]
@@ -3004,6 +3010,79 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
         narrative_finding=misaligned_narrative,
         evidence_by_id=evidence_by_id,
     )
+
+
+def test_aligned_percentage_table_clarifies_points_and_relative_change_generically():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(),
+    )
+    narrative_statement = (
+        "Increasing additive fraction increased relative density by approximately "
+        "5%; the authors attributed this increase to improved particle packing."
+    )
+    narrative_finding = {
+        "finding_id": "finding-density-narrative",
+        "claim_id": "claim-density",
+        "statement": narrative_statement,
+        "variables": ["additive fraction"],
+        "mediators": ["particle packing"],
+        "outcomes": ["relative density"],
+        "direction": "increases",
+        "relation_chain": [
+            {
+                "variable": "additive fraction",
+                "outcome": "relative density",
+                "direction": "increases",
+                "statement": narrative_statement,
+            }
+        ],
+        "scope_summary": "alloy powder, additive fraction, relative density",
+        "support_grade": "partial",
+        "review_status": "needs_review",
+        "confidence": 0.9,
+        "paper_count": 1,
+        "evidence_ref_ids": ["ev-density-text"],
+        "evidence_bundle": {"direct_result": ["ev-density-text"]},
+        "context_ids": [],
+        "relation_ids": ["rel-density"],
+    }
+    table_finding = {
+        **narrative_finding,
+        "finding_id": "finding-density-table",
+        "statement": (
+            "The source table reports relative density of 80% at 0 wt% additive "
+            "and 84% at 2 wt% additive."
+        ),
+        "mediators": [],
+        "evidence_ref_ids": ["ev-density-table"],
+        "evidence_bundle": {"direct_result": ["ev-density-table"]},
+        "comparison_summary": {
+            "variable": "additive fraction",
+            "direction": "increases",
+            "outcome": "relative density",
+            "baseline": {"label": "0 wt% additive", "value": "80%"},
+            "observed": {"label": "2 wt% additive", "value": "84%"},
+            "controlled_conditions": [],
+        },
+    }
+
+    merged = service._merged_aligned_table_finding(
+        narrative_finding,
+        table_finding=table_finding,
+        evidence_by_id={
+            "ev-density-text": {"document_id": "paper-density"},
+            "ev-density-table": {"document_id": "paper-density"},
+        },
+    )
+
+    assert "increased relative density by 4 percentage points" in merged["statement"]
+    assert "about 5.0% relative to the 0 wt% additive value" in merged["statement"]
+    assert "rounded relative increase as 5%" in merged["statement"]
+    assert "improved particle packing" in merged["statement"]
+    assert {segment["statement"] for segment in merged["relation_chain"]} == {
+        merged["statement"]
+    }
 
 
 def test_finding_promotes_matching_preheat_strength_table():

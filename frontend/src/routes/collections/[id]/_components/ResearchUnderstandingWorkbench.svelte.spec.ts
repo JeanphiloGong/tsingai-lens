@@ -267,6 +267,7 @@ function presentationFinding(
 		| 'upgrade_actions'
 		| 'related_review_finding_ids'
 		| 'comparison_summary'
+		| 'relation_chain'
 	> & {
 		expert_use_status?: string;
 		dataset_use_status?: string;
@@ -276,6 +277,7 @@ function presentationFinding(
 		upgrade_actions?: string[];
 		related_review_finding_ids?: string[];
 		comparison_summary?: ResearchUnderstandingPresentationFinding['comparison_summary'];
+		relation_chain?: ResearchUnderstandingPresentationFinding['relation_chain'];
 	}
 ): ResearchUnderstandingPresentationFinding {
 	return {
@@ -287,6 +289,7 @@ function presentationFinding(
 		upgrade_actions: [],
 		related_review_finding_ids: [],
 		comparison_summary: null,
+		relation_chain: [],
 		...finding
 	};
 }
@@ -3554,6 +3557,48 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
 		await expect.element(browserPage.getByText('1 of 2')).toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Finding detail')).not.toBeInTheDocument();
+	});
+
+	it('uses the finding-specific projected relation chain in finding detail', async () => {
+		const fixture = understandingFixture();
+		const projectedStatement =
+			'The selected rows show a condition-specific association and do not isolate a causal mechanism.';
+		for (const findings of [
+			fixture.presentation.findings,
+			fixture.presentation.review_queue_findings
+		]) {
+			const finding = findings.find((item) => item.finding_id === 'finding_mechanism_limited');
+			if (!finding) continue;
+			finding.direction = 'condition-dependent';
+			finding.relation_chain = [
+				{
+					relation_id: 'rel_annealing_microstructure',
+					variable: 'annealing',
+					mediators: ['cellular substructure'],
+					outcome: 'yield strength',
+					direction: 'condition-dependent',
+					statement: projectedStatement
+				}
+			];
+		}
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: fixture,
+			collectionId: 'col_123'
+		});
+
+		const findingDetail = await openMechanismClaimDetail();
+		await expect.element(findingDetail.getByText(projectedStatement)).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('condition-dependent', { exact: true }).last())
+			.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Annealing explains cellular substructure changes in LPBF 316L.'
+				)
+			)
+			.not.toBeInTheDocument();
 	});
 
 	it('labels fully covered paper-level findings as a draft answer before expert use', async () => {

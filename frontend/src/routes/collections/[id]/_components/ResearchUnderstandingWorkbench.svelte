@@ -563,6 +563,7 @@
 					.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
 			: [];
 	$: selectedReadableRelations = selectedRelations.filter((relation) => isReadableRelation(relation));
+	$: selectedFindingRelationChain = selectedFinding?.relation_chain ?? [];
 	$: selectedHiddenRelationCount = Math.max(
 		0,
 		selectedRelations.length - selectedReadableRelations.length
@@ -6136,36 +6137,50 @@
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.relatedRelations')}</h5>
-								{#each selectedReadableRelations.slice(0, 5) as relation (relation.relation_id)}
-									<div class="research-understanding-workbench__context">
-										<div class="research-understanding-workbench__meta">
-											<span>{relationLabel(relation.relation_type)}</span>
-											<span>{relationStatusLabel(relation.status)}</span>
-											{#if relation.confidence !== null}
-												<span>{confidenceLabel(relation.confidence)}</span>
+								{#if selectedFindingRelationChain.length}
+									{#each selectedFindingRelationChain as segment, index (`${segment.relation_id}-${index}`)}
+										<div class="research-understanding-workbench__context">
+											<div class="research-understanding-workbench__meta">
+												<span>{relationLabel(segment.direction)}</span>
+											</div>
+											<p>{segment.statement}</p>
+											<small>
+												{listLabel([segment.variable, ...segment.mediators, segment.outcome])}
+											</small>
+										</div>
+									{/each}
+								{:else}
+									{#each selectedReadableRelations.slice(0, 5) as relation (relation.relation_id)}
+										<div class="research-understanding-workbench__context">
+											<div class="research-understanding-workbench__meta">
+												<span>{relationLabel(relation.relation_type)}</span>
+												<span>{relationStatusLabel(relation.status)}</span>
+												{#if relation.confidence !== null}
+													<span>{confidenceLabel(relation.confidence)}</span>
+												{/if}
+											</div>
+											<p>{relationSummary(relation)}</p>
+											{#if relation.conditions.length}
+												<small>
+													{$t('research.understanding.contextPrefix')}
+													{listLabel(relation.conditions)}
+												</small>
+											{/if}
+											{#if relation.warnings.length}
+												<div class="research-understanding-workbench__chips">
+													{#each relation.warnings as warning (`${relation.relation_id}-${warning}`)}
+														<span>{humanizeCode(warning)}</span>
+													{/each}
+												</div>
 											{/if}
 										</div>
-										<p>{relationSummary(relation)}</p>
-										{#if relation.conditions.length}
-											<small>
-												{$t('research.understanding.contextPrefix')}
-												{listLabel(relation.conditions)}
-											</small>
-										{/if}
-										{#if relation.warnings.length}
-											<div class="research-understanding-workbench__chips">
-												{#each relation.warnings as warning (`${relation.relation_id}-${warning}`)}
-													<span>{humanizeCode(warning)}</span>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								{:else}
-									<div class="research-understanding-workbench__empty">
-										{$t('research.understanding.noRelations')}
-									</div>
-								{/each}
-								{#if selectedHiddenRelationCount || selectedReadableRelations.length > 5}
+									{:else}
+										<div class="research-understanding-workbench__empty">
+											{$t('research.understanding.noRelations')}
+										</div>
+									{/each}
+								{/if}
+								{#if !selectedFindingRelationChain.length && (selectedHiddenRelationCount || selectedReadableRelations.length > 5)}
 									<small>
 										{$t('research.understanding.hiddenRelationCount', {
 											count:

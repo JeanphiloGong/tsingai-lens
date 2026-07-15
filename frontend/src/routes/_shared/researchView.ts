@@ -141,6 +141,14 @@ export type ResearchUnderstandingPresentationEvidenceBundle = {
 	noise: string[];
 	uncategorized: string[];
 };
+export type ResearchUnderstandingPresentationRelationSegment = {
+	relation_id: string;
+	variable: string;
+	mediators: string[];
+	outcome: string;
+	direction: string;
+	statement: string;
+};
 export type ResearchUnderstandingPresentationFinding = {
 	finding_id: string;
 	claim_id: string;
@@ -159,6 +167,7 @@ export type ResearchUnderstandingPresentationFinding = {
 	evidence_ref_ids: string[];
 	context_ids: string[];
 	relation_ids: string[];
+	relation_chain: ResearchUnderstandingPresentationRelationSegment[];
 	evidence_bundle: ResearchUnderstandingPresentationEvidenceBundle;
 	comparison_summary: ResearchUnderstandingPresentationComparisonSummary | null;
 	expert_use_status: string;
@@ -1816,6 +1825,11 @@ function normalizeResearchUnderstandingPresentationFinding(
 		evidence_ref_ids: toStringList(record.evidence_ref_ids),
 		context_ids: toStringList(record.context_ids),
 		relation_ids: toStringList(record.relation_ids),
+		relation_chain: asArray(record.relation_chain)
+			.map((item) => normalizeResearchUnderstandingPresentationRelationSegment(item))
+			.filter(
+				(item): item is ResearchUnderstandingPresentationRelationSegment => item !== null
+			),
 		evidence_bundle: normalizeResearchUnderstandingPresentationEvidenceBundle(
 			record.evidence_bundle
 		),
@@ -1831,6 +1845,25 @@ function normalizeResearchUnderstandingPresentationFinding(
 		related_review_finding_ids: toStringList(record.related_review_finding_ids),
 		review_reasons: toStringList(record.review_reasons),
 		warnings: toStringList(record.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationRelationSegment(
+	value: unknown
+): ResearchUnderstandingPresentationRelationSegment | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const variable = toText(record.variable);
+	const outcome = toText(record.outcome);
+	const statement = toText(record.statement);
+	if (!variable && !outcome && !statement) return null;
+	return {
+		relation_id: toText(record.relation_id),
+		variable,
+		mediators: toStringList(record.mediators),
+		outcome,
+		direction: toText(record.direction),
+		statement
 	};
 }
 

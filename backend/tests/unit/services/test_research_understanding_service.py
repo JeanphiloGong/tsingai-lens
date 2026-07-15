@@ -9220,6 +9220,7 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     assert serialized_primary[0]["evidence_bundle"]["direct_result"] == [
         "evref_direct"
     ]
+    assert serialized_primary[0]["relation_chain"] == findings[0]["relation_chain"]
     assert serialized_primary[0]["generalization_status"] == "paper_level_only"
     assert (
         serialized_primary[0]["generalization_note"]
@@ -13008,7 +13009,7 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
     )
 
 
-def test_with_presentation_marks_energy_density_coupled_table_contrasts():
+def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
     service = ResearchUnderstandingService(
         structured_extractor=_FakeSemanticExtractor(),
         source_artifact_repository=_FakeSourceArtifactRepository(
@@ -13130,42 +13131,128 @@ def test_with_presentation_marks_energy_density_coupled_table_contrasts():
         for finding in understanding["presentation"]["review_queue_findings"]
     }
     assert set(review_by_title) == {
-        "laser power + energy density -> density",
-        "scan speed + energy density -> density",
+        "laser power -> density",
+        "scan speed -> density",
     }
-    scan_finding = review_by_title["scan speed + energy density -> density"]
-    assert scan_finding["variables"] == ["scan speed", "energy density"]
-    assert scan_finding["direction"] == "associated"
-    assert scan_finding["statement"] == (
-        "Selected source table rows show a coupled parameter contrast: "
+    scan_finding = review_by_title["scan speed -> density"]
+    assert scan_finding["variables"] == ["scan speed"]
+    assert scan_finding["direction"] == "condition-dependent"
+    expected_scan_statement = (
+        "Selected source table rows show: "
         "under laser power 100, scan speed changed from 100 mm/s to 200 mm/s "
-        "while energy density changed from 278 J/mm3 to 139 J/mm3; density "
-        "changed from 97.83 % to 91.84 %. The rows do not isolate the effect "
-        "of scan speed."
+        "while the derived energy density changed from 278 J/mm3 to 139 J/mm3; "
+        "density changed from 97.83 % to 91.84 %. This is a condition-specific "
+        "table association; the rows do not isolate a causal mechanism."
     )
+    assert scan_finding["statement"] == expected_scan_statement
+    assert scan_finding["relation_chain"] == [
+        {
+            "relation_id": "rel_scan_density",
+            "variable": "scan speed",
+            "mediators": [],
+            "outcome": "density",
+            "direction": "condition-dependent",
+            "statement": expected_scan_statement,
+        }
+    ]
     assert scan_finding["comparison_summary"] == {
-        "variable": "scan speed + energy density",
-        "direction": "associated",
+        "variable": "scan speed",
+        "direction": "condition-dependent",
         "outcome": "density",
         "baseline": {
-            "label": "scan speed 100 mm/s; energy density 278 J/mm3",
+            "label": "scan speed 100 mm/s; derived energy density 278 J/mm3",
             "value": "97.83 %",
         },
         "observed": {
-            "label": "scan speed 200 mm/s; energy density 139 J/mm3",
+            "label": "scan speed 200 mm/s; derived energy density 139 J/mm3",
             "value": "91.84 %",
         },
         "controlled_conditions": [{"axis": "laser power", "value": "100"}],
     }
-    power_finding = review_by_title["laser power + energy density -> density"]
-    assert power_finding["variables"] == ["laser power", "energy density"]
-    assert power_finding["direction"] == "associated"
+    assert "derived_energy_density_context" in scan_finding["review_reasons"]
+    assert "single_variable_effect_not_isolated" not in scan_finding["review_reasons"]
+    power_finding = review_by_title["laser power -> density"]
+    assert power_finding["variables"] == ["laser power"]
+    assert power_finding["direction"] == "condition-dependent"
     assert "laser power changed from 100 W to 120 W" in power_finding["statement"]
-    assert "energy density changed from 139 J/mm3 to 167 J/mm3" in power_finding[
-        "statement"
+    assert (
+        "derived energy density changed from 139 J/mm3 to 167 J/mm3"
+        in power_finding["statement"]
+    )
+    assert "derived_energy_density_context" in power_finding["review_reasons"]
+    assert "single_variable_effect_not_isolated" not in power_finding[
+        "review_reasons"
     ]
-    assert "coupled_energy_density_change" in power_finding["review_reasons"]
-    assert "single_variable_effect_not_isolated" in power_finding["review_reasons"]
+
+
+def test_energy_density_context_preserves_independently_changed_hatch_spacing():
+    service = ResearchUnderstandingService()
+    finding = {
+        "title": "scan speed -> density",
+        "statement": (
+            "Under laser power 100, scan speed 200 decreased density from "
+            "97.83 % (scan speed 100) to 91.84 %."
+        ),
+        "variables": ["scan speed"],
+        "outcomes": ["density"],
+        "direction": "decreases",
+        "comparison_summary": {
+            "variable": "scan speed",
+            "direction": "decreases",
+            "outcome": "density",
+            "baseline": {"label": "scan speed 100", "value": "97.83 %"},
+            "observed": {"label": "scan speed 200", "value": "91.84 %"},
+            "controlled_conditions": [{"axis": "laser power", "value": "100"}],
+        },
+        "evidence_bundle": {"direct_result": ["evref_scan_density"]},
+        "review_reasons": ["table_row_needs_expert_review"],
+        "warnings": ["deterministic_relation"],
+        "relation_chain": [],
+    }
+    evidence_by_id = {
+        "evref_scan_density": {
+            "source_kind": "table",
+            "locator": {"source_ref": "tbl-density"},
+        }
+    }
+    tables_by_id = {
+        "tbl-density": SourceTable(
+            table_id="tbl-density",
+            document_id="paper-density",
+            table_order=2,
+            caption_text="Process conditions and relative density.",
+            caption_block_id=None,
+            page=4,
+            bbox=None,
+            heading_path="Results",
+            column_headers=(
+                "Laser power (W)",
+                "Scan speed (mm/s)",
+                "Hatch spacing (mm)",
+                "Laser energy density (J/mm3)",
+                "Density (%)",
+            ),
+            table_matrix=(
+                ("100", "100", "0.12", "278", "97.83"),
+                ("100", "200", "0.10", "167", "91.84"),
+            ),
+        )
+    }
+
+    updated = service._finding_with_energy_density_context(
+        finding,
+        evidence_by_id=evidence_by_id,
+        tables_by_id=tables_by_id,
+    )
+
+    assert updated["title"] == "scan speed + hatch spacing -> density"
+    assert updated["variables"] == ["scan speed", "hatch spacing"]
+    assert "hatch spacing changed from 0.12 mm to 0.10 mm" in updated["statement"]
+    assert "the derived energy density changed from 278 J/mm3 to 167 J/mm3" in (
+        updated["statement"]
+    )
+    assert "non_single_variable_table_comparison" in updated["review_reasons"]
+    assert "single_variable_effect_not_isolated" in updated["review_reasons"]
 
 
 def test_with_presentation_filters_multi_axis_table_row_comparison_from_findings():

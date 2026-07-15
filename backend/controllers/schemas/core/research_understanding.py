@@ -233,6 +233,17 @@ class ResearchUnderstandingPresentationComparisonSummaryResponse(BaseModel):
     ] = Field(default_factory=list)
 
 
+class ResearchUnderstandingPresentationRelationSegmentResponse(BaseModel):
+    """Finding-specific relation segment after expert-facing projection."""
+
+    relation_id: str = Field(default="")
+    variable: str = Field(default="")
+    mediators: list[str] = Field(default_factory=list)
+    outcome: str = Field(default="")
+    direction: str = Field(default="")
+    statement: str = Field(default="")
+
+
 class ResearchUnderstandingPresentationFindingResponse(BaseModel):
     """Expert-facing research finding row for materials review."""
 
@@ -253,6 +264,9 @@ class ResearchUnderstandingPresentationFindingResponse(BaseModel):
     evidence_ref_ids: list[str] = Field(default_factory=list)
     context_ids: list[str] = Field(default_factory=list)
     relation_ids: list[str] = Field(default_factory=list)
+    relation_chain: list[ResearchUnderstandingPresentationRelationSegmentResponse] = (
+        Field(default_factory=list)
+    )
     evidence_bundle: ResearchUnderstandingPresentationEvidenceBundleResponse = Field(
         default_factory=ResearchUnderstandingPresentationEvidenceBundleResponse
     )

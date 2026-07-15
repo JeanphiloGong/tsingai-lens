@@ -680,7 +680,7 @@ empty | processing | partial | ready | failed
     `finding_id`、`claim_id`、`statement`、`variables`、`mediators`、
     `outcomes`、`direction`、`scope_summary`、`support_grade`、
     `review_status`、`paper_count`、`evidence_count`、`evidence_ref_ids`、
-    `context_ids`、`relation_ids`、`expert_use_status`、
+    `context_ids`、`relation_ids`、`relation_chain`、`expert_use_status`、
     `generalization_status`、`generalization_note`、`evidence_gap_summary` 和
     `related_review_finding_ids`、`evidence_bundle`；`related_review_finding_ids`
     指向同一 presentation 中可用于确认、反驳或扩展当前 finding 的 review-queue
@@ -688,6 +688,8 @@ empty | processing | partial | ready | failed
     用于说明该 finding 当前只能作为单篇文献发现、
     跨文献候选、限定范围内跨文献发现、需要修复证据或需要处理冲突；
     `generalization_note` 和 `evidence_gap_summary` 面向专家解释使用边界和剩余证据缺口；
+    `relation_chain` 是经过当前 Finding 条件边界和方向修正后的展示链路，专家界面应优先
+    使用它；`relation_ids` 只保留到底层 relation 的审计绑定，不能覆盖投影后的语义；
     `evidence_bundle`
     按 `evidence_role` 分到 `direct_result`、`mechanism`、
     `condition_context`、`background`、`conflict`、`noise`，没有显式角色的证据保留在

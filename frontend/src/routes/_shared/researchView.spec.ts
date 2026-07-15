@@ -499,6 +499,16 @@ describe('research view shared helpers', () => {
 							support_grade: 'partial',
 							review_status: 'pending_review',
 							evidence_ref_ids: ['ev_1'],
+							relation_chain: [
+								{
+									relation_id: 'rel_1',
+									variable: 'heat treatment',
+									mediators: ['recrystallization'],
+									outcome: 'tensile strength',
+									direction: 'condition-dependent',
+									statement: 'The source reports a condition-specific association.'
+								}
+							],
 							evidence_bundle: {
 								direct_result: ['ev_1']
 							}
@@ -587,6 +597,16 @@ describe('research view shared helpers', () => {
 			review_status: 'pending_review'
 		});
 		expect(finding?.evidence_bundle.direct_result).toEqual(['ev_1']);
+		expect(finding?.relation_chain).toEqual([
+			{
+				relation_id: 'rel_1',
+				variable: 'heat treatment',
+				mediators: ['recrystallization'],
+				outcome: 'tensile strength',
+				direction: 'condition-dependent',
+				statement: 'The source reports a condition-specific association.'
+			}
+		]);
 		expect(analysis.understanding?.presentation.summary.primary_finding_count).toBe(1);
 		expect(analysis.understanding?.presentation.summary.review_queue_finding_count).toBe(1);
 		expect(analysis.understanding?.presentation.primary_findings.map((item) => item.finding_id)).toEqual([

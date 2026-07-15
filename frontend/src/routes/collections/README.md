@@ -60,6 +60,8 @@ This node owns the collection workspace route family in the frontend.
   specific finding for accept/reject/correct review; expert review progress uses
   dataset review-candidate counts as the canonical remaining-work number so
   primary paper-level Findings that still need human confirmation are included,
+  and Finding detail renders the Finding-specific projected relation chain so
+  table-context corrections cannot be contradicted by an earlier raw relation;
   while the separate evidence-repair filter only narrows to Findings whose
   evidence, support, or projection needs closer inspection; Finding detail also
   shows training-message diagnostics and protocol-readiness gaps from the

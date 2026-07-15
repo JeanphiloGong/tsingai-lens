@@ -287,6 +287,7 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     )
     assert understanding["relations"][0]["conditions"] == ["316L stainless steel"]
     assert understanding["relations"][0]["source_object_ids"] == ["oeu-comparison"]
+    assert "semantic_relation" in understanding["relations"][0]["warnings"]
     relation_units_by_id = {
         unit["evidence_unit_id"]: unit
         for unit in extractor.payloads[0]["evidence_units"]
@@ -14716,6 +14717,73 @@ def test_table_alignment_review_reason_marks_unaligned_direct_table_rows():
     assert "table_row_alignment_uncertain" in updated["review_reasons"]
     assert "table_row_alignment_uncertain" in updated["warnings"]
     assert "needs_expert_review" in updated["review_reasons"]
+
+
+def test_with_presentation_does_not_promote_table_only_semantic_relation():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "limited",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-semantic-table",
+                "goal_id": "goal-semantic-table",
+                "title": "How does scanning speed affect elongation?",
+            },
+            "claims": [],
+            "relations": [
+                {
+                    "relation_id": "rel_semantic_table",
+                    "relation_type": "conditional",
+                    "subject": "scanning speed",
+                    "predicate": "mixed",
+                    "object": "porosity -> microstructure -> elongation",
+                    "statement": (
+                        "Condition 6 scanning speed affected elongation through "
+                        "porosity and microstructure under specific parameter "
+                        "conditions."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.7,
+                    "evidence_ref_ids": ["evref_mechanical_table"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["oeu_mechanical_table"],
+                    "warnings": ["semantic_relation"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_mechanical_table",
+                    "source_kind": "table",
+                    "document_id": "paper-1",
+                    "label": "P001 mechanical properties",
+                    "locator": {"source_ref": "table-mechanical"},
+                    "fact_ids": ["oeu_mechanical_table"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["scanning speed"]
+                    },
+                    "property_scope": ["elongation"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    assert understanding["presentation"]["findings"] == []
 
 
 def test_with_presentation_projects_property_axis_relation_as_finding():

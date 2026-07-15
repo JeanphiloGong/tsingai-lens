@@ -4331,7 +4331,9 @@ class ResearchUnderstandingService:
             ),
             "context_ids": context_ids,
             "source_object_ids": evidence_unit_ids,
-            "warnings": _strings(item.get("warnings")),
+            "warnings": _dedupe_strings(
+                ["semantic_relation", *_strings(item.get("warnings"))]
+            ),
         }
 
     def _material_evidence_refs(self, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -5759,6 +5761,10 @@ class ResearchUnderstandingService:
             for relation in relations
             if _text(relation.get("relation_id")) not in covered_relation_ids
             and self._reviewable_presentation_relation(relation)
+            and self._relation_can_drive_presentation_finding(
+                relation,
+                evidence_by_id=evidence_by_id,
+            )
             and self._relation_matches_goal_axis(relation, goal_axes)
         ]
         effects.extend(relation_effects)
@@ -13783,6 +13789,42 @@ class ResearchUnderstandingService:
         subject = self._presentation_relation_side(relation.get("subject"))
         object_chain = self._relation_object_chain(relation)
         return bool(subject and object_chain and self._presentation_relation_summary(relation))
+
+    def _relation_can_drive_presentation_finding(
+        self,
+        relation: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, Mapping[str, Any]],
+    ) -> bool:
+        if "semantic_relation" not in _strings(relation.get("warnings")):
+            return True
+        evidence_refs = [
+            evidence_by_id[ref_id]
+            for ref_id in _strings(relation.get("evidence_ref_ids"))
+            if ref_id in evidence_by_id
+        ]
+        if not evidence_refs:
+            return False
+        if any(
+            "table"
+            not in (
+                _text(ref.get("source_kind"))
+                or _text(_locator_mapping(ref.get("locator")).get("source_kind"))
+                or ""
+            ).lower()
+            for ref in evidence_refs
+        ):
+            return True
+        statement = _text(relation.get("statement")) or ""
+        return bool(
+            re.search(
+                r"(?<![\w.])[-+]?\d+(?:\.\d+)?\s*"
+                r"(?:%|MPa|GPa|J\s*/\s*mm(?:3|³)|HV|°\s*C|°C|C|K|W|"
+                r"mm/s|µm|μm|um)(?![\w/])",
+                statement,
+                flags=re.IGNORECASE,
+            )
+        )
 
     def _relation_matches_goal_axis(
         self,

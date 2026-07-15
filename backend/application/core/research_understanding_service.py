@@ -12589,7 +12589,8 @@ class ResearchUnderstandingService:
                 ]
             )
         evidence_mediators = self._finding_mediators_from_direct_evidence(
-            mechanism_source_text
+            mechanism_source_text,
+            outcomes=outcomes,
         )
         if evidence_mediators:
             mediators = _dedupe_strings([*mediators, *evidence_mediators])
@@ -14294,8 +14295,29 @@ class ResearchUnderstandingService:
             specific_outcomes,
         )
 
-    def _finding_mediators_from_direct_evidence(self, source_text: str) -> list[str]:
-        normalized = f" {_normalize_match_text(source_text)} "
+    def _finding_mediators_from_direct_evidence(
+        self,
+        source_text: str,
+        *,
+        outcomes: list[str] | tuple[str, ...] = (),
+    ) -> list[str]:
+        focused_source_text = source_text
+        outcome_terms = self._finding_statement_outcome_terms(list(outcomes))
+        if outcome_terms:
+            sentences = _quote_sentences(source_text)
+            focused_sentences: list[str] = []
+            for index, sentence in enumerate(sentences):
+                normalized_sentence = f" {_normalize_match_text(sentence)} "
+                if not _quote_term_hits(normalized_sentence, outcome_terms):
+                    continue
+                focused_sentences.append(sentence)
+                if index + 1 < len(sentences) and _is_mechanism_attribution_sentence(
+                    sentences[index + 1]
+                ):
+                    focused_sentences.append(sentences[index + 1])
+            if focused_sentences:
+                focused_source_text = " ".join(_dedupe_strings(focused_sentences))
+        normalized = f" {_normalize_match_text(focused_source_text)} "
         mediators: list[str] = []
         if (
             " microstructure evolution " in normalized
@@ -14340,7 +14362,10 @@ class ResearchUnderstandingService:
             mediators.append("refined microstructure")
         if " densification " in normalized:
             mediators.append("densification")
-        return _dedupe_strings(mediators)
+        mediators = _dedupe_strings(mediators)
+        if not mediators and focused_source_text != source_text:
+            return self._finding_mediators_from_direct_evidence(source_text)
+        return mediators
 
     def _direct_evidence_mechanism_ref_ids(
         self,

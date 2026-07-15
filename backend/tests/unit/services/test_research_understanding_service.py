@@ -9625,6 +9625,21 @@ def test_direct_evidence_preserves_explicit_microstructure_and_texture_mechanism
     assert mediators == ["microstructure evolution", "texture evolution"]
 
 
+def test_direct_evidence_mediators_stay_with_yield_result_window():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+
+    mediators = service._finding_mediators_from_direct_evidence(
+        "Preheating the build plate increased elongation and yield strength by "
+        "approximately 14% and 4%, respectively. This is attributed to the "
+        "microstructure and texture evolution. Cellular structures are made of "
+        "high dislocation density. The material therefore accommodated more "
+        "plastic deformation through GND generation.",
+        outcomes=["yield strength"],
+    )
+
+    assert mediators == ["microstructure evolution", "texture evolution"]
+
+
 def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

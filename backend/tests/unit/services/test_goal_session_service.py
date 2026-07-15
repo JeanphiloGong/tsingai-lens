@@ -254,6 +254,8 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
                 {
                     "finding_id": "finding_preheat_ductility",
                     "claim_id": "claim_preheat_ductility",
+                    "finding_fingerprint": "finding.v1:preheat-ductility",
+                    "protocol_source_fingerprint": "protocol-source.v1:preheat-ductility",
                     "label_status": "gold",
                     "dataset_use_status": "training_ready",
                     "system_prediction": {
@@ -904,6 +906,14 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert response["review_gate"] == "protocol_ready_findings"
     assert "<think>" not in response["answer"]
     assert response["used_evidence_ids"] == ["ev_preheat_ductility"]
+    assert response["source_finding_refs"] == [
+        {
+            "finding_id": "finding_preheat_ductility",
+            "finding_fingerprint": "finding.v1:preheat-ductility",
+            "protocol_source_fingerprint": "protocol-source.v1:preheat-ductility",
+            "evidence_ref_ids": ["ev_preheat_ductility"],
+        }
+    ]
     assert response["source_links"] == [
         {
             "kind": "evidence",
@@ -918,6 +928,9 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert service.list_messages(session["session_id"])["items"][-1]["review_gate"] == (
         "protocol_ready_findings"
     )
+    assert service.list_messages(session["session_id"])["items"][-1][
+        "source_finding_refs"
+    ] == response["source_finding_refs"]
     assert feedback_service.calls == [
         {
             "collection_id": collection["collection_id"],

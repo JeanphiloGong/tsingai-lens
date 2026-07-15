@@ -73,6 +73,14 @@ def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
                         "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
                     }
                 ],
+                "source_finding_refs": [
+                    {
+                        "finding_id": "finding-1",
+                        "finding_fingerprint": "finding.v1:abc",
+                        "protocol_source_fingerprint": "protocol-source.v1:def",
+                        "evidence_ref_ids": ["ev_1"],
+                    }
+                ],
                 "created_at": "2026-07-13T00:01:00+00:00",
             }
         ],

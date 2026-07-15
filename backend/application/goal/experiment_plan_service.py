@@ -73,6 +73,10 @@ class ExperimentPlanService:
                 "source_mode": source_message.source_mode,
                 "used_evidence_ids": list(source_message.used_evidence_ids),
                 "review_gate": PROTOCOL_READY_REVIEW_GATE,
+                "source_findings": [
+                    dict(source_finding_ref)
+                    for source_finding_ref in source_message.source_finding_refs
+                ],
             }
         now = _now_iso()
         plan = ExperimentPlanRecord.from_mapping(
@@ -141,6 +145,10 @@ class ExperimentPlanService:
             raise ValueError("goal copilot answer has no auditable source links")
         if not message.used_evidence_ids:
             raise ValueError("goal copilot answer has no evidence citations")
+        if not message.source_finding_refs:
+            raise ValueError(
+                "goal copilot answer has no protocol source Finding snapshot"
+            )
         visible_source_labels = [
             link.label for link in message.source_links if link.label.strip()
         ]

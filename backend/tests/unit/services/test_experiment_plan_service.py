@@ -32,6 +32,7 @@ def _write_goal_message(
     content: str = "Run a traceable validation matrix [Source 1].",
     source_href: str = "/collections/col_1/documents/paper-a?evidence_id=ev_1",
     review_gate: str | None = None,
+    source_finding_refs: list[dict] | None = None,
 ) -> None:
     repository.write_session(
         {
@@ -75,6 +76,15 @@ def _write_goal_message(
                     }
                 ],
                 "review_gate": review_gate,
+                "source_finding_refs": source_finding_refs
+                or [
+                    {
+                        "finding_id": "finding-1",
+                        "finding_fingerprint": "finding.v1:abc",
+                        "protocol_source_fingerprint": "protocol-source.v1:def",
+                        "evidence_ref_ids": used_evidence_ids or ["ev_1"],
+                    }
+                ],
                 "created_at": "2026-07-13T00:01:00+00:00",
             }
         ],
@@ -125,6 +135,14 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     assert draft.metadata["source_mode"] == "collection_grounded"
     assert draft.metadata["used_evidence_ids"] == ["ev_1"]
     assert draft.metadata["review_gate"] == "protocol_ready_findings"
+    assert draft.metadata["source_findings"] == [
+        {
+            "finding_id": "finding-1",
+            "finding_fingerprint": "finding.v1:abc",
+            "protocol_source_fingerprint": "protocol-source.v1:def",
+            "evidence_ref_ids": ["ev_1"],
+        }
+    ]
     assert [plan.plan_id for plan in plans] == [draft.plan_id]
 
 

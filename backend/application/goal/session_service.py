@@ -469,6 +469,7 @@ class GoalSessionService:
                 and context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
                 else None
             ),
+            source_finding_refs=context.get("source_finding_refs"),
             created_at=_now_iso(),
         )
         session = self._update_session_after_answer(
@@ -705,6 +706,9 @@ class GoalSessionService:
             "review_gate": (
                 PROTOCOL_READY_REVIEW_GATE if curated_research_findings else None
             ),
+            "source_finding_refs": self._source_finding_refs(
+                curated_research_findings
+            ),
             "payload": self._compact_value(source_context_payload),
             "prompt_source_links": self._prompt_source_links(source_refs),
             "prompt_payload": self._prompt_payload(source_context_payload, source_refs),
@@ -848,6 +852,13 @@ class GoalSessionService:
             protocol_readiness.get("status") != "protocol_ready"
         ):
             return {}
+        finding_id = _clean_text(item.get("finding_id"))
+        finding_fingerprint = _clean_text(item.get("finding_fingerprint"))
+        protocol_source_fingerprint = _clean_text(
+            item.get("protocol_source_fingerprint")
+        )
+        if not finding_id or not finding_fingerprint or not protocol_source_fingerprint:
+            return {}
         target = item.get("expert_target")
         if not isinstance(target, dict):
             target = {}
@@ -871,6 +882,9 @@ class GoalSessionService:
         ):
             return {}
         return {
+            "finding_id": finding_id,
+            "finding_fingerprint": finding_fingerprint,
+            "protocol_source_fingerprint": protocol_source_fingerprint,
             "finding": statement,
             "label_status": _clean_text(item.get("label_status")),
             "dataset_use_status": "training_ready",
@@ -902,6 +916,28 @@ class GoalSessionService:
             ),
             "evidence": [ref for ref in evidence_refs if ref][:4],
         }
+
+    def _source_finding_refs(
+        self,
+        findings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "finding_id": finding["finding_id"],
+                "finding_fingerprint": finding["finding_fingerprint"],
+                "protocol_source_fingerprint": finding[
+                    "protocol_source_fingerprint"
+                ],
+                "evidence_ref_ids": self._stable_strings(
+                    [
+                        ref.get("evidence_ref_id")
+                        for ref in finding.get("evidence", [])
+                        if isinstance(ref, dict)
+                    ]
+                ),
+            }
+            for finding in findings
+        ]
 
     def _curated_research_finding_is_actionable(
         self,

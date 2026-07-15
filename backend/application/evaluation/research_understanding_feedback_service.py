@@ -790,6 +790,13 @@ class ResearchUnderstandingFeedbackService:
             training_evidence_records=training_evidence_records,
             training_messages=training_messages,
         )
+        protocol_source_fingerprint = _protocol_source_fingerprint(
+            finding_fingerprint=finding_fingerprint,
+            dataset_use_status=dataset_use_status,
+            expert_target=_mapping(expert_target),
+            training_evidence_records=training_evidence_records,
+            protocol_readiness=protocol_readiness,
+        )
         acceptance_gate = _acceptance_gate_for_sample(
             dataset_use_status=dataset_use_status,
             system_prediction=system_prediction,
@@ -812,6 +819,7 @@ class ResearchUnderstandingFeedbackService:
             "finding_id": finding_id,
             "claim_id": claim_id,
             "finding_fingerprint": finding_fingerprint,
+            "protocol_source_fingerprint": protocol_source_fingerprint,
             "label_status": label_status,
             "dataset_use_status": dataset_use_status,
             "presentation_bucket": presentation_bucket,
@@ -1088,6 +1096,31 @@ def _finding_fingerprint(finding: Mapping[str, Any]) -> str:
         sort_keys=True,
     )
     return "finding.v1:" + sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _protocol_source_fingerprint(
+    *,
+    finding_fingerprint: str,
+    dataset_use_status: str,
+    expert_target: Mapping[str, Any],
+    training_evidence_records: list[dict[str, Any]],
+    protocol_readiness: Mapping[str, Any],
+) -> str:
+    payload = json.dumps(
+        _canonical_fingerprint_value(
+            {
+                "finding_fingerprint": finding_fingerprint,
+                "dataset_use_status": dataset_use_status,
+                "expert_target": expert_target,
+                "training_evidence_refs": training_evidence_records,
+                "protocol_readiness": protocol_readiness,
+            }
+        ),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return "protocol-source.v1:" + sha1(payload.encode("utf-8")).hexdigest()
 
 
 def _canonical_fingerprint_value(value: Any) -> Any:

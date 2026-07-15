@@ -38,7 +38,8 @@ own database connections, SQL, schema initialization, or row encoding.
   Persists goal-scoped experiment plan drafts generated from chat answers. When
   a draft references a chat message, the service verifies that the message is a
   same-user, same-goal, collection-grounded assistant answer with auditable
-  evidence links and no review-blocking warnings. These drafts are
+  evidence links, exact protocol-source Finding fingerprints, and no
+  review-blocking warnings. These drafts are
   human-editable Goal Consumer outputs, not replacements for the conditional
   Protocol browsing branch.
 - `brief_service.py`

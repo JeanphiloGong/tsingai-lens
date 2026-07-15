@@ -59,6 +59,7 @@ class GoalMessageRecord:
     links: Mapping[str, str] | None = None
     source_links: tuple[GoalSourceLink, ...] = ()
     review_gate: str | None = None
+    source_finding_refs: tuple[Mapping[str, Any], ...] = ()
 
     @classmethod
     def user(
@@ -91,15 +92,20 @@ class GoalMessageRecord:
         links: Mapping[str, Any] | None = None,
         source_links: Any = None,
         review_gate: Any = None,
+        source_finding_refs: Any = None,
     ) -> "GoalMessageRecord":
         normalized_source_mode = normalize_source_mode(source_mode)
         evidence_ids = _stable_strings(used_evidence_ids)
         public_source_links = _normalize_source_links(source_links)
         normalized_review_gate = _normalize_optional_text(review_gate)
+        normalized_source_finding_refs = _normalize_source_finding_refs(
+            source_finding_refs
+        )
         if normalized_source_mode != "collection_grounded":
             evidence_ids = ()
             public_source_links = ()
             normalized_review_gate = None
+            normalized_source_finding_refs = ()
         return cls(
             message_id=_normalize_required_text(message_id, "message_id"),
             session_id=_normalize_required_text(session_id, "session_id"),
@@ -111,6 +117,7 @@ class GoalMessageRecord:
             links=_normalize_string_mapping(links),
             source_links=public_source_links,
             review_gate=normalized_review_gate,
+            source_finding_refs=normalized_source_finding_refs,
             created_at=str(created_at),
         )
 
@@ -128,6 +135,7 @@ class GoalMessageRecord:
                 links=payload.get("links"),
                 source_links=payload.get("source_links"),
                 review_gate=payload.get("review_gate"),
+                source_finding_refs=payload.get("source_finding_refs"),
                 created_at=payload.get("created_at") or "",
             )
         return cls.user(
@@ -157,6 +165,10 @@ class GoalMessageRecord:
                         source_link.to_record() for source_link in self.source_links
                     ],
                     "review_gate": self.review_gate,
+                    "source_finding_refs": [
+                        dict(source_finding_ref)
+                        for source_finding_ref in self.source_finding_refs
+                    ],
                 }
             )
         return record
@@ -460,6 +472,40 @@ def _normalize_source_links(value: Any) -> tuple[GoalSourceLink, ...]:
         seen_hrefs.add(source_link.href)
         links.append(source_link)
     return tuple(links)
+
+
+def _normalize_source_finding_refs(value: Any) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    refs: list[Mapping[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        finding_id = _normalize_optional_text(item.get("finding_id"))
+        finding_fingerprint = _normalize_optional_text(
+            item.get("finding_fingerprint")
+        )
+        protocol_source_fingerprint = _normalize_optional_text(
+            item.get("protocol_source_fingerprint")
+        )
+        if not finding_id or not finding_fingerprint or not protocol_source_fingerprint:
+            continue
+        key = (finding_id, protocol_source_fingerprint)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(
+            {
+                "finding_id": finding_id,
+                "finding_fingerprint": finding_fingerprint,
+                "protocol_source_fingerprint": protocol_source_fingerprint,
+                "evidence_ref_ids": list(
+                    _stable_strings(item.get("evidence_ref_ids"))
+                ),
+            }
+        )
+    return tuple(refs)
 
 
 def _stable_strings(values: Any) -> tuple[str, ...]:

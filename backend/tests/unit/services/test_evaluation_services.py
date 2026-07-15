@@ -958,7 +958,6 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-4"]["training_messages"] == []
     assert by_finding["finding-4"]["trace_status"] == "evidence_derived"
 
-
 def test_research_understanding_feedback_service_derives_dataset_input_blocks_from_traceable_evidence():
     record = _sample_understanding().to_record()
     record["model_traces"] = []
@@ -1777,6 +1776,69 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
     assert current_sample["feedback_refs"] == []
     assert current_sample["metadata"]["ignored_feedback_refs"] == [
         feedback.to_record()
+    ]
+
+
+def test_research_understanding_protocol_source_version_tracks_expert_target_changes():
+    repository = FakeEvaluationRepository()
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    def curate(statement: str) -> None:
+        service.record_curation(
+            collection_id="col-gold",
+            scope_type="goal",
+            scope_id="goal-1",
+            finding_id="finding-1",
+            claim_id="claim-1",
+            curated_claim_type="finding",
+            curated_status="supported",
+            curated_statement=statement,
+            curated_support_grade="partial",
+            curated_review_status="accepted",
+            curated_variables=["preheating"],
+            curated_mediators=["porosity"],
+            curated_outcomes=["ductility"],
+            curated_direction="increase",
+            curated_scope_summary="LPBF 316L",
+            curated_evidence_ref_ids=["ev-1"],
+            curated_context_ids=["ctx-1"],
+            reviewer="materials-expert",
+        )
+
+    curate("Preheating improves ductility by 14% in LPBF 316L.")
+    original = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+    original_sample = next(
+        item for item in original["items"] if item["finding_id"] == "finding-1"
+    )
+
+    curate(
+        "At 150 C, preheating improved ductility by 14% in the tested LPBF 316L condition."
+    )
+    revised = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+    revised_sample = next(
+        item for item in revised["items"] if item["finding_id"] == "finding-1"
+    )
+
+    assert original_sample["finding_fingerprint"] == revised_sample[
+        "finding_fingerprint"
+    ]
+    assert original_sample["protocol_source_fingerprint"].startswith(
+        "protocol-source.v1:"
+    )
+    assert original_sample["protocol_source_fingerprint"] != revised_sample[
+        "protocol_source_fingerprint"
     ]
 
 

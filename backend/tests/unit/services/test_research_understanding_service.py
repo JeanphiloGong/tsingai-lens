@@ -2031,6 +2031,127 @@ def test_objective_understanding_recovers_heat_treatment_density_evidence_withou
     assert "mechanical properties" not in coverage
 
 
+def test_objective_understanding_recovers_heat_treatment_conditions_without_claiming_isolation():
+    condition_text = (
+        "Two different types of heat treatments were applied to the SLM "
+        "SS316L: a typical furnace-type heat treatment was conducted at "
+        "1100 °C for 0.5 h in an Ar-H2 atmosphere, followed by furnace "
+        "cooling. Hot isostatic pressing (HIP) was performed at 1100 °C and "
+        "100 MPa for 1.5 h in an Ar atmosphere."
+    )
+    result_text = (
+        "Microstructure: It was confirmed that the heat treatments of the "
+        "SLM samples induced an increase in the density. The EBSD and TEM "
+        "analyses revealed that the cellular microstructure and dense "
+        "dislocation structures of the as-SLM disappeared after the short "
+        "heat treatments owing to recrystallization."
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FailingSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            documents=[
+                SourceDocument(
+                    document_id="paper-heat",
+                    human_readable_id=4,
+                    title="Heat treatment effect on SLM 316L",
+                    text="",
+                )
+            ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-heat-conditions",
+                    document_id="paper-heat",
+                    block_type="paragraph",
+                    text=condition_text,
+                    block_order=39,
+                    page=2,
+                    heading_path="2.1. Sample preparation and experimental setup",
+                ),
+                SourceBlock(
+                    block_id="blk-heat-result",
+                    document_id="paper-heat",
+                    block_type="list_item",
+                    text=result_text,
+                    block_order=133,
+                    page=12,
+                    heading_path="4. Conclusion",
+                ),
+            ],
+        ),
+    )
+    payload = {
+        "collection_id": "col-heat",
+        "objective": {
+            "objective_id": "obj-heat",
+            "question": (
+                "How do heat treatment type and heat treatment parameters "
+                "affect density and microstructure of stainless steel 316L?"
+            ),
+            "material_scope": ["stainless steel 316L"],
+            "process_axes": ["heat treatment type", "heat treatment parameters"],
+            "property_axes": ["density", "microstructure"],
+        },
+        "objective_context": {
+            "objective_id": "obj-heat",
+            "question": (
+                "How do heat treatment type and heat treatment parameters "
+                "affect density and microstructure of stainless steel 316L?"
+            ),
+            "material_scope": ["stainless steel 316L"],
+            "variable_process_axes": [
+                "heat treatment type",
+                "heat treatment parameters",
+            ],
+            "target_property_axes": ["density", "microstructure"],
+        },
+        "paper_frames": [{"document_id": "paper-heat", "relevance": "high"}],
+        "evidence_units": [],
+        "logic_chain": {"evidence_unit_ids": [], "summary": ""},
+    }
+
+    understanding = service.build_objective_understanding(payload)
+
+    finding = understanding["presentation"]["primary_findings"][0]
+    assert finding["title"] == (
+        "heat treatment type and heat treatment parameters -> density and microstructure"
+    )
+    assert finding["statement"] == (
+        "Under the tested furnace HT at 1100 °C for 0.5 h and HIP at "
+        "1100 °C and 100 MPa for 1.5 h, heat treatment increased density and "
+        "eliminated the as-SLM cellular microstructure and dense dislocation "
+        "structures through recrystallization. These grouped observations do "
+        "not isolate treatment type, temperature, duration, or pressure as "
+        "separate effects."
+    )
+    assert finding["variables"] == [
+        "heat treatment type and heat treatment parameters"
+    ]
+    assert finding["support_grade"] == "partial"
+    assert {
+        "heat_treatment_parameters_not_isolated",
+        "single_variable_effect_not_isolated",
+        "needs_expert_review",
+    }.issubset(finding["warnings"])
+    condition_ref_id = (
+        "evref_recovered_heat_treatment_microstructure_mechanics_condition_"
+        "blk-heat-conditions"
+    )
+    assert finding["evidence_bundle"]["condition_context"] == [condition_ref_id]
+    evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    assert evidence_by_id[condition_ref_id]["evidence_role"] == "condition_context"
+    assert "1100 °C and 100 MPa for 1.5 h" in evidence_by_id[condition_ref_id][
+        "quote"
+    ]
+    reprojected = service.with_presentation(understanding)
+    assert reprojected is not None
+    assert reprojected["presentation"]["primary_findings"][0]["finding_id"] == (
+        finding["finding_id"]
+    )
+
+
 def test_objective_understanding_recovers_heat_treatment_mechanics_when_requested():
     microstructure_text = (
         "Microstructure: A relatively higher density of SLM samples with low "

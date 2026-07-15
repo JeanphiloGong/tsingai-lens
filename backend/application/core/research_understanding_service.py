@@ -1089,7 +1089,13 @@ class ResearchUnderstandingService:
                 if block is None:
                     continue
                 condition_block = (
-                    self._best_ved_condition_source_block(
+                    self._best_heat_treatment_condition_source_block(
+                        document_id,
+                        blocks_by_id=blocks_by_id,
+                    )
+                    if _text(spec.get("slug"))
+                    == "heat_treatment_microstructure_mechanics"
+                    else self._best_ved_condition_source_block(
                         document_id,
                         blocks_by_id=blocks_by_id,
                     )
@@ -1188,6 +1194,40 @@ class ResearchUnderstandingService:
                     if table is not None
                 ]
                 recovered_spec = spec
+                if (
+                    _text(spec.get("slug"))
+                    == "heat_treatment_microstructure_mechanics"
+                    and condition_block is not None
+                ):
+                    condition_summary = self._heat_treatment_condition_summary(
+                        condition_block
+                    )
+                    if condition_summary:
+                        recovered_spec = {
+                            **spec,
+                            "subject": (
+                                "heat treatment type and heat treatment parameters"
+                            ),
+                            "statement": (
+                                self._heat_treatment_recovered_statement_with_conditions(
+                                    normalized_property_axes,
+                                    condition_summary=condition_summary,
+                                )
+                            ),
+                            "process_axes": [
+                                "heat treatment type",
+                                "heat treatment temperature",
+                                "heat treatment duration",
+                                "HIP pressure",
+                            ],
+                            "claim_status": "limited",
+                            "relation_status": "limited",
+                            "warnings": [
+                                "heat_treatment_parameters_not_isolated",
+                                "single_variable_effect_not_isolated",
+                                "needs_expert_review",
+                            ],
+                        }
                 if _text(spec.get("slug")) == "ved_defects_fatigue":
                     fabrication_context = self._ved_fabrication_parameter_context(
                         ved_fabrication_parameter_table
@@ -1354,6 +1394,40 @@ class ResearchUnderstandingService:
         if not mechanics_effects:
             return base
         return f"{base} {self._heat_treatment_recovered_mechanics_sentence(mechanics_effects)}"
+
+    def _heat_treatment_recovered_statement_with_conditions(
+        self,
+        normalized_property_axes: str,
+        *,
+        condition_summary: str,
+    ) -> str:
+        scope = self._heat_treatment_recovered_base_scope(normalized_property_axes)
+        effects: list[str] = []
+        if "density" in scope:
+            effects.append("increased density")
+        if "microstructure" in scope:
+            effects.append(
+                "eliminated the as-SLM cellular microstructure and dense "
+                "dislocation structures through recrystallization"
+            )
+        effect_text = self._finding_title_outcome(effects)
+        if not effect_text:
+            effect_text = "changed the requested material properties"
+        statement = (
+            f"Under the tested {condition_summary}, heat treatment {effect_text}."
+        )
+        mechanics_effects = self._heat_treatment_recovered_mechanics_effects(
+            normalized_property_axes
+        )
+        if mechanics_effects:
+            statement = (
+                f"{statement} "
+                f"{self._heat_treatment_recovered_mechanics_sentence(mechanics_effects)}"
+            )
+        return (
+            f"{statement} These grouped observations do not isolate treatment "
+            "type, temperature, duration, or pressure as separate effects."
+        )
 
     def _heat_treatment_recovered_base_statement(
         self,
@@ -2506,6 +2580,72 @@ class ResearchUnderstandingService:
         if " disappeared " in normalized:
             score += 2
         return score
+
+    def _best_heat_treatment_condition_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            score = self._heat_treatment_condition_source_block_score(block)
+            if score <= 0:
+                continue
+            ranked = (score, -(block.block_order or 0), block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _heat_treatment_condition_source_block_score(
+        self,
+        block: SourceBlock,
+    ) -> int:
+        if not self._heat_treatment_condition_summary(block):
+            return 0
+        heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+        score = 5
+        if any(term in heading for term in (" sample preparation ", " experimental ")):
+            score += 6
+        if " abstract " in heading:
+            score -= 3
+        if any(term in heading for term in (" result ", " conclusion ")):
+            score -= 2
+        return score
+
+    def _heat_treatment_condition_summary(
+        self,
+        block: SourceBlock,
+    ) -> str:
+        raw = re.sub(r"\s+", " ", _text(block.text) or "")
+        temperature = r"(\d+(?:\.\d+)?)\s*(?:°|◦)?\s*[Cc]"
+        duration = r"(\d+(?:\.\d+)?)\s*h\b"
+        pressure = r"(\d+(?:\.\d+)?)\s*MPa\b"
+        furnace_match = re.search(
+            rf"furnace(?:-type)?(?:\s+of)?\s+heat treatment.{{0,100}}?"
+            rf"at\s*{temperature}\s*for\s*{duration}",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        hip_match = re.search(
+            rf"(?:hot isostatic pressing|HIP).{{0,180}}?at\s*{temperature}"
+            rf"\s*(?:and|,)\s*{pressure}\s*for\s*{duration}",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if furnace_match is None or hip_match is None:
+            return ""
+        furnace_temperature, furnace_duration = furnace_match.groups()
+        hip_temperature, hip_pressure, hip_duration = hip_match.groups()
+        return (
+            f"furnace HT at {_normalize_numeric_token(furnace_temperature)} °C "
+            f"for {_normalize_numeric_token(furnace_duration)} h and HIP at "
+            f"{_normalize_numeric_token(hip_temperature)} °C and "
+            f"{_normalize_numeric_token(hip_pressure)} MPa for "
+            f"{_normalize_numeric_token(hip_duration)} h"
+        )
 
     def _best_heat_treatment_mechanics_source_block(
         self,

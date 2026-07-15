@@ -63,12 +63,27 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["heat treatment"],
             ["density"],
             ["microstructure"],
+            ["1100"],
+            ["0.5"],
+            ["100 mpa"],
+            ["1.5"],
+            ["do not isolate treatment type"],
         ],
         "evidence_terms": [
             ["heat treatment"],
             ["density"],
             ["cellular microstructure"],
             ["dislocation"],
+        ],
+        "required_condition_evidence_sets": [
+            [
+                "furnace-type",
+                "1100",
+                "0.5 h",
+                "hot isostatic pressing",
+                "100 mpa",
+                "1.5 h",
+            ],
         ],
     },
     "goal_399171646354": {
@@ -277,6 +292,10 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
     "goal_399171646354": [
         ["paper_level_association"],
         ["process_conditions_not_isolated"],
+    ],
+    "goal_1a7a26d850b9": [
+        ["heat_treatment_parameters_not_isolated"],
+        ["single_variable_effect_not_isolated"],
     ],
     "goal_061c9c049e69": [
         ["model_validation_finding"],

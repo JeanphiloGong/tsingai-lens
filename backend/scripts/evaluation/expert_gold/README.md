@@ -272,8 +272,11 @@ Use `review-priority.md` to decide which candidates to inspect first, then use
 `expert-decision-board.tsv` when the reviewer wants a spreadsheet-style board
 with priority, allowed actions, required checks, source quote, and open links.
 The board includes empty `expert_action`, `issue_type`, `expert_note`, and
-`corrected_*` columns for human input. It is not imported directly; merge it
-back into the JSONL template first:
+`corrected_*` columns for human input, plus `fill_instruction`, `accept_rule`,
+and `reject_issue_options` columns that explain how to complete each row.
+In the browser review workspace, paste the filled TSV directly into Reviewed
+decisions and run Dry run before Import decisions. For offline CLI workflows,
+merge it back into the JSONL template first:
 
 ```bash
 ./.venv/bin/python scripts/evaluation/expert_gold/merge_expert_decision_board.py \
@@ -337,12 +340,13 @@ cannot be imported as `accept`; change them to `correct` after filling the
 missing fields/evidence, `reject`, or leave them as `skip`. Validate first,
 then import with a human reviewer id:
 
-If the reviewer used `expert-decision-board.tsv`, run
-`merge_expert_decision_board.py` first and use the merged
-`reviewed-findings.from-board.jsonl` in the dry-run/import commands below.
-The merge step refuses blocked accepts, rejects without `issue_type`, and
-corrections without corrected statement and evidence refs before the stricter
-import validation runs.
+If the reviewer used `expert-decision-board.tsv` in the browser, paste the TSV
+directly into Reviewed decisions. If the reviewer used the offline CLI path,
+run `merge_expert_decision_board.py` first and use the merged
+`reviewed-findings.from-board.jsonl` in the dry-run/import commands below. The
+merge and browser import paths both refuse blocked accepts, rejects without
+`issue_type`, and corrections without corrected statement and evidence refs
+before labels are written.
 
 For agent-assisted review, keep every exported row at `"action": "skip"` and
 write the agent's suggestion under `agent_review` instead. To prepare a safe

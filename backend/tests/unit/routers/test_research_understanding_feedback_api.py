@@ -1271,6 +1271,11 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
     assert row["expert_action"] == ""
     assert row["issue_type"] == ""
     assert row["corrected_statement"] == ""
+    assert "Fill expert_action with accept, reject, correct, or skip" in row[
+        "fill_instruction"
+    ]
+    assert "Accept only if the statement" in row["accept_rule"]
+    assert "wrong_variable" in row["reject_issue_options"]
     assert row["collection_id"] == "col-1"
     assert row["goal_id"] == "goal-1"
     assert row["finding_id"] == "finding-1"

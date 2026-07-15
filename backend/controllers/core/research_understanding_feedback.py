@@ -59,6 +59,9 @@ DECISION_BOARD_COLUMNS = (
     "expert_action",
     "issue_type",
     "expert_note",
+    "fill_instruction",
+    "accept_rule",
+    "reject_issue_options",
     "corrected_statement",
     "corrected_variables",
     "corrected_mediators",
@@ -465,6 +468,15 @@ def _decision_board_tsv_row(row: dict[str, Any]) -> dict[str, str]:
         "expert_action": "",
         "issue_type": "",
         "expert_note": "",
+        "fill_instruction": (
+            "Fill expert_action with accept, reject, correct, or skip. "
+            "Use correct when statement fields or evidence ids need edits."
+        ),
+        "accept_rule": _decision_board_accept_rule(
+            acceptance_gate,
+            protocol_readiness,
+        ),
+        "reject_issue_options": _join(list(REJECT_ISSUE_OPTIONS)),
         "corrected_statement": "",
         "corrected_variables": "",
         "corrected_mediators": "",
@@ -497,6 +509,23 @@ def _decision_board_tsv_row(row: dict[str, Any]) -> dict[str, str]:
         "quote": _text(first_evidence.get("quote")),
         "source_open": _short_review_href(first_evidence.get("href")),
     }
+
+
+def _decision_board_accept_rule(
+    acceptance_gate: dict[str, Any],
+    protocol_readiness: dict[str, Any],
+) -> str:
+    if not bool(acceptance_gate.get("accept_allowed")):
+        blockers = _strings(acceptance_gate.get("accept_blockers")) or _strings(
+            acceptance_gate.get("blocking_missing")
+        )
+        if blockers:
+            return f"Do not accept directly; correct or reject: {_join(blockers)}."
+        return "Do not accept directly; use correct or reject."
+    blocking_missing = _strings(protocol_readiness.get("blocking_missing"))
+    if blocking_missing:
+        return f"Accept is unsafe until corrected: {_join(blocking_missing)}."
+    return "Accept only if the statement, direction, scope, and cited evidence match."
 
 
 def _decision_board_evidence_labels(records: list[dict[str, Any]]) -> list[str]:

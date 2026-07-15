@@ -259,6 +259,7 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
                             "cross-paper conclusion."
                         ),
                     },
+                    "protocol_readiness": {"status": "protocol_ready"},
                     "training_evidence_refs": [
                         {
                             "evidence_ref_id": "ev_preheat_ductility",
@@ -307,7 +308,7 @@ class _EmptyTrainingReadyResearchUnderstandingFeedbackService:
         }
 
 
-class _NonActionableTrainingReadyResearchUnderstandingFeedbackService:
+class _ProtocolIneligibleTrainingReadyResearchUnderstandingFeedbackService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -318,7 +319,7 @@ class _NonActionableTrainingReadyResearchUnderstandingFeedbackService:
             "scope_type": "goal",
             "scope_id": kwargs["scope_id"],
             "dataset_use_status_filter": kwargs["dataset_use_status"],
-            "item_count": 4,
+            "item_count": 5,
             "items": [
                 {
                     "finding_id": "finding_missing_protocol_inputs",
@@ -387,6 +388,36 @@ class _NonActionableTrainingReadyResearchUnderstandingFeedbackService:
                             "evidence_ref_id": "ev_insufficient",
                             "document_id": "paper-insufficient",
                             "training_source_text": "Only background context was available.",
+                        }
+                    ],
+                },
+                {
+                    "finding_id": "finding_protocol_blocked",
+                    "label_status": "gold",
+                    "dataset_use_status": "training_ready",
+                    "expert_target": {
+                        "statement": (
+                            "Preheating improves ductility but the protocol input "
+                            "remains incomplete."
+                        ),
+                        "status": "supported",
+                        "support_grade": "strong",
+                        "variables": ["build platform preheating temperature"],
+                        "outcomes": ["ductility"],
+                        "direction": "increase",
+                    },
+                    "protocol_readiness": {
+                        "status": "needs_correction",
+                        "blocking_missing": ["training_messages"],
+                    },
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev_protocol_blocked",
+                            "document_id": "paper-protocol-blocked",
+                            "training_source_text": (
+                                "The evidence is traceable but the protocol message "
+                                "is incomplete."
+                            ),
                         }
                     ],
                 },
@@ -946,6 +977,11 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
                         "scope_summary": "LPBF 316L",
                         "support_grade": "partial",
                         "review_status": "needs_review",
+                        "generalization_status": "paper_level_only",
+                        "generalization_note": (
+                            "Evidence comes from one paper; use this as a traceable "
+                            "paper-level finding, not a cross-paper conclusion."
+                        ),
                         "paper_count": 1,
                         "evidence_count": 1,
                         "evidence_bundle": {"direct_result": ["ev_preheat"]},
@@ -1067,6 +1103,8 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     assert dataset["item_count"] == 1
     assert dataset["items"][0]["label_status"] == "gold"
     assert dataset["items"][0]["dataset_use_status"] == "training_ready"
+    assert dataset["items"][0]["protocol_readiness"]["status"] == "protocol_ready"
+    assert dataset["quality_summary"]["protocol_ready_sample_count"] == 1
     assert len(dataset["items"][0]["training_messages"]) == 2
     assert response["source_mode"] == "collection_grounded"
     assert response["review_gate"] == "protocol_ready_findings"
@@ -1158,8 +1196,8 @@ def test_goal_chat_warns_when_focused_scope_has_no_protocol_ready_findings(tmp_p
     ]
 
 
-def test_goal_chat_excludes_non_actionable_protocol_ready_findings(tmp_path):
-    feedback_service = _NonActionableTrainingReadyResearchUnderstandingFeedbackService()
+def test_goal_chat_excludes_training_ready_findings_that_are_not_protocol_ready(tmp_path):
+    feedback_service = _ProtocolIneligibleTrainingReadyResearchUnderstandingFeedbackService()
     service, collection_service = _service(
         tmp_path,
         content="No reviewed actionable findings are available.",
@@ -1190,6 +1228,7 @@ def test_goal_chat_excludes_non_actionable_protocol_ready_findings(tmp_path):
     assert "ev_unsupported" not in prompt
     assert "ev_conflict" not in prompt
     assert "ev_insufficient" not in prompt
+    assert "ev_protocol_blocked" not in prompt
 
 
 def test_goal_chat_returns_limited_response_when_llm_is_unavailable(tmp_path):

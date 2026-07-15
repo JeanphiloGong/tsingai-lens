@@ -789,6 +789,11 @@ class GoalSessionService:
     ) -> dict[str, Any]:
         if item.get("dataset_use_status") != "training_ready":
             return {}
+        protocol_readiness = item.get("protocol_readiness")
+        if not isinstance(protocol_readiness, dict) or (
+            protocol_readiness.get("status") != "protocol_ready"
+        ):
+            return {}
         target = item.get("expert_target")
         if not isinstance(target, dict):
             target = {}

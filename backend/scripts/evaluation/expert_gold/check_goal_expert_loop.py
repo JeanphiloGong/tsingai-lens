@@ -1057,7 +1057,18 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
     if _text(summary.get("completion_status")) == "complete":
         return []
     collection_id = _text(summary.get("collection_id")) or DEFAULT_COLLECTION_ID
+    review_href = _first_pending_goal_href(summary)
     commands = [
+        (
+            "Browser: open the goal review page"
+            + (f" at {review_href}" if review_href else "")
+        ),
+        (
+            "Browser: download Decision board TSV, fill expert_action/issue_type/"
+            "corrected_* columns, paste it into Reviewed decisions, then run Dry run "
+            "and Import decisions."
+        ),
+        "Offline CLI:",
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
             f"--collection-id {collection_id}"
@@ -1102,6 +1113,15 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
             f"--collection-id {collection_id} --format messages-jsonl --require-training-ready"
         )
     return commands
+
+
+def _first_pending_goal_href(summary: dict[str, Any]) -> str:
+    remaining = _mapping(summary.get("remaining_work"))
+    for goal in _mapping_list(remaining.get("pending_goals")):
+        href = _text(goal.get("href"))
+        if href:
+            return href
+    return ""
 
 
 def _goal_review_url(

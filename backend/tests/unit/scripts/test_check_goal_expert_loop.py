@@ -361,6 +361,18 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "- Experiment design usable: blocked" in text
     assert "Next commands:" in text
     assert (
+        "Browser: open the goal review page at "
+        "/collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1"
+        in text
+    )
+    assert (
+        "Browser: download Decision board TSV, fill expert_action/issue_type/"
+        "corrected_* columns, paste it into Reviewed decisions, then run Dry run "
+        "and Import decisions."
+        in text
+    )
+    assert "Offline CLI:" in text
+    assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py "
         "--collection-id col-1"
         in text

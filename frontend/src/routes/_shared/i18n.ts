@@ -370,11 +370,11 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadReviewPacket: 'Review packet',
 				reviewImportTitle: 'Import reviewed decisions',
 				reviewImportBody:
-					'Paste reviewed JSONL rows from the decision template, or merge a filled decision-board TSV into JSONL before pasting. Raw TSV cannot be imported here. Dry-run checks the rows first; import writes only explicit accept, reject, or correct actions.',
+					'Paste reviewed JSONL rows or a filled decision-board TSV. Dry-run checks the rows against the current dataset first; import writes only explicit accept, reject, or correct actions.',
 				reviewImportReviewer: 'Reviewer',
-				reviewImportTextareaLabel: 'Reviewed JSONL rows',
+				reviewImportTextareaLabel: 'Reviewed decisions',
 				reviewImportTextareaPlaceholder:
-					'Paste one JSON object per line from reviewed-findings.from-board.jsonl or an edited decision template.',
+					'Paste one JSON object per line from the decision template, or paste the filled TSV decision board.',
 				reviewImportDryRun: 'Dry run',
 				reviewImportSubmit: 'Import decisions',
 				reviewImportSubmitting: 'Submitting...',
@@ -3742,11 +3742,11 @@ const translations: Record<Language, Translations> = {
 				datasetDownloadReviewPacket: '复核包',
 				reviewImportTitle: '导入已复核决策',
 				reviewImportBody:
-					'粘贴已复核的决策模板 JSONL；如果填写的是决策表 TSV，需要先合并成 JSONL 再粘贴。这里不能直接导入原始 TSV。先 dry-run 检查；正式导入只写入明确的 accept、reject 或 correct。',
+					'粘贴已复核的 JSONL 行，或直接粘贴填写后的决策表 TSV。系统会先按当前数据集 dry-run 检查；正式导入只写入明确的 accept、reject 或 correct。',
 				reviewImportReviewer: '复核人',
-				reviewImportTextareaLabel: '已复核 JSONL 行',
+				reviewImportTextareaLabel: '已复核决策',
 				reviewImportTextareaPlaceholder:
-					'从 reviewed-findings.from-board.jsonl 或编辑后的决策模板粘贴，每行一个 JSON 对象。',
+					'粘贴决策模板 JSONL，每行一个对象；也可以粘贴填写后的 TSV 决策表。',
 				reviewImportDryRun: 'Dry run 检查',
 				reviewImportSubmit: '导入决策',
 				reviewImportSubmitting: '正在提交...',

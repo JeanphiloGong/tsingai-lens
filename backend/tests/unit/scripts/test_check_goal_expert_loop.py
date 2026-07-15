@@ -344,7 +344,7 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
-        "Do not rerun goal analysis for this state; export the decision workspace, fill expert-decision-board.tsv or the JSONL template, then merge, dry-run, and import human-confirmed decisions."
+        "Do not rerun goal analysis for this state; export the decision workspace or browser decision board, fill expert-decision-board.tsv or the JSONL template, then dry-run and import human-confirmed decisions. The browser import can accept a filled TSV board directly."
         in text
     )
     assert "Expert satisfaction: blocked" in text

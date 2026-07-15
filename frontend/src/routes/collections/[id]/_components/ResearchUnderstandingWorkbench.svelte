@@ -3312,6 +3312,19 @@
 		return rows;
 	}
 
+	function reviewImportLooksLikeDecisionBoardTsv(text: string) {
+		const firstLine = text
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.find(Boolean);
+		return Boolean(
+			firstLine &&
+				!firstLine.startsWith('{') &&
+				firstLine.includes('\t') &&
+				firstLine.split('\t').includes('expert_action')
+		);
+	}
+
 	function reviewImportContainsAgentDraftOnly(rows: Record<string, unknown>[]) {
 		return (
 			rows.some((row) => Boolean(row.agent_review)) &&
@@ -3496,15 +3509,16 @@
 		reviewImportError = '';
 		reviewImportSummary = null;
 		try {
-			const rows = parseReviewImportRows(reviewImportText);
-			if (!rows.length) {
+			const isDecisionBoardTsv = reviewImportLooksLikeDecisionBoardTsv(reviewImportText);
+			const rows = isDecisionBoardTsv ? [] : parseReviewImportRows(reviewImportText);
+			if (!isDecisionBoardTsv && !rows.length) {
 				throw new Error($t('research.understanding.reviewImportEmpty'));
 			}
-			if (reviewImportContainsAgentDraftOnly(rows)) {
+			if (!isDecisionBoardTsv && reviewImportContainsAgentDraftOnly(rows)) {
 				throw new Error($t('research.understanding.reviewImportAgentDraftOnly'));
 			}
 			const summary = await importResearchUnderstandingReviewDecisions(collectionId, {
-				rows,
+				...(isDecisionBoardTsv ? { decision_board_tsv: reviewImportText } : { rows }),
 				reviewer: currentReviewer,
 				dry_run: dryRun,
 				fail_on_warnings: dryRun

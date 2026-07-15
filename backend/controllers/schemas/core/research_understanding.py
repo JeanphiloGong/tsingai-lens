@@ -477,6 +477,7 @@ class ResearchUnderstandingReviewDecisionImportRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    decision_board_tsv: str | None = Field(default=None, max_length=2_000_000)
     reviewer: str | None = Field(default=None, max_length=120)
     dry_run: bool = Field(default=True)
     fail_on_warnings: bool = Field(default=False)

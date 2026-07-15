@@ -317,7 +317,8 @@ export type ResearchUnderstandingCurationFilters = {
 	claim_id?: string;
 };
 export type ResearchUnderstandingReviewDecisionImportRequest = {
-	rows: Record<string, unknown>[];
+	rows?: Record<string, unknown>[];
+	decision_board_tsv?: string | null;
 	reviewer?: string | null;
 	dry_run?: boolean;
 	fail_on_warnings?: boolean;

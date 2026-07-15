@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
+import csv
+from io import StringIO
 import json
+from pathlib import Path
 from typing import Any
 
 
@@ -200,6 +202,25 @@ class ResearchUnderstandingReviewImportService:
             ),
         )
 
+    def import_decision_board_tsv(
+        self,
+        *,
+        content: str,
+        reviewer: str,
+        dry_run: bool = False,
+        fail_on_warnings: bool = False,
+    ) -> dict[str, Any]:
+        rows = _decision_board_rows_to_review_rows(
+            self.feedback_service,
+            read_decision_board_tsv(content),
+        )
+        return self.import_rows(
+            rows=rows,
+            reviewer=reviewer,
+            dry_run=dry_run,
+            fail_on_warnings=fail_on_warnings,
+        )
+
     def import_jsonl_file(
         self,
         *,
@@ -231,6 +252,22 @@ def read_review_jsonl(path: Path) -> list[dict[str, Any]]:
                 raise ValueError(f"line {line_number} must be a JSON object")
             rows.append(payload)
     return rows
+
+
+def read_decision_board_tsv(content: str) -> list[dict[str, str]]:
+    reader = csv.DictReader(StringIO(content), delimiter="\t")
+    fieldnames = reader.fieldnames or []
+    missing = [
+        field
+        for field in ("collection_id", "goal_id", "finding_id", "expert_action")
+        if field not in fieldnames
+    ]
+    if missing:
+        raise ValueError(f"decision board missing column(s): {', '.join(missing)}")
+    return [
+        {key: value or "" for key, value in row.items() if key is not None}
+        for row in reader
+    ]
 
 
 def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
@@ -307,6 +344,210 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             },
         }
     return _correct_decision(row, line_number=line_number, action=action)
+
+
+def _decision_board_rows_to_review_rows(
+    service: Any,
+    board_rows: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    templates = _decision_board_templates(service, board_rows)
+    rows: list[dict[str, Any]] = []
+    for line_number, board_row in enumerate(board_rows, start=2):
+        action = _text(board_row.get("expert_action")).lower()
+        if action not in {"", "accept", "reject", "correct", "skip"}:
+            raise ValueError(
+                f"line {line_number}: expert_action must be accept, reject, correct, or skip"
+            )
+        template = templates.get(_decision_board_key(board_row))
+        if not template:
+            raise ValueError(
+                f"line {line_number}: finding is not present in current goal dataset"
+            )
+        row = dict(template)
+        if action in {"", "skip"}:
+            row["action"] = "skip"
+            rows.append(row)
+            continue
+        row["action"] = action
+        expert_note = _text(board_row.get("expert_note"))
+        if expert_note:
+            row["expert_note"] = expert_note
+        if action == "reject":
+            row["issue_type"] = _text(board_row.get("issue_type")).lower()
+        if action == "correct":
+            _apply_decision_board_correction(row, board_row)
+        rows.append(row)
+    return rows
+
+
+def _decision_board_templates(
+    service: Any,
+    board_rows: list[dict[str, str]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    templates: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for collection_id, goal_id in sorted(_decision_board_goal_keys(board_rows)):
+        dataset = service.export_dataset(
+            collection_id=collection_id,
+            scope_type="goal",
+            scope_id=goal_id,
+            label_status=None,
+            dataset_use_status=None,
+        )
+        for item in _mapping_list(dataset.get("items")):
+            if _text(item.get("dataset_use_status")) != "review_candidate":
+                continue
+            finding_id = _text(item.get("finding_id"))
+            if not finding_id:
+                continue
+            templates[(collection_id, goal_id, finding_id)] = (
+                _review_row_from_dataset_item(
+                    collection_id,
+                    goal_id,
+                    item,
+                )
+            )
+    return templates
+
+
+def _decision_board_goal_keys(
+    board_rows: list[dict[str, str]],
+) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for line_number, row in enumerate(board_rows, start=2):
+        collection_id = _text(row.get("collection_id"))
+        goal_id = _text(row.get("goal_id"))
+        finding_id = _text(row.get("finding_id"))
+        if not collection_id or not goal_id or not finding_id:
+            raise ValueError(
+                f"line {line_number}: collection_id, goal_id, and finding_id are required"
+            )
+        keys.add((collection_id, goal_id))
+    return keys
+
+
+def _review_row_from_dataset_item(
+    collection_id: str,
+    goal_id: str,
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    prediction = _mapping(item.get("system_prediction"))
+    expert_target = _mapping(item.get("expert_target"))
+    review_action = _mapping(item.get("review_action"))
+    protocol_readiness = _mapping(item.get("protocol_readiness"))
+    acceptance_gate = _mapping(item.get("acceptance_gate"))
+    decision_hint = _mapping(item.get("review_decision_hint"))
+    evidence_records = (
+        _mapping_list(item.get("training_evidence_refs"))
+        or _mapping_list(item.get("evidence_refs"))
+        or _mapping_list(item.get("input_blocks"))
+    )
+    item_scope_type = _text(item.get("scope_type")) or "goal"
+    item_scope_id = _text(item.get("scope_id")) or goal_id
+    return {
+        "collection_id": collection_id,
+        "goal_id": item_scope_id if item_scope_type == "goal" else goal_id,
+        "scope_type": item_scope_type,
+        "scope_id": item_scope_id,
+        "sample_id": _text(item.get("sample_id")),
+        "finding_id": _text(item.get("finding_id")),
+        "claim_id": _text(item.get("claim_id")),
+        "statement": _text(prediction.get("statement"))
+        or _text(expert_target.get("statement")),
+        "variables": _strings(prediction.get("variables")),
+        "mediators": _strings(prediction.get("mediators")),
+        "outcomes": _strings(prediction.get("outcomes")),
+        "direction": _text(prediction.get("direction")),
+        "scope_summary": _text(prediction.get("scope_summary")),
+        "support_grade": _text(prediction.get("support_grade")),
+        "review_status": _text(prediction.get("review_status")),
+        "presentation_bucket": _text(item.get("presentation_bucket")),
+        "trace_status": _text(item.get("trace_status")),
+        "review_reasons": _strings(prediction.get("review_reasons")),
+        "warnings": _strings(prediction.get("warnings")),
+        "recommended_action": _text(review_action.get("label")),
+        "recommended_action_code": _text(review_action.get("code")),
+        "protocol_readiness": protocol_readiness,
+        "acceptance_gate": acceptance_gate,
+        "review_decision_hint": decision_hint,
+        "action": "skip",
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "issue_type": "",
+        "expert_note": "",
+        "suggested_target": expert_target,
+        "curated_evidence_ref_ids": _dataset_evidence_ref_ids_from_records(evidence_records),
+        "evidence": [_decision_board_evidence_record(record) for record in evidence_records],
+        "protocol_blocking_missing": _strings(protocol_readiness.get("blocking_missing")),
+    }
+
+
+def _decision_board_evidence_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "evidence_ref_id": _text(record.get("evidence_ref_id")),
+        "label": _text(record.get("label") or record.get("source_label")),
+        "source_ref": _text(record.get("source_ref")),
+        "page": _text(record.get("page")),
+        "value_summary": _text(record.get("value_summary")),
+        "quote": (
+            _text(record.get("quote"))
+            or _text(record.get("source_text"))
+            or _text(record.get("training_source_text"))
+            or _text(record.get("text"))
+        ),
+    }
+
+
+def _dataset_evidence_ref_ids_from_records(records: list[dict[str, Any]]) -> list[str]:
+    return [
+        ref_id
+        for record in records
+        if (ref_id := _text(record.get("evidence_ref_id")))
+    ]
+
+
+def _apply_decision_board_correction(
+    row: dict[str, Any],
+    board_row: dict[str, str],
+) -> None:
+    target = dict(_mapping(row.get("suggested_target")))
+    text_fields = {
+        "corrected_statement": "statement",
+        "corrected_direction": "direction",
+        "corrected_scope_summary": "scope_summary",
+        "corrected_support_grade": "support_grade",
+    }
+    for source_field, target_field in text_fields.items():
+        value = _text(board_row.get(source_field))
+        if value:
+            target[target_field] = value
+    list_fields = {
+        "corrected_variables": "variables",
+        "corrected_mediators": "mediators",
+        "corrected_outcomes": "outcomes",
+        "corrected_evidence_ref_ids": "evidence_ref_ids",
+    }
+    for source_field, target_field in list_fields.items():
+        values = _split_decision_board_list(board_row.get(source_field))
+        if values:
+            target[target_field] = values
+    row["suggested_target"] = target
+    if target.get("evidence_ref_ids"):
+        row["curated_evidence_ref_ids"] = list(_strings(target.get("evidence_ref_ids")))
+
+
+def _split_decision_board_list(value: Any) -> list[str]:
+    text = _text(value)
+    if not text:
+        return []
+    delimiter = ";" if ";" in text else ","
+    return [_text(item) for item in text.split(delimiter) if _text(item)]
+
+
+def _decision_board_key(row: dict[str, str]) -> tuple[str, str, str]:
+    return (
+        _text(row.get("collection_id")),
+        _text(row.get("goal_id")),
+        _text(row.get("finding_id")),
+    )
 
 
 def confirm_agent_review_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

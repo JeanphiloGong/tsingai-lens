@@ -3920,7 +3920,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'Paste reviewed JSONL rows from the decision template, or merge a filled decision-board TSV into JSONL before pasting. Raw TSV cannot be imported here. Dry-run checks the rows first; import writes only explicit accept, reject, or correct actions.'
+					'Paste reviewed JSONL rows or a filled decision-board TSV. Dry-run checks the rows against the current dataset first; import writes only explicit accept, reject, or correct actions.'
 				)
 			)
 			.toBeInTheDocument();
@@ -3932,7 +3932,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			review_status: 'correct',
 			issue_type: 'none'
 		};
-		const importTextarea = browserPage.getByLabelText('Reviewed JSONL rows');
+		const importTextarea = browserPage.getByLabelText('Reviewed decisions');
 		await expect.element(importTextarea).toHaveAttribute('name', 'review_import_jsonl');
 		await importTextarea.fill(JSON.stringify(row));
 		await browserPage.getByRole('button', { name: 'Dry run' }).click();
@@ -4008,6 +4008,94 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
+	it('dry-runs pasted decision board TSV through the import service', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						status: 'pass',
+						dry_run: true,
+						total_rows: 1,
+						written_count: 0,
+						skipped_count: 0,
+						counts: { correct: 1 },
+						errors: [],
+						warnings: [],
+						review_progress: {
+							actionable_count: 1,
+							skipped_count: 0,
+							needs_review_count: 0,
+							ready_to_write: true,
+							next_steps: []
+						},
+						decision_progress_by_goal: [],
+						affected_goals: [],
+						readiness_summary: {},
+						review_scope_gate: {}
+					})
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = datasetSummaryLocator();
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		datasetRegion?.setAttribute('open', '');
+
+		const tsv = [
+			'expert_action\tissue_type\texpert_note\tcollection_id\tgoal_id\tfinding_id',
+			'correct\t\tChecked source table.\tcol_123\tgoal_1\tfinding_strength_supported'
+		].join('\n');
+		await browserPage.getByLabelText('Reviewed decisions').fill(tsv);
+		await browserPage.getByRole('button', { name: 'Dry run' }).click();
+
+		await expect
+			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 0 written.'))
+			.toBeInTheDocument();
+		const importCall = fetchMock.mock.calls.find(([input, init]) => {
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof (init as RequestInit | undefined)?.method === 'string'
+						? (init as RequestInit).method
+						: 'GET';
+			return (
+				requestPath(input as string | URL | Request).endsWith(
+					'/research-understanding/review-decisions/import'
+				) && method === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit] | undefined;
+		expect(importCall).toBeTruthy();
+		expect(JSON.parse(String(importCall?.[1]?.body))).toEqual({
+			decision_board_tsv: tsv,
+			reviewer: 'materials-expert@example.com',
+			dry_run: true,
+			fail_on_warnings: true
+		});
+	});
+
 	it('blocks agent review drafts until a human sets import actions', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
@@ -4052,7 +4140,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 				note: 'Evidence supports this paper-level finding.'
 			}
 		};
-		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByLabelText('Reviewed decisions').fill(JSON.stringify(row));
 		await browserPage.getByRole('button', { name: 'Dry run' }).click();
 
 		await expect
@@ -4143,7 +4231,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 				}
 			}
 		};
-		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByLabelText('Reviewed decisions').fill(JSON.stringify(row));
 		await browserPage.getByRole('button', { name: 'Dry run' }).click();
 
 		const importCall = fetchMock.mock.calls.find(([input, init]) => {
@@ -4276,7 +4364,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			review_status: 'correct',
 			issue_type: 'none'
 		};
-		await browserPage.getByLabelText('Reviewed JSONL rows').fill(JSON.stringify(row));
+		await browserPage.getByLabelText('Reviewed decisions').fill(JSON.stringify(row));
 		await browserPage.getByRole('button', { name: 'Import decisions' }).click();
 
 		await expect

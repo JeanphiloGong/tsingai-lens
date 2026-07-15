@@ -401,6 +401,7 @@ class FakeResearchUnderstandingFeedbackService:
 class FakeResearchUnderstandingReviewImportService:
     def __init__(self) -> None:
         self.imported = None
+        self.imported_tsv = None
 
     def import_rows(self, **kwargs):  # noqa: ANN003
         self.imported = kwargs
@@ -433,6 +434,29 @@ class FakeResearchUnderstandingReviewImportService:
                     "next_review_finding_id": "",
                 }
             ],
+            "affected_goals": [],
+            "readiness_summary": {},
+        }
+
+    def import_decision_board_tsv(self, **kwargs):  # noqa: ANN003
+        self.imported_tsv = kwargs
+        return {
+            "status": "pass",
+            "dry_run": kwargs["dry_run"],
+            "total_rows": 1,
+            "written_count": 0,
+            "skipped_count": 0,
+            "counts": {"correct": 1},
+            "errors": [],
+            "warnings": [],
+            "review_progress": {
+                "actionable_count": 1,
+                "skipped_count": 0,
+                "needs_review_count": 0,
+                "ready_to_write": True,
+                "next_steps": [],
+            },
+            "decision_progress_by_goal": [],
             "affected_goals": [],
             "readiness_summary": {},
         }
@@ -515,6 +539,42 @@ def test_research_understanding_review_decision_import_writes(monkeypatch):
     assert response.written_count == 1
     assert import_service.imported["dry_run"] is False
     assert import_service.imported["rows"][0]["collection_id"] == "col-other"
+
+
+def test_research_understanding_review_decision_import_accepts_decision_board_tsv(
+    monkeypatch,
+):
+    import_service = FakeResearchUnderstandingReviewImportService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "review_import_service",
+        import_service,
+    )
+    tsv = (
+        "expert_action\tcollection_id\tgoal_id\tfinding_id\n"
+        "correct\tcol-1\tgoal-1\tfinding-1\n"
+    )
+
+    response = asyncio.run(
+        feedback_controller.import_research_understanding_review_decisions(
+            "col-1",
+            ResearchUnderstandingReviewDecisionImportRequest(
+                dry_run=True,
+                fail_on_warnings=True,
+                decision_board_tsv=tsv,
+            ),
+            request_with_user(email="expert@example.com"),
+        )
+    )
+
+    assert response.status == "pass"
+    assert response.counts == {"correct": 1}
+    assert import_service.imported_tsv == {
+        "content": tsv,
+        "reviewer": "expert@example.com",
+        "dry_run": True,
+        "fail_on_warnings": True,
+    }
 
 
 def test_research_understanding_feedback_route_records_contract_payload(monkeypatch):

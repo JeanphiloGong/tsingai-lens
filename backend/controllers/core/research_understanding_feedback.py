@@ -855,6 +855,15 @@ async def import_research_understanding_review_decisions(
     request: Request,
 ) -> ResearchUnderstandingReviewDecisionImportResponse:
     reviewer = _reviewer_for_write(request, payload.reviewer)
+    if payload.decision_board_tsv:
+        summary = await run_in_threadpool(
+            review_import_service.import_decision_board_tsv,
+            content=payload.decision_board_tsv,
+            reviewer=reviewer,
+            dry_run=payload.dry_run,
+            fail_on_warnings=payload.fail_on_warnings,
+        )
+        return ResearchUnderstandingReviewDecisionImportResponse(**summary)
     rows = [
         {**row, "collection_id": _text(row.get("collection_id")) or collection_id}
         for row in payload.rows

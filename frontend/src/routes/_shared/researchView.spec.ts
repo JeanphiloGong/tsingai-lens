@@ -691,6 +691,40 @@ describe('research view shared helpers', () => {
 		expect(summary.review_progress.ready_to_write).toBe(true);
 	});
 
+	it('posts decision board TSV review imports through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			status: 'pass',
+			dry_run: true,
+			total_rows: 1,
+			written_count: 0,
+			skipped_count: 0,
+			counts: { correct: 1 },
+			errors: [],
+			warnings: [],
+			review_progress: { ready_to_write: true },
+			decision_progress_by_goal: [],
+			affected_goals: [],
+			readiness_summary: {}
+		});
+
+		const payload = {
+			dry_run: true,
+			fail_on_warnings: true,
+			decision_board_tsv:
+				'expert_action\tcollection_id\tgoal_id\tfinding_id\ncorrect\tcol 123\tgoal_1\tfinding_1\n'
+		};
+		const summary = await importResearchUnderstandingReviewDecisions('col 123', payload);
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col%20123/research-understanding/review-decisions/import',
+			{
+				method: 'POST',
+				body: JSON.stringify(payload)
+			}
+		);
+		expect(summary.counts.correct).toBe(1);
+	});
+
 	it('lists research understanding feedback through the same-origin collection contract', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',

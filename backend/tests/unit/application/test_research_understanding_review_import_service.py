@@ -74,6 +74,19 @@ class FakeFeedbackService:
         }
 
 
+class GateBlockingFeedbackService(FakeFeedbackService):
+    def export_dataset(self, **kwargs):  # noqa: ANN003
+        dataset = super().export_dataset(**kwargs)
+        dataset["items"][1]["acceptance_gate"] = {
+            "status": "correction_required",
+            "accept_allowed": False,
+            "requires_correction": True,
+            "blocking_missing": [],
+            "accept_blockers": ["table_row_alignment_uncertain"],
+        }
+        return dataset
+
+
 def _row(**overrides):
     row = {
         "collection_id": "col-1",
@@ -99,6 +112,81 @@ def _row(**overrides):
     }
     row.update(overrides)
     return row
+
+
+def test_review_import_service_imports_decision_board_tsv():
+    feedback_service = FakeFeedbackService()
+    service = ResearchUnderstandingReviewImportService(feedback_service)
+    tsv = "\n".join(
+        [
+            (
+                "expert_action\tissue_type\texpert_note\tcorrected_statement\t"
+                "corrected_variables\tcorrected_mediators\tcorrected_outcomes\t"
+                "corrected_direction\tcorrected_scope_summary\tcorrected_support_grade\t"
+                "corrected_evidence_ref_ids\tcollection_id\tgoal_id\tfinding_id"
+            ),
+            (
+                "correct\t\tChecked source table.\t"
+                "Preheating increases ductility by 14%.\tpreheating\t\tductility\t"
+                "increase\tLPBF 316L\tpartial\tev-2\tcol-1\tgoal-1\tfinding-correct"
+            ),
+        ]
+    )
+
+    summary = service.import_decision_board_tsv(
+        content=tsv,
+        reviewer="materials-expert@example.com",
+        dry_run=False,
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["written_count"] == 1
+    assert summary["counts"] == {"correct": 1}
+    assert feedback_service.curations == [
+        {
+            "collection_id": "col-1",
+            "scope_type": "goal",
+            "scope_id": "goal-1",
+            "finding_id": "finding-correct",
+            "claim_id": "claim-2",
+            "curated_claim_type": "finding",
+            "curated_status": "limited",
+            "curated_statement": "Preheating increases ductility by 14%.",
+            "curated_support_grade": "partial",
+            "curated_review_status": "accepted",
+            "curated_variables": ["preheating"],
+            "curated_mediators": [],
+            "curated_outcomes": ["ductility"],
+            "curated_direction": "increase",
+            "curated_scope_summary": "LPBF 316L",
+            "curated_evidence_ref_ids": ["ev-2"],
+            "curated_context_ids": [],
+            "note": "Checked source table.",
+            "reviewer": "materials-expert@example.com",
+        }
+    ]
+
+
+def test_review_import_service_decision_board_accept_uses_current_acceptance_gate():
+    service = ResearchUnderstandingReviewImportService(GateBlockingFeedbackService())
+    tsv = "\n".join(
+        [
+            "expert_action\tissue_type\texpert_note\tcollection_id\tgoal_id\tfinding_id",
+            "accept\t\tLooks valid.\tcol-1\tgoal-1\tfinding-correct",
+        ]
+    )
+
+    summary = service.import_decision_board_tsv(
+        content=tsv,
+        reviewer="materials-expert@example.com",
+        dry_run=True,
+    )
+
+    assert summary["status"] == "fail"
+    assert summary["errors"][0]["message"] == (
+        "accept is blocked by acceptance_gate.accept_blockers; "
+        "use correct or reject for: table_row_alignment_uncertain"
+    )
 
 
 def test_review_import_service_writes_feedback_and_curation():

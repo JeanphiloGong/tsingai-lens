@@ -2690,7 +2690,9 @@
 					? 'empty'
 				: readyFindings === total
 					? 'ready'
-					: trainingReady > 0
+					: trainingReady > 0 && reviewCandidateSamples === 0
+						? 'training_ready'
+						: trainingReady > 0
 						? 'mixed'
 						: 'review';
 		return {
@@ -2711,6 +2713,9 @@
 
 	function expertSummaryTitle(summary: ReturnType<typeof expertReadinessSummary>) {
 		if (summary.status === 'ready') return $t('research.understanding.expertSummaryReady');
+		if (summary.status === 'training_ready') {
+			return $t('research.understanding.expertSummaryTrainingReady');
+		}
 		if (summary.status === 'mixed') return $t('research.understanding.expertSummaryMixed');
 		if (summary.paperLevelFindings > 0) {
 			return $t('research.understanding.expertSummaryPaperLevel');
@@ -2731,6 +2736,11 @@
 		if (summary.status === 'ready') {
 			return $t('research.understanding.expertSummaryReadyBody', {
 				count: summary.readyFindings
+			});
+		}
+		if (summary.status === 'training_ready') {
+			return $t('research.understanding.expertSummaryTrainingReadyBody', {
+				count: summary.trainingReady
 			});
 		}
 		if (summary.trainingReady > 0) {

@@ -1548,6 +1548,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 		await expect.element(findingsTable.getByText('Accepted', { exact: true })).toBeInTheDocument();
 		await expect.element(findingsTable.getByText('Needs review', { exact: true })).not.toBeInTheDocument();
+		const expertSummary = browserPage.getByLabelText('Expert readiness summary');
+		await expect
+			.element(expertSummary.getByText('Training-ready expert labels'))
+			.toBeInTheDocument();
+		await expect
+			.element(expertSummary.getByText('Mixed review and training set'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(
+				expertSummary.getByText(
+					'1 human-confirmed finding sample(s) are ready for training and evaluation within their stated evidence scope.'
+				)
+			)
+			.toBeInTheDocument();
 
 		await findingsTable
 			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
@@ -3548,7 +3562,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Gold 1');
 		expect(datasetText).toContain('Rejected 1');
 		expect(datasetText).toContain(
-			'Gold is human-confirmed and can become training-ready; Silver is AI or non-human review and still needs expert confirmation.'
+			'Gold is human-confirmed; the Training-ready count shows which Gold samples pass dataset checks. Silver still needs human confirmation.'
 		);
 		expect(datasetText).toContain('Common error categories');
 		expect(datasetText).toContain('Variable error 2');

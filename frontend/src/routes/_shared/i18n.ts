@@ -432,7 +432,7 @@ const translations: Record<Language, Translations> = {
 				datasetTrainingMessagesNote:
 					'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.',
 				datasetLabelBoundaryNote:
-					'Gold is human-confirmed and can become training-ready; Silver is AI or non-human review and still needs expert confirmation.',
+					'Gold is human-confirmed; the Training-ready count shows which Gold samples pass dataset checks. Silver still needs human confirmation.',
 				datasetSummary: 'Dataset',
 				collectionDatasetSummary: 'Collection dataset',
 				collectionDatasetReady:
@@ -450,12 +450,15 @@ const translations: Record<Language, Translations> = {
 					'Where expert labels or review risks concentrate by research dimension.',
 				expertSummary: 'Expert readiness summary',
 				expertSummaryReady: 'Ready for expert use',
+				expertSummaryTrainingReady: 'Training-ready expert labels',
 				expertSummaryMixed: 'Mixed review and training set',
 				expertSummaryPaperLevel: 'Paper-level evidence',
 				expertSummaryReviewOnly: 'Review before use',
 				expertSummaryEmpty: 'No expert findings yet',
 				expertSummaryReadyBody:
 					'{count} finding(s) have enough support for scoped expert use.',
+				expertSummaryTrainingReadyBody:
+					'{count} human-confirmed finding sample(s) are ready for training and evaluation within their stated evidence scope.',
 				expertSummaryMixedBody:
 					'{training} sample(s) are training-ready; {review} review candidate finding(s) still need expert curation before use.',
 				expertSummaryPaperLevelBody:
@@ -3819,7 +3822,7 @@ const translations: Record<Language, Translations> = {
 				datasetTrainingMessagesNote:
 					'训练导出包含基于证据的 user/assistant messages，可用于评价或微调准备。',
 				datasetLabelBoundaryNote:
-					'金标代表人工确认，可进入 training-ready；银标代表 AI 或非人工复核，仍需专家确认。',
+					'金标代表人工确认；“可用于训练”数量表示其中通过当前数据集检查的金标样本。银标仍需人工确认。',
 				datasetSummary: '数据集',
 				collectionDatasetSummary: '全集合数据集',
 				collectionDatasetReady:
@@ -3836,11 +3839,14 @@ const translations: Record<Language, Translations> = {
 				datasetOptimizationHotspotsBody: '专家标注或复核风险按研究维度集中的位置。',
 				expertSummary: '专家可用性摘要',
 				expertSummaryReady: '可供专家使用',
+				expertSummaryTrainingReady: '已确认且可训练',
 				expertSummaryMixed: '复核和训练样本混合状态',
 				expertSummaryPaperLevel: '单篇文献级证据',
 				expertSummaryReviewOnly: '使用前需要复核',
 				expertSummaryEmpty: '暂无专家研究发现',
 				expertSummaryReadyBody: '{count} 条研究发现具备带条件使用的证据基础。',
+				expertSummaryTrainingReadyBody:
+					'{count} 条人工确认的研究发现已可在所述证据范围内用于训练和评价。',
 				expertSummaryMixedBody:
 					'{training} 条样本可用于训练；{review} 条候选研究发现仍需专家复核或校正后再使用。',
 				expertSummaryPaperLevelBody:

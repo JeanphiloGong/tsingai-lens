@@ -6450,6 +6450,14 @@ class ResearchUnderstandingService:
             findings,
             evidence_by_id=evidence_by_id,
         )
+        findings = [
+            self._finding_with_preheating_table_comparison(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
+            for finding in findings
+        ]
         primary_findings, review_queue_findings = self._partition_presentation_findings(
             findings,
             evidence_by_id=evidence_by_id,
@@ -6476,14 +6484,6 @@ class ResearchUnderstandingService:
         ]
         review_queue_findings = [
             self._finding_with_energy_density_context(
-                finding,
-                evidence_by_id=evidence_by_id,
-                tables_by_id=tables_by_id,
-            )
-            for finding in review_queue_findings
-        ]
-        review_queue_findings = [
-            self._finding_with_preheating_table_comparison(
                 finding,
                 evidence_by_id=evidence_by_id,
                 tables_by_id=tables_by_id,
@@ -9644,13 +9644,22 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         tables_by_id: Mapping[str, SourceTable],
     ) -> dict[str, Any]:
-        if not self._finding_has_only_table_direct_result(
+        table_only = self._finding_has_only_table_direct_result(
             finding,
             evidence_by_id=evidence_by_id,
-        ) or self._finding_has_non_direct_text_support(
+        )
+        narrative_supported = self._finding_has_non_table_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        )
+        if not table_only and not narrative_supported:
+            return dict(finding)
+        if table_only and self._finding_has_non_direct_text_support(
             _mapping(finding.get("evidence_bundle")),
             evidence_by_id=evidence_by_id,
         ):
+            return dict(finding)
+        if narrative_supported and _mapping(finding.get("comparison_summary")):
             return dict(finding)
         comparison = self._finding_preheating_table_comparison_values(
             finding,
@@ -9678,11 +9687,28 @@ class ResearchUnderstandingService:
             direction = "decreases"
         else:
             direction = "unchanged"
-        statement = (
+        table_statement = (
             f"The source table reports {outcome_axis} of {baseline_value} for the "
             f"non-preheated condition and {observed_value} for the preheated "
             "condition."
         )
+        statement = table_statement
+        if narrative_supported:
+            stated_change = self._finding_stated_relative_change(finding)
+            calculated_change = (
+                abs(observed_number - baseline_number) / abs(baseline_number) * 100
+                if baseline_number
+                else None
+            )
+            if stated_change is None or calculated_change is None:
+                return dict(finding)
+            tolerance = max(1.0, abs(stated_change) * 0.1)
+            if abs(calculated_change - abs(stated_change)) > tolerance:
+                return dict(finding)
+            narrative_statement = (_text(finding.get("statement")) or "").strip()
+            if not narrative_statement:
+                return dict(finding)
+            statement = f"{table_statement} {narrative_statement}"
         variable = _text(next(iter(_strings(finding.get("variables"))), "")) or ""
         updated = dict(finding)
         updated["statement"] = statement

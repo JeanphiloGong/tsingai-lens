@@ -2985,6 +2985,18 @@ def test_finding_promotes_matching_preheat_strength_table():
             ("Preheated", "465", "618", "82"),
         ),
     )
+    evidence_by_id = {
+        "evref-text": {
+            "source_kind": "text_window",
+            "document_id": "paper-preheat",
+        },
+        "evref-table": {
+            "source_kind": "table",
+            "document_id": "paper-preheat",
+            "locator": {"source_ref": "tbl-preheat-tensile"},
+            "traceability_status": "resolved",
+        },
+    }
 
     bundle = service._finding_direct_bundle(
         {
@@ -2996,14 +3008,7 @@ def test_finding_promotes_matching_preheat_strength_table():
             "noise": [],
             "uncategorized": ["evref-table"],
         },
-        evidence_by_id={
-            "evref-text": {"source_kind": "text_window"},
-            "evref-table": {
-                "source_kind": "table",
-                "locator": {"source_ref": "tbl-preheat-tensile"},
-                "traceability_status": "resolved",
-            },
-        },
+        evidence_by_id=evidence_by_id,
         outcomes=["mechanical properties"],
         promote_non_table=False,
         statement="Preheating increased yield strength by approximately 4%.",
@@ -3012,6 +3017,61 @@ def test_finding_promotes_matching_preheat_strength_table():
 
     assert bundle["direct_result"] == ["evref-text", "evref-table"]
     assert bundle["uncategorized"] == []
+
+    statement = (
+        "Build platform preheating increased yield strength by approximately "
+        "4%; the authors attributed the change to microstructure and texture "
+        "evolution."
+    )
+    finding = service._finding_with_preheating_table_comparison(
+        {
+            "statement": statement,
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["yield strength"],
+            "direction": "increases",
+            "comparison_summary": None,
+            "evidence_bundle": bundle,
+            "relation_chain": [
+                {
+                    "statement": statement,
+                    "direction": "increases",
+                    "outcome": "yield strength",
+                }
+            ],
+        },
+        evidence_by_id=evidence_by_id,
+        tables_by_id={"tbl-preheat-tensile": table},
+    )
+
+    assert finding["statement"] == (
+        "The source table reports yield strength of 448 MPa for the "
+        "non-preheated condition and 465 MPa for the preheated condition. "
+        "Build platform preheating increased yield strength by approximately "
+        "4%; the authors attributed the change to microstructure and texture "
+        "evolution."
+    )
+    assert finding["comparison_summary"] == {
+        "variable": "build platform preheating temperature",
+        "direction": "increases",
+        "outcome": "yield strength",
+        "baseline": {"label": "non-preheated", "value": "448 MPa"},
+        "observed": {"label": "preheated", "value": "465 MPa"},
+        "controlled_conditions": [],
+    }
+    assert finding["relation_chain"][0]["statement"] == finding["statement"]
+
+    mismatched = service._finding_with_preheating_table_comparison(
+        {
+            **finding,
+            "statement": "Preheating increased yield strength by 40%.",
+            "comparison_summary": None,
+        },
+        evidence_by_id=evidence_by_id,
+        tables_by_id={"tbl-preheat-tensile": table},
+    )
+
+    assert mismatched["statement"] == "Preheating increased yield strength by 40%."
+    assert mismatched["comparison_summary"] is None
 
 
 def test_objective_understanding_does_not_recover_mechanical_finding_for_corrosion_goal():

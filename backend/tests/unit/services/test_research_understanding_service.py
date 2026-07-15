@@ -2125,7 +2125,14 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
 
     understanding = service.build_objective_understanding(payload)
 
-    finding = understanding["presentation"]["primary_findings"][0]
+    findings = understanding["presentation"]["primary_findings"]
+    assert len(findings) == 2
+    finding = next(
+        item
+        for item in findings
+        if item["title"]
+        == "heat treatment type and heat treatment parameters -> density and microstructure"
+    )
     assert finding["title"] == (
         "heat treatment type and heat treatment parameters -> density and microstructure"
     )
@@ -2133,10 +2140,9 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
         "Under the tested furnace HT at 1100 °C for 0.5 h and HIP at "
         "1100 °C and 100 MPa for 1.5 h, heat treatment increased density and "
         "eliminated the as-SLM cellular microstructure and dense dislocation "
-        "structures through recrystallization. The authors reported no "
-        "superiority between the furnace HT and HIP treatment bundles for "
-        "pore reduction. These grouped observations do not isolate treatment "
-        "type, temperature, duration, or pressure as separate effects."
+        "structures through recrystallization. These grouped observations do "
+        "not isolate treatment type, temperature, duration, or pressure as "
+        "separate effects."
     )
     assert finding["variables"] == [
         "heat treatment type and heat treatment parameters"
@@ -2152,14 +2158,33 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
         "blk-heat-conditions"
     )
     comparison_ref_id = (
-        "evref_recovered_heat_treatment_microstructure_mechanics_comparison_"
+        "evref_recovered_heat_treatment_bundle_pore_reduction_"
         "blk-heat-comparison"
     )
     assert finding["evidence_bundle"]["direct_result"] == [
         "evref_recovered_heat_treatment_microstructure_mechanics_blk-heat-result",
-        comparison_ref_id,
     ]
     assert finding["evidence_bundle"]["condition_context"] == [condition_ref_id]
+    comparison_finding = next(
+        item
+        for item in findings
+        if item["title"]
+        == "heat treatment type and heat treatment parameters -> pore reduction"
+    )
+    assert comparison_finding["statement"] == (
+        "Under the tested furnace HT at 1100 °C for 0.5 h and HIP at "
+        "1100 °C and 100 MPa for 1.5 h, the authors reported no superiority "
+        "between the furnace HT and HIP treatment bundles for pore reduction. "
+        "This bundle comparison does not isolate treatment type, temperature, "
+        "duration, or pressure as separate effects."
+    )
+    assert comparison_finding["evidence_bundle"]["direct_result"] == [
+        comparison_ref_id
+    ]
+    assert comparison_finding["evidence_bundle"]["condition_context"] == [
+        "evref_recovered_heat_treatment_bundle_pore_reduction_condition_"
+        "blk-heat-conditions"
+    ]
     evidence_by_id = {
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
@@ -2171,9 +2196,10 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
     assert "No superiority" in evidence_by_id[comparison_ref_id]["quote"]
     reprojected = service.with_presentation(understanding)
     assert reprojected is not None
-    assert reprojected["presentation"]["primary_findings"][0]["finding_id"] == (
-        finding["finding_id"]
-    )
+    assert {
+        item["finding_id"]
+        for item in reprojected["presentation"]["primary_findings"]
+    } == {finding["finding_id"], comparison_finding["finding_id"]}
 
 
 def test_objective_understanding_recovers_heat_treatment_mechanics_when_requested():

@@ -979,6 +979,47 @@ class ResearchUnderstandingService:
                     "confidence": 0.84,
                 }
             )
+            if self._objective_property_axes_include_any(
+                normalized_property_axes,
+                legacy_match=" density " in normalized_axes,
+                terms=["density", "relative density", "densification", "porosity"],
+            ):
+                specs.append(
+                    {
+                        "slug": "heat_treatment_bundle_pore_reduction",
+                        "subject": (
+                            "heat treatment type and heat treatment parameters"
+                        ),
+                        "relation_type": "compares",
+                        "predicate": "compares",
+                        "object": "pore reduction",
+                        "statement": (
+                            "The authors reported no superiority between the "
+                            "furnace HT and HIP treatment bundles for pore "
+                            "reduction. This bundle comparison does not isolate "
+                            "treatment type, temperature, duration, or pressure "
+                            "as separate effects."
+                        ),
+                        "process_axes": [
+                            "heat treatment type",
+                            "heat treatment temperature",
+                            "heat treatment duration",
+                            "HIP pressure",
+                        ],
+                        "property_scope": ["pore reduction"],
+                        "block_predicate": (
+                            self._is_heat_treatment_bundle_comparison_block
+                        ),
+                        "confidence": 0.84,
+                        "claim_status": "limited",
+                        "relation_status": "limited",
+                        "warnings": [
+                            "heat_treatment_parameters_not_isolated",
+                            "single_variable_effect_not_isolated",
+                            "needs_expert_review",
+                        ],
+                    }
+                )
         if (
             (
                 " scan strategy " in normalized_axes
@@ -1094,7 +1135,10 @@ class ResearchUnderstandingService:
                         blocks_by_id=blocks_by_id,
                     )
                     if _text(spec.get("slug"))
-                    == "heat_treatment_microstructure_mechanics"
+                    in {
+                        "heat_treatment_microstructure_mechanics",
+                        "heat_treatment_bundle_pore_reduction",
+                    }
                     else self._best_ved_condition_source_block(
                         document_id,
                         blocks_by_id=blocks_by_id,
@@ -1110,36 +1154,25 @@ class ResearchUnderstandingService:
                         else None
                     )
                 )
-                supporting_blocks: list[SourceBlock] = []
-                heat_treatment_comparison_block = None
-                if (
-                    _text(spec.get("slug"))
-                    == "heat_treatment_microstructure_mechanics"
-                ):
-                    heat_treatment_comparison_block = (
-                        self._best_heat_treatment_bundle_comparison_source_block(
-                            document_id,
-                            blocks_by_id=blocks_by_id,
-                            exclude_block_id=_text(block.block_id),
-                        )
-                    )
-                    if heat_treatment_comparison_block is not None:
-                        supporting_blocks.append(heat_treatment_comparison_block)
-                    if self._heat_treatment_objective_requests_mechanics(
-                        normalized_property_axes
-                    ):
-                        mechanics_block = (
+                supporting_blocks = (
+                    [
+                        supporting_block
+                        for supporting_block in [
                             self._best_heat_treatment_mechanics_source_block(
                                 document_id,
                                 blocks_by_id=blocks_by_id,
                                 exclude_block_id=_text(block.block_id),
                             )
-                        )
-                        if (
-                            mechanics_block is not None
-                            and mechanics_block not in supporting_blocks
-                        ):
-                            supporting_blocks.append(mechanics_block)
+                        ]
+                        if supporting_block is not None
+                    ]
+                    if _text(spec.get("slug"))
+                    == "heat_treatment_microstructure_mechanics"
+                    and self._heat_treatment_objective_requests_mechanics(
+                        normalized_property_axes
+                    )
+                    else []
+                )
                 if _text(spec.get("slug")).startswith("texture_yield_"):
                     supporting_block = self._best_recovered_spec_source_block(
                         document_id,
@@ -1205,14 +1238,6 @@ class ResearchUnderstandingService:
                     if table is not None
                 ]
                 recovered_spec = spec
-                if heat_treatment_comparison_block is not None:
-                    recovered_spec = {
-                        **recovered_spec,
-                        "statement": (
-                            f"{_text(recovered_spec.get('statement'))} "
-                            f"{self._heat_treatment_bundle_comparison_sentence()}"
-                        ),
-                    }
                 if (
                     _text(spec.get("slug"))
                     == "heat_treatment_microstructure_mechanics"
@@ -1231,9 +1256,6 @@ class ResearchUnderstandingService:
                                 self._heat_treatment_recovered_statement_with_conditions(
                                     normalized_property_axes,
                                     condition_summary=condition_summary,
-                                    includes_bundle_comparison=(
-                                        heat_treatment_comparison_block is not None
-                                    ),
                                 )
                             ),
                             "process_axes": [
@@ -1249,6 +1271,26 @@ class ResearchUnderstandingService:
                                 "single_variable_effect_not_isolated",
                                 "needs_expert_review",
                             ],
+                        }
+                if (
+                    _text(spec.get("slug"))
+                    == "heat_treatment_bundle_pore_reduction"
+                    and condition_block is not None
+                ):
+                    condition_summary = self._heat_treatment_condition_summary(
+                        condition_block
+                    )
+                    if condition_summary:
+                        recovered_spec = {
+                            **spec,
+                            "statement": (
+                                f"Under the tested {condition_summary}, the "
+                                "authors reported no superiority between the "
+                                "furnace HT and HIP treatment bundles for pore "
+                                "reduction. This bundle comparison does not "
+                                "isolate treatment type, temperature, duration, "
+                                "or pressure as separate effects."
+                            ),
                         }
                 if _text(spec.get("slug")) == "ved_defects_fatigue":
                     fabrication_context = self._ved_fabrication_parameter_context(
@@ -1422,7 +1464,6 @@ class ResearchUnderstandingService:
         normalized_property_axes: str,
         *,
         condition_summary: str,
-        includes_bundle_comparison: bool = False,
     ) -> str:
         scope = self._heat_treatment_recovered_base_scope(normalized_property_axes)
         effects: list[str] = []
@@ -1447,19 +1488,9 @@ class ResearchUnderstandingService:
                 f"{statement} "
                 f"{self._heat_treatment_recovered_mechanics_sentence(mechanics_effects)}"
             )
-        if includes_bundle_comparison:
-            statement = (
-                f"{statement} {self._heat_treatment_bundle_comparison_sentence()}"
-            )
         return (
             f"{statement} These grouped observations do not isolate treatment "
             "type, temperature, duration, or pressure as separate effects."
-        )
-
-    def _heat_treatment_bundle_comparison_sentence(self) -> str:
-        return (
-            "The authors reported no superiority between the furnace HT and HIP "
-            "treatment bundles for pore reduction."
         )
 
     def _heat_treatment_recovered_base_statement(
@@ -2701,27 +2732,6 @@ class ResearchUnderstandingService:
                 best = ranked
         return best[2] if best else None
 
-    def _best_heat_treatment_bundle_comparison_source_block(
-        self,
-        document_id: str,
-        *,
-        blocks_by_id: Mapping[str, SourceBlock],
-        exclude_block_id: str,
-    ) -> SourceBlock | None:
-        best: tuple[int, int, SourceBlock] | None = None
-        for block in blocks_by_id.values():
-            if block.document_id != document_id:
-                continue
-            if _text(block.block_id) == exclude_block_id:
-                continue
-            score = self._is_heat_treatment_bundle_comparison_block(block)
-            if score <= 0:
-                continue
-            ranked = (score, block.block_order or 0, block)
-            if best is None or ranked > best:
-                best = ranked
-        return best[2] if best else None
-
     def _is_heat_treatment_bundle_comparison_block(
         self,
         block: SourceBlock,
@@ -3020,17 +3030,8 @@ class ResearchUnderstandingService:
             supporting_block_id = _text(supporting_block.block_id)
             if not supporting_block_id:
                 continue
-            supporting_kind = (
-                "comparison"
-                if slug == "heat_treatment_microstructure_mechanics"
-                and self._is_heat_treatment_bundle_comparison_block(
-                    supporting_block
-                )
-                > 0
-                else "mechanics"
-            )
             supporting_ref_id = (
-                f"evref_recovered_{slug}_{supporting_kind}_{supporting_block_id}"
+                f"evref_recovered_{slug}_mechanics_{supporting_block_id}"
             )
             evidence_ref_ids.append(supporting_ref_id)
             supporting_quote = (

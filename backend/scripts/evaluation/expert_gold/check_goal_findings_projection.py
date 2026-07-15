@@ -89,6 +89,10 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
                 "1.5 h",
             ],
         ],
+        "required_primary_finding_sets": [
+            ["heat treatment increased density", "recrystallization"],
+            ["no superiority", "furnace ht", "hip", "pore reduction"],
+        ],
     },
     "goal_399171646354": {
         "finding_terms": [

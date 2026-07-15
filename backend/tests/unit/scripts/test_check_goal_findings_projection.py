@@ -1215,20 +1215,78 @@ def test_evaluate_goal_analysis_payload_accepts_table_axes_in_review_queue():
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_1a7_axis_summary(),
+                    "summary": _goal_1a7_axis_summary(
+                        evidence_count=5,
+                        primary_finding_count=2,
+                    ),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
-                            "title": "heat treatment -> density and microstructure",
-                            "statement": (
-                                "Heat treatment increased density and changed "
-                                "cellular microstructure."
+                            "title": (
+                                "heat treatment type and heat treatment parameters "
+                                "-> density and microstructure"
                             ),
-                            "variables": ["heat treatment"],
-                            "mediators": ["cellular microstructure"],
-                            "outcomes": ["density and microstructure"],
-                            "evidence_ref_ids": ["ev-1"],
-                            "evidence_bundle": {"direct_result": ["ev-1"]},
+                            "statement": (
+                                "Under the tested furnace HT at 1100 °C for 0.5 h "
+                                "and HIP at 1100 °C and 100 MPa for 1.5 h, heat "
+                                "treatment increased density and eliminated the "
+                                "cellular microstructure and dense dislocation "
+                                "structures through recrystallization. These "
+                                "grouped observations do not isolate treatment "
+                                "type, temperature, duration, or pressure as "
+                                "separate effects."
+                            ),
+                            "variables": [
+                                "heat treatment type and heat treatment parameters"
+                            ],
+                            "mediators": [
+                                "cellular microstructure",
+                                "dislocation structures",
+                                "recrystallization",
+                            ],
+                            "outcomes": ["density", "microstructure"],
+                            "evidence_ref_ids": ["ev-1", "ev-condition"],
+                            "evidence_bundle": {
+                                "direct_result": ["ev-1"],
+                                "condition_context": ["ev-condition"],
+                            },
+                            "warnings": [
+                                "heat_treatment_parameters_not_isolated",
+                                "single_variable_effect_not_isolated",
+                            ],
+                            **_paper_level_boundary_fields(),
+                        },
+                        {
+                            "finding_id": "finding-heat-comparison",
+                            "title": (
+                                "heat treatment type and heat treatment parameters "
+                                "-> pore reduction"
+                            ),
+                            "statement": (
+                                "Under the tested furnace HT at 1100 °C for 0.5 h "
+                                "and HIP at 1100 °C and 100 MPa for 1.5 h, the "
+                                "authors reported no superiority between the "
+                                "furnace HT and HIP treatment bundles for pore "
+                                "reduction. This bundle comparison does not isolate "
+                                "treatment type, temperature, duration, or pressure "
+                                "as separate effects."
+                            ),
+                            "variables": [
+                                "heat treatment type and heat treatment parameters"
+                            ],
+                            "outcomes": ["pore reduction"],
+                            "evidence_ref_ids": [
+                                "ev-heat-comparison",
+                                "ev-condition",
+                            ],
+                            "evidence_bundle": {
+                                "direct_result": ["ev-heat-comparison"],
+                                "condition_context": ["ev-condition"],
+                            },
+                            "warnings": [
+                                "heat_treatment_parameters_not_isolated",
+                                "single_variable_effect_not_isolated",
+                            ],
                             **_paper_level_boundary_fields(),
                         },
                     ],
@@ -1267,9 +1325,34 @@ def test_evaluate_goal_analysis_payload_accepts_table_axes_in_review_queue():
                             "evidence_ref_id": "ev-1",
                             "quote": (
                                 "Heat treatment increased density and removed "
-                                "cellular microstructure and dense dislocation structures."
+                                "cellular microstructure and dense dislocation "
+                                "structures through recrystallization."
                             ),
                             "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
+                        },
+                        {
+                            "evidence_ref_id": "ev-heat-comparison",
+                            "quote": (
+                                "No superiority was found between the furnace-type "
+                                "HT and HIP in terms of pore reduction."
+                            ),
+                            "href": (
+                                "/collections/col-1/documents/doc-1"
+                                "?source_ref=blk-heat-comparison"
+                            ),
+                        },
+                        {
+                            "evidence_ref_id": "ev-condition",
+                            "evidence_role": "condition_context",
+                            "quote": (
+                                "A furnace-type heat treatment was conducted at "
+                                "1100 °C for 0.5 h. Hot isostatic pressing was "
+                                "performed at 1100 °C and 100 MPa for 1.5 h."
+                            ),
+                            "href": (
+                                "/collections/col-1/documents/doc-1"
+                                "?source_ref=blk-condition"
+                            ),
                         },
                         {
                             "evidence_ref_id": "ev-2",

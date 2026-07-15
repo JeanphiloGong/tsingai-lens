@@ -1560,6 +1560,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(findingDetail.getByText('Human confirmed', { exact: true }).first()).toBeInTheDocument();
 		await expect.element(findingDetail.getByText('Accepted', { exact: true }).first()).toBeInTheDocument();
 		await expect
+			.element(
+				findingDetail.getByText(
+					'This human-confirmed label is usable as a training and evaluation sample within the stated evidence scope.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				findingDetail.getByText(
+					'Accepted expert review or curation can make this usable as a labeled training/evaluation sample.'
+				)
+			)
+			.not.toBeInTheDocument();
+		await expect
 			.element(findingDetail.getByText('Needs review', { exact: true }))
 			.not.toBeInTheDocument();
 		await expect

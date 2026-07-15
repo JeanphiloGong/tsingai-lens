@@ -763,7 +763,7 @@ const translations: Record<Language, Translations> = {
 						'Do not use this finding yet. The source binding needs direct result evidence before review.'
 				},
 				findingUsageDatasetReady:
-					'Accepted expert review or curation can make this usable as a labeled training/evaluation sample.',
+					'This human-confirmed label is usable as a training and evaluation sample within the stated evidence scope.',
 				findingUsageDatasetSilver:
 					'AI review keeps this as a silver review candidate; human confirmation is still required before training-ready use.',
 				findingUsageDatasetReview:
@@ -4132,7 +4132,7 @@ const translations: Record<Language, Translations> = {
 					repair: '暂不可使用。需要先绑定直接结果证据，再进入复核。'
 				},
 				findingUsageDatasetReady:
-					'已有专家反馈或校正后，可以作为带标签的训练/评价样本使用。',
+					'该人工确认标签已可在所述证据范围内作为训练和评价样本使用。',
 				findingUsageDatasetSilver:
 					'AI 复核只能让它保持为 Silver 待复核候选；进入可训练样本前仍需要人工确认。',
 				findingUsageDatasetReview: '在专家反馈或校正给出最终标签前，只能保留为待复核候选。',

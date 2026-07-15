@@ -268,6 +268,14 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["hatch spacing"],
             ["layer thickness remained fixed"],
             ["does not isolate a ved-only effect"],
+            ["fatigue-test scope", "vertically built specimens"],
+            ["600 °c", "120 min"],
+            ["fully reversed loading"],
+            ["lcf and hcf frequencies", "15", "100 hz"],
+            ["600 grit", "electropolished", "ra < 0.1"],
+            ["15 specimens per parameter set"],
+            ["10^7-cycle fatigue-limit cutoff"],
+            ["parsed load-ratio token conflicts", "source-pdf verification"],
         ],
         "evidence_terms": [
             ["increasing ved"],
@@ -290,6 +298,9 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
                 "79.4",
                 "84.3",
             ],
+            ["vertically fabricated", "600", "120 min"],
+            ["fully reversed loading", "15 hz", "100 hz", "10 7 cycles"],
+            ["600 grit", "electropolish", "0.1", "15 samples"],
         ],
     },
 }
@@ -345,6 +356,9 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
     "goal_3037e425673a": [
         ["process_conditions_not_isolated"],
         ["single_variable_effect_not_isolated"],
+        ["fatigue_test_conditions_required"],
+        ["fatigue_metrics_use_different_cycle_regimes"],
+        ["source_sign_inconsistency"],
     ],
 }
 GOAL_AXIS_SEMANTIC_EXPECTATIONS: dict[str, dict[str, list[str]]] = {

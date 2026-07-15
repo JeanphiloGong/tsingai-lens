@@ -100,21 +100,43 @@ def _ved_fatigue_strength_primary_finding():
             "fraction, size, and complexity and slightly improved fatigue life. "
             "Laser power, scanning speed, and hatch spacing varied across these "
             "VED groups, while layer thickness remained fixed at 30 μm, so the "
-            "comparison does not isolate a VED-only effect."
+            "comparison does not isolate a VED-only effect. Fatigue-test scope: "
+            "vertically built specimens were stress-relief annealed at 600 °C "
+            "for 120 min. Tests used fully reversed loading; LCF and HCF "
+            "frequencies were 15 and 100 Hz, respectively. Specimens were ground "
+            "to 600 grit and electropolished to Ra < 0.1 μm, with 15 specimens "
+            "per parameter set and a 10^7-cycle fatigue-limit cutoff. The parsed "
+            "load-ratio token conflicts with 'fully reversed' and requires "
+            "source-PDF verification."
         ),
         "variables": [
             "coupled PBF-LB parameter sets grouped by volumetric energy density"
         ],
         "mediators": ["defect structure"],
         "outcomes": ["fatigue strength"],
-        "evidence_ref_ids": ["ev-1", "ev-fatigue-strength", "ev-condition"],
+        "evidence_ref_ids": [
+            "ev-1",
+            "ev-fatigue-strength",
+            "ev-condition",
+            "ev-fatigue-specimen",
+            "ev-fatigue-loading",
+            "ev-fatigue-surface",
+        ],
         "evidence_bundle": {
             "direct_result": ["ev-1", "ev-fatigue-strength"],
-            "condition_context": ["ev-condition"],
+            "condition_context": [
+                "ev-condition",
+                "ev-fatigue-specimen",
+                "ev-fatigue-loading",
+                "ev-fatigue-surface",
+            ],
         },
         "warnings": [
             "process_conditions_not_isolated",
             "single_variable_effect_not_isolated",
+            "fatigue_test_conditions_required",
+            "fatigue_metrics_use_different_cycle_regimes",
+            "source_sign_inconsistency",
             "needs_expert_review",
         ],
         "review_reasons": [
@@ -174,6 +196,7 @@ def _ved_fatigue_condition_evidence(**extra):
     return {
         "evidence_ref_id": "ev-condition",
         "source_kind": "paragraph",
+        "source_ref": "blk-condition",
         "quote": (
             "By varying the scanning speed and laser power, three different VED "
             "levels were applied: L-VED at 50.8 J/mm3, M-VED at 79.4 J/mm3, "
@@ -184,8 +207,55 @@ def _ved_fatigue_condition_evidence(**extra):
     }
 
 
+def _ved_fatigue_test_condition_evidence(**extra):
+    return [
+        {
+            "evidence_ref_id": "ev-fatigue-specimen",
+            "source_kind": "paragraph",
+            "source_ref": "blk-fatigue-specimen",
+            "quote": (
+                "Fatigue specimens were vertically fabricated and stress-relief "
+                "annealed at 600 °C for 120 min under argon."
+            ),
+            "href": (
+                "/collections/col-1/documents/doc-1"
+                "?source_ref=blk-fatigue-specimen"
+            ),
+            **extra,
+        },
+        {
+            "evidence_ref_id": "ev-fatigue-loading",
+            "source_kind": "paragraph",
+            "source_ref": "blk-fatigue-loading",
+            "quote": (
+                "LCF testing used 15 Hz and HCF testing used 100 Hz under fully "
+                "reversed loading (R = 1), with a cut-off of 10 7 cycles."
+            ),
+            "href": (
+                "/collections/col-1/documents/doc-1"
+                "?source_ref=blk-fatigue-loading"
+            ),
+            **extra,
+        },
+        {
+            "evidence_ref_id": "ev-fatigue-surface",
+            "source_kind": "paragraph",
+            "source_ref": "blk-fatigue-surface",
+            "quote": (
+                "Samples were ground to 600 grit and electropolished to Ra < "
+                "0.1 μm; 15 samples were tested for each set."
+            ),
+            "href": (
+                "/collections/col-1/documents/doc-1"
+                "?source_ref=blk-fatigue-surface"
+            ),
+            **extra,
+        },
+    ]
+
+
 def _goal_3037_axis_summary(
-    evidence_count: int = 3,
+    evidence_count: int = 6,
     primary_finding_count: int = 1,
     review_queue_finding_count: int = 0,
 ):
@@ -483,6 +553,7 @@ def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
                         },
                         _ved_fatigue_strength_table_evidence(),
                         _ved_fatigue_condition_evidence(),
+                        *_ved_fatigue_test_condition_evidence(),
                     ],
                 },
             },
@@ -556,7 +627,10 @@ def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artif
                         ),
                         _ved_fatigue_condition_evidence(
                             document_id="doc-1",
-                            source_ref="blk-condition",
+                            page="3",
+                        ),
+                        *_ved_fatigue_test_condition_evidence(
+                            document_id="doc-1",
                             page="3",
                         ),
                     ],
@@ -592,6 +666,35 @@ def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artif
                             "By varying the scanning speed and laser power, three "
                             "different VED levels were applied: L-VED at 50.8 J/mm3, "
                             "M-VED at 79.4 J/mm3, and H-VED at 84.3 J/mm3."
+                        ),
+                    },
+                    "blk-fatigue-specimen": {
+                        "kind": "block",
+                        "document_id": "doc-1",
+                        "page": "3",
+                        "text": (
+                            "Fatigue specimens were vertically fabricated and "
+                            "stress-relief annealed at 600 °C for 120 min under "
+                            "argon."
+                        ),
+                    },
+                    "blk-fatigue-loading": {
+                        "kind": "block",
+                        "document_id": "doc-1",
+                        "page": "3",
+                        "text": (
+                            "LCF testing used 15 Hz and HCF testing used 100 Hz "
+                            "under fully reversed loading (R = 1), with a cut-off "
+                            "of 10 7 cycles."
+                        ),
+                    },
+                    "blk-fatigue-surface": {
+                        "kind": "block",
+                        "document_id": "doc-1",
+                        "page": "3",
+                        "text": (
+                            "Samples were ground to 600 grit and electropolished "
+                            "to Ra < 0.1 μm; 15 samples were tested for each set."
                         ),
                     },
                 },
@@ -712,6 +815,7 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
                         },
                         evidence,
                         _ved_fatigue_condition_evidence(),
+                        *_ved_fatigue_test_condition_evidence(),
                     ],
                 },
             },

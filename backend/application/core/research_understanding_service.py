@@ -1174,6 +1174,21 @@ class ResearchUnderstandingService:
                         else None
                     )
                 )
+                condition_blocks = [condition_block] if condition_block else []
+                if _text(spec.get("slug")) == "ved_defects_fatigue":
+                    condition_blocks.extend(
+                        self._ved_fatigue_test_condition_blocks(
+                            document_id,
+                            blocks_by_id=blocks_by_id,
+                        )
+                    )
+                    condition_blocks = list(
+                        {
+                            _text(candidate.block_id): candidate
+                            for candidate in condition_blocks
+                            if _text(candidate.block_id)
+                        }.values()
+                    )
                 supporting_blocks = (
                     [
                         supporting_block
@@ -1339,6 +1354,14 @@ class ResearchUnderstandingService:
                         *fixed_process_axes,
                     ]
                     coupled_process_parameters = len(varied_process_axes) > 1
+                    fatigue_test_summary = self._ved_fatigue_test_condition_summary(
+                        condition_blocks
+                    )
+                    fatigue_sign_inconsistency = (
+                        self._ved_fatigue_loading_sign_is_inconsistent(
+                            condition_blocks
+                        )
+                    )
                     table_statement = (
                         self._ved_fatigue_strength_table_statement(
                             ved_fatigue_strength_table,
@@ -1358,9 +1381,41 @@ class ResearchUnderstandingService:
                                 fixed_process_axes,
                             )
                         )
+                    if fatigue_test_summary:
+                        table_statement = " ".join(
+                            part
+                            for part in [table_statement, fatigue_test_summary]
+                            if part
+                        )
+                    fatigue_metric_indexes = (
+                        self._ved_fatigue_strength_column_indexes(
+                            ved_fatigue_strength_table
+                        )
+                        if ved_fatigue_strength_table is not None
+                        else {}
+                    )
+                    fatigue_warnings = [
+                        *(
+                            ["fatigue_test_conditions_required"]
+                            if fatigue_test_summary
+                            else []
+                        ),
+                        *(
+                            ["fatigue_metrics_use_different_cycle_regimes"]
+                            if {"fatigue_strength", "fat50"}
+                            <= set(fatigue_metric_indexes)
+                            else []
+                        ),
+                        *(
+                            ["source_sign_inconsistency"]
+                            if fatigue_sign_inconsistency
+                            else []
+                        ),
+                    ]
                     recovered_spec = {
                         **spec,
                         "process_axes": context_process_axes,
+                        "test_condition_summary": fatigue_test_summary,
                         **({"statement": table_statement} if table_statement else {}),
                         **(
                             {
@@ -1374,10 +1429,11 @@ class ResearchUnderstandingService:
                                     "process_conditions_not_isolated",
                                     "single_variable_effect_not_isolated",
                                     "needs_expert_review",
+                                    *fatigue_warnings,
                                 ],
                             }
                             if coupled_process_parameters
-                            else {}
+                            else {"warnings": fatigue_warnings}
                         ),
                     }
                 specific_spec_axes = _strings(spec.get("specific_mechanical_axes"))
@@ -1457,7 +1513,7 @@ class ResearchUnderstandingService:
                         objective_context=objective_context,
                         objective=objective,
                         spec=recovered_spec,
-                        condition_block=condition_block,
+                        condition_blocks=condition_blocks,
                         condition_tables=condition_tables,
                         supporting_blocks=supporting_blocks,
                         supporting_tables=supporting_tables,
@@ -3046,6 +3102,171 @@ class ResearchUnderstandingService:
                 best = ranked
         return best[2] if best else None
 
+    def _ved_fatigue_test_condition_blocks(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> list[SourceBlock]:
+        best_by_kind: dict[str, tuple[tuple[int, int, str], SourceBlock]] = {}
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            kind_and_score = self._ved_fatigue_test_condition_kind(block)
+            if kind_and_score is None:
+                continue
+            kind, score = kind_and_score
+            rank = (
+                score,
+                -(block.block_order or 0),
+                _text(block.block_id) or "",
+            )
+            current = best_by_kind.get(kind)
+            if current is None or rank > current[0]:
+                best_by_kind[kind] = (rank, block)
+        return sorted(
+            [item[1] for item in best_by_kind.values()],
+            key=lambda block: block.block_order or 0,
+        )
+
+    def _ved_fatigue_test_condition_kind(
+        self,
+        block: SourceBlock,
+    ) -> tuple[str, int] | None:
+        normalized = self._normalized_block_text(block)
+        heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+        heading_score = 3 if " measurement of mechanical properties " in heading else 0
+        if (
+            " fatigue specimens " in normalized
+            and " vertically fabricated " in normalized
+            and " stress relief " in normalized
+        ):
+            return ("specimen", 10 + heading_score)
+        if (
+            " fully reversed loading " in normalized
+            and " fatigue limit " in normalized
+            and " frequency " in normalized
+        ):
+            return ("loading", 10 + heading_score)
+        if (
+            " before fatigue testing " in normalized
+            and " electropolishing " in normalized
+            and " samples were tested " in normalized
+        ):
+            return ("surface", 10 + heading_score)
+        return None
+
+    def _ved_fatigue_test_condition_summary(
+        self,
+        blocks: list[SourceBlock],
+    ) -> str:
+        blocks_by_kind: dict[str, SourceBlock] = {}
+        for block in blocks:
+            kind_and_score = self._ved_fatigue_test_condition_kind(block)
+            if kind_and_score is not None:
+                blocks_by_kind[kind_and_score[0]] = block
+        sentences: list[str] = []
+        specimen_block = blocks_by_kind.get("specimen")
+        specimen_text = _text(specimen_block.text if specimen_block else None)
+        specimen_match = re.search(
+            r"stress[-\s]?relief.*?at\s*(\d+(?:\.\d+)?)\s*"
+            r"(?:°|◦)?\s*c\s*for\s*(\d+(?:\.\d+)?)\s*min",
+            specimen_text or "",
+            flags=re.IGNORECASE,
+        )
+        if specimen_match:
+            temperature, duration = specimen_match.groups()
+            sentences.append(
+                "Fatigue-test scope: vertically built specimens were "
+                "stress-relief annealed at "
+                f"{_normalize_numeric_token(temperature)} °C for "
+                f"{_normalize_numeric_token(duration)} min."
+            )
+
+        loading_block = blocks_by_kind.get("loading")
+        loading_text = _text(loading_block.text if loading_block else None)
+        lcf_frequency = re.search(
+            r"LCF.{0,200}?(\d+(?:\.\d+)?)\s*Hz",
+            loading_text or "",
+            flags=re.IGNORECASE,
+        )
+        hcf_frequency = re.search(
+            r"HCF.{0,200}?(\d+(?:\.\d+)?)\s*Hz",
+            loading_text or "",
+            flags=re.IGNORECASE,
+        )
+        if loading_text and "fully reversed loading" in loading_text.lower():
+            loading_sentence = "Tests used fully reversed loading"
+            if lcf_frequency and hcf_frequency:
+                loading_sentence += (
+                    "; LCF and HCF frequencies were "
+                    f"{_normalize_numeric_token(lcf_frequency.group(1))} and "
+                    f"{_normalize_numeric_token(hcf_frequency.group(1))} Hz, "
+                    "respectively"
+                )
+            sentences.append(f"{loading_sentence}.")
+
+        surface_block = blocks_by_kind.get("surface")
+        surface_text = _text(surface_block.text if surface_block else None)
+        grit = re.search(
+            r"grinding\s+to\s+(\d+(?:\.\d+)?)\s+grit",
+            surface_text or "",
+            flags=re.IGNORECASE,
+        )
+        roughness = re.search(
+            r"Ra\s*<\s*(\d+(?:\.\d+)?)\s*μ\s*m?",
+            surface_text or "",
+            flags=re.IGNORECASE,
+        )
+        sample_count = re.search(
+            r"(\d+)\s+samples were tested for each set",
+            surface_text or "",
+            flags=re.IGNORECASE,
+        )
+        cutoff = re.search(
+            r"cut[-\s]?off\s+of\s+10\s*([5-9])\s*cycles",
+            loading_text or "",
+            flags=re.IGNORECASE,
+        )
+        if grit and roughness:
+            surface_sentence = (
+                "Specimens were ground to "
+                f"{_normalize_numeric_token(grit.group(1))} grit and "
+                "electropolished to Ra < "
+                f"{_normalize_numeric_token(roughness.group(1))} μm"
+            )
+            retained_conditions: list[str] = []
+            if sample_count:
+                retained_conditions.append(
+                    f"{sample_count.group(1)} specimens per parameter set"
+                )
+            if cutoff:
+                retained_conditions.append(
+                    f"a 10^{cutoff.group(1)}-cycle fatigue-limit cutoff"
+                )
+            if retained_conditions:
+                surface_sentence += f", with {' and '.join(retained_conditions)}"
+            sentences.append(f"{surface_sentence}.")
+
+        if self._ved_fatigue_loading_sign_is_inconsistent(blocks):
+            sentences.append(
+                "The parsed load-ratio token conflicts with 'fully reversed' "
+                "and requires source-PDF verification."
+            )
+        return " ".join(sentences)
+
+    def _ved_fatigue_loading_sign_is_inconsistent(
+        self,
+        blocks: list[SourceBlock],
+    ) -> bool:
+        for block in blocks:
+            text = _text(block.text) or ""
+            if "fully reversed loading" not in text.lower():
+                continue
+            if re.search(r"\bR\s*=\s*1(?:\D|$)", text, flags=re.IGNORECASE):
+                return True
+        return False
+
     def _ved_condition_source_block_score(self, block: SourceBlock) -> int:
         raw = " ".join(
             value
@@ -3150,7 +3371,7 @@ class ResearchUnderstandingService:
         objective_context: Mapping[str, Any],
         objective: Mapping[str, Any],
         spec: Mapping[str, Any],
-        condition_block: SourceBlock | None = None,
+        condition_blocks: list[SourceBlock] | None = None,
         condition_tables: list[SourceTable] | None = None,
         supporting_blocks: list[SourceBlock] | None = None,
         supporting_tables: list[SourceTable] | None = None,
@@ -3202,8 +3423,10 @@ class ResearchUnderstandingService:
                 ),
             }
         ]
-        condition_block_id = _text(condition_block.block_id if condition_block else None)
-        if condition_block_id:
+        for condition_block in condition_blocks or []:
+            condition_block_id = _text(condition_block.block_id)
+            if not condition_block_id:
+                continue
             condition_ref_id = f"evref_recovered_{slug}_condition_{condition_block_id}"
             evidence_ref_ids.append(condition_ref_id)
             condition_quote = _short_text(_text(condition_block.text), limit=900)
@@ -3357,7 +3580,14 @@ class ResearchUnderstandingService:
                 "label": "Recovered source scope",
                 "material_scope": material_scope,
                 "process_context": {"variable_process_axes": process_axes},
-                "test_condition": {"source_heading": _text(block.heading_path)},
+                "test_condition": {
+                    "source_heading": _text(block.heading_path),
+                    **(
+                        {"summary": _text(spec.get("test_condition_summary"))}
+                        if _text(spec.get("test_condition_summary"))
+                        else {}
+                    ),
+                },
                 "property_scope": property_scope,
                 "limitations": ["Recovered from parsed source text"],
             },

@@ -14641,6 +14641,22 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
         "different VED levels, low (L-VED at 50.8 J/mm3), medium (M-VED at "
         "79.4 J/mm3), and high (H-VED at 84.3 J/mm3) were applied."
     )
+    specimen_text = (
+        "Cylindrical fatigue specimens were vertically fabricated to their "
+        "final shape. After deposition, the samples underwent stress-relief "
+        "annealing at 600 °C for 120 min under argon."
+    )
+    loading_text = (
+        "LCF testing used a frequency of 15 Hz and HCF testing used 100 Hz. "
+        "All tests were executed under fully reversed loading conditions "
+        "(R = 1). The fatigue limit was determined for unbroken samples at a "
+        "cut-off of 10 7 cycles."
+    )
+    surface_text = (
+        "Before fatigue testing, samples underwent mechanical grinding to 600 "
+        "grit and electropolishing to an average surface roughness Ra < 0.1 μm. "
+        "15 samples were tested for each set."
+    )
     service = ResearchUnderstandingService(
         structured_extractor=_FakeSemanticExtractor(),
         source_artifact_repository=_FakeSourceArtifactRepository(
@@ -14661,6 +14677,33 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
                     block_order=47,
                     page=3,
                     heading_path="2.1. Laser powder bed fusion processing",
+                ),
+                SourceBlock(
+                    block_id="blk-fatigue-specimen",
+                    document_id="paper-ved",
+                    block_type="paragraph",
+                    text=specimen_text,
+                    block_order=48,
+                    page=3,
+                    heading_path="2.1. Laser powder bed fusion processing",
+                ),
+                SourceBlock(
+                    block_id="blk-fatigue-loading",
+                    document_id="paper-ved",
+                    block_type="paragraph",
+                    text=loading_text,
+                    block_order=59,
+                    page=3,
+                    heading_path="2.3. Measurement of mechanical properties",
+                ),
+                SourceBlock(
+                    block_id="blk-fatigue-surface",
+                    document_id="paper-ved",
+                    block_type="paragraph",
+                    text=surface_text,
+                    block_order=60,
+                    page=3,
+                    heading_path="2.3. Measurement of mechanical properties",
                 ),
                 SourceBlock(
                     block_id="blk-result-ved",
@@ -14763,10 +14806,22 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
         "groups" in finding["statement"]
     )
     assert "layer thickness remained fixed at 30 μm" in finding["statement"]
+    assert "vertically built specimens" in finding["statement"]
+    assert "stress-relief annealed at 600 °C for 120 min" in finding["statement"]
+    assert "fully reversed loading" in finding["statement"]
+    assert "LCF and HCF frequencies were 15 and 100 Hz" in finding["statement"]
+    assert "ground to 600 grit and electropolished to Ra < 0.1 μm" in finding[
+        "statement"
+    ]
+    assert "15 specimens per parameter set" in finding["statement"]
+    assert "10^7-cycle fatigue-limit cutoff" in finding["statement"]
+    assert "parsed load-ratio token conflicts" in finding["statement"]
     assert "process_conditions_not_isolated" in finding["warnings"]
+    assert "fatigue_test_conditions_required" in finding["warnings"]
+    assert "source_sign_inconsistency" in finding["warnings"]
     assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     condition_refs = finding["evidence_bundle"]["condition_context"]
-    assert len(condition_refs) == 2
+    assert len(condition_refs) == 5
     evidence_by_id = {
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
@@ -14778,6 +14833,23 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
     assert "50.8" in condition_block_item["quote"]
     assert "79.4" in condition_block_item["quote"]
     assert "84.3" in condition_block_item["quote"]
+    specimen_item = next(
+        item for item in condition_items if item["source_ref"] == "blk-fatigue-specimen"
+    )
+    assert specimen_item["evidence_role"] == "condition_context"
+    assert "600 °C for 120 min" in specimen_item["quote"]
+    loading_item = next(
+        item for item in condition_items if item["source_ref"] == "blk-fatigue-loading"
+    )
+    assert loading_item["evidence_role"] == "condition_context"
+    assert "fully reversed loading" in loading_item["quote"]
+    assert "10 7 cycles" in loading_item["quote"]
+    surface_item = next(
+        item for item in condition_items if item["source_ref"] == "blk-fatigue-surface"
+    )
+    assert surface_item["evidence_role"] == "condition_context"
+    assert "Ra < 0.1 μm" in surface_item["quote"]
+    assert "15 samples" in surface_item["quote"]
     condition_table_item = next(
         item for item in condition_items if item["source_ref"] == "tbl-ved-parameters"
     )

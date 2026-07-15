@@ -56,6 +56,12 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
+function requestUrl(input: string | URL | Request) {
+	const rawUrl =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	return new URL(rawUrl, 'http://localhost');
+}
+
 function requestMethod(input: string | URL | Request, init?: RequestInit) {
 	return input instanceof Request ? input.method : (init?.method ?? 'GET');
 }
@@ -252,6 +258,41 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
 			.toBeInTheDocument();
+	});
+
+	it('uses the assistant goal deep link for the goal session and curated dataset', async () => {
+		render(Page);
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'1 training-ready finding(s) and 1 message-ready sample(s) are available for traceable protocol drafts.'
+				)
+			)
+			.toBeInTheDocument();
+
+		const [, sessionInit] = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request) === '/api/v1/goal-sessions' &&
+				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
+			);
+		}) as [string | URL | Request, RequestInit];
+		expect(JSON.parse(sessionInit.body as string)).toMatchObject({
+			collection_id: 'col_123',
+			focused_goal_id: 'goal_1',
+			answer_mode: 'hybrid'
+		});
+
+		const [datasetRequest] = fetchMock.mock.calls.find(([input, init]) => {
+			return (
+				requestPath(input as string | URL | Request) ===
+					'/api/v1/collections/col_123/research-understanding/dataset' &&
+				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'GET'
+			);
+		}) as [string | URL | Request, RequestInit | undefined];
+		const datasetUrl = requestUrl(datasetRequest);
+		expect(datasetUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(datasetUrl.searchParams.get('scope_id')).toBe('goal_1');
 	});
 
 	it('shows pending protocol inputs before protocol drafts are ready', async () => {

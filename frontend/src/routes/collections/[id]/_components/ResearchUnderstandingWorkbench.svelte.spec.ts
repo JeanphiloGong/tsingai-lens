@@ -2357,6 +2357,24 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(decisionBoardUrl.searchParams.get('scope_id')).toBe('obj_1');
 		expect(decisionBoardUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
 		expect(decisionBoardUrl.searchParams.get('format')).toBe('decision_board_tsv');
+		const agentReviewPromptUrl = new URL(
+			reviewLoop
+				.getByRole('link', { name: 'Download agent review prompts' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(agentReviewPromptUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(agentReviewPromptUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(agentReviewPromptUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(agentReviewPromptUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(agentReviewPromptUrl.searchParams.get('format')).toBe(
+			'agent_review_prompt_jsonl'
+		);
 		await expect.element(reviewLoop.getByRole('button', { name: 'Review evidence' })).toBeInTheDocument();
 		await expect
 			.element(reviewLoop.getByRole('button', { name: 'Accept paper-level' }))
@@ -3575,11 +3593,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		);
 		expect(decisionBoardUrl.searchParams.get('format')).toBe('decision_board_tsv');
 
+		const agentReviewPromptLink = Array.from(datasetRegion?.querySelectorAll('a') ?? []).find(
+			(link) => link.textContent?.trim() === 'Agent review prompts'
+		);
+		expect(agentReviewPromptLink).toBeTruthy();
 		const agentReviewPromptUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Agent review prompts' })
-				.element()
-				.getAttribute('href') ?? '',
+			agentReviewPromptLink?.getAttribute('href') ?? '',
 			'http://localhost'
 		);
 		expect(agentReviewPromptUrl.pathname).toBe(

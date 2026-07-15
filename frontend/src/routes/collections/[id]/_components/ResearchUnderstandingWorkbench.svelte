@@ -3793,6 +3793,13 @@
 							</a>
 							<a
 								class="research-understanding-workbench__review-loop-link"
+								href={datasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')}
+								download
+							>
+								{$t('research.understanding.reviewLoopDownloadAgentReviewPrompt')}
+							</a>
+							<a
+								class="research-understanding-workbench__review-loop-link"
 								href={datasetDownloadUrl('review_packet', 'review_candidate')}
 								download
 							>

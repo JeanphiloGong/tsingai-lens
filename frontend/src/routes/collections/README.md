@@ -66,9 +66,9 @@ This node owns the collection workspace route family in the frontend.
   detail also shows the selected candidate's position in the active review queue and
   prioritizes the next review action for table-row checks, conflict resolution,
   mechanism-evidence decisions, paper-level scope limits, and continuous
-  accept/reject/correct review; the review loop exposes the decision template
-  decision board TSV, and review packet download actions whenever review
-  candidates remain; the in-browser batch import accepts reviewed JSONL rows or
+  accept/reject/correct review; the review loop exposes the decision template,
+  decision board TSV, agent review prompts, and review packet download actions
+  whenever review candidates remain; the in-browser batch import accepts reviewed JSONL rows or
   spreadsheet-filled TSV decision boards and checks them against the current
   dataset before writing labels; when
   the backend dataset sample provides an acceptance gate, the detail view also

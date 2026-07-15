@@ -67,6 +67,8 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["0.5"],
             ["100 mpa"],
             ["1.5"],
+            ["no superiority"],
+            ["pore reduction"],
             ["do not isolate treatment type"],
         ],
         "evidence_terms": [
@@ -74,6 +76,8 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["density"],
             ["cellular microstructure"],
             ["dislocation"],
+            ["no superiority"],
+            ["pore reduction"],
         ],
         "required_condition_evidence_sets": [
             [

@@ -1110,25 +1110,36 @@ class ResearchUnderstandingService:
                         else None
                     )
                 )
-                supporting_blocks = (
-                    [
-                        supporting_block
-                        for supporting_block in [
+                supporting_blocks: list[SourceBlock] = []
+                heat_treatment_comparison_block = None
+                if (
+                    _text(spec.get("slug"))
+                    == "heat_treatment_microstructure_mechanics"
+                ):
+                    heat_treatment_comparison_block = (
+                        self._best_heat_treatment_bundle_comparison_source_block(
+                            document_id,
+                            blocks_by_id=blocks_by_id,
+                            exclude_block_id=_text(block.block_id),
+                        )
+                    )
+                    if heat_treatment_comparison_block is not None:
+                        supporting_blocks.append(heat_treatment_comparison_block)
+                    if self._heat_treatment_objective_requests_mechanics(
+                        normalized_property_axes
+                    ):
+                        mechanics_block = (
                             self._best_heat_treatment_mechanics_source_block(
                                 document_id,
                                 blocks_by_id=blocks_by_id,
                                 exclude_block_id=_text(block.block_id),
                             )
-                        ]
-                        if supporting_block is not None
-                    ]
-                    if _text(spec.get("slug"))
-                    == "heat_treatment_microstructure_mechanics"
-                    and self._heat_treatment_objective_requests_mechanics(
-                        normalized_property_axes
-                    )
-                    else []
-                )
+                        )
+                        if (
+                            mechanics_block is not None
+                            and mechanics_block not in supporting_blocks
+                        ):
+                            supporting_blocks.append(mechanics_block)
                 if _text(spec.get("slug")).startswith("texture_yield_"):
                     supporting_block = self._best_recovered_spec_source_block(
                         document_id,
@@ -1194,6 +1205,14 @@ class ResearchUnderstandingService:
                     if table is not None
                 ]
                 recovered_spec = spec
+                if heat_treatment_comparison_block is not None:
+                    recovered_spec = {
+                        **recovered_spec,
+                        "statement": (
+                            f"{_text(recovered_spec.get('statement'))} "
+                            f"{self._heat_treatment_bundle_comparison_sentence()}"
+                        ),
+                    }
                 if (
                     _text(spec.get("slug"))
                     == "heat_treatment_microstructure_mechanics"
@@ -1212,6 +1231,9 @@ class ResearchUnderstandingService:
                                 self._heat_treatment_recovered_statement_with_conditions(
                                     normalized_property_axes,
                                     condition_summary=condition_summary,
+                                    includes_bundle_comparison=(
+                                        heat_treatment_comparison_block is not None
+                                    ),
                                 )
                             ),
                             "process_axes": [
@@ -1400,6 +1422,7 @@ class ResearchUnderstandingService:
         normalized_property_axes: str,
         *,
         condition_summary: str,
+        includes_bundle_comparison: bool = False,
     ) -> str:
         scope = self._heat_treatment_recovered_base_scope(normalized_property_axes)
         effects: list[str] = []
@@ -1424,9 +1447,19 @@ class ResearchUnderstandingService:
                 f"{statement} "
                 f"{self._heat_treatment_recovered_mechanics_sentence(mechanics_effects)}"
             )
+        if includes_bundle_comparison:
+            statement = (
+                f"{statement} {self._heat_treatment_bundle_comparison_sentence()}"
+            )
         return (
             f"{statement} These grouped observations do not isolate treatment "
             "type, temperature, duration, or pressure as separate effects."
+        )
+
+    def _heat_treatment_bundle_comparison_sentence(self) -> str:
+        return (
+            "The authors reported no superiority between the furnace HT and HIP "
+            "treatment bundles for pore reduction."
         )
 
     def _heat_treatment_recovered_base_statement(
@@ -2668,6 +2701,41 @@ class ResearchUnderstandingService:
                 best = ranked
         return best[2] if best else None
 
+    def _best_heat_treatment_bundle_comparison_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        exclude_block_id: str,
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            if _text(block.block_id) == exclude_block_id:
+                continue
+            score = self._is_heat_treatment_bundle_comparison_block(block)
+            if score <= 0:
+                continue
+            ranked = (score, block.block_order or 0, block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _is_heat_treatment_bundle_comparison_block(
+        self,
+        block: SourceBlock,
+    ) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            " furnace type " in normalized
+            and " hip " in normalized
+            and " no superiority " in normalized
+            and " pore reduction " in normalized
+        ):
+            return 0
+        return self._source_block_result_score(block, normalized) + 4
+
     def _is_texture_yield_conclusion_block(self, block: SourceBlock) -> int:
         normalized = self._normalized_block_text(block)
         if not (
@@ -2952,7 +3020,18 @@ class ResearchUnderstandingService:
             supporting_block_id = _text(supporting_block.block_id)
             if not supporting_block_id:
                 continue
-            supporting_ref_id = f"evref_recovered_{slug}_mechanics_{supporting_block_id}"
+            supporting_kind = (
+                "comparison"
+                if slug == "heat_treatment_microstructure_mechanics"
+                and self._is_heat_treatment_bundle_comparison_block(
+                    supporting_block
+                )
+                > 0
+                else "mechanics"
+            )
+            supporting_ref_id = (
+                f"evref_recovered_{slug}_{supporting_kind}_{supporting_block_id}"
+            )
             evidence_ref_ids.append(supporting_ref_id)
             supporting_quote = (
                 _short_text(_text(supporting_block.text), limit=900)

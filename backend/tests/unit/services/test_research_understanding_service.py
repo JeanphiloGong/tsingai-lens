@@ -2046,6 +2046,11 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
         "dislocation structures of the as-SLM disappeared after the short "
         "heat treatments owing to recrystallization."
     )
+    comparison_text = (
+        "Two different heat treatments (i.e., typical furnace-type HT and "
+        "HIP) were applied to the SLM samples. No superiority was found "
+        "between the furnace-type HT and HIP in terms of pore reduction."
+    )
     service = ResearchUnderstandingService(
         structured_extractor=_FailingSemanticExtractor(),
         source_artifact_repository=_FakeSourceArtifactRepository(
@@ -2066,6 +2071,15 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
                     block_order=39,
                     page=2,
                     heading_path="2.1. Sample preparation and experimental setup",
+                ),
+                SourceBlock(
+                    block_id="blk-heat-comparison",
+                    document_id="paper-heat",
+                    block_type="paragraph",
+                    text=comparison_text,
+                    block_order=132,
+                    page=12,
+                    heading_path="4. Conclusion",
                 ),
                 SourceBlock(
                     block_id="blk-heat-result",
@@ -2119,9 +2133,10 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
         "Under the tested furnace HT at 1100 °C for 0.5 h and HIP at "
         "1100 °C and 100 MPa for 1.5 h, heat treatment increased density and "
         "eliminated the as-SLM cellular microstructure and dense dislocation "
-        "structures through recrystallization. These grouped observations do "
-        "not isolate treatment type, temperature, duration, or pressure as "
-        "separate effects."
+        "structures through recrystallization. The authors reported no "
+        "superiority between the furnace HT and HIP treatment bundles for "
+        "pore reduction. These grouped observations do not isolate treatment "
+        "type, temperature, duration, or pressure as separate effects."
     )
     assert finding["variables"] == [
         "heat treatment type and heat treatment parameters"
@@ -2136,6 +2151,14 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
         "evref_recovered_heat_treatment_microstructure_mechanics_condition_"
         "blk-heat-conditions"
     )
+    comparison_ref_id = (
+        "evref_recovered_heat_treatment_microstructure_mechanics_comparison_"
+        "blk-heat-comparison"
+    )
+    assert finding["evidence_bundle"]["direct_result"] == [
+        "evref_recovered_heat_treatment_microstructure_mechanics_blk-heat-result",
+        comparison_ref_id,
+    ]
     assert finding["evidence_bundle"]["condition_context"] == [condition_ref_id]
     evidence_by_id = {
         item["evidence_ref_id"]: item
@@ -2145,6 +2168,7 @@ def test_objective_understanding_recovers_heat_treatment_conditions_without_clai
     assert "1100 °C and 100 MPa for 1.5 h" in evidence_by_id[condition_ref_id][
         "quote"
     ]
+    assert "No superiority" in evidence_by_id[comparison_ref_id]["quote"]
     reprojected = service.with_presentation(understanding)
     assert reprojected is not None
     assert reprojected["presentation"]["primary_findings"][0]["finding_id"] == (

@@ -405,7 +405,8 @@ const translations: Record<Language, Translations> = {
 				reviewImportScopeGateReady: 'ready for expert handoff',
 				reviewImportScopeGateBlocked: 'blocked',
 				reviewImportScopeGateReasonsTitle: 'Blocking reasons',
-				reviewImportScopeGateReasonNoActionable: 'No accept, reject, or correct decisions yet.',
+				reviewImportScopeGateReasonNoActionable:
+					'No accept, reject, or correct decisions yet. Fill expert_action in the decision board TSV, then dry-run again.',
 				reviewImportScopeGateReasonUncheckedRows: 'Some rows are still skipped or unchecked.',
 				reviewImportScopeGateReasonReviewCandidates: 'Some findings still need review.',
 				reviewImportScopeGateReasonTraining: 'Training export is not ready yet.',
@@ -3777,7 +3778,8 @@ const translations: Record<Language, Translations> = {
 				reviewImportScopeGateReady: '可交付专家闭环',
 				reviewImportScopeGateBlocked: '仍被阻塞',
 				reviewImportScopeGateReasonsTitle: '阻塞原因',
-				reviewImportScopeGateReasonNoActionable: '还没有 accept、reject 或 correct 决策。',
+				reviewImportScopeGateReasonNoActionable:
+					'还没有 accept、reject 或 correct 决策。请先在决策表 TSV 的 expert_action 列填写结果，再重新 dry-run。',
 				reviewImportScopeGateReasonUncheckedRows: '仍有行处于 skip 或未检查状态。',
 				reviewImportScopeGateReasonReviewCandidates: '仍有 Finding 需要复核。',
 				reviewImportScopeGateReasonTraining: '训练导出尚未就绪。',

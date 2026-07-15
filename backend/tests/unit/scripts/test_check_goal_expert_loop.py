@@ -198,6 +198,17 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
         "goals_without_training_ready": ["goal-2"],
         "goals_without_training_messages": ["goal-2"],
         "goals_without_protocol_ready": ["goal-2"],
+        "protocol_ready_goals": [
+            {
+                "goal_id": "goal-1",
+                "question": "How does preheating affect ductility?",
+                "training_ready_count": 1,
+                "training_message_ready_count": 1,
+                "protocol_ready_count": 1,
+                "assistant_url": "/collections/col-1/assistant?goal_id=goal-1",
+                "training_ready_url": "/collections/col-1/goals/goal-1?review=training_ready",
+            }
+        ],
         "pending_goals": [
             {
                 "goal_id": "goal-2",
@@ -359,6 +370,10 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert "- Experiment design usable: blocked" in text
+    assert "Protocol-ready goals:" in text
+    assert "How does preheating affect ductility?" in text
+    assert "ai chat: /collections/col-1/assistant?goal_id=goal-1" in text
+    assert "review inputs: /collections/col-1/goals/goal-1?review=training_ready" in text
     assert "Next commands:" in text
     assert (
         "Browser: open the goal review page at "

@@ -697,6 +697,24 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             or int(goal.get("protocol_ready_count") or 0) == 0
         )
     ]
+    protocol_ready_goals = [
+        {
+            "goal_id": str(goal.get("goal_id")),
+            "question": _text(goal.get("question")),
+            "training_ready_count": int(goal.get("training_ready_count") or 0),
+            "training_message_ready_count": int(
+                goal.get("training_message_ready_count") or 0
+            ),
+            "protocol_ready_count": int(goal.get("protocol_ready_count") or 0),
+            "assistant_url": _goal_assistant_url(
+                str(goal.get("collection_id") or ""),
+                str(goal.get("goal_id") or ""),
+            ),
+            "training_ready_url": _text(goal.get("training_ready_url")),
+        }
+        for goal in goals
+        if int(goal.get("protocol_ready_count") or 0) > 0
+    ]
     review_candidate_count = sum(int(goal.get("review_candidate_count") or 0) for goal in goals)
     by_error_category: dict[str, int] = {}
     by_review_reason: dict[str, int] = {}
@@ -741,6 +759,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "goals_without_training_messages": goals_without_training_messages,
             "goals_without_protocol_ready": goals_without_protocol_ready,
             "pending_goals": pending_goals,
+            "protocol_ready_goals": protocol_ready_goals,
             "by_error_category": dict(
                 sorted(
                     by_error_category.items(),
@@ -974,6 +993,23 @@ def render_text_summary(summary: dict[str, Any]) -> str:
                 ]
             )
     pending_goals = _mapping_list(remaining_work.get("pending_goals"))
+    protocol_ready_goals = _mapping_list(remaining_work.get("protocol_ready_goals"))
+    if protocol_ready_goals:
+        lines.extend(["", "Protocol-ready goals:"])
+        for index, goal in enumerate(protocol_ready_goals, start=1):
+            lines.extend(
+                [
+                    f"{index}. {_text(goal.get('question')) or _text(goal.get('goal_id'))}",
+                    (
+                        "   counts: "
+                        f"training_ready={int(goal.get('training_ready_count') or 0)}, "
+                        f"messages={int(goal.get('training_message_ready_count') or 0)}, "
+                        f"protocol={int(goal.get('protocol_ready_count') or 0)}"
+                    ),
+                    f"   ai chat: {_text(goal.get('assistant_url'))}",
+                    f"   review inputs: {_text(goal.get('training_ready_url'))}",
+                ]
+            )
     if pending_goals:
         lines.extend(["", "Pending goals:"])
         for index, goal in enumerate(pending_goals, start=1):
@@ -1138,6 +1174,12 @@ def _goal_review_url(
 
 def _goal_training_ready_url(collection_id: str, goal_id: str) -> str:
     return f"/collections/{collection_id}/goals/{goal_id}?review=training_ready"
+
+
+def _goal_assistant_url(collection_id: str, goal_id: str) -> str:
+    if not collection_id or not goal_id:
+        return ""
+    return f"/collections/{collection_id}/assistant?goal_id={goal_id}"
 
 
 def _pending_goal_action(goal: dict[str, Any]) -> str:

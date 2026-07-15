@@ -98,8 +98,9 @@ def _ved_fatigue_strength_primary_finding():
             "(93, 82, and 97 MPa) and remained below wrought 316L (256 MPa). "
             "The authors associated the higher-VED conditions with lower defect "
             "fraction, size, and complexity and slightly improved fatigue life. "
-            "Laser power and scanning speed were both varied to create these VED "
-            "levels, so the comparison does not isolate a VED-only effect."
+            "Laser power, scanning speed, and hatch spacing varied across these "
+            "VED groups, while layer thickness remained fixed at 30 μm, so the "
+            "comparison does not isolate a VED-only effect."
         ),
         "variables": [
             "coupled PBF-LB parameter sets grouped by volumetric energy density"
@@ -196,8 +197,10 @@ def _goal_3037_axis_summary(
         "axis_coverage": {
             "variables": [
                 {"axis": "volumetric energy density", "status": "primary"},
-                {"axis": "energy density", "status": "primary"},
-                {"axis": "laser beam powder bed fusion", "status": "context"},
+                {"axis": "laser power", "status": "context"},
+                {"axis": "scanning speed", "status": "context"},
+                {"axis": "hatch spacing", "status": "context"},
+                {"axis": "layer thickness", "status": "context"},
             ],
             "properties": [
                 {"axis": "defect structure", "status": "mechanism"},

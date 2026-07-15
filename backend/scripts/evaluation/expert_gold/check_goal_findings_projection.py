@@ -216,7 +216,10 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["82"],
             ["97"],
             ["wrought 316l (256 mpa)"],
-            ["laser power and scanning speed were both varied"],
+            ["laser power"],
+            ["scanning speed"],
+            ["hatch spacing"],
+            ["layer thickness remained fixed"],
             ["does not isolate a ved-only effect"],
         ],
         "evidence_terms": [
@@ -327,7 +330,7 @@ GOAL_MIN_PRIMARY_AXIS_COVERAGE: dict[str, dict[str, int]] = {
     "goal_399171646354": {"variables": 1, "properties": 1},
     "goal_061c9c049e69": {"variables": 2, "properties": 2},
     "goal_6bf7d2c1030e": {"variables": 3, "properties": 3},
-    "goal_3037e425673a": {"variables": 2, "properties": 1},
+    "goal_3037e425673a": {"variables": 1, "properties": 1},
 }
 
 

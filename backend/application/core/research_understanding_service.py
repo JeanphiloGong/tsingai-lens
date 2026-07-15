@@ -735,6 +735,7 @@ class ResearchUnderstandingService:
                 item.model_dump(),
                 evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
                 context_ids=context_ids,
+                context_ids_by_unit=context_ids_by_unit,
             )
             if relation:
                 relations.append(relation)
@@ -5443,6 +5444,7 @@ class ResearchUnderstandingService:
         *,
         evidence_ref_ids_by_unit: dict[str, list[str]],
         context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
     ) -> dict[str, Any]:
         source = _text(item.get("source_concept"))
         target = _text(item.get("target_concept"))
@@ -5456,6 +5458,13 @@ class ResearchUnderstandingService:
         direction = _text(item.get("direction")) or "unknown"
         mediators = _strings(item.get("mediator_concepts"))
         conditions = _strings(item.get("conditions"))
+        relation_context_ids = _dedupe_strings(
+            [
+                context_id
+                for unit_id in evidence_unit_ids
+                for context_id in context_ids_by_unit.get(unit_id, [])
+            ]
+        ) or context_ids[:1]
         return {
             "relation_id": _stable_relation_id(
                 relation_type,
@@ -5476,7 +5485,7 @@ class ResearchUnderstandingService:
                 evidence_unit_ids,
                 evidence_ref_ids_by_unit,
             ),
-            "context_ids": context_ids,
+            "context_ids": relation_context_ids,
             "source_object_ids": evidence_unit_ids,
             "warnings": _dedupe_strings(
                 ["semantic_relation", *_strings(item.get("warnings"))]
@@ -15844,6 +15853,15 @@ class ResearchUnderstandingService:
     ) -> dict[str, Any]:
         relation_id = _text(relation.get("relation_id")) or "relation"
         context_ids = _strings(relation.get("context_ids"))
+        source_context_ids = [
+            context_id
+            for source_object_id in _strings(relation.get("source_object_ids"))
+            if (context_id := f"ctx_{source_object_id}_boundary")
+            in contexts_by_id
+            and context_id in context_ids
+        ]
+        if source_context_ids:
+            context_ids = _dedupe_strings(source_context_ids)
         contexts = [
             contexts_by_id[context_id]
             for context_id in context_ids

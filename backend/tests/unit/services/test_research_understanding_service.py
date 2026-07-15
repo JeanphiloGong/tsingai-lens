@@ -287,6 +287,9 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     )
     assert understanding["relations"][0]["conditions"] == ["316L stainless steel"]
     assert understanding["relations"][0]["source_object_ids"] == ["oeu-comparison"]
+    assert understanding["relations"][0]["context_ids"] == [
+        "ctx_oeu-comparison_boundary"
+    ]
     assert "semantic_relation" in understanding["relations"][0]["warnings"]
     relation_units_by_id = {
         unit["evidence_unit_id"]: unit
@@ -306,6 +309,56 @@ def test_objective_understanding_projects_claims_relations_and_evidence_refs():
     assert presentation["effects"][0]["evidence_count"] == 1
     assert presentation["effects"][0]["needs_review"] is True
     assert presentation["evidence_items"][0]["title"] == "table-1"
+
+
+def test_relation_presentation_drops_unrelated_persisted_unit_contexts():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    relation = {
+        "relation_id": "rel-yield",
+        "relation_type": "increases",
+        "subject": "build platform preheating temperature",
+        "predicate": "increases",
+        "object": "yield strength",
+        "statement": "Preheating increases yield strength.",
+        "evidence_ref_ids": [],
+        "context_ids": [
+            "ctx_objective_scope",
+            "ctx_oeu-yield_boundary",
+            "ctx_oeu-elongation_boundary",
+            "ctx_recovered_preheating_ductility",
+        ],
+        "source_object_ids": ["oeu-yield"],
+    }
+    contexts_by_id = {
+        "ctx_objective_scope": {
+            "context_id": "ctx_objective_scope",
+            "label": "Objective scope",
+            "property_scope": ["mechanical properties"],
+        },
+        "ctx_oeu-yield_boundary": {
+            "context_id": "ctx_oeu-yield_boundary",
+            "label": "Claim applicability",
+            "property_scope": ["yield strength"],
+        },
+        "ctx_oeu-elongation_boundary": {
+            "context_id": "ctx_oeu-elongation_boundary",
+            "label": "Claim applicability",
+            "property_scope": ["elongation"],
+        },
+        "ctx_recovered_preheating_ductility": {
+            "context_id": "ctx_recovered_preheating_ductility",
+            "label": "Recovered source scope",
+            "property_scope": ["ductility", "microstructure"],
+        },
+    }
+
+    effect = service._presentation_relation_effect(
+        relation,
+        evidence_by_id={},
+        contexts_by_id=contexts_by_id,
+    )
+
+    assert effect["context_ids"] == ["ctx_oeu-yield_boundary"]
 
 
 def test_objective_understanding_persists_relation_model_trace():

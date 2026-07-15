@@ -3099,6 +3099,8 @@ def test_objective_understanding_recovers_ved_fatigue_from_relevant_frames_when_
 
 def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summary():
     fatigue_text = (
+        "As pointed out, the defects in PBF-LB materials results in low "
+        "fatigue resistance compared to their static properties. "
         "The present results indicate that the increasing VED leads to lower "
         "fraction of defects, slightly smaller defect size and complexity, and "
         "improves slightly the fatigue life, but still the fatigue resistance "
@@ -3348,6 +3350,15 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
         "evref_recovered_ved_defects_fatigue_blk-fatigue-result",
         "evref_recovered_ved_defects_fatigue_table_tbl-fatigue-strength",
     ]
+    evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    visible_quote = evidence_by_id[
+        "evref_recovered_ved_defects_fatigue_blk-fatigue-result"
+    ]["quote"]
+    assert "increasing VED leads to lower fraction of defects" in visible_quote
+    assert not visible_quote.startswith("As pointed out")
     assert all(
         item["title"] != "volumetric energy density -> fatigue strength"
         for item in review_queue

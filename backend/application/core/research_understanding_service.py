@@ -14831,6 +14831,7 @@ def _target_token_variants(token: str) -> set[str]:
 
 def _quote_hint_terms(value: str | None) -> set[str]:
     terms: set[str] = set()
+    normalized_value = f" {_normalize_match_text(value or '')} "
     tokens = _meaningful_match_tokens(value or "")
     for token in tokens:
         terms.update(_target_token_variants(token))
@@ -14844,6 +14845,10 @@ def _quote_hint_terms(value: str | None) -> set[str]:
             terms.add(f"{left} {right[:-1]}")
         else:
             terms.add(f"{left} {right}s")
+    if " volumetric energy density " in normalized_value:
+        terms.add("ved")
+    if " ved " in normalized_value:
+        terms.update({"volumetric energy density", "energy density"})
     return {term for term in terms if term}
 
 

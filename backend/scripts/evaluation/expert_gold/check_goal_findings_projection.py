@@ -133,12 +133,21 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
     "goal_6bf7d2c1030e": {
         "finding_terms": [
+            ["coupled SLM parameter sets"],
             ["scanning speed"],
+            ["scan strategy"],
+            ["hatch spacing"],
+            ["energy density"],
+            ["do not isolate a scanning-speed effect"],
             "elongation",
             ["yield strength"],
             ["ultimate tensile strength"],
         ],
         "forbidden_primary_terms": [
+            (
+                "scanning speed -> yield strength, ultimate tensile strength, "
+                "and elongation"
+            ),
             "Increasing scanning speed from 0.167 to 0.175",
             "Yield Strength 236.65-462.02 MPa",
             "Ultimate Tensile Strength 375.13-584.44 MPa",
@@ -167,6 +176,12 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
                 "236.65",
                 "375.13",
                 "7.21",
+            ],
+            [
+                "hatch",
+                "scan strategy",
+                "scanning speed",
+                "energy density",
             ],
         ],
     },
@@ -214,6 +229,10 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
         ["model_validation_finding"],
         ["author_summary_table_mismatch"],
     ],
+    "goal_6bf7d2c1030e": [
+        ["non_single_variable_table_comparison"],
+        ["single_variable_effect_not_isolated"],
+    ],
 }
 GOAL_AXIS_SEMANTIC_EXPECTATIONS: dict[str, dict[str, list[str]]] = {
     "goal_061c9c049e69": {
@@ -253,7 +272,7 @@ GOAL_MIN_PRIMARY_AXIS_COVERAGE: dict[str, dict[str, int]] = {
     "goal_1a7a26d850b9": {"variables": 3, "properties": 2},
     "goal_399171646354": {"variables": 1, "properties": 1},
     "goal_061c9c049e69": {"variables": 2, "properties": 2},
-    "goal_6bf7d2c1030e": {"variables": 1, "properties": 3},
+    "goal_6bf7d2c1030e": {"variables": 3, "properties": 3},
     "goal_3037e425673a": {"variables": 2, "properties": 1},
 }
 

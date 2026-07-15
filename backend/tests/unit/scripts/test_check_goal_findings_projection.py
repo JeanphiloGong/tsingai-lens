@@ -168,9 +168,9 @@ def _goal_6bf7_axis_summary(
         "axis_coverage": {
             "variables": [
                 {"axis": "selective laser melting", "status": "context"},
-                {"axis": "scanning strategy", "status": "context"},
+                {"axis": "scanning strategy", "status": "primary"},
                 {"axis": "scanning speed", "status": "primary"},
-                {"axis": "energy density", "status": "context"},
+                {"axis": "energy density", "status": "primary"},
             ],
             "properties": [
                 {"axis": "yield strength", "status": "primary"},
@@ -664,7 +664,7 @@ def test_evaluate_goal_analysis_payload_fails_specific_scan_speed_projection_wit
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_6bf7_axis_summary(evidence_count=2),
+                    "summary": _goal_6bf7_axis_summary(evidence_count=1),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
@@ -721,28 +721,46 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_6bf7_axis_summary(evidence_count=2),
+                    "summary": _goal_6bf7_axis_summary(evidence_count=3),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
                             "title": (
-                                "scanning speed -> yield strength, ultimate "
-                                "tensile strength, and elongation"
+                                "coupled SLM parameter sets: scanning strategy, "
+                                "scanning speed, hatch spacing, and energy density "
+                                "-> yield strength, ultimate tensile strength, and "
+                                "elongation"
                             ),
                             "statement": (
-                                "Higher scanning speed improved densification "
-                                "and refined microstructure, with mechanical "
-                                "property values traceable in the source table."
+                                "Across the tested SLM parameter sets, the authors "
+                                "reported that higher-scanning-speed conditions "
+                                "showed better densification and a refined "
+                                "microstructure. Because scan strategy, hatch "
+                                "spacing, and energy density also varied, these "
+                                "data do not isolate a scanning-speed effect."
                             ),
-                            "variables": ["scanning speed"],
+                            "variables": [
+                                "coupled SLM parameter sets: scanning strategy, "
+                                "scanning speed, hatch spacing, and energy density"
+                            ],
                             "mediators": ["microstructure", "densification"],
                             "outcomes": [
                                 "yield strength",
                                 "ultimate tensile strength",
                                 "elongation",
                             ],
-                            "evidence_ref_ids": ["ev-1", "ev-2"],
-                            "evidence_bundle": {"direct_result": ["ev-1", "ev-2"]},
+                            "evidence_ref_ids": ["ev-1", "ev-2", "ev-3"],
+                            "evidence_bundle": {
+                                "direct_result": ["ev-1", "ev-2", "ev-3"]
+                            },
+                            "warnings": [
+                                "non_single_variable_table_comparison",
+                                "single_variable_effect_not_isolated",
+                            ],
+                            "review_reasons": [
+                                "non_single_variable_table_comparison",
+                                "single_variable_effect_not_isolated",
+                            ],
                             **_paper_level_boundary_fields(),
                         }
                     ],
@@ -767,6 +785,14 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
                             ),
                             "href": "/collections/col-1/documents/doc-1?source_ref=tbl-1",
                         },
+                        {
+                            "evidence_ref_id": "ev-3",
+                            "quote": (
+                                "SLM processing parameters: Hatch space, Scan "
+                                "strategy, Scanning speed, and Energy density."
+                            ),
+                            "href": "/collections/col-1/documents/doc-1?source_ref=tbl-2",
+                        },
                     ],
                 },
             },
@@ -790,23 +816,41 @@ def test_evaluate_goal_analysis_payload_rejects_scan_speed_confounded_review_row
                         {
                             "finding_id": "finding-1",
                             "title": (
-                                "scanning speed -> yield strength, ultimate "
-                                "tensile strength, and elongation"
+                                "coupled SLM parameter sets: scanning strategy, "
+                                "scanning speed, hatch spacing, and energy density "
+                                "-> yield strength, ultimate tensile strength, and "
+                                "elongation"
                             ),
                             "statement": (
-                                "Higher scanning speed improved densification "
-                                "and refined microstructure, with mechanical "
-                                "property values traceable in the source table."
+                                "Across the tested SLM parameter sets, the authors "
+                                "reported that higher-scanning-speed conditions "
+                                "showed better densification and a refined "
+                                "microstructure. Because scan strategy, hatch "
+                                "spacing, and energy density also varied, these "
+                                "data do not isolate a scanning-speed effect."
                             ),
-                            "variables": ["scanning speed"],
+                            "variables": [
+                                "coupled SLM parameter sets: scanning strategy, "
+                                "scanning speed, hatch spacing, and energy density"
+                            ],
                             "mediators": ["microstructure", "densification"],
                             "outcomes": [
                                 "yield strength",
                                 "ultimate tensile strength",
                                 "elongation",
                             ],
-                            "evidence_ref_ids": ["ev-1", "ev-2"],
-                            "evidence_bundle": {"direct_result": ["ev-1", "ev-2"]},
+                            "evidence_ref_ids": ["ev-1", "ev-2", "ev-4"],
+                            "evidence_bundle": {
+                                "direct_result": ["ev-1", "ev-2", "ev-4"]
+                            },
+                            "warnings": [
+                                "non_single_variable_table_comparison",
+                                "single_variable_effect_not_isolated",
+                            ],
+                            "review_reasons": [
+                                "non_single_variable_table_comparison",
+                                "single_variable_effect_not_isolated",
+                            ],
                             **_paper_level_boundary_fields(),
                         }
                     ],
@@ -857,6 +901,14 @@ def test_evaluate_goal_analysis_payload_rejects_scan_speed_confounded_review_row
                                 "from 319.0 MPa to 464.8 MPa."
                             ),
                             "href": "/collections/col-1/documents/doc-1?source_ref=tbl-2",
+                        },
+                        {
+                            "evidence_ref_id": "ev-4",
+                            "quote": (
+                                "SLM processing parameters: Hatch space, Scan "
+                                "strategy, Scanning speed, and Energy density."
+                            ),
+                            "href": "/collections/col-1/documents/doc-1?source_ref=tbl-3",
                         },
                     ],
                 },

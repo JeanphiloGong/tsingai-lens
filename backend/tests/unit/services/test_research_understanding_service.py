@@ -11119,6 +11119,61 @@ def test_presentation_filters_multi_outcome_row_covered_by_specific_findings():
     ]
 
 
+def test_presentation_keeps_coupled_parameter_set_finding_beside_single_axis_rows():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    evidence_by_id = {
+        "evref-coupled": {"document_id": "paper-1"},
+        "evref-yield": {"document_id": "paper-1"},
+        "evref-uts": {"document_id": "paper-1"},
+        "evref-elongation": {"document_id": "paper-1"},
+    }
+    coupled = {
+        "finding_id": "finding-coupled",
+        "variables": [
+            "coupled SLM parameter sets: scanning strategy, scanning speed, "
+            "hatch spacing, and energy density"
+        ],
+        "outcomes": [
+            "yield strength",
+            "ultimate tensile strength",
+            "elongation",
+        ],
+        "support_grade": "partial",
+        "evidence_ref_ids": ["evref-coupled"],
+        "evidence_bundle": {"direct_result": ["evref-coupled"]},
+        "relation_chain": [{"outcome": "mechanical properties"}],
+        "warnings": ["single_variable_effect_not_isolated"],
+    }
+    single_axis_rows = [
+        {
+            "finding_id": f"finding-{outcome}",
+            "variables": ["scanning strategy"],
+            "outcomes": [outcome],
+            "support_grade": "partial",
+            "evidence_ref_ids": [evidence_ref_id],
+            "evidence_bundle": {"direct_result": [evidence_ref_id]},
+            "relation_chain": [{"outcome": outcome}],
+        }
+        for outcome, evidence_ref_id in (
+            ("yield strength", "evref-yield"),
+            ("ultimate tensile strength", "evref-uts"),
+            ("elongation", "evref-elongation"),
+        )
+    ]
+
+    filtered = service._findings_without_redundant_multi_outcome_rows(
+        [coupled, *single_axis_rows],
+        evidence_by_id=evidence_by_id,
+    )
+
+    assert [finding["finding_id"] for finding in filtered] == [
+        "finding-coupled",
+        "finding-yield strength",
+        "finding-ultimate tensile strength",
+        "finding-elongation",
+    ]
+
+
 def test_with_presentation_keeps_same_paper_comparable_finding_when_recovered_expert_finding_exists():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(
@@ -14581,8 +14636,14 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     primary = understanding["presentation"]["primary_findings"]
     finding = primary[0]
     assert finding["title"] == (
-        "scanning speed -> yield strength, ultimate tensile strength, and elongation"
+        "coupled SLM parameter sets: scanning strategy, scanning speed, hatch "
+        "spacing, and energy density -> yield strength, ultimate tensile "
+        "strength, and elongation"
     )
+    assert finding["variables"] == [
+        "coupled SLM parameter sets: scanning strategy, scanning speed, hatch "
+        "spacing, and energy density"
+    ]
     assert finding["outcomes"] == [
         "yield strength",
         "ultimate tensile strength",
@@ -14614,12 +14675,15 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     assert "6.40" in direct_evidence_text
     statement = finding["statement"]
     assert "  " not in statement
-    assert "In this study, higher scanning speed was associated with" in statement
+    assert "Across the tested SLM parameter sets" in statement
+    assert "higher-scanning-speed conditions" in statement
     assert "densification" in statement
     assert "microstructure" in statement
     assert "yield strength" in statement
     assert "ultimate tensile strength" in statement
     assert "elongation" in statement
+    assert "scan strategy, hatch spacing, and energy density also varied" in statement
+    assert "do not isolate a scanning-speed effect" in statement
     assert "scanning speed from 0.167 to 0.175" not in statement
     assert "yield strength (302.24 to 341.38 MPa)" not in statement
     assert "ultimate tensile strength (384.5 to 459.58 MPa)" not in statement
@@ -14631,6 +14695,8 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     assert "Yield Strength 236.65-341.38 MPa" not in statement
     assert "values traceable in the associated source table" not in statement
     assert finding["direction"] == "associated"
+    assert "single_variable_effect_not_isolated" in finding["warnings"]
+    assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     assert {
         segment["direction"] for segment in finding["relation_chain"]
     } == {"associated"}
@@ -14895,16 +14961,25 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
 
     finding = understanding["presentation"]["primary_findings"][0]
     assert finding["title"] == (
-        "scanning speed -> yield strength, ultimate tensile strength, and elongation"
+        "coupled SLM parameter sets: scanning strategy, scanning speed, hatch "
+        "spacing, and energy density -> yield strength, ultimate tensile "
+        "strength, and elongation"
     )
+    assert finding["variables"] == [
+        "coupled SLM parameter sets: scanning strategy, scanning speed, hatch "
+        "spacing, and energy density"
+    ]
     statement = finding["statement"]
     assert "  " not in statement
-    assert "In this study, higher scanning speed was associated with" in statement
+    assert "Across the tested SLM parameter sets" in statement
+    assert "higher-scanning-speed conditions" in statement
     assert "densification" in statement
     assert "microstructure" in statement
     assert "yield strength" in statement
     assert "ultimate tensile strength" in statement
     assert "elongation" in statement
+    assert "scan strategy, hatch spacing, and energy density also varied" in statement
+    assert "do not isolate a scanning-speed effect" in statement
     assert "scanning speed from 0.167 to 0.175" not in statement
     assert "yield strength (302.24 to 341.38 MPa)" not in statement
     assert "ultimate tensile strength (384.5 to 459.58 MPa)" not in statement
@@ -14917,6 +14992,8 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
     assert "values traceable in the associated source table" not in statement
     assert "non_single_variable_table_comparison" in finding["warnings"]
     assert "non_single_variable_table_comparison" in finding["review_reasons"]
+    assert "single_variable_effect_not_isolated" in finding["warnings"]
+    assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     assert finding["direction"] == "associated"
     assert {
         segment["direction"] for segment in finding["relation_chain"]

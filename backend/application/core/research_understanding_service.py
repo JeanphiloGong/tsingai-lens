@@ -73,6 +73,10 @@ _MECHANICAL_PROPERTY_AXIS_TOKENS = {
     "yield",
 }
 _MULTI_AXIS_TABLE_CONTRAST_LABEL = "multi-axis table contrast"
+_SLM_COUPLED_PARAMETER_SET_LABEL = (
+    "coupled SLM parameter sets: scanning strategy, scanning speed, hatch spacing, "
+    "and energy density"
+)
 
 
 class ResearchUnderstandingService:
@@ -1188,18 +1192,35 @@ class ResearchUnderstandingService:
                             [
                                 *warnings,
                                 "non_single_variable_table_comparison",
+                                "single_variable_effect_not_isolated",
                                 "needs_expert_review",
                             ]
                         )
+                    statement = (
+                        "In this study, higher scanning speed was associated "
+                        "with better densification, a refined microstructure, "
+                        "and better overall mechanical performance. "
+                        f"{value_clause}"
+                    )
+                    subject = _text(spec.get("subject"))
+                    process_axes = _strings(spec.get("process_axes"))
+                    if not controlled_summary:
+                        subject = _SLM_COUPLED_PARAMETER_SET_LABEL
+                        process_axes = [
+                            "scanning strategy",
+                            "scanning speed",
+                            "hatch spacing",
+                            "energy density",
+                        ]
+                        statement = self._unisolated_scanning_speed_statement(
+                            specific_spec_axes
+                        )
                     recovered_spec = {
                         **spec,
+                        "subject": subject,
                         "object": specific_object,
-                        "statement": (
-                            "In this study, higher scanning speed was associated "
-                            "with better densification, a refined microstructure, "
-                            "and better overall mechanical performance. "
-                            f"{value_clause}"
-                        ),
+                        "statement": statement,
+                        "process_axes": process_axes,
                         "property_scope": specific_spec_axes,
                         "warnings": warnings,
                         **(
@@ -1899,6 +1920,16 @@ class ResearchUnderstandingService:
         return (
             f"The associated source table reports {specific_object} measurements; "
             "use the table rows as direct evidence rather than a single global range."
+        )
+
+    def _unisolated_scanning_speed_statement(self, axes: list[str]) -> str:
+        return (
+            "Across the tested SLM parameter sets, the authors reported that "
+            "higher-scanning-speed conditions showed better densification, a "
+            "refined microstructure, and better overall mechanical performance. "
+            "Because scan strategy, hatch spacing, and energy density also varied, "
+            "these data do not isolate a scanning-speed effect. "
+            f"{self._specific_mechanical_property_table_statement(axes)}"
         )
 
     def _specific_mechanical_property_column_indexes(
@@ -6815,11 +6846,12 @@ class ResearchUnderstandingService:
             return dict(finding)
 
         updated = dict(finding)
-        updated["statement"] = (
-            "In this study, higher scanning speed was associated with better "
-            "densification, a refined microstructure, and better overall "
-            "mechanical performance. "
-            f"{self._specific_mechanical_property_table_statement(axes)}"
+        updated["statement"] = self._unisolated_scanning_speed_statement(axes)
+        updated["variables"] = [_SLM_COUPLED_PARAMETER_SET_LABEL]
+        updated["title"] = self._finding_title(
+            variables=updated["variables"],
+            outcomes=axes,
+            fallback=_text(updated.get("title")) or "",
         )
         updated["direction"] = "associated"
         updated["support_grade"] = "partial"
@@ -6828,6 +6860,7 @@ class ResearchUnderstandingService:
             [
                 *_strings(updated.get("warnings")),
                 "non_single_variable_table_comparison",
+                "single_variable_effect_not_isolated",
                 "needs_expert_review",
             ]
         )
@@ -6835,6 +6868,7 @@ class ResearchUnderstandingService:
             [
                 *_strings(updated.get("review_reasons")),
                 "non_single_variable_table_comparison",
+                "single_variable_effect_not_isolated",
                 "needs_expert_review",
             ]
         )
@@ -6842,6 +6876,7 @@ class ResearchUnderstandingService:
         updated["relation_chain"] = [
             {
                 **segment,
+                "variable": _SLM_COUPLED_PARAMETER_SET_LABEL,
                 "statement": updated["statement"],
                 "direction": "associated",
                 "status": "limited",
@@ -6849,6 +6884,7 @@ class ResearchUnderstandingService:
                     [
                         *_strings(segment.get("warnings")),
                         "non_single_variable_table_comparison",
+                        "single_variable_effect_not_isolated",
                     ]
                 ),
             }
@@ -6873,7 +6909,7 @@ class ResearchUnderstandingService:
             _normalize_match_text(value)
             for value in _strings(finding.get("outcomes"))
         }
-        return "scanning speed" in variables and bool(
+        return any("scanning speed" in variable for variable in variables) and bool(
             outcomes
             & {
                 "yield strength",
@@ -9025,6 +9061,11 @@ class ResearchUnderstandingService:
         retained: list[dict[str, Any]] = []
         for index, (finding, finding_outcomes, document_ids) in enumerate(indexed):
             if len(finding_outcomes) <= 1 or not document_ids:
+                retained.append(finding)
+                continue
+            if "single_variable_effect_not_isolated" in _strings(
+                finding.get("warnings")
+            ):
                 retained.append(finding)
                 continue
             variables = _strings(finding.get("variables"))
@@ -11789,6 +11830,10 @@ class ResearchUnderstandingService:
             reasons.append(f"{support_grade}_support")
         if "non_single_variable_table_comparison" in _strings(effect.get("warnings")):
             reasons.append("non_single_variable_table_comparison")
+        if "single_variable_effect_not_isolated" in _strings(
+            effect.get("warnings")
+        ):
+            reasons.append("single_variable_effect_not_isolated")
         if (
             support_grade == "partial"
             and self._finding_has_direct_support(evidence_bundle)

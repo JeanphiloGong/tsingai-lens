@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.prompts import (
     build_objective_evidence_unit_prompt,
+    build_research_understanding_relation_prompt,
 )
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -195,13 +197,37 @@ def test_core_llm_extractor_captures_provider_parse_trace_for_relations():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "research_understanding_relation"
-    assert trace["prompt_version"] == "research_understanding_relation.v1"
+    assert trace["prompt_version"] == "research_understanding_relation.v2"
     assert trace["model"] == "fake-model"
     assert trace["trace_status"] == "available"
     assert trace["parsed_output"] == {"relations": []}
     assert trace["raw_output"] is None
     assert "api_key" not in str(trace).lower()
     assert "authorization" not in str(trace).lower()
+
+
+def test_research_understanding_relation_prompt_compacts_input_json():
+    payload = {
+        "objective": {"question": "预热如何影响孔隙率？"},
+        "contexts": [{"label": "LPBF 316L", "property_scope": ["porosity"]}],
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-1",
+                "value_payload": {"summary": "Preheating reduces porosity."},
+            }
+        ],
+    }
+
+    _, user_prompt = build_research_understanding_relation_prompt(payload)
+
+    input_json = user_prompt.split("Input JSON:\n", 1)[1].split(
+        "\n\nReturn only schema-valid", 1
+    )[0]
+    assert input_json == json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def test_core_llm_extractor_falls_back_to_json_text_when_provider_parse_fails(

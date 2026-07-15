@@ -5,7 +5,7 @@ from typing import Any
 
 
 RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION = (
-    "research_understanding_relation.v1"
+    "research_understanding_relation.v2"
 )
 
 
@@ -791,9 +791,10 @@ def build_objective_evidence_unit_prompt(
 def build_research_understanding_relation_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
+    input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     user_prompt = (
         "Extract expert-readable relations for this research understanding workspace.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{input_json}\n\n"
         "Return only schema-valid structured data with a `relations` array.\n"
         "Return at most 8 relations.\n"
         "`relation_type` must be one of: causal, correlational, mechanistic, "

@@ -104,6 +104,7 @@ class ResearchUnderstandingService:
             else dict(understanding)
         )
         record = self._record_with_traceable_evidence_refs(record)
+        record = self._record_with_comparison_condition_evidence(record)
         record = self._record_without_off_axis_recovered_objects(record)
         record = self._record_with_recovered_presentation_objects(record)
         record["presentation"] = self._presentation_for(record)
@@ -4656,6 +4657,58 @@ class ResearchUnderstandingService:
                 )
         return self._sort_evidence_refs_for_review(refs)
 
+    def _comparison_condition_table_row(
+        self,
+        table: SourceTable,
+        *,
+        comparison_axis: str,
+        context: Mapping[str, Any],
+    ) -> tuple[int, tuple[str, ...], int, str] | None:
+        headers = list(table.column_headers)
+        comparison_index = next(
+            (
+                index
+                for index, header in enumerate(headers)
+                if self._axis_match_tokens(header)
+                and self._axis_match_tokens(comparison_axis)
+                == self._axis_match_tokens(header)
+            ),
+            None,
+        )
+        if comparison_index is None:
+            return None
+        expected_by_index: dict[int, str] = {}
+        for index, header in enumerate(headers):
+            expected = next(
+                (
+                    _text(value)
+                    for key, value in context.items()
+                    if _text(value)
+                    and self._axis_match_tokens(header)
+                    and self._axis_match_tokens(_text(key))
+                    == self._axis_match_tokens(header)
+                ),
+                None,
+            )
+            if expected:
+                expected_by_index[index] = expected
+        if comparison_index not in expected_by_index or len(expected_by_index) < 2:
+            return None
+        for row_index, row in enumerate(table.table_matrix):
+            if len(row) < len(headers):
+                continue
+            if all(
+                self._energy_density_condition_matches(row[index], expected)
+                for index, expected in expected_by_index.items()
+            ):
+                return (
+                    row_index,
+                    tuple(row),
+                    len(expected_by_index),
+                    row[comparison_index],
+                )
+        return None
+
     def _sort_evidence_refs_for_review(
         self,
         refs: list[dict[str, Any]],
@@ -4868,6 +4921,193 @@ class ResearchUnderstandingService:
             )
             for ref in refs
         ]
+        return updated
+
+    def _record_with_comparison_condition_evidence(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        collection_id = _text(_mapping(record.get("scope")).get("collection_id"))
+        if not collection_id:
+            return dict(record)
+        blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
+            collection_id
+        )
+        if not tables_by_id:
+            return dict(record)
+        tables_by_document: dict[str, list[SourceTable]] = {}
+        for table in tables_by_id.values():
+            tables_by_document.setdefault(table.document_id, []).append(table)
+        evidence_refs = _mapping_list(record.get("evidence_refs"))
+        evidence_by_id = {
+            ref_id: ref
+            for ref in evidence_refs
+            if (ref_id := _text(ref.get("evidence_ref_id")))
+        }
+        contexts_by_id = {
+            context_id: context
+            for context in _mapping_list(record.get("contexts"))
+            if (context_id := _text(context.get("context_id")))
+        }
+        generated_refs: list[dict[str, Any]] = []
+        relations: list[dict[str, Any]] = []
+        for relation in _mapping_list(record.get("relations")):
+            relation_ref_ids = _strings(relation.get("evidence_ref_ids"))
+            if any(
+                _text(evidence_by_id.get(ref_id, {}).get("evidence_role"))
+                == "condition_context"
+                for ref_id in relation_ref_ids
+            ):
+                relations.append(relation)
+                continue
+            process_payload = next(
+                (
+                    _mapping(contexts_by_id[context_id].get("process_context"))
+                    for context_id in _strings(relation.get("context_ids"))
+                    if context_id in contexts_by_id
+                    and _mapping(
+                        _mapping(contexts_by_id[context_id].get("process_context")).get(
+                            "baseline_context"
+                        )
+                    )
+                ),
+                {},
+            )
+            source_object_ids = _strings(relation.get("source_object_ids"))
+            direct_refs = [
+                evidence_by_id[ref_id]
+                for ref_id in relation_ref_ids
+                if ref_id in evidence_by_id
+            ]
+            document_ids = {
+                document_id
+                for ref in direct_refs
+                if (document_id := _text(ref.get("document_id")))
+            }
+            comparison_axis = self._presentation_relation_side(
+                relation.get("subject")
+            )
+            current_context = {
+                **_mapping(process_payload.get("sample_context")),
+                **_mapping(process_payload.get("process_context")),
+            }
+            baseline = _mapping(process_payload.get("baseline_context"))
+            baseline_context = {
+                **_mapping(baseline.get("sample_context")),
+                **_mapping(baseline.get("process_context")),
+            }
+            if (
+                not comparison_axis
+                or not source_object_ids
+                or len(document_ids) != 1
+                or not current_context
+                or not baseline_context
+            ):
+                relations.append(relation)
+                continue
+            document_id = next(iter(document_ids))
+            direct_source_refs = {
+                source_ref
+                for ref in direct_refs
+                if (
+                    source_ref := _text(
+                        _locator_mapping(ref.get("locator")).get("source_ref")
+                    )
+                )
+            }
+            candidates = []
+            for table in tables_by_document.get(document_id, []):
+                if table.table_id in direct_source_refs:
+                    continue
+                current_match = self._comparison_condition_table_row(
+                    table,
+                    comparison_axis=comparison_axis,
+                    context=current_context,
+                )
+                baseline_match = self._comparison_condition_table_row(
+                    table,
+                    comparison_axis=comparison_axis,
+                    context=baseline_context,
+                )
+                if (
+                    current_match
+                    and baseline_match
+                    and current_match[0] != baseline_match[0]
+                    and not self._energy_density_condition_matches(
+                        current_match[3],
+                        baseline_match[3],
+                    )
+                ):
+                    candidates.append(
+                        (
+                            current_match[2] + baseline_match[2],
+                            -(table.table_order or 0),
+                            table,
+                            current_match,
+                            baseline_match,
+                        )
+                    )
+            if not candidates:
+                relations.append(relation)
+                continue
+            _, _, table, current_match, baseline_match = max(
+                candidates,
+                key=lambda candidate: (candidate[0], candidate[1]),
+            )
+            quote = _presentation_table_audit_quote(
+                {
+                    "columns": list(table.column_headers),
+                    "relevant_rows": [
+                        {
+                            "row_index": match[0],
+                            "cells": list(match[1]),
+                            "aligned": _table_row_cells_are_aligned(
+                                list(match[1]),
+                                list(table.column_headers),
+                            ),
+                        }
+                        for match in (current_match, baseline_match)
+                    ],
+                }
+            )
+            condition_ref = self._evidence_ref_from_unit(
+                {
+                    "evidence_unit_id": source_object_ids[0],
+                    "document_id": document_id,
+                    "confidence": relation.get("confidence"),
+                    "resolution_status": "resolved",
+                },
+                source_ref={
+                    "source_kind": "table",
+                    "source_ref": table.table_id,
+                    "display_label": (
+                        _text(table.caption_text) or "Comparison conditions"
+                    ),
+                    "page": table.page,
+                    "evidence_role": "condition_context",
+                    "quote": quote,
+                },
+                collection_id=collection_id,
+                blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
+            )
+            condition_ref_id = _text(condition_ref.get("evidence_ref_id")) or ""
+            generated_refs.append(condition_ref)
+            relations.append(
+                {
+                    **relation,
+                    "evidence_ref_ids": _dedupe_strings(
+                        [*relation_ref_ids, condition_ref_id]
+                    ),
+                }
+            )
+        if not generated_refs:
+            return dict(record)
+        updated = dict(record)
+        updated["relations"] = relations
+        updated["evidence_refs"] = self._sort_evidence_refs_for_review(
+            [*evidence_refs, *generated_refs]
+        )
         return updated
 
     def _traceable_evidence_ref(
@@ -13679,6 +13919,12 @@ class ResearchUnderstandingService:
             for ref_id in effect_evidence_ref_ids
             if ref_id in evidence_by_id
         ]
+        review_support_count = sum(
+            1
+            for ref in evidence_refs
+            if _text(ref.get("evidence_role"))
+            not in {"condition_context", "background", "conflict", "noise"}
+        )
         paper_count = len(
             {
                 _text(ref.get("document_id"))
@@ -13727,7 +13973,7 @@ class ResearchUnderstandingService:
             "relation_ids": relation_ids,
             "needs_review": self._effect_needs_review(
                 claim,
-                evidence_count=len(evidence_refs),
+                evidence_count=review_support_count,
                 relation_ids=relation_ids,
                 context_summary=self._context_summary_text(contexts),
             ),
@@ -14049,6 +14295,12 @@ class ResearchUnderstandingService:
             for ref_id in evidence_ref_ids
             if ref_id in evidence_by_id
         ]
+        review_support_count = sum(
+            1
+            for ref in evidence_refs
+            if _text(ref.get("evidence_role"))
+            not in {"condition_context", "background", "conflict", "noise"}
+        )
         paper_count = len(
             {
                 _text(ref.get("document_id"))
@@ -14083,7 +14335,7 @@ class ResearchUnderstandingService:
             "relation_ids": [relation_id],
             "needs_review": self._effect_needs_review(
                 {"claim_type": "finding", "status": relation.get("status")},
-                evidence_count=len(evidence_refs),
+                evidence_count=review_support_count,
                 relation_ids=[relation_id],
                 context_summary=self._context_summary_text(contexts),
             ),

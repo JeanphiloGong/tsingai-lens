@@ -542,6 +542,10 @@ def test_objective_understanding_projects_pairwise_comparison_as_finding():
             "document_id": "paper-1",
             "unit_kind": "comparison",
             "property_normalized": "yield strength",
+            "sample_context": {
+                "Condition number": "6",
+                "Sample number": "14",
+            },
             "process_context": {
                 "Energy density (J/mm 3 )": "150",
                 "Scan strategy": "A",
@@ -585,7 +589,36 @@ def test_objective_understanding_projects_pairwise_comparison_as_finding():
         "evidence_unit_ids": ["oeu-scan-strategy-yield"],
         "summary": "",
     }
-    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            tables=[
+                SourceTable(
+                    table_id="table-process",
+                    document_id="paper-1",
+                    table_order=1,
+                    page=2,
+                    caption_text="Table 1 SLM processing parameters.",
+                    caption_block_id=None,
+                    bbox=None,
+                    heading_path="Experimental procedure",
+                    column_headers=(
+                        "Condition number",
+                        "Sample number",
+                        "Hatch space (mm)",
+                        "Scan strategy",
+                        "Scanning speed (mm/s)",
+                        "Energy density (J/mm 3)",
+                        "Relative density",
+                    ),
+                    table_matrix=(
+                        ("6", "14", "0.12", "A", "0.111", "150", "99.45"),
+                        ("6", "15", "0.12", "B", "0.111", "150", "96.7"),
+                    ),
+                ),
+            ]
+        ),
+    )
 
     understanding = service.build_objective_understanding(payload)
 
@@ -604,7 +637,29 @@ def test_objective_understanding_projects_pairwise_comparison_as_finding():
     assert relation["object"] == "yield strength"
     assert relation["relation_type"] == "increases"
     assert relation["statement"] == claim["statement"]
-    assert understanding["evidence_refs"][0]["evidence_role"] == "direct_support"
+    evidence_by_id = {
+        ref["evidence_ref_id"]: ref for ref in understanding["evidence_refs"]
+    }
+    condition_refs = [
+        ref
+        for ref in evidence_by_id.values()
+        if ref["evidence_role"] == "condition_context"
+    ]
+    assert len(condition_refs) == 1
+    condition_ref = condition_refs[0]
+    assert condition_ref["locator"]["source_ref"] == "table-process"
+    assert "Sample number: 14" in condition_ref["quote"]
+    assert "Scan strategy: A" in condition_ref["quote"]
+    assert "Sample number: 15" in condition_ref["quote"]
+    assert "Scan strategy: B" in condition_ref["quote"]
+    assert set(relation["evidence_ref_ids"]) == {
+        next(
+            ref_id
+            for ref_id, ref in evidence_by_id.items()
+            if ref["evidence_role"] == "direct_support"
+        ),
+        condition_ref["evidence_ref_id"],
+    }
     assert understanding["presentation"]["findings"][0]["title"] == (
         "scanning strategy -> yield strength"
     )
@@ -615,6 +670,39 @@ def test_objective_understanding_projects_pairwise_comparison_as_finding():
     )
     assert review_finding["title"] == "scanning strategy -> yield strength"
     assert review_finding["dataset_use_status"] == "review_candidate"
+    assert review_finding["evidence_bundle"]["condition_context"] == [
+        condition_ref["evidence_ref_id"]
+    ]
+
+    persisted = json.loads(json.dumps(understanding))
+    persisted["evidence_refs"] = [
+        ref
+        for ref in persisted["evidence_refs"]
+        if ref["evidence_ref_id"] != condition_ref["evidence_ref_id"]
+    ]
+    for item in [*persisted["claims"], *persisted["relations"]]:
+        item["evidence_ref_ids"] = [
+            ref_id
+            for ref_id in item["evidence_ref_ids"]
+            if ref_id != condition_ref["evidence_ref_id"]
+        ]
+
+    reprojected = service.with_presentation(persisted)
+
+    assert reprojected is not None
+    reprojected_condition_refs = [
+        ref
+        for ref in reprojected["evidence_refs"]
+        if ref["evidence_role"] == "condition_context"
+    ]
+    assert len(reprojected_condition_refs) == 1
+    reprojected_finding = _presentation_review_finding_by_claim_id(
+        reprojected,
+        claim["claim_id"],
+    )
+    assert reprojected_finding["evidence_bundle"]["condition_context"] == [
+        reprojected_condition_refs[0]["evidence_ref_id"]
+    ]
 
 
 def test_objective_understanding_presents_symbol_axis_as_material_variable():

@@ -1147,6 +1147,14 @@ class ResearchUnderstandingService:
                     if spec.get("fatigue_strength_table")
                     else None
                 )
+                ved_fabrication_parameter_table = (
+                    self._best_ved_fabrication_parameter_table(
+                        document_id,
+                        tables_by_id=tables_by_id or {},
+                    )
+                    if _text(spec.get("slug")) == "ved_defects_fatigue"
+                    else None
+                )
                 texture_yield_table = (
                     self._best_texture_yield_validation_table(
                         document_id,
@@ -1169,15 +1177,25 @@ class ResearchUnderstandingService:
                 ]
                 recovered_spec = spec
                 if _text(spec.get("slug")) == "ved_defects_fatigue":
-                    coupled_process_parameters = (
-                        self._ved_condition_varies_multiple_process_parameters(
-                            condition_block
-                        )
+                    fabrication_context = self._ved_fabrication_parameter_context(
+                        ved_fabrication_parameter_table
                     )
+                    varied_process_axes = _strings(
+                        fabrication_context.get("varied_axes")
+                    ) or self._ved_condition_varied_process_axes(condition_block)
+                    fixed_process_axes = {
+                        _text(axis): _text(value)
+                        for axis, value in _mapping(
+                            fabrication_context.get("fixed_axes")
+                        ).items()
+                        if _text(axis) and _text(value)
+                    }
+                    coupled_process_parameters = len(varied_process_axes) > 1
                     table_statement = (
                         self._ved_fatigue_strength_table_statement(
                             ved_fatigue_strength_table,
-                            coupled_process_parameters=coupled_process_parameters,
+                            varied_process_axes=varied_process_axes,
+                            fixed_process_axes=fixed_process_axes,
                         )
                         if ved_fatigue_strength_table is not None
                         else ""
@@ -1186,10 +1204,11 @@ class ResearchUnderstandingService:
                         table_statement = (
                             "The authors associated the tested higher-VED PBF-LB "
                             "parameter sets with lower defect fraction, size, and "
-                            "complexity and slightly improved fatigue life. Laser "
-                            "power and scanning speed were both varied to create "
-                            "these VED levels, so the comparison does not isolate "
-                            "a VED-only effect."
+                            "complexity and slightly improved fatigue life. "
+                            + self._ved_process_condition_limitation(
+                                varied_process_axes,
+                                fixed_process_axes,
+                            )
                         )
                     recovered_spec = {
                         **spec,
@@ -1204,8 +1223,7 @@ class ResearchUnderstandingService:
                                 "predicate": "associated",
                                 "process_axes": [
                                     "volumetric energy density",
-                                    "laser power",
-                                    "scanning speed",
+                                    *varied_process_axes,
                                 ],
                                 "warnings": [
                                     "process_conditions_not_isolated",
@@ -1285,6 +1303,9 @@ class ResearchUnderstandingService:
                         objective=objective,
                         spec=recovered_spec,
                         condition_block=condition_block,
+                        condition_tables=[ved_fabrication_parameter_table]
+                        if ved_fabrication_parameter_table is not None
+                        else [],
                         supporting_blocks=supporting_blocks,
                         supporting_tables=supporting_tables,
                     )
@@ -1504,6 +1525,154 @@ class ResearchUnderstandingService:
             score += 2
         return score
 
+    def _best_ved_fabrication_parameter_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            score = self._ved_fabrication_parameter_table_score(table)
+            if score <= 0:
+                continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _ved_fabrication_parameter_table_score(self, table: SourceTable) -> int:
+        indexes = self._ved_fabrication_parameter_column_indexes(table)
+        required = {
+            "label",
+            "volumetric energy density",
+            "laser power",
+            "scanning speed",
+            "hatch spacing",
+            "layer thickness",
+        }
+        if not required <= set(indexes):
+            return 0
+        labels = {
+            _normalize_match_text(row[indexes["label"]])
+            for row in table.table_matrix
+            if len(row) > indexes["label"]
+        }
+        if not all(
+            any(target in label for label in labels)
+            for target in ("l ved", "m ved", "h ved")
+        ):
+            return 0
+        text = f" {_normalize_match_text(self._source_table_text(table))} "
+        score = 10
+        if " fabrication parameters " in text or " printing parameters " in text:
+            score += 4
+        return score
+
+    def _ved_fabrication_parameter_column_indexes(
+        self,
+        table: SourceTable,
+    ) -> dict[str, int]:
+        headers = list(table.column_headers)
+        if not headers and table.table_matrix:
+            headers = list(table.table_matrix[0])
+        indexes: dict[str, int] = {}
+        for index, header in enumerate(headers):
+            normalized = f" {_normalize_match_text(header)} "
+            if normalized.strip() in {"id", "sample", "condition"}:
+                indexes.setdefault("label", index)
+            elif " volumetric energy density " in normalized or re.search(
+                r"\bved\b", normalized
+            ):
+                indexes.setdefault("volumetric energy density", index)
+            elif " laser power " in normalized:
+                indexes.setdefault("laser power", index)
+            elif " scanning speed " in normalized or " scan speed " in normalized:
+                indexes.setdefault("scanning speed", index)
+            elif " hatch spacing " in normalized or " hatch space " in normalized:
+                indexes.setdefault("hatch spacing", index)
+            elif " layer thickness " in normalized:
+                indexes.setdefault("layer thickness", index)
+        if "label" not in indexes and headers:
+            indexes["label"] = 0
+        return indexes
+
+    def _ved_fabrication_parameter_context(
+        self,
+        table: SourceTable | None,
+    ) -> dict[str, Any]:
+        if table is None:
+            return {}
+        indexes = self._ved_fabrication_parameter_column_indexes(table)
+        label_index = indexes.get("label")
+        if label_index is None:
+            return {}
+        values_by_axis: dict[str, list[str]] = {
+            axis: []
+            for axis in (
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            )
+            if axis in indexes
+        }
+        for row in table.table_matrix:
+            if len(row) <= label_index:
+                continue
+            label = _normalize_match_text(row[label_index])
+            if not any(target in label for target in ("l ved", "m ved", "h ved")):
+                continue
+            for axis, values in values_by_axis.items():
+                index = indexes[axis]
+                if len(row) > index and (value := _text(row[index])):
+                    values.append(value)
+        units = {
+            "laser power": "W",
+            "scanning speed": "mm/s",
+            "hatch spacing": "μm",
+            "layer thickness": "μm",
+        }
+        varied_axes: list[str] = []
+        fixed_axes: dict[str, str] = {}
+        for axis, values in values_by_axis.items():
+            unique_values = _dedupe_strings(values)
+            if len(unique_values) > 1:
+                varied_axes.append(axis)
+            elif len(unique_values) == 1:
+                fixed_axes[axis] = f"{unique_values[0]} {units[axis]}"
+        return {"varied_axes": varied_axes, "fixed_axes": fixed_axes}
+
+    def _ved_fabrication_parameter_table_quote(self, table: SourceTable) -> str:
+        indexes = self._ved_fabrication_parameter_column_indexes(table)
+        label_index = indexes.get("label")
+        if label_index is None:
+            return ""
+        relevant_rows = [
+            {
+                "row_index": row_index,
+                "cells": [_text(cell) for cell in row],
+                "aligned": _table_row_cells_are_aligned(
+                    [_text(cell) for cell in row],
+                    list(table.column_headers),
+                ),
+            }
+            for row_index, row in enumerate(table.table_matrix)
+            if len(row) > label_index
+            and any(
+                target in _normalize_match_text(row[label_index])
+                for target in ("l ved", "m ved", "h ved")
+            )
+        ]
+        return _presentation_table_audit_quote(
+            {
+                "columns": list(table.column_headers),
+                "relevant_rows": relevant_rows,
+            }
+        )
+
     def _best_ved_fatigue_strength_table(
         self,
         document_id: str,
@@ -1581,7 +1750,8 @@ class ResearchUnderstandingService:
         self,
         table: SourceTable,
         *,
-        coupled_process_parameters: bool = False,
+        varied_process_axes: list[str] | None = None,
+        fixed_process_axes: Mapping[str, str] | None = None,
     ) -> str:
         indexes = self._ved_fatigue_strength_column_indexes(table)
         label_index = indexes.get("label")
@@ -1659,12 +1829,44 @@ class ResearchUnderstandingService:
             "The authors associated the higher-VED conditions with lower defect "
             "fraction, size, and complexity and slightly improved fatigue life."
         )
-        if coupled_process_parameters:
+        if len(varied_process_axes or []) > 1:
             parts.append(
-                "Laser power and scanning speed were both varied to create these "
-                "VED levels, so the comparison does not isolate a VED-only effect."
+                self._ved_process_condition_limitation(
+                    varied_process_axes or [],
+                    fixed_process_axes or {},
+                )
             )
         return " ".join(parts)
+
+    def _ved_process_condition_limitation(
+        self,
+        varied_process_axes: list[str],
+        fixed_process_axes: Mapping[str, str],
+    ) -> str:
+        axes = _dedupe_strings(varied_process_axes)
+        if not axes:
+            return ""
+        if len(axes) == 1:
+            varied_text = axes[0]
+        elif len(axes) == 2:
+            varied_text = " and ".join(axes)
+        else:
+            varied_text = f"{', '.join(axes[:-1])}, and {axes[-1]}"
+        fixed_descriptions = [
+            f"{axis} remained fixed at {value}"
+            for axis, value in fixed_process_axes.items()
+            if _text(axis) and _text(value)
+        ]
+        fixed_clause = (
+            f", while {' and '.join(fixed_descriptions)}"
+            if fixed_descriptions
+            else ""
+        )
+        return (
+            f"{varied_text[0].upper() + varied_text[1:]} varied across these VED "
+            f"groups{fixed_clause}, so the comparison does not isolate a "
+            "VED-only effect."
+        )
 
     def _ved_fatigue_strength_column_indexes(
         self,
@@ -2436,17 +2638,13 @@ class ResearchUnderstandingService:
             score -= 3
         return score
 
-    def _ved_condition_varies_multiple_process_parameters(
+    def _ved_condition_varied_process_axes(
         self,
         block: SourceBlock | None,
-    ) -> bool:
+    ) -> list[str]:
         if block is None:
-            return False
+            return []
         normalized = f" {_normalize_match_text(_text(block.text))} "
-        has_laser_power = " laser power " in normalized
-        has_scan_speed = (
-            " scanning speed " in normalized or " scan speed " in normalized
-        )
         has_variation = any(
             term in normalized
             for term in (
@@ -2456,7 +2654,14 @@ class ResearchUnderstandingService:
                 " changed together ",
             )
         )
-        return has_laser_power and has_scan_speed and has_variation
+        if not has_variation:
+            return []
+        axes: list[str] = []
+        if " laser power " in normalized:
+            axes.append("laser power")
+        if " scanning speed " in normalized or " scan speed " in normalized:
+            axes.append("scanning speed")
+        return axes
 
     def _normalized_block_text(self, block: SourceBlock) -> str:
         return f" {_normalize_match_text((_text(block.heading_path) or '') + ' ' + (_text(block.text) or ''))} "
@@ -2499,6 +2704,7 @@ class ResearchUnderstandingService:
         objective: Mapping[str, Any],
         spec: Mapping[str, Any],
         condition_block: SourceBlock | None = None,
+        condition_tables: list[SourceTable] | None = None,
         supporting_blocks: list[SourceBlock] | None = None,
         supporting_tables: list[SourceTable] | None = None,
     ) -> dict[str, Any]:
@@ -2632,13 +2838,26 @@ class ResearchUnderstandingService:
                     ),
                 }
             )
-        for supporting_table in supporting_tables or []:
+        table_sources = [
+            (table, "table", "direct_support")
+            for table in supporting_tables or []
+        ] + [
+            (table, "condition_table", "condition_context")
+            for table in condition_tables or []
+        ]
+        for supporting_table, ref_kind, evidence_role in table_sources:
             supporting_table_id = _text(supporting_table.table_id)
             if not supporting_table_id:
                 continue
-            supporting_ref_id = f"evref_recovered_{slug}_table_{supporting_table_id}"
+            supporting_ref_id = (
+                f"evref_recovered_{slug}_{ref_kind}_{supporting_table_id}"
+            )
             evidence_ref_ids.append(supporting_ref_id)
-            supporting_quote = self._presentation_table_source_text(supporting_table)
+            supporting_quote = (
+                self._ved_fabrication_parameter_table_quote(supporting_table)
+                if evidence_role == "condition_context"
+                else self._presentation_table_source_text(supporting_table)
+            )
             evidence_refs.append(
                 {
                     "evidence_ref_id": supporting_ref_id,
@@ -2661,7 +2880,7 @@ class ResearchUnderstandingService:
                     "anchor_ids": [],
                     "confidence": confidence,
                     "traceability_status": "resolved",
-                    "evidence_role": "direct_support",
+                    "evidence_role": evidence_role,
                     "quote": supporting_quote,
                     "href": _presentation_evidence_href(
                         collection_id=collection_id,
@@ -13273,6 +13492,11 @@ class ResearchUnderstandingService:
         table_audit = self._presentation_table_audit(
             table,
             quote_hints=quote_hints or {},
+            cited_rows_quote=(
+                quote
+                if _text(ref.get("evidence_role")) == "condition_context"
+                else ""
+            ),
         )
         quote = (
             _presentation_table_audit_quote(table_audit) or source_text
@@ -13346,6 +13570,7 @@ class ResearchUnderstandingService:
         table: SourceTable | None,
         *,
         quote_hints: Mapping[str, set[str]],
+        cited_rows_quote: str = "",
     ) -> dict[str, Any] | None:
         if table is None:
             return None
@@ -13359,6 +13584,7 @@ class ResearchUnderstandingService:
             for term in quote_hints.get("result_numeric", set())
             if re.search(r"\d", term)
         }
+        normalized_cited_rows = f" {_normalize_match_text(cited_rows_quote)} "
         for row_index, row in enumerate(table.table_matrix):
             cells = [_text(cell) for cell in row]
             row_text = " | ".join(cell for cell in cells if cell)
@@ -13396,6 +13622,11 @@ class ResearchUnderstandingService:
                 score += statement_hits * 20
             if score <= 0 and re.search(r"\d", row_text):
                 score = 1
+            cited = bool(cited_rows_quote) and all(
+                f" {_normalize_match_text(cell)} " in normalized_cited_rows
+                for cell in cells
+                if _text(cell)
+            )
             row_records.append(
                 {
                     "row_index": row_index,
@@ -13405,8 +13636,10 @@ class ResearchUnderstandingService:
                     "_numeric_statement_hits": numeric_statement_hits,
                     "_result_numeric_hits": result_numeric_hits,
                     "_endpoint_hits": endpoint_hits,
+                    "_cited": cited,
                 }
             )
+        cited_rows = [row for row in row_records if row["_cited"]]
         endpoint_rows = _quote_endpoint_precision_rows(
             row_records,
             quote_hints.get("result_numeric_endpoints", set()),
@@ -13431,7 +13664,7 @@ class ResearchUnderstandingService:
             if max_numeric_hits > 0
             and int(row["_numeric_statement_hits"]) == max_numeric_hits
         ]
-        precision_rows = endpoint_rows or _dedupe_rows_by_index(
+        precision_rows = cited_rows or endpoint_rows or _dedupe_rows_by_index(
             [
                 *(result_precision_rows or numeric_precision_rows),
                 *[row for row in row_records if row["_statement_hits"] > 0],

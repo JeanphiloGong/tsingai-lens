@@ -4387,8 +4387,10 @@ def test_objective_understanding_keeps_comparison_axis_as_relation_subject():
     finding = _presentation_finding_by_title(understanding, "laser power -> density")
     assert finding["title"] == "laser power -> density"
     assert finding["statement"] == (
+        "Selected source table rows show: "
         "With scan speed 100 and heat treatment type Furnace HT, changing "
-        "laser power from 120 to 140 decreased density from 98.45 % to 93.33 %."
+        "laser power from 120 to 140 decreased density from 98.45 % to 93.33 %. "
+        "Expert review is required before treating this as a material effect."
     )
     assert finding["comparison_summary"] == {
         "variable": "laser power",
@@ -4519,8 +4521,10 @@ def test_with_presentation_keeps_controlled_axis_out_of_variable_title():
     assert finding["title"] == "volumetric energy density -> fatigue strength"
     assert finding["variables"] == ["volumetric energy density"]
     assert finding["statement"] == (
+        "Selected source table rows show: "
         "With layer thickness 30, changing volumetric energy density "
-        "from 50.8 to 79.4 increased fatigue strength from 340 MPa to 450 MPa."
+        "from 50.8 to 79.4 increased fatigue strength from 340 MPa to 450 MPa. "
+        "Expert review is required before treating this as a material effect."
     )
     assert finding["comparison_summary"]["controlled_conditions"] == [
         {"axis": "layer thickness", "value": "30"}
@@ -5952,7 +5956,7 @@ def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
     assert "source_ref=blk-conclusion-result" in (evidence_item["href"] or "")
 
 
-def test_with_presentation_keeps_results_direct_evidence_over_introduction_review():
+def test_with_presentation_filters_measurement_only_density_claim():
     results_text = (
         "The achieved density measured using the Archimedes method was 91.9, "
         "98.9 and 99.6 % for L-VED, M-VED and H-VED, respectively."
@@ -6068,9 +6072,14 @@ def test_with_presentation_keeps_results_direct_evidence_over_introduction_revie
     understanding = service.with_presentation(stored)
 
     assert understanding is not None
-    finding = understanding["presentation"]["findings"][0]
-    assert finding["evidence_bundle"]["direct_result"] == ["evref_results"]
-    assert finding["evidence_bundle"]["uncategorized"] == []
+    assert understanding["presentation"]["findings"] == []
+    assert understanding["presentation"]["review_queue_findings"] == []
+    results_evidence = next(
+        item
+        for item in understanding["presentation"]["evidence_items"]
+        if item["evidence_ref_id"] == "evref_results"
+    )
+    assert results_evidence["quote"] == results_text
 
 
 def test_with_presentation_statement_aligned_quote_prefers_matching_result_sentence():
@@ -9238,8 +9247,10 @@ def test_with_presentation_uses_numeric_relation_statement_for_symbol_axis_findi
         "claim_theta_yield",
     )
     assert finding["statement"] == (
+        "Selected source table rows show: "
         "Under α 0 and β 0, θ increased yield strength experiment "
-        "from 334.2 MPa to 342.5 MPa."
+        "from 334.2 MPa to 342.5 MPa. "
+        "Expert review is required before treating this as a material effect."
     )
     assert finding["title"] == (
         "scan strategy rotation angle -> yield strength experiment"
@@ -10143,7 +10154,7 @@ def test_specific_quote_statement_preserves_equivalent_aligned_statement():
     assert statement == "Laser power increases relative density."
 
 
-def test_with_presentation_quote_calibrated_variable_promotes_density_primary():
+def test_with_presentation_does_not_promote_density_measurements_to_finding():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(
         {
@@ -10220,17 +10231,14 @@ def test_with_presentation_quote_calibrated_variable_promotes_density_primary():
     understanding = service.with_presentation(stored)
 
     assert understanding is not None
-    finding = understanding["presentation"]["findings"][0]
-    assert finding["variables"] == ["VED"]
-    assert finding["title"] == "VED -> density"
-    assert finding["statement"] == (
+    assert understanding["presentation"]["findings"] == []
+    assert understanding["presentation"]["primary_findings"] == []
+    assert understanding["presentation"]["review_queue_findings"] == []
+    evidence_item = understanding["presentation"]["evidence_items"][0]
+    assert evidence_item["quote"] == (
         "The achieved density measured using the Archimedes method was "
         "91.9, 98.9 and 99.6% for L-VED, M-VED and H-VED, respectively."
     )
-    assert finding["relation_chain"][0]["variable"] == "VED"
-    assert finding["relation_chain"][0]["direction"] == "increases"
-    assert understanding["presentation"]["primary_findings"] == [finding]
-    assert understanding["presentation"]["review_queue_findings"] == []
 
 
 def test_with_presentation_quote_derived_statement_uses_microstructure_result():
@@ -10999,7 +11007,7 @@ def test_with_presentation_promotes_single_paper_relation_with_aligned_direct_ev
     assert understanding["presentation"]["review_queue_findings"] == []
 
 
-def test_with_presentation_merges_duplicate_row_level_findings():
+def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(
         {
@@ -11105,33 +11113,13 @@ def test_with_presentation_merges_duplicate_row_level_findings():
     understanding = service.with_presentation(stored)
 
     assert understanding is not None
-    findings = understanding["presentation"]["findings"]
-    assert len(findings) == 1
-    finding = findings[0]
-    assert finding["title"] == "VED -> density"
-    assert finding["evidence_count"] == 2
-    assert finding["paper_count"] == 2
-    assert finding["evidence_bundle"]["direct_result"] == [
-        "evref_density_low",
-        "evref_density_high",
-    ]
-    assert finding["relation_ids"] == ["rel_density_low", "rel_density_high"]
-    assert finding["expert_use_status"] == "review_candidate"
-    assert finding["generalization_status"] == "cross_paper_candidate"
-    assert (
-        finding["generalization_note"]
-        == "Evidence spans 2 papers, but support or review is not final; keep this "
-        "as a cross-paper review candidate."
-    )
-    assert "independent cross-paper confirmation" not in finding[
-        "evidence_gap_summary"
-    ]
-    assert "add_cross_paper_evidence" not in finding["upgrade_actions"]
-    assert "cross_paper_evidence" in finding["review_reasons"]
-    assert "single_paper_evidence" not in finding["review_reasons"]
-    assert "needs_cross_paper_confirmation" not in finding["review_reasons"]
+    assert understanding["presentation"]["findings"] == []
     assert understanding["presentation"]["primary_findings"] == []
-    assert understanding["presentation"]["review_queue_findings"] == [finding]
+    assert understanding["presentation"]["review_queue_findings"] == []
+    assert {
+        item["evidence_ref_id"]
+        for item in understanding["presentation"]["evidence_items"]
+    } == {"evref_density_low", "evref_density_high"}
 
 
 def test_presentation_filters_multi_outcome_row_covered_by_specific_findings():
@@ -12181,9 +12169,11 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
         for finding in understanding["presentation"]["review_queue_findings"]
     }
     assert review_by_title["laser power -> density"]["statement"] == (
+        "Selected source table rows show: "
         "Under heat treatment type furnace ht and scan speed 200, "
         "laser power 120 increased density from 93.67 % "
-        "(laser power 100) to 96.84 %."
+        "(laser power 100) to 96.84 %. "
+        "Expert review is required before treating this as a material effect."
     )
     assert review_by_title["laser power -> density"]["comparison_summary"] == {
         "variable": "laser power",
@@ -13797,6 +13787,35 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
                     heading_path="4.2. The influence of defect structure on fatigue strength",
                 ),
             ],
+            tables=[
+                SourceTable(
+                    table_id="tbl-ved-parameters",
+                    document_id="paper-ved",
+                    table_order=2,
+                    page=3,
+                    caption_text=(
+                        "Table 2 Fabrication parameters for 316L samples with "
+                        "varying VED."
+                    ),
+                    caption_block_id=None,
+                    bbox=None,
+                    heading_path="2.1. Laser powder bed fusion processing",
+                    column_headers=[
+                        "ID",
+                        "VED [J/mm3]",
+                        "Laser power [W]",
+                        "Scanning speed [mm/s]",
+                        "Hatch spacing [μm]",
+                        "Layer thickness [μm]",
+                    ],
+                    table_matrix=[
+                        ["L-VED", "50.8", "160", "875", "120", "30"],
+                        ["M-VED", "79.4", "190", "800", "100", "30"],
+                        ["H-VED", "84.3", "220", "725", "120", "30"],
+                        ["Border hatch", "104.2", "100", "400", "80", "30"],
+                    ],
+                )
+            ],
         ),
     )
     payload = _oversized_relation_payload(unit_count=4)
@@ -13854,19 +13873,58 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
         )
     )
     assert "does not isolate a VED-only effect" in finding["statement"]
+    assert (
+        "Laser power, scanning speed, and hatch spacing varied across these VED "
+        "groups" in finding["statement"]
+    )
+    assert "layer thickness remained fixed at 30 μm" in finding["statement"]
     assert "process_conditions_not_isolated" in finding["warnings"]
     assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     condition_refs = finding["evidence_bundle"]["condition_context"]
-    assert condition_refs
+    assert len(condition_refs) == 2
     evidence_by_id = {
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
     }
-    condition_item = evidence_by_id[condition_refs[0]]
-    assert condition_item["source_ref"] == "blk-method-ved"
-    assert "50.8" in condition_item["quote"]
-    assert "79.4" in condition_item["quote"]
-    assert "84.3" in condition_item["quote"]
+    condition_items = [evidence_by_id[ref_id] for ref_id in condition_refs]
+    condition_block_item = next(
+        item for item in condition_items if item["source_ref"] == "blk-method-ved"
+    )
+    assert "50.8" in condition_block_item["quote"]
+    assert "79.4" in condition_block_item["quote"]
+    assert "84.3" in condition_block_item["quote"]
+    condition_table_item = next(
+        item for item in condition_items if item["source_ref"] == "tbl-ved-parameters"
+    )
+    assert condition_table_item["evidence_role"] == "condition_context"
+    assert condition_table_item["table_audit"]["relevant_rows"] == [
+        {
+            "row_index": 0,
+            "cells": ["L-VED", "50.8", "160", "875", "120", "30"],
+            "aligned": True,
+        },
+        {
+            "row_index": 1,
+            "cells": ["M-VED", "79.4", "190", "800", "100", "30"],
+            "aligned": True,
+        },
+        {
+            "row_index": 2,
+            "cells": ["H-VED", "84.3", "220", "725", "120", "30"],
+            "aligned": True,
+        },
+    ]
+    recovered_context = next(
+        item
+        for item in understanding["contexts"]
+        if item["context_id"].startswith("ctx_recovered_ved_defects_fatigue_")
+    )
+    assert recovered_context["process_context"]["variable_process_axes"] == [
+        "volumetric energy density",
+        "laser power",
+        "scanning speed",
+        "hatch spacing",
+    ]
 
 
 def test_with_presentation_projects_traceable_table_comparison_as_finding():

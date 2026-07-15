@@ -8337,6 +8337,17 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
     } & {segment["outcome"] for segment in finding["relation_chain"]}
 
 
+def test_direct_evidence_preserves_explicit_microstructure_and_texture_mechanisms():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+
+    mediators = service._finding_mediators_from_direct_evidence(
+        "The increases in elongation and yield strength were attributed to the "
+        "microstructure and texture evolution."
+    )
+
+    assert mediators == ["microstructure evolution", "texture evolution"]
+
+
 def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

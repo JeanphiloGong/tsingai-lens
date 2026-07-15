@@ -10212,6 +10212,14 @@ class ResearchUnderstandingService:
         normalized = f" {_normalize_match_text(source_text)} "
         mediators: list[str] = []
         if (
+            " microstructure evolution " in normalized
+            or " microstructural evolution " in normalized
+            or " microstructure and texture evolution " in normalized
+        ):
+            mediators.append("microstructure evolution")
+        if " texture evolution " in normalized:
+            mediators.append("texture evolution")
+        if (
             " cellular microstructure " in normalized
             or " cellular microstructures " in normalized
             or " cellular structure " in normalized

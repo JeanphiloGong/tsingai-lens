@@ -222,6 +222,31 @@ def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path
         )
 
 
+def test_experiment_plan_service_rejects_invalid_protocol_contract_warning(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        warnings=["goal_copilot_protocol_contract_invalid"],
+        review_gate="protocol_ready_findings",
+        content=_structured_protocol(),
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+    )
+
+    with pytest.raises(ValueError, match="not eligible"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="Preheating validation matrix",
+            content=_structured_protocol(),
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
 def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
     goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
     _write_goal_message(

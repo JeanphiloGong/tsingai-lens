@@ -17,6 +17,7 @@ PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
 BLOCKED_GOAL_COPILOT_WARNINGS = {
     "curated_research_findings_empty",
     "goal_copilot_model_unavailable",
+    "goal_copilot_protocol_contract_invalid",
 }
 
 

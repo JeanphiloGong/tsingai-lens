@@ -17,18 +17,19 @@ from infra.persistence.sqlite import (
 
 
 class _FakeMessage:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, parsed=None) -> None:
         self.content = content
+        self.parsed = parsed
 
 
 class _FakeChoice:
-    def __init__(self, content: str) -> None:
-        self.message = _FakeMessage(content)
+    def __init__(self, content: str, parsed=None) -> None:
+        self.message = _FakeMessage(content, parsed)
 
 
 class _FakeCompletion:
-    def __init__(self, content: str) -> None:
-        self.choices = [_FakeChoice(content)]
+    def __init__(self, content: str, parsed=None) -> None:
+        self.choices = [_FakeChoice(content, parsed)]
 
 
 class _FakeCompletions:
@@ -49,6 +50,32 @@ class _FakeChat:
 class _FakeLLMClient:
     def __init__(self, content: str) -> None:
         self.chat = _FakeChat(content)
+
+
+class _FakeParseCompletions:
+    def __init__(self, parsed) -> None:
+        self.parsed = parsed
+        self.calls: list[dict] = []
+
+    def parse(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(kwargs)
+        return _FakeCompletion("", self.parsed)
+
+
+class _FakeParseChat:
+    def __init__(self, parsed) -> None:
+        self.completions = _FakeParseCompletions(parsed)
+
+
+class _FakeBeta:
+    def __init__(self, parsed) -> None:
+        self.chat = _FakeParseChat(parsed)
+
+
+class _StructuredRepairLLMClient:
+    def __init__(self, content: str, parsed) -> None:
+        self.chat = _FakeChat(content)
+        self.beta = _FakeBeta(parsed)
 
 
 class _FailingCompletions:
@@ -914,6 +941,28 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert "every constituent parameter is fixed" in prompt_messages[0]["content"]
     assert "confounded comparison" in prompt_messages[0]["content"]
     assert "proposed design choice" in prompt_messages[0]["content"]
+    assert "Source-backed:" in prompt_messages[0]["content"]
+    assert "Proposed design choice:" in prompt_messages[0]["content"]
+    assert "Do not leave these bullets unlabeled" in prompt_messages[0]["content"]
+    assert "numeric levels, standards, sample sizes, or named methods" in (
+        prompt_messages[0]["content"]
+    )
+    assert "Bad: change VED while laser power" in prompt_messages[0]["content"]
+    assert "Good: Proposed design choice: vary laser power" in (
+        prompt_messages[0]["content"]
+    )
+    assert "A Source-backed line must include" in prompt_messages[0]["content"]
+    assert "on that same line" in prompt_messages[0]["content"]
+    assert "Do not use Source-backed as a group heading" in (
+        prompt_messages[0]["content"]
+    )
+    assert "The Hypothesis must cite" in prompt_messages[0]["content"]
+    assert "Only call an operational setting Source-backed" in (
+        prompt_messages[0]["content"]
+    )
+    assert "general domain knowledge or this boundary example" in (
+        prompt_messages[0]["content"]
+    )
     prompt = prompt_messages[1]["content"]
     assert "curated_research_findings" in prompt
     assert "150 C preheating improves LPBF 316L ductility" in prompt
@@ -924,6 +973,131 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt
     assert "finding_review_candidate" not in prompt
+
+
+def test_goal_chat_repairs_protocol_contract_before_returning_grounded_answer(tmp_path):
+    invalid_draft = """Hypothesis
+Preheating improves ductility [Source 1].
+Variable matrix
+- Source-backed: Compare ambient and preheated builds [Source 1].
+Measurements
+- Source-backed: Ductility [Source 1].
+Controls
+- Proposed design choice: Hold scan parameters constant.
+Risks or limits
+- Design risk: Scan-parameter drift can affect the result.
+"""
+    repaired_protocol = {
+        "proposed_variable_manipulations": [
+            "Compare ambient and preheated builds while the expert selects the levels."
+        ],
+        "proposed_measurements": [
+            "The expert selects a validated defect-characterization method."
+        ],
+        "proposed_controls": ["Hold scan parameters constant."],
+        "design_risks": ["Scan-parameter drift can confound preheating effects."],
+    }
+    llm_client = _StructuredRepairLLMClient(invalid_draft, repaired_protocol)
+    service, collection_service = _service_with_llm_client(
+        tmp_path,
+        llm_client,
+        research_understanding_feedback_service=(
+            _TrainingReadyResearchUnderstandingFeedbackService()
+        ),
+        paper_facts_service=_EvidencePaperFactsService(),
+    )
+    collection = collection_service.create_collection("Repair Protocol Contract")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_preheat",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Design the next experiment from reviewed findings.",
+        page_context={"goal_id": "goal_preheat"},
+    )
+
+    assert response["source_mode"] == "collection_grounded"
+    assert "150 C preheating improves LPBF 316L ductility" in response["answer"]
+    assert (
+        "- Source-backed: Observed relation: build platform preheating temperature "
+        "-> ductility; mediator: microstructure, GND density; direction: increase; "
+        "scope: LPBF 316L stainless steel. [Source 1]"
+    ) in response["answer"]
+    assert "- Source-backed: Reported outcome: ductility. [Source 1]" in (
+        response["answer"]
+    )
+    assert "- Proposed design choice: Compare ambient and preheated builds" in (
+        response["answer"]
+    )
+    assert "\nSource-backed:\n" not in response["answer"]
+    assert response["review_gate"] == "protocol_ready_findings"
+    assert response["warnings"] == []
+    assert len(llm_client.chat.completions.calls) == 1
+    assert len(llm_client.beta.chat.completions.calls) == 1
+    parse_call = llm_client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"].__name__ == "_StructuredProtocolDraft"
+    repair_prompt = parse_call["messages"][1]["content"]
+    assert "Repair the protocol as structured data" in repair_prompt
+    assert "Normalize the protocol into the required evidence/design fields" in (
+        repair_prompt
+    )
+    assert invalid_draft.strip() in repair_prompt
+
+
+def test_goal_chat_limits_protocol_when_repair_still_violates_contract(tmp_path):
+    invalid_draft = """Hypothesis
+VED improves fatigue strength [Source 1].
+Variable matrix
+Source-backed:
+- Vary laser power while other parameters are fixed.
+Measurements
+- ASTM E466 fatigue testing
+Controls
+- Scan speed
+Risks or limits
+- Confounding
+"""
+    invalid_protocol = {
+        "proposed_variable_manipulations": ["Vary laser power by 10 percent."],
+        "proposed_measurements": [
+            "Select a fatigue test method. Source-backed: use LCSM."
+        ],
+        "proposed_controls": ["Hold scan speed constant."],
+        "design_risks": ["Constituent-parameter drift can confound VED."],
+    }
+    llm_client = _StructuredRepairLLMClient(invalid_draft, invalid_protocol)
+    service, collection_service = _service_with_llm_client(
+        tmp_path,
+        llm_client,
+        research_understanding_feedback_service=(
+            _TrainingReadyResearchUnderstandingFeedbackService()
+        ),
+        paper_facts_service=_EvidencePaperFactsService(),
+    )
+    collection = collection_service.create_collection("Reject Invalid Protocol")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_preheat",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Design the next experiment from reviewed findings.",
+        page_context={"goal_id": "goal_preheat"},
+    )
+
+    assert response["source_mode"] == "collection_limited"
+    assert response["review_gate"] is None
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
+    assert "goal_copilot_protocol_contract_invalid" in response["warnings"]
+    assert "could not verify the protocol draft contract" in response["answer"]
+    assert len(llm_client.chat.completions.calls) == 1
+    assert len(llm_client.beta.chat.completions.calls) == 1
 
 
 def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
@@ -1034,9 +1208,7 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
             _PassthroughResearchUnderstandingProjectionService()
         ),
     )
-    service, collection_service = _service(
-        tmp_path,
-        content=(
+    protocol_candidate = (
             "Hypothesis: 150 C preheating improves LPBF 316L ductility "
             "through microstructure changes [Source 1].\n"
             "Variable matrix: compare 25 C and 150 C build-platform "
@@ -1044,7 +1216,22 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
             "Measurements: elongation and microstructure.\n"
             "Controls: keep LPBF alloy, powder, and scan parameters fixed.\n"
             "Risks or limits: current evidence is one LPBF 316L finding."
-        ),
+        )
+    structured_protocol = {
+        "proposed_variable_manipulations": [
+            "Compare ambient and preheated conditions selected by the expert."
+        ],
+        "proposed_measurements": [
+            "The expert selects a validated microstructure method."
+        ],
+        "proposed_controls": [
+            "Keep alloy, powder, and scan parameters fixed."
+        ],
+        "design_risks": ["Uncontrolled scan parameters can confound preheating effects."],
+    }
+    service, collection_service = _service_with_llm_client(
+        tmp_path,
+        _StructuredRepairLLMClient(protocol_candidate, structured_protocol),
         research_understanding_feedback_service=feedback_service,
         paper_facts_service=_EvidencePaperFactsService(),
     )
@@ -1114,6 +1301,9 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     assert len(dataset["items"][0]["training_messages"]) == 2
     assert response["source_mode"] == "collection_grounded"
     assert response["review_gate"] == "protocol_ready_findings"
+    assert "- Proposed design choice: Compare ambient and preheated conditions" in (
+        response["answer"]
+    )
     assert response["used_evidence_ids"] == ["ev_preheat"]
     assert response["source_links"] == [
         {

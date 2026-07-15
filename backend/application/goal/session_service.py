@@ -9,6 +9,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from openai import OpenAI, OpenAIError
+from pydantic import BaseModel, Field
 
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
@@ -57,6 +58,45 @@ _MAX_SOURCE_LINKS = 12
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
 _UNSET = object()
 PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
+
+
+class _StructuredProtocolDraft(BaseModel):
+    proposed_variable_manipulations: list[str] = Field(
+        min_length=1,
+        max_length=12,
+        description=(
+            "One plain design action per list item. Do not include category labels, "
+            "citations, source facts, or multiple actions in one string."
+        ),
+    )
+    proposed_measurements: list[str] = Field(
+        default_factory=list,
+        max_length=12,
+        description=(
+            "One plain proposed measurement choice per list item. Do not include "
+            "category labels, citations, or source-backed claims."
+        ),
+    )
+    proposed_controls: list[str] = Field(
+        min_length=1,
+        max_length=12,
+        description=(
+            "One plain proposed control per list item. Do not include category labels, "
+            "citations, or source-backed claims."
+        ),
+    )
+    design_risks: list[str] = Field(
+        min_length=1,
+        max_length=12,
+        description=(
+            "One plain design risk per list item. Do not repeat evidence limits or "
+            "include category labels."
+        ),
+    )
+
+
+class _ProtocolContractError(RuntimeError):
+    """Raised when a generated protocol cannot satisfy the review contract."""
 
 
 class GoalSessionNotFoundError(FileNotFoundError):
@@ -374,6 +414,20 @@ class GoalSessionService:
             if failed_warning:
                 source_mode = "collection_limited"
                 warnings.append(failed_warning)
+                used_evidence_ids = []
+                source_links = []
+            elif (
+                context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
+                and self._is_protocol_draft(answer)
+                and not self._protocol_contract_is_valid(answer)
+            ):
+                source_mode = "collection_limited"
+                warnings.append("goal_copilot_protocol_contract_invalid")
+                answer = (
+                    "Lens could not verify the protocol draft contract, so do not "
+                    "save or use this answer as an expert-ready experiment plan.\n\n"
+                    f"{answer}"
+                )
                 used_evidence_ids = []
                 source_links = []
             elif not source_links or not self._answer_cites_source_link(answer, source_links):
@@ -917,6 +971,33 @@ class GoalSessionService:
             source_mode=source_mode,
             context=context,
         )
+        answer = self._complete_llm_prompt(system_prompt, prompt)
+        if (
+            source_mode == "collection_grounded"
+            and context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
+            and self._is_protocol_draft(answer)
+        ):
+            answer = self._repair_protocol_answer(
+                system_prompt=system_prompt,
+                prompt=prompt,
+                answer=answer,
+                allowed_source_labels={
+                    str(link.get("label") or "").strip()
+                    for link in context.get("prompt_source_links") or []
+                    if str(link.get("label") or "").strip()
+                },
+                curated_findings=(
+                    context.get("prompt_payload", {}).get(
+                        "curated_research_findings",
+                        [],
+                    )
+                    if isinstance(context.get("prompt_payload"), dict)
+                    else []
+                ),
+            )
+        return answer
+
+    def _complete_llm_prompt(self, system_prompt: str, prompt: str) -> str:
         completion = self.llm_client.chat.completions.create(
             model=self.model,
             temperature=0.2,
@@ -930,6 +1011,260 @@ class GoalSessionService:
         if not answer:
             raise RuntimeError("goal copilot returned empty answer")
         return answer
+
+    def _repair_protocol_answer(
+        self,
+        *,
+        system_prompt: str,
+        prompt: str,
+        answer: str,
+        allowed_source_labels: set[str],
+        curated_findings: list[dict[str, Any]],
+    ) -> str:
+        repair_prompt = (
+            f"{prompt}\n\n"
+            "Repair the protocol as structured data. Return only proposed variable "
+            "manipulations, proposed measurements, proposed controls, and design risks. "
+            "Do not generate or restate source-backed facts; Lens derives those directly "
+            "from the curated Findings. Proposed items must not invent numeric settings, "
+            "sample counts, standards, or named methods.\n"
+            "Normalize the protocol into the required evidence/design fields."
+            f"\n\nPrevious draft:\n<draft>\n{answer}\n</draft>"
+        )
+        try:
+            completion = self.llm_client.beta.chat.completions.parse(
+                model=self.model,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": repair_prompt},
+                ],
+                response_format=_StructuredProtocolDraft,
+            )
+            parsed = completion.choices[0].message.parsed if completion.choices else None
+            draft = _StructuredProtocolDraft.model_validate(parsed)
+            return self._render_protocol_draft(
+                draft,
+                allowed_source_labels=allowed_source_labels,
+                curated_findings=curated_findings,
+            )
+        except Exception as exc:
+            raise _ProtocolContractError(
+                "goal copilot protocol repair failed validation"
+            ) from exc
+
+    def _render_protocol_draft(
+        self,
+        draft: _StructuredProtocolDraft,
+        *,
+        allowed_source_labels: set[str],
+        curated_findings: list[dict[str, Any]],
+    ) -> str:
+        grounding = self._protocol_grounding(
+            curated_findings,
+            allowed_source_labels=allowed_source_labels,
+        )
+        variable_items = [
+            f"- Source-backed: {item}" for item in grounding["variable_observations"]
+        ]
+        variable_items.extend(
+            f"- Proposed design choice: {self._proposed_protocol_text(item)}"
+            for item in draft.proposed_variable_manipulations
+        )
+        measurement_items = [
+            f"- Source-backed: {item}" for item in grounding["reported_outcomes"]
+        ]
+        measurement_items.extend(
+            f"- Proposed design choice: {self._proposed_protocol_text(item)}"
+            for item in draft.proposed_measurements
+        )
+        control_items = [
+            f"- Proposed design choice: {self._proposed_protocol_text(item)}"
+            for item in draft.proposed_controls
+        ]
+        evidence_limits = [
+            f"- Evidence limit: {item}" for item in grounding["evidence_limits"]
+        ]
+        design_risks = []
+        for item in draft.design_risks:
+            text = self._clean_protocol_text(item)
+            if any(
+                marker in text.lower()
+                for marker in ("paper-level", "cross-paper", "generalization")
+            ):
+                continue
+            design_risks.append(f"- Design risk: {text}")
+        if not design_risks:
+            design_risks.append(
+                "- Design risk: The proposed choices require expert validation for "
+                "uncontrolled variables."
+            )
+        return "\n\n".join(
+            [
+                "**Hypothesis**\n" + "\n".join(grounding["hypotheses"]),
+                "**Variable matrix**\n" + "\n".join(variable_items),
+                "**Measurements**\n" + "\n".join(measurement_items),
+                "**Controls**\n" + "\n".join(control_items),
+                "**Risks or limits**\n" + "\n".join(evidence_limits + design_risks),
+            ]
+        )
+
+    def _protocol_grounding(
+        self,
+        curated_findings: list[dict[str, Any]],
+        *,
+        allowed_source_labels: set[str],
+    ) -> dict[str, list[str]]:
+        hypotheses: list[str] = []
+        variable_observations: list[str] = []
+        reported_outcomes: list[str] = []
+        evidence_limits: list[str] = []
+        for finding in curated_findings[:8]:
+            if not isinstance(finding, dict):
+                continue
+            statement = _clean_text(finding.get("finding"))
+            evidence = finding.get("evidence")
+            labels = self._stable_strings(
+                [
+                    ref.get("evidence_source")
+                    for ref in evidence or []
+                    if isinstance(ref, dict) and ref.get("evidence_source")
+                ]
+            )
+            if not statement or not labels:
+                continue
+            unknown_labels = set(labels) - allowed_source_labels
+            if unknown_labels:
+                raise ValueError(
+                    f"unknown protocol source labels: {sorted(unknown_labels)}"
+                )
+            citations = "".join(f"[{label}]" for label in labels)
+            hypotheses.append(
+                f"{self._clean_protocol_text(statement)} {citations}"
+            )
+
+            variables = self._stable_strings(finding.get("variables"))
+            mediators = self._stable_strings(finding.get("mediators"))
+            outcomes = self._stable_strings(finding.get("outcomes"))
+            direction = _clean_text(finding.get("direction"))
+            scope = _clean_text(finding.get("scope_summary"))
+            relation = (
+                f"Observed relation: {', '.join(variables)} -> "
+                f"{', '.join(outcomes)}"
+            )
+            if mediators:
+                relation += f"; mediator: {', '.join(mediators)}"
+            if direction and direction.lower() not in {
+                "compares",
+                "comparison",
+                "mixed",
+                "unknown",
+                "unspecified",
+            }:
+                relation += f"; direction: {direction}"
+            if scope:
+                relation += f"; scope: {scope}"
+            variable_observations.append(f"{relation}. {citations}")
+
+            outcome_label = (
+                "Reported outcome" if len(outcomes) == 1 else "Reported outcomes"
+            )
+            reported_outcomes.append(
+                f"{outcome_label}: {', '.join(outcomes)}. {citations}"
+            )
+            generalization_note = _clean_text(finding.get("generalization_note"))
+            generalization_status = _clean_text(
+                finding.get("generalization_status")
+            )
+            limit = generalization_note or generalization_status
+            if limit and limit not in evidence_limits:
+                evidence_limits.append(self._clean_protocol_text(limit))
+
+        if not hypotheses or not variable_observations or not reported_outcomes:
+            raise ValueError("curated protocol grounding is incomplete")
+        if not evidence_limits:
+            evidence_limits.append(
+                "The curated Findings do not define a cross-paper generalization boundary."
+            )
+        return {
+            "hypotheses": hypotheses,
+            "variable_observations": variable_observations,
+            "reported_outcomes": reported_outcomes,
+            "evidence_limits": evidence_limits,
+        }
+
+    def _proposed_protocol_text(self, value: str) -> str:
+        raw_text = " ".join(str(value or "").split()).strip()
+        if re.search(
+            r"(?:Source-backed|Proposed design choice|Evidence limit|Design risk)\s*:",
+            raw_text,
+            flags=re.IGNORECASE,
+        ):
+            raise ValueError("proposed protocol item contains an embedded category label")
+        text = self._clean_protocol_text(value)
+        unsupported_detail = re.search(
+            r"(?:[±+\-]?\d+(?:\.\d+)?\s*(?:%|percent|replicates?|samples?|"
+            r"W|kW|mm|µm|μm|MPa|GPa|°C))|\b(?:ASTM|ISO|DIN|GB/T)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if unsupported_detail:
+            raise ValueError("proposed protocol item contains an unsupported detail")
+        return text
+
+    def _clean_protocol_text(self, value: str) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if not text:
+            raise ValueError("protocol item text is required")
+        text = re.sub(r"\[\s*Source\s+\d+\s*\]", "", text, flags=re.IGNORECASE)
+        return re.sub(
+            r"^(?:Source-backed|Proposed design choice|Evidence limit|Design risk)\s*:\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    def _protocol_contract_is_valid(self, answer: str) -> bool:
+        required_headings = (
+            "**Hypothesis**",
+            "**Variable matrix**",
+            "**Measurements**",
+            "**Controls**",
+            "**Risks or limits**",
+        )
+        if not all(heading in answer for heading in required_headings):
+            return False
+        source_pattern = re.compile(r"\[\s*Source\s+\d+\s*\]", re.IGNORECASE)
+        source_lines = [
+            line for line in answer.splitlines() if line.startswith("- Source-backed:")
+        ]
+        if not source_lines or any(not source_pattern.search(line) for line in source_lines):
+            return False
+        hypothesis = answer.split("**Variable matrix**", 1)[0]
+        if not source_pattern.search(hypothesis):
+            return False
+        category_pattern = re.compile(
+            r"(?:Source-backed|Proposed design choice|Evidence limit|Design risk)\s*:",
+            re.IGNORECASE,
+        )
+        for line in answer.splitlines():
+            if not line.startswith("- Proposed design choice:"):
+                continue
+            item = line.split(":", 1)[1]
+            if category_pattern.search(item):
+                return False
+        return True
+
+    def _is_protocol_draft(self, answer: str) -> bool:
+        normalized = answer.lower()
+        required_labels = (
+            "hypothesis",
+            "variable matrix",
+            "measurements",
+            "controls",
+            "risks or limits",
+        )
+        return sum(label in normalized for label in required_labels) >= 4
 
     def _try_generate_llm_answer(
         self,
@@ -948,6 +1283,12 @@ class GoalSessionService:
                     context=context,
                 ),
                 None,
+            )
+        except _ProtocolContractError:
+            return (
+                "Lens could not verify the protocol draft contract. Review the "
+                "protocol-ready findings and source evidence directly, then retry.",
+                "goal_copilot_protocol_contract_invalid",
             )
         except OpenAIError:
             return (
@@ -984,7 +1325,24 @@ class GoalSessionService:
                 "multiple constituent parameters, label it as a confounded comparison and "
                 "propose an isolated or factorial validation. Separate source-backed "
                 "observations from protocol choices, and mark uncited settings or methods "
-                "as a proposed design choice. "
+                "as a proposed design choice. In Variable matrix, Measurements, and "
+                "Controls, prefix every bullet with exactly 'Source-backed:' and include "
+                "exact bracket citations such as [Source 1], or prefix it with exactly "
+                "'Proposed design choice:'. Do not leave these bullets unlabeled. For "
+                "each item. A Source-backed line must include one or more exact bracket "
+                "citations on that same line. Do not use Source-backed as a group heading. "
+                "The Hypothesis must cite every evidence-backed direction with source "
+                "labels. Only call an operational setting Source-backed when a provided "
+                "evidence quote explicitly states that setting; general domain knowledge "
+                "or this boundary example is not source evidence. For "
+                "Risks or limits, distinguish 'Evidence limit:' from 'Design risk:'. Do "
+                "not invent numeric levels, standards, sample sizes, or named methods; "
+                "when they are not source-backed, say that the expert must select or "
+                "confirm them. Boundary example: Bad: change VED while laser power, scan "
+                "speed, hatch spacing, and layer thickness are fixed. Good: Proposed "
+                "design choice: vary laser power to create VED levels, hold scan speed, "
+                "hatch spacing, and layer thickness fixed, and have the expert select "
+                "the levels. "
                 "Do not collapse protocol answers into one paragraph. Attach source labels "
                 "to each evidence-backed recommendation. "
                 "Do not paste raw document_id, paper_id, evidence_id, or other long "

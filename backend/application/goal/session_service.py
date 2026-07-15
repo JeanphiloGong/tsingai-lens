@@ -1107,9 +1107,34 @@ class GoalSessionService:
         variable_items = [
             f"- Source-backed: {item}" for item in grounding["variable_observations"]
         ]
+        proposed_variables: list[str] = []
+        for item in draft.proposed_variable_manipulations:
+            try:
+                proposed_variables.append(self._proposed_protocol_text(item))
+            except ValueError:
+                continue
+        if ved_grounding:
+            candidate = "\n".join(
+                [
+                    "Variable matrix:",
+                    *proposed_variables,
+                    "Measurements:",
+                    "Controls:",
+                    "Risks or limits:",
+                ]
+            )
+            if not proposed_variables or not ved_design_is_scientifically_consistent(
+                candidate
+            ):
+                proposed_variables = [
+                    "Vary laser power to create VED levels while holding scan speed, "
+                    "hatch spacing, and layer thickness fixed; the expert selects "
+                    "the levels."
+                ]
+        elif not proposed_variables:
+            raise ValueError("protocol has no valid proposed variable manipulation")
         variable_items.extend(
-            f"- Proposed design choice: {self._proposed_protocol_text(item)}"
-            for item in draft.proposed_variable_manipulations
+            f"- Proposed design choice: {item}" for item in proposed_variables
         )
         measurement_items = [
             f"- Source-backed: {item}" for item in grounding["reported_outcomes"]

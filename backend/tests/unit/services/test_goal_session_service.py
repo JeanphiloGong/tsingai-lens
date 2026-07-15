@@ -1204,6 +1204,38 @@ def test_protocol_renderer_does_not_delegate_measurements_or_controls_to_model(
     assert service._protocol_contract_is_valid(answer) is True
 
 
+def test_protocol_renderer_falls_back_from_unsafe_ved_variable_choice(tmp_path):
+    service, _ = _service(tmp_path, content="unused")
+    draft = _StructuredProtocolDraft(
+        proposed_variable_manipulations=[
+            "Vary laser power at 190 W for 316L PBF-LB while holding scan speed, "
+            "hatch spacing, and layer thickness fixed."
+        ],
+        design_risks=["Review interactions among process parameters."],
+    )
+    finding = {
+        "finding": "Coupled VED parameter sets were associated with fatigue strength.",
+        "variables": ["coupled parameter sets grouped by VED"],
+        "outcomes": ["fatigue strength"],
+        "direction": "associated",
+        "scope_summary": "316L stainless steel, one paper",
+        "generalization_note": "Treat as paper-level evidence.",
+        "evidence": [{"evidence_source": "Source 1"}],
+    }
+
+    answer = service._render_protocol_draft(
+        draft,
+        allowed_source_labels={"Source 1"},
+        curated_findings=[finding],
+    )
+
+    assert "190 W" not in answer
+    assert "Proposed design choice: Vary laser power to create VED levels" in answer
+    assert "holding scan speed, hatch spacing, and layer thickness fixed" in answer
+    assert "the expert selects the levels" in answer
+    assert service._protocol_contract_is_valid(answer) is True
+
+
 def test_goal_chat_limits_protocol_when_repair_still_violates_contract(tmp_path):
     invalid_draft = """Hypothesis
 VED improves fatigue strength [Source 1].

@@ -244,6 +244,8 @@ def test_review_import_service_writes_feedback_and_curation():
     ]
     assert summary["review_scope_gate"] == {
         "status": "blocked",
+        "scope": "reviewed_goals",
+        "ready_for_reviewed_scope": False,
         "ready_for_expert_satisfaction_gate": False,
         "blocking_reasons": [
             "unchecked_rows_remain",
@@ -322,6 +324,8 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
     ]
     assert summary["review_scope_gate"] == {
         "status": "blocked",
+        "scope": "reviewed_goals",
+        "ready_for_reviewed_scope": False,
         "ready_for_expert_satisfaction_gate": False,
         "blocking_reasons": [
             "no_actionable_decisions",
@@ -365,6 +369,8 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
     }
     assert summary["review_scope_gate"] == {
         "status": "ready",
+        "scope": "reviewed_goals",
+        "ready_for_reviewed_scope": True,
         "ready_for_expert_satisfaction_gate": True,
         "blocking_reasons": [],
         "actionable_count": 1,

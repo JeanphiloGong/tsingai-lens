@@ -298,6 +298,8 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
         },
         "review_scope_gate": {
             "status": "blocked",
+            "scope": "reviewed_goals",
+            "ready_for_reviewed_scope": False,
             "ready_for_expert_satisfaction_gate": False,
             "blocking_reasons": [
                 "unchecked_rows_remain",
@@ -495,8 +497,13 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     assert "Readiness after import:" in text
     assert "goals=1 training_ready_goals=1 message_ready_goals=1 protocol_ready_goals=1" in text
     assert "ready_for_training_export=True ready_for_protocol_drafting=True" in text
-    assert "Review scope gate:" in text
-    assert "status=blocked ready_for_expert_satisfaction_gate=False" in text
+    assert "Reviewed-goals gate:" in text
+    assert "status=blocked ready_for_reviewed_scope=False" in text
+    assert "scope=reviewed_goals actionable=1 skipped=1" in text
+    assert (
+        "This gate covers only goals present in this decision import. "
+        "Run check_goal_expert_loop.py for the full collection expert-satisfaction gate."
+    ) in text
     assert "blocking_reasons=unchecked_rows_remain" in text
     assert "finding-accept: training=message_pair; protocol=training_messages" in text
 

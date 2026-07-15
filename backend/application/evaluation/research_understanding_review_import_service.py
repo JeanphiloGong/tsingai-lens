@@ -1387,6 +1387,8 @@ def _review_scope_gate(
         blocking_reasons.append("protocol_drafting_not_ready")
     return {
         "status": "ready" if not blocking_reasons else "blocked",
+        "scope": "reviewed_goals",
+        "ready_for_reviewed_scope": not blocking_reasons,
         "ready_for_expert_satisfaction_gate": not blocking_reasons,
         "blocking_reasons": blocking_reasons,
         "actionable_count": actionable,

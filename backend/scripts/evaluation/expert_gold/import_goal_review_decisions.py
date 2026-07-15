@@ -182,18 +182,23 @@ def _render_readiness_summary(readiness: dict) -> list[str]:
 
 def _render_review_scope_gate(gate: dict) -> list[str]:
     lines = [
-        "Review scope gate:",
+        "Reviewed-goals gate:",
         (
             "- "
             f"status={gate.get('status', 'unknown')} "
-            f"ready_for_expert_satisfaction_gate={bool(gate.get('ready_for_expert_satisfaction_gate'))}"
+            f"ready_for_reviewed_scope={bool(gate.get('ready_for_reviewed_scope'))}"
         ),
         (
             "- "
+            f"scope={gate.get('scope', 'reviewed_goals')} "
             f"actionable={gate.get('actionable_count', 0)} "
             f"skipped={gate.get('skipped_count', 0)} "
             f"training_ready={bool(gate.get('ready_for_training_export'))} "
             f"protocol_ready={bool(gate.get('ready_for_protocol_drafting'))}"
+        ),
+        (
+            "- This gate covers only goals present in this decision import. "
+            "Run check_goal_expert_loop.py for the full collection expert-satisfaction gate."
         ),
     ]
     reasons = gate.get("blocking_reasons")

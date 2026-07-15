@@ -461,6 +461,9 @@ current goal counts, pending accept/correct/reject decisions, projected
 `training_ready`, projected training-message and protocol-ready counts, remaining
 review candidates, rejected counts, and the first readiness issues that still
 block fine-tuning messages or protocol inputs.
+The text output's reviewed-goals gate covers only goals present in the current
+decision import; run `check_goal_expert_loop.py` to verify the full collection
+expert-satisfaction gate after import.
 When skipped template rows include `review_work_order`, the text output also
 shows the next skipped finding's recommended decision path, whether direct
 accept is allowed, and the checks that should be completed before changing the

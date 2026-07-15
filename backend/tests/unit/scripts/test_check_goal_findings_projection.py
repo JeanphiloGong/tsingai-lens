@@ -645,6 +645,18 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
     )
 
 
+def test_statement_numeric_endpoints_ignore_single_author_summary_percentage():
+    check = _load_goal_findings_check_module()
+
+    endpoints = check._statement_numeric_endpoint_terms(
+        "Changing scan rotation from 0° to 45° increased experimental yield "
+        "strength from 334.2 MPa to 351.9 MPa. The authors describe model "
+        "deviations as generally below 5%, but Table 3 is not uniformly aligned."
+    )
+
+    assert endpoints == ["0", "45", "334.2", "351.9"]
+
+
 def test_evaluate_goal_analysis_payload_fails_unreferenced_presentation_evidence():
     check = _load_goal_findings_check_module()
 

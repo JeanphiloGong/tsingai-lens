@@ -1683,9 +1683,9 @@ def _statement_numeric_endpoint_terms(statement: str) -> list[str]:
         statement,
         flags=re.IGNORECASE,
     ):
-        endpoints.extend(
-            re.findall(r"[-+]?\d+(?:\.\d+)?", match.group("values"))
-        )
+        values = re.findall(r"[-+]?\d+(?:\.\d+)?", match.group("values"))
+        if len(values) > 1:
+            endpoints.extend(values)
     return _dedupe_strings(endpoints)
 
 

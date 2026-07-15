@@ -1080,13 +1080,20 @@ class ResearchUnderstandingService:
                             "At fixed scan strategy rotation angle θ=0°, changing "
                             "build orientation from α=0° and β=0° to α=45° and "
                             "β=22.5° increased experimental yield strength from "
-                            "334.2 MPa to 363.1 MPa. The authors describe model "
+                            "334.2 MPa to 363.1 MPa. α and β changed together, "
+                            "so this contrast does not isolate either angle's "
+                            "individual effect. The authors describe model "
                             "deviations as generally below 5%, but the Table 3 "
                             "values do not uniformly satisfy that summary. "
                             "Crystallographic texture is a model-derived "
                             "explanatory path, not an experimentally isolated "
                             "mediator."
                         ),
+                        "warnings": [
+                            *texture_spec_base["warnings"],
+                            "non_single_variable_table_comparison",
+                            "single_variable_effect_not_isolated",
+                        ],
                     },
                     {
                         **texture_spec_base,

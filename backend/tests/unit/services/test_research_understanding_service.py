@@ -4048,6 +4048,11 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
         "statement"
     ]
     assert "334.2 MPa to 363.1 MPa" in build_orientation["statement"]
+    assert (
+        "α and β changed together, so this contrast does not isolate either "
+        "angle's individual effect"
+        in build_orientation["statement"]
+    )
     assert "do not uniformly satisfy" in build_orientation["statement"]
     assert "fixed build orientation α=0° and β=0°" in scan_rotation["statement"]
     assert "334.2 MPa to 351.9 MPa" in scan_rotation["statement"]
@@ -4087,6 +4092,13 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
     }
     assert "model_validation_finding" in build_orientation["warnings"]
     assert "author_summary_table_mismatch" in build_orientation["warnings"]
+    assert "non_single_variable_table_comparison" in build_orientation["warnings"]
+    assert "single_variable_effect_not_isolated" in build_orientation["warnings"]
+    assert (
+        "single_variable_effect_not_isolated"
+        in build_orientation["review_reasons"]
+    )
+    assert "single_variable_effect_not_isolated" not in scan_rotation["warnings"]
     assert (
         "model_derived_mechanism_not_experimental_mediation"
         in build_orientation["warnings"]

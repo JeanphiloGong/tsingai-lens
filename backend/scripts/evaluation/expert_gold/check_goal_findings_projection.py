@@ -137,6 +137,8 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["351.9"],
             ["363.1"],
             ["do not uniformly satisfy"],
+            ["α and β changed together"],
+            ["does not isolate either angle's individual effect"],
         ],
         "evidence_terms": [
             ["yield strength"],
@@ -346,6 +348,8 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
     "goal_061c9c049e69": [
         ["model_validation_finding"],
         ["author_summary_table_mismatch"],
+        ["non_single_variable_table_comparison"],
+        ["single_variable_effect_not_isolated"],
     ],
     "goal_6bf7d2c1030e": [
         ["non_single_variable_table_comparison"],

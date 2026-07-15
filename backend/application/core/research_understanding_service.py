@@ -107,9 +107,9 @@ class ResearchUnderstandingService:
             else dict(understanding)
         )
         record = self._record_with_traceable_evidence_refs(record)
-        record = self._record_with_comparison_condition_evidence(record)
         record = self._record_without_off_axis_recovered_objects(record)
         record = self._record_with_recovered_presentation_objects(record)
+        record = self._record_with_comparison_condition_evidence(record)
         record["presentation"] = self._presentation_for(record)
         record["state"] = self._state_with_presentation(record)
         return ResearchUnderstanding.from_mapping(record).to_record()
@@ -5843,7 +5843,7 @@ class ResearchUnderstandingService:
         blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
             collection_id
         )
-        if not tables_by_id:
+        if not blocks_by_id and not tables_by_id:
             return dict(record)
         tables_by_document: dict[str, list[SourceTable]] = {}
         for table in tables_by_id.values():
@@ -5861,7 +5861,8 @@ class ResearchUnderstandingService:
         }
         generated_refs: list[dict[str, Any]] = []
         relations: list[dict[str, Any]] = []
-        for relation in _mapping_list(record.get("relations")):
+        source_relations = _mapping_list(record.get("relations"))
+        for relation in source_relations:
             relation_ref_ids = _strings(relation.get("evidence_ref_ids"))
             if any(
                 _text(evidence_by_id.get(ref_id, {}).get("evidence_role"))
@@ -5870,6 +5871,60 @@ class ResearchUnderstandingService:
             ):
                 relations.append(relation)
                 continue
+            source_object_ids = _strings(relation.get("source_object_ids"))
+            direct_refs = [
+                evidence_by_id[ref_id]
+                for ref_id in relation_ref_ids
+                if ref_id in evidence_by_id
+                and _text(evidence_by_id[ref_id].get("evidence_role"))
+                != "condition_context"
+            ]
+            document_ids = {
+                document_id
+                for ref in direct_refs
+                if (document_id := _text(ref.get("document_id")))
+            }
+            comparison_axis = self._presentation_relation_side(
+                relation.get("subject")
+            )
+            if not comparison_axis or not source_object_ids or len(document_ids) != 1:
+                relations.append(relation)
+                continue
+            document_id = next(iter(document_ids))
+            if "preheat" in _normalize_match_text(comparison_axis):
+                condition_block = self._best_preheating_condition_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                )
+                if condition_block is not None:
+                    condition_ref = next(
+                        (
+                            ref
+                            for ref in evidence_by_id.values()
+                            if _text(ref.get("evidence_role")) == "condition_context"
+                            and _text(ref.get("document_id")) == document_id
+                            and _text(
+                                _locator_mapping(ref.get("locator")).get("source_ref")
+                            )
+                            == condition_block.block_id
+                        ),
+                        None,
+                    )
+                    condition_ref_id = (
+                        _text(condition_ref.get("evidence_ref_id"))
+                        if condition_ref is not None
+                        else ""
+                    )
+                    if condition_ref_id:
+                        relations.append(
+                            {
+                                **relation,
+                                "evidence_ref_ids": _dedupe_strings(
+                                    [*relation_ref_ids, condition_ref_id]
+                                ),
+                            }
+                        )
+                        continue
             process_payload = next(
                 (
                     _mapping(contexts_by_id[context_id].get("process_context"))
@@ -5883,20 +5938,6 @@ class ResearchUnderstandingService:
                 ),
                 {},
             )
-            source_object_ids = _strings(relation.get("source_object_ids"))
-            direct_refs = [
-                evidence_by_id[ref_id]
-                for ref_id in relation_ref_ids
-                if ref_id in evidence_by_id
-            ]
-            document_ids = {
-                document_id
-                for ref in direct_refs
-                if (document_id := _text(ref.get("document_id")))
-            }
-            comparison_axis = self._presentation_relation_side(
-                relation.get("subject")
-            )
             current_context = {
                 **_mapping(process_payload.get("sample_context")),
                 **_mapping(process_payload.get("process_context")),
@@ -5907,15 +5948,11 @@ class ResearchUnderstandingService:
                 **_mapping(baseline.get("process_context")),
             }
             if (
-                not comparison_axis
-                or not source_object_ids
-                or len(document_ids) != 1
-                or not current_context
+                not current_context
                 or not baseline_context
             ):
                 relations.append(relation)
                 continue
-            document_id = next(iter(document_ids))
             heat_treatment_values = [
                 self._axis_value_from_context("heat treatment type", context)
                 for context in (current_context, baseline_context)
@@ -6061,7 +6098,7 @@ class ResearchUnderstandingService:
                     ),
                 }
             )
-        if not generated_refs:
+        if not generated_refs and relations == source_relations:
             return dict(record)
         updated = dict(record)
         updated["relations"] = relations
@@ -11572,7 +11609,7 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
     ) -> bool:
         direct_refs = set(_strings(bundle.get("direct_result")))
-        for role in ("mechanism", "uncategorized", "condition_context"):
+        for role in ("mechanism", "uncategorized"):
             for ref_id in _strings(bundle.get(role)):
                 if ref_id in direct_refs:
                     continue
@@ -15292,10 +15329,19 @@ class ResearchUnderstandingService:
         evidence_ref_ids = _strings(claim.get("evidence_ref_ids"))
         context_ids = _strings(claim.get("context_ids"))
         source_object_ids = _strings(claim.get("source_object_ids"))
+        relation_link_ref_ids = [
+            ref_id
+            for ref_id in evidence_ref_ids
+            if _text(evidence_by_id.get(ref_id, {}).get("evidence_role"))
+            not in {"condition_context", "background", "conflict", "noise"}
+        ]
         direct_relations = [
             relation
             for relation in relations
-            if _intersects(evidence_ref_ids, _strings(relation.get("evidence_ref_ids")))
+            if _intersects(
+                relation_link_ref_ids,
+                _strings(relation.get("evidence_ref_ids")),
+            )
         ]
         if not direct_relations:
             direct_relations = [

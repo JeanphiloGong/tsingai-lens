@@ -3060,6 +3060,176 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     )
 
 
+def test_comparison_condition_evidence_reuses_preheating_conditions_for_same_axis():
+    condition_block = SourceBlock(
+        block_id="blk-preheat-process-conditions",
+        document_id="paper-preheat",
+        block_type="paragraph",
+        text=(
+            "For both NP and P150 conditions, the optimized process parameters "
+            "were a layer thickness of 50 μm, hatch spacing of 0.11 mm, laser "
+            "power of 200 W, and scan speed of 1833 mm/s."
+        ),
+        block_order=37,
+        page=3,
+        heading_path="Materials and methods",
+    )
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[condition_block]
+        ),
+    )
+    record = {
+        "scope": {"collection_id": "col-preheat"},
+        "evidence_refs": [
+            {
+                "evidence_ref_id": "ev-preheat-ductility",
+                "document_id": "paper-preheat",
+                "evidence_role": "direct_support",
+                "locator": {"source_ref": "blk-ductility"},
+            },
+            {
+                "evidence_ref_id": "ev-preheat-condition",
+                "document_id": "paper-preheat",
+                "evidence_role": "condition_context",
+                "locator": {"source_ref": condition_block.block_id},
+                "quote": condition_block.text,
+            },
+            {
+                "evidence_ref_id": "ev-preheat-yield",
+                "document_id": "paper-preheat",
+                "evidence_role": "direct_support",
+                "locator": {"source_ref": "blk-yield"},
+            },
+            {
+                "evidence_ref_id": "ev-scan-speed",
+                "document_id": "paper-preheat",
+                "evidence_role": "direct_support",
+                "locator": {"source_ref": "blk-scan-speed"},
+            },
+        ],
+        "contexts": [],
+        "relations": [
+            {
+                "relation_id": "rel-preheat-ductility",
+                "subject": "build platform preheating temperature",
+                "evidence_ref_ids": [
+                    "ev-preheat-ductility",
+                    "ev-preheat-condition",
+                ],
+                "source_object_ids": ["claim-preheat-ductility"],
+            },
+            {
+                "relation_id": "rel-preheat-yield",
+                "subject": "build platform preheating temperature",
+                "evidence_ref_ids": ["ev-preheat-yield"],
+                "source_object_ids": ["oeu-preheat-yield"],
+            },
+            {
+                "relation_id": "rel-scan-speed",
+                "subject": "scan speed",
+                "evidence_ref_ids": ["ev-scan-speed"],
+                "source_object_ids": ["oeu-scan-speed"],
+            },
+        ],
+    }
+
+    updated = service._record_with_comparison_condition_evidence(record)
+
+    relations_by_id = {
+        relation["relation_id"]: relation for relation in updated["relations"]
+    }
+    assert relations_by_id["rel-preheat-yield"]["evidence_ref_ids"] == [
+        "ev-preheat-yield",
+        "ev-preheat-condition",
+    ]
+    assert relations_by_id["rel-scan-speed"]["evidence_ref_ids"] == [
+        "ev-scan-speed"
+    ]
+    assert [
+        ref["evidence_ref_id"]
+        for ref in updated["evidence_refs"]
+        if ref["evidence_role"] == "condition_context"
+    ] == ["ev-preheat-condition"]
+
+
+def test_presentation_effect_does_not_link_relations_through_condition_only():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(),
+    )
+    evidence_by_id = {
+        "ev-ductility": {
+            "evidence_ref_id": "ev-ductility",
+            "document_id": "paper-preheat",
+            "evidence_role": "direct_support",
+        },
+        "ev-yield": {
+            "evidence_ref_id": "ev-yield",
+            "document_id": "paper-preheat",
+            "evidence_role": "direct_support",
+        },
+        "ev-condition": {
+            "evidence_ref_id": "ev-condition",
+            "document_id": "paper-preheat",
+            "evidence_role": "condition_context",
+        },
+    }
+    relations = [
+        {
+            "relation_id": "rel-ductility",
+            "relation_type": "increases",
+            "subject": "build platform preheating temperature",
+            "predicate": "increases",
+            "object": "ductility",
+            "statement": "Preheating increased ductility by 14%.",
+            "status": "supported",
+            "evidence_ref_ids": ["ev-ductility", "ev-condition"],
+            "source_object_ids": ["claim-ductility"],
+        },
+        {
+            "relation_id": "rel-yield",
+            "relation_type": "increases",
+            "subject": "build platform preheating temperature",
+            "predicate": "increases",
+            "object": "yield strength",
+            "statement": "Preheating increased yield strength by 4%.",
+            "status": "supported",
+            "evidence_ref_ids": ["ev-yield", "ev-condition"],
+            "source_object_ids": ["oeu-yield"],
+        },
+    ]
+    context = {
+        "context_id": "ctx-ductility",
+        "label": "Recovered source scope",
+        "material_scope": ["316L stainless steel"],
+        "process_context": {
+            "variable_process_axes": [
+                "build platform preheating temperature"
+            ]
+        },
+        "property_scope": ["ductility"],
+    }
+
+    effect = service._presentation_effect(
+        {
+            "claim_id": "claim-ductility",
+            "claim_type": "finding",
+            "statement": "Preheating increased ductility by 14%.",
+            "status": "supported",
+            "evidence_ref_ids": ["ev-ductility", "ev-condition"],
+            "context_ids": [context["context_id"]],
+            "source_object_ids": ["claim-ductility"],
+        },
+        relations=relations,
+        evidence_by_id=evidence_by_id,
+        contexts_by_id={context["context_id"]: context},
+    )
+
+    assert effect["relation_ids"] == ["rel-ductility"]
+
+
 def test_aligned_percentage_table_clarifies_points_and_relative_change_generically():
     service = ResearchUnderstandingService(
         structured_extractor=_FakeSemanticExtractor(),

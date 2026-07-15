@@ -5279,6 +5279,38 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shows a generic applicability context when its property matches the finding', async () => {
+		const understanding = findingOnlyUnderstandingFixture();
+		const finding = understanding.presentation!.primary_findings[0];
+		finding.context_ids = ['ctx_density_boundary'];
+		understanding.presentation!.findings = [finding];
+		understanding.presentation!.context_summaries = [
+			{
+				context_id: 'ctx_density_boundary',
+				label: 'Claim applicability',
+				material_scope: ['stainless steel 316L'],
+				property_scope: ['density'],
+				process_summary: 'oeu_3870b611d846, specimen 1, 91.9',
+				test_summary: 'Archimedes method',
+				limitations: []
+			}
+		];
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding,
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByRole('button', { name: /VED -> density/ }).click();
+
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect.element(findingDetail.getByText('Claim applicability')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Archimedes method')).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('No context records are linked to this claim.'))
+			.not.toBeInTheDocument();
+	});
+
 	it('deduplicates evidence links that point to the same parsed source target', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: findingWithDuplicateEvidenceTargetsFixture(),

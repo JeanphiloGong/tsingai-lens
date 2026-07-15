@@ -2653,9 +2653,12 @@
 		if (!isGenericFindingContextLabel(context.label)) return true;
 		if (!context.property_scope.length) return true;
 		if (contextHasOffAxisTerms(context, finding)) return false;
+		if (context.property_scope.some((value) => contextValueMatchesFinding(value, finding))) {
+			return true;
+		}
 		if (contextDescriptionMatchesFinding(context, finding)) return true;
 		if (context.process_summary || context.test_summary || context.limitations.length) return false;
-		return context.property_scope.some((value) => contextValueMatchesFinding(value, finding));
+		return false;
 	}
 
 	function compactFindingContext(

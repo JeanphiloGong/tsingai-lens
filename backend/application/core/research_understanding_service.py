@@ -5847,6 +5847,7 @@ class ResearchUnderstandingService:
                 evidence_by_id=evidence_by_id,
                 relations_by_id=relations_by_id,
                 blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
                 contexts_by_id=contexts_by_id,
             )
             for effect in effects
@@ -9402,26 +9403,66 @@ class ResearchUnderstandingService:
         claim_id = _text(effect.get("claim_id")) or ""
         return claim_id.startswith("claim_recovered_")
 
-    def _recovered_finding_direct_bundle(
+    def _finding_direct_bundle(
         self,
         bundle: Mapping[str, Any],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
+        outcomes: list[str],
+        promote_non_table: bool,
+        statement: str,
+        tables_by_id: Mapping[str, SourceTable],
     ) -> dict[str, list[str]]:
         updated = {key: list(_strings(value)) for key, value in bundle.items()}
         direct_refs = list(updated.get("direct_result", []))
-        text_refs = [
-            ref_id
-            for role in ("mechanism", "uncategorized")
-            for ref_id in _strings(updated.get(role))
-            if "table"
-            not in (_text(evidence_by_id.get(ref_id, {}).get("source_kind")) or "").lower()
-        ]
-        updated["direct_result"] = _dedupe_strings([*text_refs, *direct_refs])
+        text_refs = (
+            [
+                ref_id
+                for role in ("mechanism", "uncategorized")
+                for ref_id in _strings(updated.get(role))
+                if "table"
+                not in (
+                    _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""
+                ).lower()
+            ]
+            if promote_non_table
+            else []
+        )
+        outcome_keys = {
+            self._axis_key(outcome)
+            for outcome in [
+                *outcomes,
+                *self._specific_mechanical_outcome_terms(statement),
+            ]
+        }
+        table_refs = []
+        for ref_id in _strings(updated.get("uncategorized")):
+            evidence_ref = evidence_by_id.get(ref_id, {})
+            if "table" not in (
+                _text(evidence_ref.get("source_kind")) or ""
+            ).lower():
+                continue
+            if (_text(evidence_ref.get("traceability_status")) or "").lower() not in {
+                "resolved",
+                "traceable",
+            }:
+                continue
+            source_ref = _text(
+                _locator_mapping(evidence_ref.get("locator")).get("source_ref")
+            )
+            table = tables_by_id.get(source_ref or "")
+            if table is None:
+                continue
+            table_axes = set(self._specific_mechanical_property_column_indexes(table))
+            if outcome_keys & table_axes:
+                table_refs.append(ref_id)
+        updated["direct_result"] = _dedupe_strings(
+            [*text_refs, *direct_refs, *table_refs]
+        )
         updated["uncategorized"] = [
             ref_id
             for ref_id in updated.get("uncategorized", [])
-            if ref_id not in text_refs
+            if ref_id not in text_refs and ref_id not in table_refs
         ]
         return updated
 
@@ -10272,6 +10313,7 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         relations_by_id: Mapping[str, dict[str, Any]],
         blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable],
         contexts_by_id: Mapping[str, dict[str, Any]],
     ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
@@ -10363,11 +10405,14 @@ class ResearchUnderstandingService:
             evidence_bundle,
             evidence_by_id=evidence_by_id,
         )
-        if self._is_recovered_expert_effect(effect):
-            evidence_bundle = self._recovered_finding_direct_bundle(
-                evidence_bundle,
-                evidence_by_id=evidence_by_id,
-            )
+        evidence_bundle = self._finding_direct_bundle(
+            evidence_bundle,
+            evidence_by_id=evidence_by_id,
+            outcomes=outcomes,
+            promote_non_table=self._is_recovered_expert_effect(effect),
+            statement=_text(effect.get("statement")) or "",
+            tables_by_id=tables_by_id,
+        )
         mechanism_source_text = " ".join(
             self._direct_evidence_source_texts(
                 evidence_by_id=evidence_by_id,

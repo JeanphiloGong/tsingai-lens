@@ -2680,6 +2680,57 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     )
 
 
+def test_finding_promotes_matching_preheat_strength_table():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    table = SourceTable(
+        table_id="tbl-preheat-tensile",
+        document_id="paper-preheat",
+        table_order=2,
+        page=8,
+        caption_text="Monotonic tensile properties",
+        caption_block_id=None,
+        bbox=None,
+        heading_path="Tensile properties",
+        column_headers=(
+            "Build platform conditions",
+            "ı y (MPa)",
+            "ı u (MPa)",
+            "El%",
+        ),
+        table_matrix=(
+            ("Non-preheated", "448", "617", "72"),
+            ("Preheated", "465", "618", "82"),
+        ),
+    )
+
+    bundle = service._finding_direct_bundle(
+        {
+            "direct_result": ["evref-text"],
+            "mechanism": ["evref-text"],
+            "condition_context": [],
+            "background": [],
+            "conflict": [],
+            "noise": [],
+            "uncategorized": ["evref-table"],
+        },
+        evidence_by_id={
+            "evref-text": {"source_kind": "text_window"},
+            "evref-table": {
+                "source_kind": "table",
+                "locator": {"source_ref": "tbl-preheat-tensile"},
+                "traceability_status": "resolved",
+            },
+        },
+        outcomes=["mechanical properties"],
+        promote_non_table=False,
+        statement="Preheating increased yield strength by approximately 4%.",
+        tables_by_id={"tbl-preheat-tensile": table},
+    )
+
+    assert bundle["direct_result"] == ["evref-text", "evref-table"]
+    assert bundle["uncategorized"] == []
+
+
 def test_objective_understanding_does_not_recover_mechanical_finding_for_corrosion_goal():
     slm_mechanical_conclusion = (
         "The SLM samples processed at higher scanning speed exhibited better "

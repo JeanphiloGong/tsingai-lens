@@ -4710,7 +4710,7 @@ def test_objective_understanding_keeps_comparison_axis_as_relation_subject():
     )
     assert finding["comparison_summary"] == {
         "variable": "laser power",
-        "direction": "decreases",
+        "direction": "condition-dependent",
         "outcome": "density",
         "baseline": {
             "label": "laser power=120",
@@ -9695,7 +9695,7 @@ def test_with_presentation_comparison_summary_handles_symbol_conditions():
     )
     assert finding["comparison_summary"] == {
         "variable": "β build orientation angle",
-        "direction": "decreases",
+        "direction": "condition-dependent",
         "outcome": "yield strength experiment",
         "baseline": {"label": "1", "value": "334.2 MPa"},
         "observed": {"label": "β", "value": "295.1 MPa"},
@@ -9895,7 +9895,7 @@ def test_with_presentation_comparison_summary_handles_uncertainty_parentheses():
     )
     assert finding["comparison_summary"] == {
         "variable": "energy density",
-        "direction": "decreases",
+        "direction": "condition-dependent",
         "outcome": "elongation",
         "baseline": {
             "label": "energy density 278",
@@ -10048,7 +10048,7 @@ def test_with_presentation_keeps_table_row_comparison_in_review_when_narrative_p
     )
     assert finding["comparison_summary"] == {
         "variable": "energy density",
-        "direction": "decreases",
+        "direction": "condition-dependent",
         "outcome": "elongation",
         "baseline": {
             "label": "energy density 278",
@@ -12534,7 +12534,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
     )
     assert review_by_title["laser power -> density"]["comparison_summary"] == {
         "variable": "laser power",
-        "direction": "increases",
+        "direction": "condition-dependent",
         "outcome": "density",
         "baseline": {
             "label": "laser power 100",
@@ -12549,6 +12549,86 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
             {"axis": "scan speed", "value": "200"},
         ],
     }
+    assert review_by_title["laser power -> density"]["direction"] == (
+        "condition-dependent"
+    )
+    assert review_by_title["laser power -> density"]["relation_chain"] == [
+        {
+            **review_by_title["laser power -> density"]["relation_chain"][0],
+            "direction": "condition-dependent",
+            "statement": review_by_title["laser power -> density"]["statement"],
+        }
+    ]
+
+
+def test_table_row_review_candidate_syncs_projected_relation_semantics():
+    service = ResearchUnderstandingService()
+    statement = (
+        "Under energy density 150, scanning strategy A increased elongation "
+        "from 4.29 % (scanning strategy B) to 41.9 %."
+    )
+    finding = {
+        "title": "scanning strategy -> elongation",
+        "statement": statement,
+        "variables": ["scanning strategy"],
+        "mediators": [],
+        "outcomes": ["elongation"],
+        "direction": "increases",
+        "comparison_summary": {
+            "variable": "scanning strategy",
+            "direction": "increases",
+            "outcome": "elongation",
+            "baseline": {
+                "label": "scanning strategy B",
+                "value": "4.29 %",
+            },
+            "observed": {
+                "label": "scanning strategy A",
+                "value": "41.9 %",
+            },
+            "controlled_conditions": [
+                {"axis": "energy density", "value": "150"},
+            ],
+        },
+        "relation_chain": [
+            {
+                "relation_id": "rel_strategy_elongation",
+                "variable": "scanning strategy",
+                "mediators": [],
+                "outcome": "elongation",
+                "direction": "increases",
+                "statement": statement,
+            }
+        ],
+        "support_grade": "partial",
+        "review_status": "needs_review",
+        "paper_count": 1,
+        "evidence_bundle": {"direct_result": ["evref_strategy_elongation"]},
+        "review_reasons": [],
+    }
+
+    updated = service._finding_as_review_candidate(
+        finding,
+        reason="table_row_needs_expert_review",
+    )
+
+    expected_statement = (
+        f"Selected source table rows show: {statement} "
+        "Expert review is required before treating this as a material effect."
+    )
+    assert updated["statement"] == expected_statement
+    assert updated["direction"] == "condition-dependent"
+    assert updated["comparison_summary"]["direction"] == "condition-dependent"
+    assert updated["relation_chain"] == [
+        {
+            "relation_id": "rel_strategy_elongation",
+            "variable": "scanning strategy",
+            "mediators": [],
+            "outcome": "elongation",
+            "direction": "condition-dependent",
+            "statement": expected_statement,
+        }
+    ]
 
 
 def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
@@ -14620,7 +14700,7 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
     assert finding["support_grade"] == "partial"
     assert finding["comparison_summary"] == {
         "variable": "heat treatment type",
-        "direction": "increases",
+        "direction": "condition-dependent",
         "outcome": "density",
         "baseline": {
             "label": "heat treatment type -",

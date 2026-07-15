@@ -9551,9 +9551,35 @@ class ResearchUnderstandingService:
         reasons = [reason]
         table_row_statement = self._finding_table_row_statement_text(updated)
         if table_row_statement:
-            updated["statement"] = self._review_candidate_table_row_statement(
+            review_statement = self._review_candidate_table_row_statement(
                 table_row_statement
             )
+            updated["statement"] = review_statement
+            updated["direction"] = "condition-dependent"
+            updated["relation_chain"] = [
+                {
+                    **segment,
+                    **(
+                        {
+                            "direction": "condition-dependent",
+                            "statement": self._review_candidate_table_row_statement(
+                                _text(segment.get("statement")) or ""
+                            ),
+                        }
+                        if self._finding_statement_is_table_row_comparison(
+                            _text(segment.get("statement")) or ""
+                        )
+                        else {}
+                    ),
+                }
+                for segment in _mapping_list(updated.get("relation_chain"))
+            ]
+            summary = _mapping(updated.get("comparison_summary"))
+            if summary:
+                updated["comparison_summary"] = {
+                    **summary,
+                    "direction": "condition-dependent",
+                }
         if self._finding_statement_is_confounded_table_row_comparison(statement):
             reasons.append("confounded_table_row_comparison")
             updated["title"] = self._finding_title(

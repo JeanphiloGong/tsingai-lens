@@ -32,6 +32,9 @@ from application.core.semantic_build.research_objective_service import (
 from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
+from application.goal.protocol_contract import (
+    ved_design_is_operationally_consistent,
+)
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
@@ -1289,7 +1292,7 @@ class GoalSessionService:
             item = line.split(":", 1)[1]
             if category_pattern.search(item):
                 return False
-        return True
+        return ved_design_is_operationally_consistent(answer)
 
     def _is_protocol_draft(self, answer: str) -> bool:
         normalized = answer.lower()

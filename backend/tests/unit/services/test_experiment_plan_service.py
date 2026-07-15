@@ -20,6 +20,27 @@ def _structured_protocol(source_label: str = "Source 1") -> str:
     )
 
 
+def _ved_protocol(*, operational: bool) -> str:
+    variable_matrix = (
+        "vary laser power to create VED levels while holding scan speed, hatch "
+        "spacing, and layer thickness constant"
+        if operational
+        else "compare low and moderate VED levels"
+    )
+    controls = (
+        "hold scan speed, hatch spacing, and layer thickness constant"
+        if operational
+        else "hold laser power, scan speed, hatch spacing, and layer thickness constant"
+    )
+    return (
+        "Hypothesis: VED is associated with fatigue strength [Source 1].\n"
+        f"Variable matrix: {variable_matrix}.\n"
+        "Measurements: fatigue strength and defect size.\n"
+        f"Controls: {controls}.\n"
+        "Risks or limits: validate the isolated effect before causal interpretation."
+    )
+
+
 def _protocol_source_item(
     *,
     protocol_source_fingerprint: str = "protocol-source.v1:def",
@@ -237,6 +258,65 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
         )
 
 
+def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
+    tmp_path,
+):
+    repository = SqliteExperimentPlanRepository(tmp_path / "lens.sqlite")
+    existing = repository.upsert_plan(
+        ExperimentPlanRecord.from_mapping(
+            {
+                "plan_id": "exp_inconsistent_ved",
+                "collection_id": "col_1",
+                "goal_id": "goal_1",
+                "title": "Existing VED protocol",
+                "content": _ved_protocol(operational=False),
+                "status": "draft",
+                "source_message_id": "msg_existing",
+                "source_links": [
+                    {
+                        "kind": "evidence",
+                        "label": "Source 1",
+                        "href": (
+                            "/collections/col_1/documents/"
+                            "paper-a?evidence_id=ev_1"
+                        ),
+                    }
+                ],
+                "metadata": {
+                    "source": "goal_copilot",
+                    "review_gate": "protocol_ready_findings",
+                    "used_evidence_ids": ["ev_1"],
+                    "source_findings": [
+                        {
+                            "finding_id": "finding-1",
+                            "finding_fingerprint": "finding.v1:abc",
+                            "protocol_source_fingerprint": "protocol-source.v1:def",
+                            "evidence_ref_ids": ["ev_1"],
+                        }
+                    ],
+                },
+                "created_by": "expert-a",
+                "created_at": "2026-07-01T00:00:00+00:00",
+                "updated_at": "2026-07-01T00:00:00+00:00",
+            }
+        )
+    )
+    service = ExperimentPlanService(
+        repository=repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+    listed = service.list_plans("col_1", "goal_1")[0]
+
+    assert listed.plan_id == existing.plan_id
+    assert listed.metadata["source_validity"] == "stale"
+    assert listed.metadata["source_validity_reasons"] == [
+        "protocol_design_inconsistent"
+    ]
+
+
 def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified(
     tmp_path,
 ):
@@ -404,6 +484,35 @@ def test_experiment_plan_service_rejects_invalid_protocol_contract_warning(tmp_p
             goal_id="goal_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
+def test_experiment_plan_service_rejects_ved_plan_without_operational_constituent(
+    tmp_path,
+):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        content=_ved_protocol(operational=False),
+        review_gate="protocol_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VED design must identify"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="VED validation matrix",
+            content=_ved_protocol(operational=False),
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},
@@ -716,5 +825,40 @@ def test_experiment_plan_service_rejects_copilot_update_without_protocol_structu
             plan_id=draft.plan_id,
             title="Edited unstructured protocol",
             content="Run 25 C and 150 C LPBF builds [Source 1].",
+            status="ready_for_review",
+        )
+
+
+def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        content=_ved_protocol(operational=True),
+        review_gate="protocol_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+    draft = service.create_plan(
+        collection_id="col_1",
+        goal_id="goal_1",
+        title="VED validation matrix",
+        content=_ved_protocol(operational=True),
+        source_message_id="msg_1",
+        created_by="expert-a",
+        metadata={"source": "goal_copilot"},
+    )
+
+    with pytest.raises(ValueError, match="VED design must identify"):
+        service.update_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            plan_id=draft.plan_id,
+            title="Edited VED validation matrix",
+            content=_ved_protocol(operational=False),
             status="ready_for_review",
         )

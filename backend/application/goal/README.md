@@ -44,6 +44,12 @@ own database connections, SQL, schema initialization, or row encoding.
   cannot enter `ready_for_review`. These drafts are
   human-editable Goal Consumer outputs, not replacements for the conditional
   Protocol browsing branch.
+- `protocol_contract.py`
+  Enforces the operational VED design rule shared by chat generation and plan
+  persistence: at least one constituent parameter must change, every other
+  constituent must be explicitly changed or fixed, and no constituent may be
+  both changed and fixed. Existing Copilot drafts that violate this rule are
+  reported as stale instead of being promoted for review.
 - `brief_service.py`
   Optional goal-first collection-seeding path. It shapes a thin research brief
   and registers a `seed_collection` handoff into Source, but it is not required

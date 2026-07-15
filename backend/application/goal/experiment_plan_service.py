@@ -6,6 +6,9 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from application.evaluation import ResearchUnderstandingFeedbackService
+from application.goal.protocol_contract import (
+    ved_design_is_operationally_consistent,
+)
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
 from domain.ports import ExperimentPlanRepository, GoalSessionRepository
 from infra.persistence.factory import (
@@ -209,6 +212,7 @@ class ExperimentPlanService:
             raise ValueError(
                 "goal copilot answer is not a structured protocol draft"
             )
+        _validate_ved_design(content)
         return session, message
 
     def list_plans(
@@ -324,6 +328,8 @@ def _source_validity(
     plan: ExperimentPlanRecord,
     dataset_items: tuple[Mapping[str, Any], ...] | None,
 ) -> tuple[str, list[str]]:
+    if not ved_design_is_operationally_consistent(plan.content):
+        return "stale", ["protocol_design_inconsistent"]
     if dataset_items is None:
         return "unverified", ["source_dataset_unavailable"]
     current_by_finding_id = {
@@ -399,6 +405,7 @@ def _validate_goal_copilot_plan_edit(
 ) -> None:
     if not _has_protocol_draft_structure(content):
         raise ValueError("goal copilot answer is not a structured protocol draft")
+    _validate_ved_design(content)
     visible_source_labels = [
         label
         for link in plan.source_links
@@ -406,6 +413,14 @@ def _validate_goal_copilot_plan_edit(
     ]
     if visible_source_labels and not any(label in content for label in visible_source_labels):
         raise ValueError("goal copilot answer does not cite a visible source label")
+
+
+def _validate_ved_design(content: str) -> None:
+    if not ved_design_is_operationally_consistent(content):
+        raise ValueError(
+            "VED design must identify at least one changed constituent and mark "
+            "every other constituent as changed or fixed"
+        )
 
 
 def _has_protocol_draft_structure(content: str) -> bool:

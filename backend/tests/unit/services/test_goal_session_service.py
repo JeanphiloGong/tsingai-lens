@@ -1113,6 +1113,60 @@ Risks or limits
     assert len(llm_client.beta.chat.completions.calls) == 1
 
 
+def test_goal_chat_limits_ved_protocol_without_an_operational_constituent(
+    tmp_path,
+):
+    draft = """Hypothesis
+VED improves fatigue strength [Source 1].
+Variable matrix
+- Proposed design choice: Compare low and moderate VED levels.
+Measurements
+- Proposed design choice: Measure fatigue strength.
+Controls
+- Proposed design choice: Hold laser power, scan speed, hatch spacing, and layer thickness constant.
+Risks or limits
+- Design risk: Constituent-parameter drift can confound VED.
+"""
+    repaired_protocol = {
+        "proposed_variable_manipulations": [
+            "Compare low and moderate VED levels."
+        ],
+        "proposed_measurements": ["Measure fatigue strength."],
+        "proposed_controls": [
+            "Hold laser power, scan speed, hatch spacing, and layer thickness constant."
+        ],
+        "design_risks": ["Constituent-parameter drift can confound VED."],
+    }
+    llm_client = _StructuredRepairLLMClient(draft, repaired_protocol)
+    service, collection_service = _service_with_llm_client(
+        tmp_path,
+        llm_client,
+        research_understanding_feedback_service=(
+            _TrainingReadyResearchUnderstandingFeedbackService()
+        ),
+        paper_facts_service=_EvidencePaperFactsService(),
+    )
+    collection = collection_service.create_collection("Reject Impossible VED Protocol")
+    session = service.create_session(
+        collection_id=collection["collection_id"],
+        focused_goal_id="goal_preheat",
+        answer_mode="hybrid",
+    )
+
+    response = service.post_message(
+        session["session_id"],
+        message="Design the next experiment from reviewed findings.",
+        page_context={"goal_id": "goal_preheat"},
+    )
+
+    assert response["source_mode"] == "collection_limited"
+    assert response["review_gate"] is None
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
+    assert "goal_copilot_protocol_contract_invalid" in response["warnings"]
+    assert "could not verify the protocol draft contract" in response["answer"]
+
+
 def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     understanding = ResearchUnderstanding.from_mapping(
         {

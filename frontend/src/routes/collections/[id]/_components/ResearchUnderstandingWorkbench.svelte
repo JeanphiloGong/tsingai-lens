@@ -169,9 +169,11 @@
 	let curationError = '';
 	let curationLoadError = '';
 	let curationsByTargetId = new Map<string, ResearchUnderstandingCuration>();
+	let alignedCurationsByTargetId = new Map<string, ResearchUnderstandingCuration>();
 	let loadedCurationScopeKey = '';
 	let lastCurationTargetId = '';
 	let feedbackByTargetId = new Map<string, ResearchUnderstandingFeedback[]>();
+	let alignedFeedbackByTargetId = new Map<string, ResearchUnderstandingFeedback[]>();
 	let loadedFeedbackScopeKey = '';
 	let feedbackLoadError = '';
 	let reviewQueueOnly = false;
@@ -214,10 +216,20 @@
 	$: allDisplayFindingRows = allFindingRows.length
 		? allFindingRows
 		: dedupeFindings([...primaryFindingRows, ...reviewQueueFindingRows]);
+	$: alignedFeedbackByTargetId = alignFeedbackToCurrentFindings(
+		feedbackByTargetId,
+		datasetSummary,
+		allDisplayFindingRows
+	);
+	$: alignedCurationsByTargetId = alignCurationsToCurrentFindings(
+		curationsByTargetId,
+		datasetSummary,
+		allDisplayFindingRows
+	);
 	$: reviewableFindingRows = hasReviewQueueFindingProjection
 		? reviewQueueFindingRows
 		: allDisplayFindingRows.filter((finding) =>
-				findingNeedsReview(finding, feedbackByTargetId, reviewQueueClaimIds)
+				findingNeedsReview(finding, alignedFeedbackByTargetId, reviewQueueClaimIds)
 			);
 	$: if (!primaryFindingRows.length && reviewableFindingRows.length && !reviewQueueOnly) {
 		reviewQueueOnly = true;
@@ -253,7 +265,7 @@
 	);
 	$: reviewQueueClaimIds = new Set(
 		claims
-			.filter((claim) => shouldReviewClaim(claim, feedbackByTargetId))
+			.filter((claim) => shouldReviewClaim(claim, alignedFeedbackByTargetId))
 			.map((claim) => claim.claim_id)
 	);
 	$: reviewQueueFindingIds = new Set(reviewableFindingRows.map((finding) => finding.finding_id));
@@ -280,7 +292,12 @@
 	$: hasAxisCoverage = Boolean(axisCoverage.variables.length || axisCoverage.properties.length);
 	$: axisCoverageGapGroups = hasAxisCoverage ? buildAxisCoverageGapGroups(axisCoverage) : [];
 	$: answerBoundary = hasAxisCoverage
-		? buildAnswerBoundary(axisCoverage, primaryFindingRows, feedbackByTargetId, curationsByTargetId)
+		? buildAnswerBoundary(
+				axisCoverage,
+				primaryFindingRows,
+				alignedFeedbackByTargetId,
+				alignedCurationsByTargetId
+			)
 		: null;
 	$: datasetTrainingReadySampleCount =
 		datasetSummary?.quality_summary.training_ready_sample_count ?? 0;
@@ -440,9 +457,17 @@
 	$: filteredFindings = findingRows.filter(
 		(finding) =>
 			(selectedClaimStatus === 'all' ||
-				findingForDisplay(finding).support_grade === selectedClaimStatus) &&
+				findingForDisplay(
+					finding,
+					findingCurationFor(finding, alignedCurationsByTargetId)
+				).support_grade === selectedClaimStatus) &&
 			(selectedDatasetUseStatus === 'all' ||
-				findingDatasetTrust(finding).datasetUseStatus === selectedDatasetUseStatus) &&
+				findingDatasetTrust(
+					finding,
+					alignedFeedbackByTargetId,
+					alignedCurationsByTargetId,
+					datasetSummary
+				).datasetUseStatus === selectedDatasetUseStatus) &&
 			(!reviewQueueOnly ||
 				finding.review_status === 'needs_review' ||
 				reviewQueueFindingIds.has(finding.finding_id) ||
@@ -488,12 +513,22 @@
 		if (!usesFindings) return countEffectsBy(effectRows, 'support_status');
 		const counts = new Map<string, number>([['all', findingRows.length]]);
 		for (const finding of findingRows) {
-			const grade = findingForDisplay(finding).support_grade;
+			const grade = findingForDisplay(
+				finding,
+				findingCurationFor(finding, alignedCurationsByTargetId)
+			).support_grade;
 			counts.set(grade, (counts.get(grade) ?? 0) + 1);
 		}
 		return counts;
 	})();
-	$: findingDatasetUseCounts = usesFindings ? countFindingsByDatasetUse(findingRows) : new Map();
+	$: findingDatasetUseCounts = usesFindings
+		? countFindingsByDatasetUse(
+				findingRows,
+				alignedFeedbackByTargetId,
+				alignedCurationsByTargetId,
+				datasetSummary
+			)
+		: new Map();
 	$: if (selectedFindingId && selectedEffectId) {
 		selectedEffectId = '';
 	}
@@ -538,20 +573,31 @@
 		selectedFinding && selectedFinding.claim_id !== selectedReviewTargetId
 			? selectedFinding.claim_id
 			: '';
-	$: selectedCuration = selectedReviewTargetId
-		? (curationsByTargetId.get(selectedReviewTargetId) ??
-			(selectedReviewFallbackId ? curationsByTargetId.get(selectedReviewFallbackId) : null) ??
-			null)
+	$: selectedFindingDatasetSample = selectedFinding
+		? findingDatasetSampleFor(selectedFinding, datasetSummary)
 		: null;
+	$: selectedCuration = selectedFinding
+		? findingCurationFor(selectedFinding, alignedCurationsByTargetId)
+		: selectedReviewTargetId
+			? (alignedCurationsByTargetId.get(selectedReviewTargetId) ??
+				(selectedReviewFallbackId
+					? alignedCurationsByTargetId.get(selectedReviewFallbackId)
+					: null) ??
+				null)
+			: null;
 	$: selectedDisplayFinding = selectedFinding
 		? findingForDisplay(selectedFinding, selectedCuration)
 		: null;
-	$: selectedFeedback = selectedReviewTargetId
-		? [
-				...(feedbackByTargetId.get(selectedReviewTargetId) ?? []),
-				...(selectedReviewFallbackId ? (feedbackByTargetId.get(selectedReviewFallbackId) ?? []) : [])
-			]
-		: [];
+	$: selectedFeedback = selectedFinding
+		? findingFeedbackFor(selectedFinding, alignedFeedbackByTargetId)
+		: selectedReviewTargetId
+			? [
+					...(alignedFeedbackByTargetId.get(selectedReviewTargetId) ?? []),
+					...(selectedReviewFallbackId
+						? (alignedFeedbackByTargetId.get(selectedReviewFallbackId) ?? [])
+						: [])
+				]
+			: [];
 	$: displayClaim = selectedClaim
 		? {
 				claim_type: selectedCuration?.curated_claim_type ?? selectedClaim.claim_type,
@@ -585,10 +631,18 @@
 	$: selectedFindingUsagePath = selectedDisplayFinding
 		? findingUsagePath(selectedDisplayFinding, selectedFeedback, selectedCuration)
 		: null;
-	$: selectedFindingTrust = selectedFinding ? findingDatasetTrust(selectedFinding) : null;
-	$: selectedFindingDatasetSample = selectedFinding
-		? findingDatasetSampleFor(selectedFinding, datasetSummary)
+	$: selectedFindingTrust = selectedFinding
+		? findingDatasetTrust(
+				selectedFinding,
+				alignedFeedbackByTargetId,
+				alignedCurationsByTargetId,
+				datasetSummary
+			)
 		: null;
+	$: selectedOutdatedReviewCount = selectedFindingDatasetSample
+		? selectedFindingDatasetSample.metadata.ignored_feedback_refs.length +
+			selectedFindingDatasetSample.metadata.ignored_curation_refs.length
+		: 0;
 	$: selectedFindingExpertNotePrompt = selectedFinding
 		? findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)
 		: '';
@@ -1614,9 +1668,58 @@
 		openFindingDetail(findingId);
 	}
 
+	function alignFeedbackToCurrentFindings(
+		rawFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		currentDataset: ResearchUnderstandingDataset | null,
+		findings: ResearchUnderstandingPresentationFinding[]
+	) {
+		const findingTargetIds = new Set(
+			findings.flatMap((finding) => [finding.finding_id, finding.claim_id]).filter(Boolean)
+		);
+		const aligned = new Map<string, ResearchUnderstandingFeedback[]>();
+		for (const [targetId, records] of rawFeedbackByTargetId) {
+			if (!findingTargetIds.has(targetId)) aligned.set(targetId, records);
+		}
+		for (const sample of currentDataset?.items ?? []) {
+			for (const feedback of sample.feedback_refs) {
+				if (feedback.finding_fingerprint !== sample.finding_fingerprint) continue;
+				const targetId = reviewTargetKey(feedback);
+				if (!targetId) continue;
+				const existing = aligned.get(targetId) ?? [];
+				if (existing.some((item) => item.feedback_id === feedback.feedback_id)) continue;
+				aligned.set(targetId, [...existing, feedback]);
+			}
+		}
+		return aligned;
+	}
+
+	function alignCurationsToCurrentFindings(
+		rawCurationsByTargetId: Map<string, ResearchUnderstandingCuration>,
+		currentDataset: ResearchUnderstandingDataset | null,
+		findings: ResearchUnderstandingPresentationFinding[]
+	) {
+		const findingTargetIds = new Set(
+			findings.flatMap((finding) => [finding.finding_id, finding.claim_id]).filter(Boolean)
+		);
+		const aligned = new Map<string, ResearchUnderstandingCuration>();
+		const curationsById = new Map<string, ResearchUnderstandingCuration>();
+		for (const [targetId, curation] of rawCurationsByTargetId) {
+			curationsById.set(curation.curation_id, curation);
+			if (!findingTargetIds.has(targetId)) aligned.set(targetId, curation);
+		}
+		for (const sample of currentDataset?.items ?? []) {
+			const curationId = sample.metadata.curation_id;
+			const curation = curationId ? curationsById.get(curationId) : null;
+			if (!curation || curation.finding_fingerprint !== sample.finding_fingerprint) continue;
+			const targetId = reviewTargetKey(curation);
+			if (targetId) aligned.set(targetId, curation);
+		}
+		return aligned;
+	}
+
 	function findingFeedbackFor(
 		finding: ResearchUnderstandingPresentationFinding,
-		currentFeedbackByTargetId = feedbackByTargetId
+		currentFeedbackByTargetId = alignedFeedbackByTargetId
 	) {
 		return [
 			...(currentFeedbackByTargetId.get(finding.finding_id) ?? []),
@@ -1626,7 +1729,7 @@
 
 	function findingCurationFor(
 		finding: ResearchUnderstandingPresentationFinding,
-		currentCurationsByTargetId = curationsByTargetId
+		currentCurationsByTargetId = alignedCurationsByTargetId
 	) {
 		return (
 			currentCurationsByTargetId.get(finding.finding_id) ??
@@ -1703,12 +1806,40 @@
 
 	function findingDatasetTrust(
 		finding: ResearchUnderstandingPresentationFinding,
-		currentFeedbackByTargetId = feedbackByTargetId,
-		currentCurationsByTargetId = curationsByTargetId
+		currentFeedbackByTargetId = alignedFeedbackByTargetId,
+		currentCurationsByTargetId = alignedCurationsByTargetId,
+		currentDataset: ResearchUnderstandingDataset | null = datasetSummary
 	): FindingDatasetTrust {
 		const curation = findingCurationFor(finding, currentCurationsByTargetId);
 		const feedback = findingFeedbackFor(finding, currentFeedbackByTargetId);
+		const sample = findingDatasetSampleFor(finding, currentDataset);
 		const hasRejected = findingHasRejectingReview(feedback);
+		let source: FindingDatasetTrust['source'] = 'candidate';
+		if (sample?.label_status === 'rejected' || sample?.dataset_use_status === 'rejected') {
+			source = 'rejected';
+		} else if (curation && isHumanReviewer(curation.reviewer)) {
+			source = 'human_curation';
+		} else if (curation) {
+			source = isAiReviewer(curation.reviewer) ? 'ai_curation' : 'candidate';
+		} else if (
+			feedback.some(
+				(item) =>
+					item.review_status === 'correct' &&
+					item.issue_type === 'none' &&
+					isHumanReviewer(item.reviewer)
+			)
+		) {
+			source = 'human_feedback';
+		} else if (feedback.length) {
+			source = hasRejected ? 'rejected' : 'ai_feedback';
+		}
+		if (sample?.label_status && sample.dataset_use_status) {
+			return {
+				labelStatus: sample.label_status,
+				datasetUseStatus: sample.dataset_use_status,
+				source
+			};
+		}
 		if (curation && isHumanReviewer(curation.reviewer)) {
 			return {
 				labelStatus: 'gold',
@@ -2326,10 +2457,20 @@
 		return counts;
 	}
 
-	function countFindingsByDatasetUse(currentFindings: ResearchUnderstandingPresentationFinding[]) {
+	function countFindingsByDatasetUse(
+		currentFindings: ResearchUnderstandingPresentationFinding[],
+		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration>,
+		currentDataset: ResearchUnderstandingDataset | null
+	) {
 		const counts = new Map<FindingDatasetUseFilter, number>([['all', currentFindings.length]]);
 		for (const finding of currentFindings) {
-			const status = findingDatasetTrust(finding).datasetUseStatus;
+			const status = findingDatasetTrust(
+				finding,
+				currentFeedbackByTargetId,
+				currentCurationsByTargetId,
+				currentDataset
+			).datasetUseStatus;
 			counts.set(status, (counts.get(status) ?? 0) + 1);
 		}
 		return counts;
@@ -3792,11 +3933,22 @@
 									</thead>
 										<tbody>
 											{#each visibleFindingRows as finding (finding.finding_id)}
-												{@const curation = findingCurationFor(finding)}
+												{@const curation = findingCurationFor(
+													finding,
+													alignedCurationsByTargetId
+												)}
 												{@const displayFinding = findingForDisplay(finding, curation)}
-												{@const findingFeedback = findingFeedbackFor(finding)}
+												{@const findingFeedback = findingFeedbackFor(
+													finding,
+													alignedFeedbackByTargetId
+												)}
 												{@const usagePreview = findingUsagePreview(displayFinding)}
-												{@const trust = findingDatasetTrust(finding)}
+												{@const trust = findingDatasetTrust(
+													finding,
+													alignedFeedbackByTargetId,
+													alignedCurationsByTargetId,
+													datasetSummary
+												)}
 												<tr>
 													<td class="research-understanding-workbench__finding-main">
 														<button
@@ -4094,7 +4246,10 @@
 						{/if}
 					</div>
 					{#if datasetSummary && nextReviewCandidateFinding && !reviewQueueOnly && !datasetReviewCandidatesOnly}
-						{@const nextDisplayFinding = findingForDisplay(nextReviewCandidateFinding)}
+						{@const nextDisplayFinding = findingForDisplay(
+							nextReviewCandidateFinding,
+							findingCurationFor(nextReviewCandidateFinding, alignedCurationsByTargetId)
+						)}
 						{@const nextUsagePreview = findingUsagePreview(nextDisplayFinding)}
 						{@const nextReviewReasonLabels = findingReviewReasonLabels(nextDisplayFinding)}
 						{@const nextProtocolBlockingLabels = protocolReadinessBlockingLabels(
@@ -5116,6 +5271,19 @@
 							</header>
 
 							{#if selectedFinding}
+								{#if selectedOutdatedReviewCount}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-decision"
+										role="status"
+									>
+										<strong>{$t('research.understanding.outdatedReviewTitle')}</strong>
+										<p>
+											{$t('research.understanding.outdatedReviewBody', {
+												count: selectedOutdatedReviewCount
+											})}
+										</p>
+									</section>
+								{/if}
 								{#if selectedFindingDecision}
 									<section
 										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--decision"

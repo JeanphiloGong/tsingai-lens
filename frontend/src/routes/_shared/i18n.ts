@@ -977,6 +977,9 @@ const translations: Record<Language, Translations> = {
 				quickReject: 'Reject',
 				quickCorrect: 'Correct',
 				feedbackHistory: 'Feedback history',
+				outdatedReviewTitle: 'Previous review no longer applies',
+				outdatedReviewBody:
+					'This Finding changed after {count} review record(s) were saved. Review the current statement and evidence again before accepting it.',
 				feedbackStatus: 'Review result',
 				feedbackIssue: 'Issue type',
 				feedbackNote: 'Feedback note',
@@ -4321,6 +4324,9 @@ const translations: Record<Language, Translations> = {
 				quickReject: '拒绝',
 				quickCorrect: '校正',
 				feedbackHistory: '反馈历史',
+				outdatedReviewTitle: '之前的审核已不再适用',
+				outdatedReviewBody:
+					'该 Finding 在保存 {count} 条审核记录后发生了变化。接受前请重新核对当前结论和证据。',
 				feedbackStatus: '复核结果',
 				feedbackIssue: '问题类型',
 				feedbackNote: '反馈备注',

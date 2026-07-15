@@ -277,6 +277,7 @@ export type ResearchUnderstandingFeedbackCreate = {
 export type ResearchUnderstandingFeedback = ResearchUnderstandingFeedbackCreate & {
 	feedback_id: string;
 	collection_id: string;
+	finding_fingerprint: string | null;
 	created_at: string;
 };
 export type ResearchUnderstandingFeedbackFilters = {
@@ -308,6 +309,7 @@ export type ResearchUnderstandingCurationCreate = {
 export type ResearchUnderstandingCuration = ResearchUnderstandingCurationCreate & {
 	curation_id: string;
 	collection_id: string;
+	finding_fingerprint: string | null;
 	updated_at: string;
 };
 export type ResearchUnderstandingCurationFilters = {
@@ -441,13 +443,18 @@ export type ResearchUnderstandingDatasetSample = {
 	sample_id: string;
 	finding_id: string;
 	claim_id: string;
+	finding_fingerprint: string;
 	label_status: ResearchUnderstandingDatasetLabelStatus | null;
 	dataset_use_status: ResearchUnderstandingDatasetUseStatus | null;
 	review_action: ResearchUnderstandingDatasetReviewAction;
 	protocol_readiness: ResearchUnderstandingProtocolReadiness | null;
 	acceptance_gate: ResearchUnderstandingAcceptanceGate | null;
 	review_decision_hint: ResearchUnderstandingReviewDecisionHint | null;
+	feedback_refs: ResearchUnderstandingFeedback[];
 	metadata: {
+		curation_id: string | null;
+		ignored_feedback_refs: ResearchUnderstandingFeedback[];
+		ignored_curation_refs: ResearchUnderstandingCuration[];
 		training_message_diagnostic: string[];
 	};
 };
@@ -1276,6 +1283,7 @@ function normalizeResearchUnderstandingDatasetSample(
 		sample_id: sampleId,
 		finding_id: findingId,
 		claim_id: claimId,
+		finding_fingerprint: toText(record.finding_fingerprint),
 		label_status: normalizeResearchUnderstandingDatasetLabelStatus(record.label_status),
 		dataset_use_status: normalizeResearchUnderstandingDatasetUseStatus(record.dataset_use_status),
 		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action),
@@ -1284,6 +1292,9 @@ function normalizeResearchUnderstandingDatasetSample(
 		review_decision_hint: normalizeResearchUnderstandingReviewDecisionHint(
 			record.review_decision_hint
 		),
+		feedback_refs: asArray(record.feedback_refs)
+			.map(normalizeResearchUnderstandingFeedback)
+			.filter((item): item is ResearchUnderstandingFeedback => item !== null),
 		metadata: normalizeResearchUnderstandingDatasetSampleMetadata(record.metadata)
 	};
 }
@@ -1291,7 +1302,70 @@ function normalizeResearchUnderstandingDatasetSample(
 function normalizeResearchUnderstandingDatasetSampleMetadata(value: unknown) {
 	const record = asRecord(value);
 	return {
+		curation_id: toText(record?.curation_id) || null,
+		ignored_feedback_refs: asArray(record?.ignored_feedback_refs)
+			.map(normalizeResearchUnderstandingFeedback)
+			.filter((item): item is ResearchUnderstandingFeedback => item !== null),
+		ignored_curation_refs: asArray(record?.ignored_curation_refs)
+			.map(normalizeResearchUnderstandingCuration)
+			.filter((item): item is ResearchUnderstandingCuration => item !== null),
 		training_message_diagnostic: toStringList(record?.training_message_diagnostic)
+	};
+}
+
+function normalizeResearchUnderstandingFeedback(
+	value: unknown
+): ResearchUnderstandingFeedback | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const feedbackId = toText(record.feedback_id);
+	if (!feedbackId) return null;
+	return {
+		feedback_id: feedbackId,
+		collection_id: toText(record.collection_id),
+		scope_type: toText(record.scope_type),
+		scope_id: toText(record.scope_id),
+		finding_id: toText(record.finding_id),
+		claim_id: toText(record.claim_id) || null,
+		finding_fingerprint: toText(record.finding_fingerprint) || null,
+		review_status: toText(record.review_status) as ResearchUnderstandingFeedbackStatus,
+		issue_type: toText(record.issue_type) as ResearchUnderstandingFeedbackIssueType,
+		note: toText(record.note) || null,
+		reviewer: toText(record.reviewer) || null,
+		created_at: toText(record.created_at)
+	};
+}
+
+function normalizeResearchUnderstandingCuration(
+	value: unknown
+): ResearchUnderstandingCuration | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const curationId = toText(record.curation_id);
+	if (!curationId) return null;
+	return {
+		curation_id: curationId,
+		collection_id: toText(record.collection_id),
+		scope_type: toText(record.scope_type),
+		scope_id: toText(record.scope_id),
+		finding_id: toText(record.finding_id),
+		claim_id: toText(record.claim_id) || null,
+		finding_fingerprint: toText(record.finding_fingerprint) || null,
+		curated_claim_type: toText(record.curated_claim_type),
+		curated_status: toText(record.curated_status),
+		curated_statement: toText(record.curated_statement),
+		curated_support_grade: toText(record.curated_support_grade) || null,
+		curated_review_status: toText(record.curated_review_status) || null,
+		curated_variables: toStringList(record.curated_variables),
+		curated_mediators: toStringList(record.curated_mediators),
+		curated_outcomes: toStringList(record.curated_outcomes),
+		curated_direction: toText(record.curated_direction) || null,
+		curated_scope_summary: toText(record.curated_scope_summary) || null,
+		curated_evidence_ref_ids: toStringList(record.curated_evidence_ref_ids),
+		curated_context_ids: toStringList(record.curated_context_ids),
+		note: toText(record.note) || null,
+		reviewer: toText(record.reviewer) || null,
+		updated_at: toText(record.updated_at)
 	};
 }
 

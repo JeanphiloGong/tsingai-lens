@@ -15,8 +15,11 @@ vi.stubGlobal('fetch', fetchMock);
 type DatasetSampleFixture = {
 	sample_id: string;
 	finding_id: string;
+	claim_id?: string;
+	finding_fingerprint?: string;
 	label_status: string;
 	dataset_use_status: string;
+	feedback_refs?: Record<string, unknown>[];
 	review_action: {
 		code: string;
 		label: string;
@@ -47,6 +50,12 @@ type DatasetSampleFixture = {
 			why_accept_blocked: string[];
 			required_checks: string[];
 			import_note: string;
+		};
+		metadata?: {
+			curation_id?: string | null;
+			training_message_diagnostic?: string[];
+			ignored_feedback_refs?: Record<string, unknown>[];
+			ignored_curation_refs?: Record<string, unknown>[];
 		};
 	};
 
@@ -203,8 +212,47 @@ function datasetResponse(overrides: {
 				{ name: 'table_row', metric: 'single_paper_evidence', count: 2 }
 			]
 		},
-		items: overrides.items ?? [],
+		items: (overrides.items ?? []).map((item) => ({
+			claim_id: item.claim_id ?? '',
+			finding_fingerprint: item.finding_fingerprint ?? `finding.v1:${item.finding_id}`,
+			feedback_refs: item.feedback_refs ?? [],
+			...item,
+			metadata: {
+				curation_id: null,
+				training_message_diagnostic: [],
+				ignored_feedback_refs: [],
+				ignored_curation_refs: [],
+				...item.metadata
+			}
+		})),
 		warnings: []
+	};
+}
+
+function datasetSample(overrides: {
+	findingId: string;
+	claimId: string;
+	fingerprint: string;
+	labelStatus: string;
+	datasetUseStatus: string;
+	feedbackRefs?: Record<string, unknown>[];
+	curationId?: string | null;
+}) {
+	return {
+		sample_id: `rus_${overrides.findingId}`,
+		finding_id: overrides.findingId,
+		claim_id: overrides.claimId,
+		finding_fingerprint: overrides.fingerprint,
+		label_status: overrides.labelStatus,
+		dataset_use_status: overrides.datasetUseStatus,
+		review_action: { code: 'record_expert_review', label: 'Review this Finding' },
+		feedback_refs: overrides.feedbackRefs ?? [],
+		metadata: {
+			curation_id: overrides.curationId ?? null,
+			training_message_diagnostic: [],
+			ignored_feedback_refs: [],
+			ignored_curation_refs: []
+		}
 	};
 }
 
@@ -1335,6 +1383,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 	});
 
 	it('marks AI-reviewed findings as silver review candidates, not training-ready gold', async () => {
+		const feedback = {
+			feedback_id: 'ruf_ai_reviewed',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			finding_id: 'finding_strength_supported',
+			claim_id: 'claim_strength_supported',
+			finding_fingerprint: 'finding.v1:strength',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'AI evidence audit accepted the source quote.',
+			reviewer: 'ai-reviewer-codex-evidence-audit',
+			created_at: '2026-07-11T09:00:00+00:00'
+		};
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -1350,26 +1412,29 @@ describe('ResearchUnderstandingWorkbench', () => {
 				return Promise.resolve(
 					jsonResponse({
 						collection_id: 'col_123',
-						items: [
-							{
-								feedback_id: 'ruf_ai_reviewed',
-								collection_id: 'col_123',
-								scope_type: 'objective',
-								scope_id: 'obj_1',
-								finding_id: 'finding_strength_supported',
-								claim_id: 'claim_strength_supported',
-								review_status: 'correct',
-								issue_type: 'none',
-								note: 'AI evidence audit accepted the source quote.',
-								reviewer: 'ai-reviewer-codex-evidence-audit',
-								created_at: '2026-07-11T09:00:00+00:00'
-							}
-						]
+						items: [feedback]
 					})
 				);
 			}
 			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
-				return Promise.resolve(jsonResponse(datasetResponse({ trainingReady: 0, reviewCandidate: 1 })));
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							reviewCandidate: 1,
+							items: [
+								datasetSample({
+									findingId: 'finding_strength_supported',
+									claimId: 'claim_strength_supported',
+									fingerprint: 'finding.v1:strength',
+									labelStatus: 'silver',
+									datasetUseStatus: 'review_candidate',
+									feedbackRefs: [feedback]
+								})
+							]
+						})
+					)
+				);
 			}
 			return Promise.resolve(jsonResponse({}));
 		});
@@ -1494,6 +1559,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 	});
 
 	it('shows human accepted training-ready findings without stale needs-review badges', async () => {
+		const feedback = {
+			feedback_id: 'ruf_human_reviewed',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			finding_id: 'finding_strength_supported',
+			claim_id: 'claim_strength_supported',
+			finding_fingerprint: 'finding.v1:strength',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'Human expert accepted the source-backed paper-level finding.',
+			reviewer: 'materials-expert@example.com',
+			created_at: '2026-07-13T09:00:00+00:00'
+		};
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -1509,21 +1588,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 				return Promise.resolve(
 					jsonResponse({
 						collection_id: 'col_123',
-						items: [
-							{
-								feedback_id: 'ruf_human_reviewed',
-								collection_id: 'col_123',
-								scope_type: 'objective',
-								scope_id: 'obj_1',
-								finding_id: 'finding_strength_supported',
-								claim_id: 'claim_strength_supported',
-								review_status: 'correct',
-								issue_type: 'none',
-								note: 'Human expert accepted the source-backed paper-level finding.',
-								reviewer: 'materials-expert@example.com',
-								created_at: '2026-07-13T09:00:00+00:00'
-							}
-						]
+						items: [feedback]
 					})
 				);
 			}
@@ -1534,7 +1599,17 @@ describe('ResearchUnderstandingWorkbench', () => {
 							trainingReady: 1,
 							reviewCandidate: 0,
 							itemCount: 1,
-							labelCounts: { candidate: 0, silver: 0, gold: 1, rejected: 0 }
+							labelCounts: { candidate: 0, silver: 0, gold: 1, rejected: 0 },
+							items: [
+								datasetSample({
+									findingId: 'finding_strength_supported',
+									claimId: 'claim_strength_supported',
+									fingerprint: 'finding.v1:strength',
+									labelStatus: 'gold',
+									datasetUseStatus: 'training_ready',
+									feedbackRefs: [feedback]
+								})
+							]
 						})
 					)
 				);
@@ -1652,6 +1727,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 	});
 
 	it('filters findings by dataset use status from current expert review state', async () => {
+		const feedback = {
+			feedback_id: 'ruf_human_reviewed',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			finding_id: 'finding_strength_supported',
+			claim_id: 'claim_strength_supported',
+			finding_fingerprint: 'finding.v1:strength',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'Human expert accepted the source-backed paper-level finding.',
+			reviewer: 'materials-expert@example.com',
+			created_at: '2026-07-13T09:00:00+00:00'
+		};
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -1667,21 +1756,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 				return Promise.resolve(
 					jsonResponse({
 						collection_id: 'col_123',
-						items: [
-							{
-								feedback_id: 'ruf_human_reviewed',
-								collection_id: 'col_123',
-								scope_type: 'objective',
-								scope_id: 'obj_1',
-								finding_id: 'finding_strength_supported',
-								claim_id: 'claim_strength_supported',
-								review_status: 'correct',
-								issue_type: 'none',
-								note: 'Human expert accepted the source-backed paper-level finding.',
-								reviewer: 'materials-expert@example.com',
-								created_at: '2026-07-13T09:00:00+00:00'
-							}
-						]
+						items: [feedback]
 					})
 				);
 			}
@@ -1692,7 +1767,31 @@ describe('ResearchUnderstandingWorkbench', () => {
 							trainingReady: 1,
 							reviewCandidate: 2,
 							itemCount: 3,
-							labelCounts: { candidate: 2, silver: 0, gold: 1, rejected: 0 }
+							labelCounts: { candidate: 2, silver: 0, gold: 1, rejected: 0 },
+							items: [
+								datasetSample({
+									findingId: 'finding_strength_supported',
+									claimId: 'claim_strength_supported',
+									fingerprint: 'finding.v1:strength',
+									labelStatus: 'gold',
+									datasetUseStatus: 'training_ready',
+									feedbackRefs: [feedback]
+								}),
+								datasetSample({
+									findingId: 'finding_mechanism_limited',
+									claimId: 'claim_mechanism_limited',
+									fingerprint: 'finding.v1:mechanism',
+									labelStatus: 'candidate',
+									datasetUseStatus: 'review_candidate'
+								}),
+								datasetSample({
+									findingId: 'finding_comparison_conflict',
+									claimId: 'claim_comparison_conflict',
+									fingerprint: 'finding.v1:conflicted',
+									labelStatus: 'candidate',
+									datasetUseStatus: 'review_candidate'
+								})
+							]
 						})
 					)
 				);
@@ -2584,6 +2683,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 	});
 
 	it('opens directly on training-ready findings and dataset exports from a messages deep link', async () => {
+		const feedback = {
+			feedback_id: 'ruf_human_reviewed',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			finding_id: 'finding_strength_supported',
+			claim_id: 'claim_strength_supported',
+			finding_fingerprint: 'finding.v1:strength',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'Human expert accepted the source-backed paper-level finding.',
+			reviewer: 'materials-expert@example.com',
+			created_at: '2026-07-13T09:00:00+00:00'
+		};
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -2599,21 +2712,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 				return Promise.resolve(
 					jsonResponse({
 						collection_id: 'col_123',
-						items: [
-							{
-								feedback_id: 'ruf_human_reviewed',
-								collection_id: 'col_123',
-								scope_type: 'objective',
-								scope_id: 'obj_1',
-								finding_id: 'finding_strength_supported',
-								claim_id: 'claim_strength_supported',
-								review_status: 'correct',
-								issue_type: 'none',
-								note: 'Human expert accepted the source-backed paper-level finding.',
-								reviewer: 'materials-expert@example.com',
-								created_at: '2026-07-13T09:00:00+00:00'
-							}
-						]
+						items: [feedback]
 					})
 				);
 			}
@@ -2626,7 +2725,31 @@ describe('ResearchUnderstandingWorkbench', () => {
 							protocolReady: 0,
 							reviewCandidate: 2,
 							itemCount: 3,
-							labelCounts: { candidate: 2, silver: 0, gold: 1, rejected: 0 }
+							labelCounts: { candidate: 2, silver: 0, gold: 1, rejected: 0 },
+							items: [
+								datasetSample({
+									findingId: 'finding_strength_supported',
+									claimId: 'claim_strength_supported',
+									fingerprint: 'finding.v1:strength',
+									labelStatus: 'gold',
+									datasetUseStatus: 'training_ready',
+									feedbackRefs: [feedback]
+								}),
+								datasetSample({
+									findingId: 'finding_mechanism_limited',
+									claimId: 'claim_mechanism_limited',
+									fingerprint: 'finding.v1:mechanism',
+									labelStatus: 'candidate',
+									datasetUseStatus: 'review_candidate'
+								}),
+								datasetSample({
+									findingId: 'finding_comparison_conflict',
+									claimId: 'claim_comparison_conflict',
+									fingerprint: 'finding.v1:conflicted',
+									labelStatus: 'candidate',
+									datasetUseStatus: 'review_candidate'
+								})
+							]
 						})
 					)
 				);
@@ -3476,6 +3599,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 								scope_id: 'obj_1',
 								finding_id: 'finding_relation_density',
 								claim_id: 'claim_relation_density',
+								finding_fingerprint: 'finding.v1:density',
 								curated_claim_type: 'finding',
 								curated_status: 'limited',
 								curated_statement:
@@ -3501,7 +3625,24 @@ describe('ResearchUnderstandingWorkbench', () => {
 				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
 			}
 			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
-				return Promise.resolve(jsonResponse(datasetResponse({ trainingReady: 1, reviewCandidate: 0 })));
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 0,
+							items: [
+								datasetSample({
+									findingId: 'finding_relation_density',
+									claimId: 'claim_relation_density',
+									fingerprint: 'finding.v1:density',
+									labelStatus: 'gold',
+									datasetUseStatus: 'training_ready',
+									curationId: 'ruc_density_accepted'
+								})
+							]
+						})
+					)
+				);
 			}
 			return Promise.resolve(jsonResponse({}));
 		});
@@ -5939,7 +6080,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 								collection_id: 'col_123',
 								scope_type: 'objective',
 								scope_id: 'obj_1',
+								finding_id: 'finding_mechanism_limited',
 								claim_id: 'claim_mechanism_limited',
+								finding_fingerprint: 'finding.v1:mechanism',
 								curated_claim_type: 'limitation',
 								curated_status: 'limited',
 								curated_statement: 'Existing expert curation: mechanism evidence remains limited.',
@@ -5951,6 +6094,26 @@ describe('ResearchUnderstandingWorkbench', () => {
 							}
 						]
 					})
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && init?.method !== 'POST') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 1,
+							items: [
+								datasetSample({
+									findingId: 'finding_mechanism_limited',
+									claimId: 'claim_mechanism_limited',
+									fingerprint: 'finding.v1:mechanism',
+									labelStatus: 'gold',
+									datasetUseStatus: 'training_ready',
+									curationId: 'ruc_existing'
+								})
+							]
+						})
+					)
 				);
 			}
 			return Promise.resolve(jsonResponse({}));
@@ -6003,6 +6166,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 								scope_id: 'obj_1',
 								finding_id: 'finding_mechanism_limited',
 								claim_id: 'claim_mechanism_limited',
+								finding_fingerprint: 'finding.v1:mechanism',
 								curated_claim_type: 'mechanism',
 								curated_status: 'limited',
 								curated_statement:
@@ -6042,7 +6206,24 @@ describe('ResearchUnderstandingWorkbench', () => {
 				);
 			}
 			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
-				return Promise.resolve(jsonResponse(datasetResponse()));
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 1,
+							reviewCandidate: 1,
+							items: [
+								datasetSample({
+									findingId: 'finding_mechanism_limited',
+									claimId: 'claim_mechanism_limited',
+									fingerprint: 'finding.v1:mechanism',
+									labelStatus: 'gold',
+									datasetUseStatus: 'training_ready',
+									curationId: 'ruc_existing'
+								})
+							]
+						})
+					)
+				);
 			}
 			return Promise.resolve(jsonResponse({}));
 		});
@@ -6091,7 +6272,112 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('does not apply review history after the finding content changes', async () => {
+		const staleFeedback = {
+			feedback_id: 'ruf_stale_human_review',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			finding_id: 'finding_strength_supported',
+			claim_id: 'claim_strength_supported',
+			finding_fingerprint: 'finding.v1:previous',
+			review_status: 'correct',
+			issue_type: 'none',
+			note: 'Accepted before the Finding variables were corrected.',
+			reviewer: 'materials-expert@example.com',
+			created_at: '2026-06-18T09:00:00+00:00'
+		};
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method =
+				input instanceof Request
+					? input.method
+					: typeof init?.method === 'string'
+						? init.method
+						: 'GET';
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse({ collection_id: 'col_123', items: [staleFeedback] })
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							reviewCandidate: 1,
+							rejected: 0,
+							itemCount: 1,
+							labelCounts: { candidate: 1, silver: 0, gold: 0, rejected: 0 },
+							items: [
+								{
+									sample_id: 'rus_current_strength',
+									finding_id: 'finding_strength_supported',
+									claim_id: 'claim_strength_supported',
+									finding_fingerprint: 'finding.v1:current',
+									label_status: 'candidate',
+									dataset_use_status: 'review_candidate',
+									review_action: {
+										code: 'record_expert_review',
+										label: 'Review the corrected Finding'
+									},
+									feedback_refs: [],
+									metadata: {
+										curation_id: null,
+										training_message_diagnostic: [],
+										ignored_feedback_refs: [staleFeedback],
+										ignored_curation_refs: []
+									}
+								}
+							]
+						})
+					)
+				);
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const row = browserPage.getByRole('row', {
+			name: /Heat treatment changes LPBF 316L tensile response/
+		});
+		await expect.element(row.getByText('Candidate', { exact: true })).toBeInTheDocument();
+		await expect.element(row.getByText('Gold', { exact: true })).not.toBeInTheDocument();
+		await row
+			.getByRole('button', { name: /Heat treatment changes LPBF 316L tensile response/ })
+			.click();
+
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(findingDetail.getByText('Previous review no longer applies'))
+			.toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('Accepted before the Finding variables were corrected.'))
+			.not.toBeInTheDocument();
+	});
+
 	it('loads existing expert feedback into the selected claim review history', async () => {
+		const feedback = {
+			feedback_id: 'ruf_existing',
+			collection_id: 'col_123',
+			scope_type: 'objective',
+			scope_id: 'obj_1',
+			finding_id: 'finding_mechanism_limited',
+			claim_id: 'claim_mechanism_limited',
+			finding_fingerprint: 'finding.v1:mechanism',
+			review_status: 'incorrect',
+			issue_type: 'evidence_not_grounded',
+			note: 'Existing feedback: mechanism claim needs direct evidence.',
+			reviewer: 'materials-expert@example.com',
+			created_at: '2026-06-18T09:00:00+00:00'
+		};
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method =
@@ -6107,21 +6393,29 @@ describe('ResearchUnderstandingWorkbench', () => {
 				return Promise.resolve(
 					jsonResponse({
 						collection_id: 'col_123',
-						items: [
-							{
-								feedback_id: 'ruf_existing',
-								collection_id: 'col_123',
-								scope_type: 'objective',
-								scope_id: 'obj_1',
-								claim_id: 'claim_mechanism_limited',
-								review_status: 'incorrect',
-								issue_type: 'evidence_not_grounded',
-								note: 'Existing feedback: mechanism claim needs direct evidence.',
-								reviewer: 'materials-expert@example.com',
-								created_at: '2026-06-18T09:00:00+00:00'
-							}
-						]
+						items: [feedback]
 					})
+				);
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(
+					jsonResponse(
+						datasetResponse({
+							trainingReady: 0,
+							reviewCandidate: 0,
+							rejected: 1,
+							items: [
+								datasetSample({
+									findingId: 'finding_mechanism_limited',
+									claimId: 'claim_mechanism_limited',
+									fingerprint: 'finding.v1:mechanism',
+									labelStatus: 'rejected',
+									datasetUseStatus: 'rejected',
+									feedbackRefs: [feedback]
+								})
+							]
+						})
+					)
 				);
 			}
 			return Promise.resolve(jsonResponse({}));

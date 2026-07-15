@@ -59,6 +59,11 @@ DECISION_BOARD_COLUMNS = (
     "expert_action",
     "issue_type",
     "expert_note",
+    "label_status",
+    "ai_review_status",
+    "ai_review_issue_type",
+    "ai_review_note",
+    "ai_reviewer",
     "fill_instruction",
     "accept_rule",
     "reject_issue_options",
@@ -468,6 +473,11 @@ def _decision_board_tsv_row(row: dict[str, Any]) -> dict[str, str]:
         "expert_action": "",
         "issue_type": "",
         "expert_note": "",
+        "label_status": row["label_status"],
+        "ai_review_status": row["ai_review_status"],
+        "ai_review_issue_type": row["ai_review_issue_type"],
+        "ai_review_note": row["ai_review_note"],
+        "ai_reviewer": row["ai_reviewer"],
         "fill_instruction": (
             "Fill expert_action with accept, reject, correct, or skip. "
             "Use correct when statement fields or evidence ids need edits."
@@ -548,6 +558,23 @@ def _review_jsonl_row(
 ) -> dict[str, Any]:
     prediction = item.system_prediction or {}
     expert_target = item.expert_target or {}
+    agent_feedback = max(
+        (
+            record
+            for record in item.feedback_refs
+            if isinstance(record, dict)
+            and _is_agent_reviewer(_text(record.get("reviewer")))
+        ),
+        key=lambda record: (
+            _text(record.get("created_at")),
+            _text(record.get("feedback_id")),
+        ),
+        default={},
+    )
+    if not agent_feedback and _is_agent_reviewer(
+        _text(expert_target.get("reviewer"))
+    ):
+        agent_feedback = expert_target
     evidence = item.training_evidence_refs or item.evidence_refs or item.input_blocks
     review_action = item.review_action or {}
     protocol_readiness = _protocol_readiness_for_item(item)
@@ -568,6 +595,11 @@ def _review_jsonl_row(
         "sample_id": item.sample_id,
         "finding_id": item.finding_id,
         "claim_id": item.claim_id or "",
+        "label_status": item.label_status,
+        "ai_review_status": _text(agent_feedback.get("review_status")),
+        "ai_review_issue_type": _text(agent_feedback.get("issue_type")),
+        "ai_review_note": _text(agent_feedback.get("note")),
+        "ai_reviewer": _text(agent_feedback.get("reviewer")),
         "statement": _text(prediction.get("statement"))
         or _text(expert_target.get("statement")),
         "variables": _strings(prediction.get("variables")),

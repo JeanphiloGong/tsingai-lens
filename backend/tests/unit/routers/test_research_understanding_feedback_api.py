@@ -35,6 +35,7 @@ def request_with_user(
 class FakeResearchUnderstandingFeedbackService:
     def __init__(self) -> None:
         self.created = None
+        self.dataset_feedback_refs = []
         self.items = (
             ResearchUnderstandingFeedback.from_mapping(
                 {
@@ -444,7 +445,7 @@ class FakeResearchUnderstandingFeedbackService:
                         ),
                     },
                     "context_refs": [],
-                    "feedback_refs": [],
+                    "feedback_refs": list(self.dataset_feedback_refs),
                     "metadata": {"curation_id": "ruc-existing"},
                 }
             ],
@@ -1329,6 +1330,32 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
 
 def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
+    service.dataset_feedback_refs = [
+        {
+            "feedback_id": "ruf-ai-older",
+            "review_status": "partial",
+            "issue_type": "insufficient_evidence",
+            "note": "Older AI review.",
+            "reviewer": "ai-reviewer-codex-v1",
+            "created_at": "2026-06-18T09:00:00+00:00",
+        },
+        {
+            "feedback_id": "ruf-human-newer",
+            "review_status": "incorrect",
+            "issue_type": "wrong_direction",
+            "note": "Human feedback must not be presented as AI review.",
+            "reviewer": "materials-expert@example.com",
+            "created_at": "2026-06-18T11:00:00+00:00",
+        },
+        {
+            "feedback_id": "ruf-ai-latest",
+            "review_status": "correct",
+            "issue_type": "none",
+            "note": "AI confirms the paper-level finding against the cited quote.",
+            "reviewer": "ai-reviewer-codex-v2",
+            "created_at": "2026-06-18T10:00:00+00:00",
+        },
+    ]
     monkeypatch.setattr(
         feedback_controller,
         "feedback_service",
@@ -1353,6 +1380,13 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
     row = rows[0]
     assert row["expert_action"] == ""
     assert row["issue_type"] == ""
+    assert row["label_status"] == "silver"
+    assert row["ai_review_status"] == "correct"
+    assert row["ai_review_issue_type"] == "none"
+    assert row["ai_review_note"] == (
+        "AI confirms the paper-level finding against the cited quote."
+    )
+    assert row["ai_reviewer"] == "ai-reviewer-codex-v2"
     assert row["corrected_statement"] == ""
     assert "Fill expert_action with accept, reject, correct, or skip" in row[
         "fill_instruction"
@@ -1491,6 +1525,7 @@ def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
         sample_id="rus-1",
         finding_id="finding-1",
         claim_id="claim-1",
+        label_status="candidate",
         dataset_use_status="review_candidate",
         presentation_bucket="review_queue",
         trace_status="evidence_derived",
@@ -1504,6 +1539,7 @@ def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
             "review_status": "needs_review",
         },
         expert_target={},
+        feedback_refs=[],
         review_action={},
         training_evidence_refs=[
             {

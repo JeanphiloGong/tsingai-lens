@@ -4053,6 +4053,27 @@ class ResearchUnderstandingService:
                 score += 2
             if " decreased porosity " in normalized or " low porosity " in normalized:
                 score += 2
+            process_count = len(
+                re.findall(
+                    r"\d+(?:\.\d+)?\s*w\s*[-–/]\s*\d+(?:\.\d+)?\s*mm",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if process_count >= 2:
+                score += 6
+            if (
+                (
+                    " rp " in normalized
+                    or " r p " in normalized
+                    or " polarization resistance " in normalized
+                )
+                and (
+                    " stable passive film " in normalized
+                    or " stable passivate film " in normalized
+                )
+            ):
+                score += 4
             ranked = (score, -(block.block_order or 0), block)
             if best is None or ranked > best:
                 best = ranked

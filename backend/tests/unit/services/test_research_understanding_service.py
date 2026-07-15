@@ -2584,6 +2584,25 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
                         "3 Results and discussion > 3.1 Microstructure and porosity"
                     ),
                 ),
+                SourceBlock(
+                    block_id="blk-corrosion-passive-film",
+                    document_id="paper-corrosion",
+                    block_type="paragraph",
+                    text=(
+                        "The R p value decreases in the following order: "
+                        "135 W-750 mm/s > 255 W-1400 mm/s > 375 W-2100 mm/s. "
+                        "The 135 W-750 mm/s sample showed the highest R p value, "
+                        "which means that it formed a stable passivate film and "
+                        "improved corrosion resistance. Relatively high porosities "
+                        "and low R p values in the 375 W-2100 mm/s sample cause the "
+                        "formed passive film to be easily broken down."
+                    ),
+                    block_order=86,
+                    page=8,
+                    heading_path=(
+                        "3 Results and discussion > 3.3 Corrosion properties"
+                    ),
+                ),
             ],
             tables=[
                 SourceTable(
@@ -2738,7 +2757,7 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
     assert "process_conditions_not_isolated" in primary[0]["review_reasons"]
     assert "porosity_response_not_monotonic" in primary[0]["warnings"]
     assert primary[0]["evidence_bundle"]["direct_result"] == [
-        "evref_recovered_porosity_corrosion_blk-corrosion-conclusion",
+        "evref_recovered_porosity_corrosion_blk-corrosion-passive-film",
         "evref_recovered_porosity_corrosion_result_tbl-corrosion-polarization",
     ]
     assert primary[0]["evidence_bundle"]["condition_context"] == [
@@ -2749,11 +2768,13 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
     }
-    recovered = evidence_by_id["evref_recovered_porosity_corrosion_blk-corrosion-conclusion"]
-    assert recovered["source_ref"] == "blk-corrosion-conclusion"
+    recovered = evidence_by_id[
+        "evref_recovered_porosity_corrosion_blk-corrosion-passive-film"
+    ]
+    assert recovered["source_ref"] == "blk-corrosion-passive-film"
     assert recovered["page"] == "8"
-    assert "pitting potential gradually increases" in recovered["quote"]
-    assert "passive film" in recovered["quote"]
+    assert "135 W-750 mm/s sample showed the highest R p value" in recovered["quote"]
+    assert "formed a stable passivate film" in recovered["quote"]
     result_table = evidence_by_id[
         "evref_recovered_porosity_corrosion_result_tbl-corrosion-polarization"
     ]

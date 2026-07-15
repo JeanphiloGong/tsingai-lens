@@ -114,9 +114,12 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
         "evidence_terms": [
             ["porosity"],
             ["pitting corrosion"],
-            ["pitting potential"],
+            ["pitting potential", "e p"],
             ["passive film"],
-            ["corrosion rate"],
+            ["corrosion rate", "corrosion resistance"],
+        ],
+        "required_direct_evidence_sets": [
+            ["135 w", "750 mm", "r p", "stable passivate film"],
         ],
         "required_condition_evidence_sets": [
             [

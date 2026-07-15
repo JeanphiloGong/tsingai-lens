@@ -442,10 +442,12 @@ def _goal_399_corrosion_payload():
                         "evidence_ref_id": "ev-corrosion",
                         "source_kind": "paragraph",
                         "quote": (
-                            "Porosities were highly sensitive to pitting corrosion. "
-                            "The pitting potential gradually increases with decreased "
-                            "porosity, resistance can slow the corrosion rate, and the "
-                            "passive film on the low-porosity sample was more stable."
+                            "The 135 W-750 mm/s sample showed the highest R p value, "
+                            "which means that it formed a stable passivate film and "
+                            "improved corrosion resistance. Relatively high porosity "
+                            "and low R p in the 375 W-2100 mm/s sample caused the "
+                            "passive film to be more easily broken down by pitting "
+                            "corrosion."
                         ),
                         "href": (
                             "/collections/col-1/documents/doc-5"
@@ -590,6 +592,23 @@ def test_evaluate_goal_analysis_payload_rejects_causal_corrosion_projection():
     }
     assert "primary findings match goal-specific expert expectations" in failed_checks
     assert "primary findings avoid over-specific unsupported terms" in failed_checks
+
+
+def test_evaluate_goal_analysis_payload_rejects_unbound_passive_film_evidence():
+    check = _load_goal_findings_check_module()
+    payload = _goal_399_corrosion_payload()
+    evidence = payload["understanding"]["presentation"]["evidence_items"][0]
+    evidence["quote"] = (
+        "Porosities were highly sensitive to pitting corrosion. The passive film "
+        "on the low-porosity sample was more stable and corrosion rate was lower."
+    )
+
+    summary = check.evaluate_goal_analysis_payload(payload)
+
+    failed_checks = {
+        item["name"] for item in summary["checks"] if item["status"] == "fail"
+    }
+    assert "direct evidence quotes cover goal-specific source claims" in failed_checks
 
 
 def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artifacts():

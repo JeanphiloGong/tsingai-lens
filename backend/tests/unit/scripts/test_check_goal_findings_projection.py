@@ -289,11 +289,15 @@ def _goal_061_axis_summary(
 
 def _goal_399_corrosion_payload():
     statement = (
-        "Across the tested SLM conditions, lower-porosity samples were associated "
-        "with higher pitting potential and a more stable passive film, consistent "
-        "with better pitting-corrosion resistance. Laser power and scan speed "
-        "changed together across the samples, so the evidence does not isolate "
-        "porosity as a causal variable."
+        "At fixed energy density 100 J/mm3 and layer thickness 20 μm, the coupled "
+        "SLM conditions were 375 W / 2100 mm/s (relative density 97.83%, pitting "
+        "potential 124.7 mV), 255 W / 1400 mm/s (relative density 99.5%, pitting "
+        "potential 199.7 mV), and 135 W / 750 mm/s (relative density 99.26%, "
+        "pitting potential 355.4 mV). The highest relative density did not coincide "
+        "with the highest pitting potential, so the response was not monotonic "
+        "with relative density. The paper also reports a more stable passive film "
+        "for the 135 W / 750 mm/s sample. These data support a condition-level "
+        "association, not an isolated porosity effect."
     )
     return {
         "goal": {
@@ -304,13 +308,19 @@ def _goal_399_corrosion_payload():
             "state": "limited",
             "presentation": {
                 "summary": {
-                    "evidence_count": 2,
+                    "evidence_count": 4,
                     "primary_finding_count": 1,
                     "review_queue_finding_count": 0,
                     "review_queue_count": 0,
                     "axis_coverage": {
                         "variables": [
-                            {"axis": "porosity level", "status": "primary"},
+                            {
+                                "axis": (
+                                    "coupled SLM process conditions with observed "
+                                    "porosity level"
+                                ),
+                                "status": "primary",
+                            },
                         ],
                         "properties": [
                             {
@@ -323,20 +333,31 @@ def _goal_399_corrosion_payload():
                 "primary_findings": [
                     {
                         "finding_id": "finding-porosity-corrosion",
-                        "title": "porosity level -> pitting corrosion behavior",
+                        "title": (
+                            "coupled SLM process conditions with observed porosity "
+                            "level -> pitting corrosion behavior"
+                        ),
                         "statement": statement,
-                        "variables": ["porosity level"],
+                        "variables": [
+                            "coupled SLM process conditions with observed porosity level"
+                        ],
                         "mediators": ["passive film"],
                         "outcomes": ["pitting corrosion behavior"],
                         "direction": "associated",
-                        "evidence_ref_ids": ["ev-corrosion", "ev-process"],
+                        "evidence_ref_ids": [
+                            "ev-corrosion",
+                            "ev-pitting-table",
+                            "ev-density",
+                            "ev-process",
+                        ],
                         "evidence_bundle": {
-                            "direct_result": ["ev-corrosion"],
-                            "condition_context": ["ev-process"],
+                            "direct_result": ["ev-corrosion", "ev-pitting-table"],
+                            "condition_context": ["ev-density", "ev-process"],
                         },
                         "warnings": [
                             "paper_level_association",
                             "process_conditions_not_isolated",
+                            "porosity_response_not_monotonic",
                         ],
                         "review_reasons": [
                             "paper_level_association",
@@ -359,6 +380,64 @@ def _goal_399_corrosion_payload():
                         "href": (
                             "/collections/col-1/documents/doc-5"
                             "?source_ref=blk-corrosion"
+                        ),
+                    },
+                    {
+                        "evidence_ref_id": "ev-pitting-table",
+                        "source_kind": "table",
+                        "quote": (
+                            "Columns: Sample | E corr (mV) | E p (mV). Rows: "
+                            "375 W-2100 mm/s | -312.9 | 124.7 / 255 W-1400 mm/s "
+                            "| -192.0 | 199.7 / 135 W-750 mm/s | -243.8 | 355.4."
+                        ),
+                        "href": (
+                            "/collections/col-1/documents/doc-5"
+                            "?source_ref=tbl-pitting"
+                        ),
+                        "table_audit": {
+                            "columns": ["Sample", "E corr (mV)", "E p (mV)"],
+                            "relevant_rows": [
+                                {
+                                    "row_index": 1,
+                                    "cells": [
+                                        "375 W-2100 mm/s",
+                                        "-312.9",
+                                        "124.7",
+                                    ],
+                                    "aligned": True,
+                                },
+                                {
+                                    "row_index": 2,
+                                    "cells": [
+                                        "255 W-1400 mm/s",
+                                        "-192.0",
+                                        "199.7",
+                                    ],
+                                    "aligned": True,
+                                },
+                                {
+                                    "row_index": 3,
+                                    "cells": [
+                                        "135 W-750 mm/s",
+                                        "-243.8",
+                                        "355.4",
+                                    ],
+                                    "aligned": True,
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "evidence_ref_id": "ev-density",
+                        "source_kind": "paragraph",
+                        "quote": (
+                            "The density of the three samples of 375 W-2100 mm/s, "
+                            "255 W-1400 mm/s, and 135 W-750 mm/s was 97.83, 99.5, "
+                            "and 99.26%, respectively."
+                        ),
+                        "href": (
+                            "/collections/col-1/documents/doc-5"
+                            "?source_ref=blk-density"
                         ),
                     },
                     {

@@ -2515,13 +2515,18 @@ def test_objective_understanding_promotes_porosity_corrosion_result_to_primary_f
     )
     assert understanding["relations"][0]["subject"] == "porosity level"
     finding = understanding["presentation"]["primary_findings"][0]
-    assert finding["title"] == "porosity level -> pitting corrosion behavior"
+    assert finding["title"] == (
+        "coupled SLM process conditions with observed porosity level -> "
+        "pitting corrosion behavior"
+    )
+    assert finding["variables"] == [
+        "coupled SLM process conditions with observed porosity level"
+    ]
     assert finding["statement"] == (
-        "Across the tested SLM conditions, lower-porosity samples were associated "
-        "with higher pitting potential and a more stable passive film, consistent "
-        "with better pitting-corrosion resistance. Laser power and scan speed "
-        "changed together across the samples, so the evidence does not isolate "
-        "porosity as a causal variable."
+        "Across the tested coupled SLM conditions, pitting potential and "
+        "passive-film response varied alongside observed porosity. Laser power "
+        "and scan speed changed together, so the evidence supports only a "
+        "condition-level association and does not isolate a porosity effect."
     )
     assert finding["direction"] == "associated"
     assert "paper_level_association" in finding["warnings"]
@@ -2563,7 +2568,22 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
                     block_order=91,
                     page=8,
                     heading_path="4 Conclusion",
-                )
+                ),
+                SourceBlock(
+                    block_id="blk-corrosion-density",
+                    document_id="paper-corrosion",
+                    block_type="paragraph",
+                    text=(
+                        "The density of the three samples of 375 W-2100 mm/s, "
+                        "255 W-1400 mm/s, and 135 W-750 mm/s was measured, which "
+                        "was 97.83, 99.5, and 99.26%, respectively."
+                    ),
+                    block_order=41,
+                    page=3,
+                    heading_path=(
+                        "3 Results and discussion > 3.1 Microstructure and porosity"
+                    ),
+                ),
             ],
             tables=[
                 SourceTable(
@@ -2579,16 +2599,16 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
                         "Test",
                         "Laser power (W)",
                         "Scan speed (mm/s)",
-                        "Layer thickness (μm)",
-                        "Energy density (J/mm3)",
+                        "Layer thick- ness (μm)",
+                        "Energy density (J mm -3)",
                     ],
                     table_matrix=[
                         [
                             "Test",
                             "Laser power (W)",
                             "Scan speed (mm/s)",
-                            "Layer thickness (μm)",
-                            "Energy density (J/mm3)",
+                            "Layer thick- ness (μm)",
+                            "Energy density (J mm -3)",
                         ],
                         ["1", "375", "2100", "20", "100"],
                         ["2", "255", "1400", "20", "100"],
@@ -2616,6 +2636,7 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
                         ["Sample", "E corr (mV)", "E p (mV)"],
                         ["375 W-2100 mm·s -1", "-312.9", "124.7"],
                         ["255 W-1400 mm·s -1", "-192.0", "199.7"],
+                        ["135 W-750 mm·s -1", "-243.8", "355.4"],
                     ],
                 )
             ],
@@ -2694,22 +2715,34 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
     understanding = service.build_objective_understanding(payload)
 
     primary = understanding["presentation"]["primary_findings"]
-    assert primary[0]["title"] == "porosity level -> pitting corrosion behavior"
-    assert primary[0]["variables"] == ["porosity level"]
+    assert primary[0]["title"] == (
+        "coupled SLM process conditions with observed porosity level -> "
+        "pitting corrosion behavior"
+    )
+    assert primary[0]["variables"] == [
+        "coupled SLM process conditions with observed porosity level"
+    ]
     assert primary[0]["statement"] == (
-        "Across the tested SLM conditions, lower-porosity samples were associated "
-        "with higher pitting potential and a more stable passive film, consistent "
-        "with better pitting-corrosion resistance. Laser power and scan speed "
-        "changed together across the samples, so the evidence does not isolate "
-        "porosity as a causal variable."
+        "At fixed energy density 100 J/mm3 and layer thickness 20 μm, the "
+        "coupled SLM conditions were 375 W / 2100 mm/s (relative density 97.83%, "
+        "pitting potential 124.7 mV), 255 W / 1400 mm/s (relative density 99.5%, "
+        "pitting potential 199.7 mV), and 135 W / 750 mm/s (relative density "
+        "99.26%, pitting potential 355.4 mV). The highest relative density did not "
+        "coincide with the highest pitting potential, so the response was not "
+        "monotonic with relative density. The paper also reports a more stable "
+        "passive film for the 135 W / 750 mm/s sample. These data support a "
+        "condition-level association, not an isolated porosity effect."
     )
     assert primary[0]["direction"] == "associated"
     assert "paper_level_association" in primary[0]["warnings"]
     assert "process_conditions_not_isolated" in primary[0]["review_reasons"]
+    assert "porosity_response_not_monotonic" in primary[0]["warnings"]
     assert primary[0]["evidence_bundle"]["direct_result"] == [
-        "evref_recovered_porosity_corrosion_blk-corrosion-conclusion"
+        "evref_recovered_porosity_corrosion_blk-corrosion-conclusion",
+        "evref_recovered_porosity_corrosion_result_tbl-corrosion-polarization",
     ]
     assert primary[0]["evidence_bundle"]["condition_context"] == [
+        "evref_recovered_porosity_corrosion_density_blk-corrosion-density",
         "evref_recovered_porosity_corrosion_condition_tbl-corrosion-process"
     ]
     evidence_by_id = {
@@ -2721,6 +2754,16 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
     assert recovered["page"] == "8"
     assert "pitting potential gradually increases" in recovered["quote"]
     assert "passive film" in recovered["quote"]
+    result_table = evidence_by_id[
+        "evref_recovered_porosity_corrosion_result_tbl-corrosion-polarization"
+    ]
+    assert result_table["source_ref"] == "tbl-corrosion-polarization"
+    assert "355.4" in result_table["quote"]
+    density = evidence_by_id[
+        "evref_recovered_porosity_corrosion_density_blk-corrosion-density"
+    ]
+    assert density["source_ref"] == "blk-corrosion-density"
+    assert "97.83, 99.5, and 99.26%" in density["quote"]
     condition = evidence_by_id[
         "evref_recovered_porosity_corrosion_condition_tbl-corrosion-process"
     ]

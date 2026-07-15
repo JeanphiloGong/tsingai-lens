@@ -96,12 +96,15 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
     "goal_399171646354": {
         "finding_terms": [
-            ["porosity"],
+            ["coupled slm process conditions with observed porosity level"],
             ["pitting corrosion"],
             ["passive film"],
-            ["associated"],
-            ["laser power and scan speed changed together"],
-            ["does not isolate porosity as a causal variable"],
+            ["condition-level association"],
+            ["97.83", "99.5", "99.26"],
+            ["124.7", "199.7", "355.4"],
+            ["fixed energy density", "100", "layer thickness", "20"],
+            ["not monotonic with relative density"],
+            ["not an isolated porosity effect"],
         ],
         "forbidden_primary_terms": [
             "Lower porosity in SLM 316L increased pitting potential",
@@ -302,6 +305,7 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
     "goal_399171646354": [
         ["paper_level_association"],
         ["process_conditions_not_isolated"],
+        ["porosity_response_not_monotonic"],
     ],
     "goal_1a7a26d850b9": [
         ["heat_treatment_parameters_not_isolated"],

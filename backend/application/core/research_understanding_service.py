@@ -77,6 +77,9 @@ _SLM_COUPLED_PARAMETER_SET_LABEL = (
     "coupled SLM parameter sets: scanning strategy, scanning speed, hatch spacing, "
     "and energy density"
 )
+_SLM_POROSITY_CORROSION_CONDITION_LABEL = (
+    "coupled SLM process conditions with observed porosity level"
+)
 
 
 class ResearchUnderstandingService:
@@ -821,6 +824,14 @@ class ResearchUnderstandingService:
                 document_id,
                 tables_by_id=tables_by_id or {},
             )
+            density_block = self._best_porosity_density_source_block(
+                document_id,
+                blocks_by_id=blocks_by_id,
+            )
+            result_table = self._best_porosity_corrosion_result_table(
+                document_id,
+                tables_by_id=tables_by_id or {},
+            )
             recovered.append(
                 self._recovered_porosity_corrosion_finding(
                     block,
@@ -828,6 +839,8 @@ class ResearchUnderstandingService:
                     objective_context=objective_context,
                     objective=objective,
                     condition_table=condition_table,
+                    density_block=density_block,
+                    result_table=result_table,
                 )
             )
         return [item for item in recovered if item]
@@ -3618,6 +3631,242 @@ class ResearchUnderstandingService:
                 best = ranked
         return best[2] if best else None
 
+    def _best_porosity_density_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> SourceBlock | None:
+        best: tuple[int, int, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            text = _text(block.text) or ""
+            normalized = f" {_normalize_match_text(text)} "
+            if not (
+                (" relative density " in normalized or " density of " in normalized)
+                and " respectively " in normalized
+                and "%" in text
+            ):
+                continue
+            process_count = len(
+                re.findall(
+                    r"\d+(?:\.\d+)?\s*w\s*[-–/]\s*\d+(?:\.\d+)?\s*mm",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if process_count < 2:
+                continue
+            heading = _normalize_match_text(_text(block.heading_path) or "")
+            score = 6 + process_count
+            if "porosity" in heading:
+                score += 3
+            ranked = (score, -(block.block_order or 0), block)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _best_porosity_corrosion_result_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            headers = list(table.column_headers)
+            if not headers and table.table_matrix:
+                headers = list(table.table_matrix[0])
+            normalized_headers = [
+                _normalize_match_text(_text(header) or "") for header in headers
+            ]
+            has_sample = any("sample" in header for header in normalized_headers)
+            has_pitting_potential = any(
+                ("pitting" in header and "potential" in header)
+                or header == "e p"
+                or header.startswith("e p ")
+                for header in normalized_headers
+            )
+            if not (has_sample and has_pitting_potential):
+                continue
+            source_text = _normalize_match_text(self._source_table_text(table))
+            process_count = len(
+                re.findall(r"\d+(?:\.\d+)? w \d+(?:\.\d+)? mm", source_text)
+            )
+            if process_count < 2:
+                continue
+            caption = _normalize_match_text(_text(table.caption_text) or "")
+            score = 8 + process_count
+            if "polarization" in caption:
+                score += 3
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _porosity_corrosion_numeric_statement(
+        self,
+        *,
+        density_block: SourceBlock | None,
+        result_table: SourceTable | None,
+        condition_table: SourceTable | None,
+    ) -> str:
+        if density_block is None or result_table is None:
+            return ""
+
+        def process_key(value: Any) -> tuple[str, str] | None:
+            match = re.search(
+                r"(\d+(?:\.\d+)?)\s*w\s*[-–/]\s*"
+                r"(\d+(?:\.\d+)?)\s*mm",
+                _text(value) or "",
+                flags=re.IGNORECASE,
+            )
+            return (match.group(1), match.group(2)) if match else None
+
+        density_text = _text(density_block.text) or ""
+        density_keys = [
+            (match.group(1), match.group(2))
+            for match in re.finditer(
+                r"(\d+(?:\.\d+)?)\s*w\s*[-–/]\s*"
+                r"(\d+(?:\.\d+)?)\s*mm",
+                density_text,
+                flags=re.IGNORECASE,
+            )
+        ]
+        density_tail = re.split(
+            r"\bwhich\s+was\b",
+            density_text,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        if len(density_tail) != 2:
+            return ""
+        density_value_text = density_tail[1].split("%", maxsplit=1)[0]
+        density_values = re.findall(r"\d+(?:\.\d+)?", density_value_text)
+        if len(density_keys) < 3 or len(density_values) < len(density_keys):
+            return ""
+        density_by_key = dict(zip(density_keys, density_values, strict=False))
+
+        headers = list(result_table.column_headers)
+        if not headers and result_table.table_matrix:
+            headers = list(result_table.table_matrix[0])
+        normalized_headers = [
+            _normalize_match_text(_text(header) or "") for header in headers
+        ]
+        sample_index = next(
+            (index for index, header in enumerate(normalized_headers) if "sample" in header),
+            None,
+        )
+        pitting_index = next(
+            (
+                index
+                for index, header in enumerate(normalized_headers)
+                if ("pitting" in header and "potential" in header)
+                or header == "e p"
+                or header.startswith("e p ")
+            ),
+            None,
+        )
+        if sample_index is None or pitting_index is None:
+            return ""
+        rows = list(result_table.table_matrix)
+        if rows and [
+            _normalize_match_text(_text(cell) or "") for cell in rows[0]
+        ] == normalized_headers:
+            rows = rows[1:]
+        pitting_by_key = {
+            key: value
+            for row in rows
+            if sample_index < len(row)
+            and pitting_index < len(row)
+            and (key := process_key(row[sample_index])) is not None
+            and (value := _numeric_text(row[pitting_index]))
+        }
+        ordered_keys = [
+            key for key in density_keys if key in density_by_key and key in pitting_by_key
+        ]
+        if len(ordered_keys) < 3:
+            return ""
+
+        fixed_values: dict[str, str] = {}
+        if condition_table is not None:
+            condition_headers = list(condition_table.column_headers)
+            if not condition_headers and condition_table.table_matrix:
+                condition_headers = list(condition_table.table_matrix[0])
+            normalized_condition_headers = [
+                _normalize_match_text(_text(header) or "")
+                for header in condition_headers
+            ]
+            condition_rows = list(condition_table.table_matrix)
+            if condition_rows and [
+                _normalize_match_text(_text(cell) or "")
+                for cell in condition_rows[0]
+            ] == normalized_condition_headers:
+                condition_rows = condition_rows[1:]
+            for label, terms in (
+                ("energy density", ("energy", "density")),
+                ("layer thickness", ("layer", "thickness")),
+            ):
+                index = next(
+                    (
+                        index
+                        for index, header in enumerate(normalized_condition_headers)
+                        if all(term in header.replace(" ", "") for term in terms)
+                    ),
+                    None,
+                )
+                if index is None:
+                    continue
+                values = _dedupe_strings(
+                    [_text(row[index]) for row in condition_rows if index < len(row)]
+                )
+                if len(values) == 1:
+                    fixed_values[label] = values[0]
+
+        condition_descriptions = [
+            (
+                f"{power} W / {speed} mm/s (relative density "
+                f"{density_by_key[(power, speed)]}%, pitting potential "
+                f"{pitting_by_key[(power, speed)]} mV)"
+            )
+            for power, speed in ordered_keys[:3]
+        ]
+        conditions_text = (
+            f"{condition_descriptions[0]}, {condition_descriptions[1]}, and "
+            f"{condition_descriptions[2]}"
+        )
+        fixed_text = "At the reported settings"
+        if fixed_values.get("energy density") and fixed_values.get("layer thickness"):
+            fixed_text = (
+                f"At fixed energy density {fixed_values['energy density']} J/mm3 "
+                f"and layer thickness {fixed_values['layer thickness']} μm"
+            )
+        highest_density_key = max(
+            ordered_keys,
+            key=lambda key: _float_text(density_by_key[key]) or -math.inf,
+        )
+        highest_pitting_key = max(
+            ordered_keys,
+            key=lambda key: _float_text(pitting_by_key[key]) or -math.inf,
+        )
+        monotonicity_text = ""
+        if highest_density_key != highest_pitting_key:
+            monotonicity_text = (
+                " The highest relative density did not coincide with the highest "
+                "pitting potential, so the response was not monotonic with "
+                "relative density."
+            )
+        high_power, high_speed = highest_pitting_key
+        return (
+            f"{fixed_text}, the coupled SLM conditions were {conditions_text}."
+            f"{monotonicity_text} The paper also reports a more stable passive "
+            f"film for the {high_power} W / {high_speed} mm/s sample. These data "
+            "support a condition-level association, not an isolated porosity effect."
+        )
+
     def _recovered_porosity_corrosion_finding(
         self,
         block: SourceBlock,
@@ -3626,6 +3875,8 @@ class ResearchUnderstandingService:
         objective_context: Mapping[str, Any],
         objective: Mapping[str, Any],
         condition_table: SourceTable | None = None,
+        density_block: SourceBlock | None = None,
+        result_table: SourceTable | None = None,
     ) -> dict[str, Any]:
         block_id = _text(block.block_id)
         document_id = _text(block.document_id)
@@ -3635,14 +3886,23 @@ class ResearchUnderstandingService:
         claim_id = f"claim_recovered_porosity_corrosion_{block_id}"
         relation_id = f"rel_recovered_porosity_corrosion_{block_id}"
         context_id = f"ctx_recovered_porosity_corrosion_{block_id}"
-        quote = _short_text(_text(block.text), limit=420)
+        quote = _short_text(_text(block.text), limit=900)
         process_conditions_not_isolated = (
             self._porosity_corrosion_process_conditions_not_isolated(
                 source_text=_text(block.text) or "",
                 condition_table=condition_table,
             )
         )
-        statement = self._porosity_corrosion_association_statement(
+        variable_label = (
+            _SLM_POROSITY_CORROSION_CONDITION_LABEL
+            if process_conditions_not_isolated
+            else "porosity level"
+        )
+        statement = self._porosity_corrosion_numeric_statement(
+            density_block=density_block,
+            result_table=result_table,
+            condition_table=condition_table,
+        ) or self._porosity_corrosion_association_statement(
             process_conditions_not_isolated=process_conditions_not_isolated,
         )
         material_scope = _strings(
@@ -3678,6 +3938,87 @@ class ResearchUnderstandingService:
             }
         ]
         evidence_ref_ids = [evidence_ref_id]
+        result_table_id = _text(result_table.table_id if result_table else None)
+        if result_table_id:
+            result_ref_id = (
+                "evref_recovered_porosity_corrosion_result_" f"{result_table_id}"
+            )
+            result_quote = self._presentation_table_source_text(result_table)
+            evidence_ref_ids.append(result_ref_id)
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": result_ref_id,
+                    "source_kind": "table",
+                    "document_id": _text(result_table.document_id) or document_id,
+                    "label": (
+                        _text(result_table.caption_text)
+                        or "Pitting-corrosion measurements"
+                    ),
+                    "locator": {
+                        "source_ref": result_table_id,
+                        "source_kind": "table",
+                        **(
+                            {"page": result_table.page}
+                            if result_table.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": 0.82,
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": result_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=_text(result_table.document_id) or document_id,
+                        source_ref=result_table_id,
+                        page=_text(result_table.page),
+                        quote_text=result_quote,
+                    ),
+                }
+            )
+        density_block_id = _text(density_block.block_id if density_block else None)
+        if density_block_id:
+            density_ref_id = (
+                "evref_recovered_porosity_corrosion_density_" f"{density_block_id}"
+            )
+            density_quote = _short_text(_text(density_block.text), limit=900)
+            evidence_ref_ids.append(density_ref_id)
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": density_ref_id,
+                    "source_kind": _text(density_block.block_type) or "text_window",
+                    "document_id": _text(density_block.document_id) or document_id,
+                    "label": (
+                        _text(density_block.heading_path)
+                        or "Observed relative density"
+                    ),
+                    "locator": {
+                        "source_ref": density_block_id,
+                        "source_kind": _text(density_block.block_type)
+                        or "text_window",
+                        **(
+                            {"page": density_block.page}
+                            if density_block.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": 0.82,
+                    "traceability_status": "resolved",
+                    "evidence_role": "condition_context",
+                    "quote": density_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=_text(density_block.document_id) or document_id,
+                        source_ref=density_block_id,
+                        page=_text(density_block.page),
+                        quote_text=density_quote,
+                    ),
+                }
+            )
         condition_table_id = _text(condition_table.table_id if condition_table else None)
         if condition_table_id:
             condition_ref_id = (
@@ -3722,6 +4063,8 @@ class ResearchUnderstandingService:
         warnings = ["paper_level_association", "needs_expert_review"]
         if process_conditions_not_isolated:
             warnings.append("process_conditions_not_isolated")
+        if "not monotonic with relative density" in statement:
+            warnings.append("porosity_response_not_monotonic")
         return {
             "evidence_ref": evidence_refs[0],
             "evidence_refs": evidence_refs,
@@ -3760,7 +4103,7 @@ class ResearchUnderstandingService:
             "relation": {
                 "relation_id": relation_id,
                 "relation_type": "associated",
-                "subject": "porosity level",
+                "subject": variable_label,
                 "predicate": "associated",
                 "object": "pitting corrosion behavior",
                 "statement": statement,
@@ -3802,7 +4145,7 @@ class ResearchUnderstandingService:
 
         def column_index(*terms: str) -> int | None:
             for index, header in enumerate(normalized_headers):
-                if all(term in header for term in terms):
+                if all(term in header.replace(" ", "") for term in terms):
                     return index
             return None
 
@@ -3869,20 +4212,19 @@ class ResearchUnderstandingService:
         *,
         process_conditions_not_isolated: bool,
     ) -> str:
-        statement = (
-            "Across the tested SLM conditions, lower-porosity samples were "
-            "associated with higher pitting potential and a more stable passive "
-            "film, consistent with better pitting-corrosion resistance."
-        )
         if process_conditions_not_isolated:
             return (
-                f"{statement} Laser power and scan speed changed together across "
-                "the samples, so the evidence does not isolate porosity as a "
-                "causal variable."
+                "Across the tested coupled SLM conditions, pitting potential and "
+                "passive-film response varied alongside observed porosity. Laser "
+                "power and scan speed changed together, so the "
+                "evidence supports only a condition-level association and does "
+                "not isolate a porosity effect."
             )
         return (
-            f"{statement} This paper-level evidence does not isolate porosity as "
-            "a causal variable."
+            "Across the tested SLM conditions, lower-porosity samples were "
+            "associated with higher pitting potential and a more stable passive "
+            "film, consistent with better pitting-corrosion resistance. This "
+            "paper-level evidence does not isolate porosity as a causal variable."
         )
 
     def _consume_relation_trace(
@@ -7063,6 +7405,14 @@ class ResearchUnderstandingService:
                     document_id,
                     tables_by_id=tables_by_id,
                 )
+                density_block = self._best_porosity_density_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                )
+                result_table = self._best_porosity_corrosion_result_table(
+                    document_id,
+                    tables_by_id=tables_by_id,
+                )
                 recovered.append(
                     self._recovered_porosity_corrosion_finding(
                         block,
@@ -7070,6 +7420,8 @@ class ResearchUnderstandingService:
                         objective_context=objective_context,
                         objective=objective,
                         condition_table=condition_table,
+                        density_block=density_block,
+                        result_table=result_table,
                     )
                 )
                 break
@@ -8128,8 +8480,13 @@ class ResearchUnderstandingService:
                 condition_table=condition_table,
             )
         )
-        statement = self._porosity_corrosion_association_statement(
-            process_conditions_not_isolated=process_conditions_not_isolated,
+        current_statement = _text(finding.get("statement")) or ""
+        statement = (
+            current_statement
+            if "not monotonic with relative density" in current_statement
+            else self._porosity_corrosion_association_statement(
+                process_conditions_not_isolated=process_conditions_not_isolated,
+            )
         )
         warnings = [
             *_strings(finding.get("warnings")),
@@ -8138,8 +8495,15 @@ class ResearchUnderstandingService:
         ]
         if process_conditions_not_isolated:
             warnings.append("process_conditions_not_isolated")
+        if "not monotonic with relative density" in statement:
+            warnings.append("porosity_response_not_monotonic")
 
         updated = dict(finding)
+        variable_label = (
+            _SLM_POROSITY_CORROSION_CONDITION_LABEL
+            if process_conditions_not_isolated
+            else None
+        )
         updated.update(
             {
                 "statement": statement,
@@ -8152,6 +8516,7 @@ class ResearchUnderstandingService:
                 "relation_chain": [
                     {
                         **segment,
+                        **({"variable": variable_label} if variable_label else {}),
                         "direction": "associated",
                         "statement": statement,
                     }
@@ -8159,6 +8524,12 @@ class ResearchUnderstandingService:
                 ],
             }
         )
+        if variable_label:
+            updated["title"] = (
+                f"{variable_label} -> "
+                f"{', '.join(_strings(finding.get('outcomes')))}"
+            )
+            updated["variables"] = [variable_label]
         return self._finding_with_refreshed_use_boundary(updated)
 
     def _finding_with_source_unit_consistency_guard(
@@ -12518,6 +12889,13 @@ class ResearchUnderstandingService:
         relations = relations or []
         if not variables or not outcomes:
             return statement
+        recovered_relation_statement = self._recovered_relation_finding_statement(
+            relations,
+            variables=variables,
+            outcomes=outcomes,
+        )
+        if recovered_relation_statement:
+            return recovered_relation_statement
         corrosion_statement = self._corrosion_direct_statement(
             outcomes=outcomes,
             evidence_by_id=evidence_by_id,
@@ -12526,13 +12904,6 @@ class ResearchUnderstandingService:
         )
         if corrosion_statement:
             return corrosion_statement
-        recovered_relation_statement = self._recovered_relation_finding_statement(
-            relations,
-            variables=variables,
-            outcomes=outcomes,
-        )
-        if recovered_relation_statement:
-            return recovered_relation_statement
         quote_statement = self._quote_derived_finding_statement(
             variables=variables,
             outcomes=outcomes,

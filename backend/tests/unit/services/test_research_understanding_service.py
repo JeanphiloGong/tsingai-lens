@@ -14992,6 +14992,19 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
             ],
             blocks=[
                 SourceBlock(
+                    block_id="blk-slm-processing",
+                    document_id="paper-slm",
+                    block_type="paragraph",
+                    text=(
+                        "All samples used the same layer thickness of 0.05 mm, "
+                        "laser power of 100 W, and the hatch spacing reported "
+                        "in Table 1."
+                    ),
+                    block_order=48,
+                    page=4,
+                    heading_path="2.1 Alloy and SLM processing",
+                ),
+                SourceBlock(
                     block_id="blk-scan-speed-conclusion",
                     document_id="paper-slm",
                     block_type="paragraph",
@@ -15241,6 +15254,11 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
     assert "non_single_variable_table_comparison" in finding["review_reasons"]
     assert "single_variable_effect_not_isolated" in finding["warnings"]
     assert "single_variable_effect_not_isolated" in finding["review_reasons"]
+    assert "source_unit_inconsistency" in finding["warnings"]
+    assert "source_unit_inconsistency" in finding["review_reasons"]
+    assert "source reports scanning speed in mm/s" in statement
+    assert "internally consistent with m/s" in statement
+    assert "treat the scanning-speed unit as unresolved" in statement
     assert finding["direction"] == "associated"
     assert {
         segment["direction"] for segment in finding["relation_chain"]

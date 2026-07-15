@@ -5882,6 +5882,15 @@ class ResearchUnderstandingService:
             )
             for finding in findings
         ]
+        findings = [
+            self._finding_with_source_unit_consistency_guard(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+                blocks_by_id=blocks_by_id,
+            )
+            for finding in findings
+        ]
         findings = self._merge_duplicate_presentation_findings(
             findings,
             evidence_by_id=evidence_by_id,
@@ -7520,6 +7529,192 @@ class ResearchUnderstandingService:
             }
         )
         return self._finding_with_refreshed_use_boundary(updated)
+
+    def _finding_with_source_unit_consistency_guard(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> dict[str, Any]:
+        bundle = _mapping(finding.get("evidence_bundle"))
+        document_ids = {
+            document_id
+            for ref_id in self._finding_evidence_ref_ids_from_bundle(bundle)
+            if (
+                document_id := _text(
+                    evidence_by_id.get(ref_id, {}).get("document_id")
+                )
+            )
+        }
+        if not document_ids:
+            return dict(finding)
+        has_unit_inconsistency = any(
+            table.document_id in document_ids
+            and self._table_has_slm_scanning_speed_unit_inconsistency(
+                table,
+                blocks_by_id=blocks_by_id,
+            )
+            for table in tables_by_id.values()
+        )
+        if not has_unit_inconsistency:
+            return dict(finding)
+
+        limitation = (
+            "The source reports scanning speed in mm/s, but its laser power, "
+            "layer thickness, hatch spacing, and energy-density values are "
+            "internally consistent with m/s; treat the scanning-speed unit as "
+            "unresolved."
+        )
+        updated = dict(finding)
+        statement = _text(updated.get("statement")) or ""
+        if limitation not in statement:
+            updated["statement"] = f"{statement} {limitation}".strip()
+        updated["warnings"] = _dedupe_strings(
+            [*_strings(updated.get("warnings")), "source_unit_inconsistency"]
+        )
+        updated["review_reasons"] = _dedupe_strings(
+            [
+                *_strings(updated.get("review_reasons")),
+                "source_unit_inconsistency",
+                "needs_expert_review",
+            ]
+        )
+        updated["relation_chain"] = [
+            {
+                **segment,
+                "statement": updated["statement"],
+                "warnings": _dedupe_strings(
+                    [
+                        *_strings(segment.get("warnings")),
+                        "source_unit_inconsistency",
+                    ]
+                ),
+            }
+            for segment in _mapping_list(updated.get("relation_chain"))
+        ]
+        return self._finding_with_refreshed_use_boundary(updated)
+
+    def _table_has_slm_scanning_speed_unit_inconsistency(
+        self,
+        table: SourceTable,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> bool:
+        indexes = self._slm_energy_density_consistency_column_indexes(table)
+        if set(indexes) != {"hatch_spacing", "scanning_speed", "energy_density"}:
+            return False
+        process_values = self._slm_fixed_power_and_layer_thickness(
+            _text(table.document_id),
+            blocks_by_id=blocks_by_id,
+        )
+        if process_values is None:
+            return False
+        laser_power, layer_thickness_mm = process_values
+        hatch_index = indexes["hatch_spacing"]
+        speed_index = indexes["scanning_speed"]
+        energy_index = indexes["energy_density"]
+        compared = 0
+        thousand_fold_matches = 0
+        for row in table.table_matrix:
+            if len(row) <= max(hatch_index, speed_index, energy_index):
+                continue
+            hatch_spacing = _float_text(row[hatch_index])
+            reported_speed = _float_text(row[speed_index])
+            energy_density = _float_text(row[energy_index])
+            if not all(
+                value is not None and value > 0
+                for value in (hatch_spacing, reported_speed, energy_density)
+            ):
+                continue
+            expected_speed_mm_s = laser_power / (
+                energy_density * hatch_spacing * layer_thickness_mm
+            )
+            ratio = expected_speed_mm_s / reported_speed
+            compared += 1
+            if 900 <= ratio <= 1100:
+                thousand_fold_matches += 1
+        return (
+            compared >= 2
+            and thousand_fold_matches >= 2
+            and thousand_fold_matches / compared >= 0.75
+        )
+
+    def _slm_energy_density_consistency_column_indexes(
+        self,
+        table: SourceTable,
+    ) -> dict[str, int]:
+        indexes: dict[str, int] = {}
+        headers = list(table.column_headers)
+        if not headers and table.table_matrix:
+            headers = list(table.table_matrix[0])
+        for index, header in enumerate(headers):
+            raw = _text(header) or ""
+            normalized = f" {_normalize_match_text(raw)} "
+            if (
+                (" hatch space " in normalized or " hatch spacing " in normalized)
+                and re.search(r"\(\s*mm\s*\)", raw, flags=re.IGNORECASE)
+            ):
+                indexes["hatch_spacing"] = index
+            if (
+                (" scan speed " in normalized or " scanning speed " in normalized)
+                and re.search(r"mm\s*/\s*s", raw, flags=re.IGNORECASE)
+            ):
+                indexes["scanning_speed"] = index
+            if (
+                " energy density " in normalized
+                and " j " in normalized
+                and " mm " in normalized
+                and " 3 " in normalized
+            ):
+                indexes["energy_density"] = index
+        return indexes
+
+    def _slm_fixed_power_and_layer_thickness(
+        self,
+        document_id: str | None,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> tuple[float, float] | None:
+        if not document_id:
+            return None
+        for block in sorted(
+            (
+                block
+                for block in blocks_by_id.values()
+                if block.document_id == document_id
+            ),
+            key=lambda item: item.block_order or 0,
+        ):
+            text = normalize_display_text(_text(block.text)) or ""
+            if (
+                "laser power" not in text.lower()
+                or "layer thickness" not in text.lower()
+            ):
+                continue
+            power_match = re.search(
+                r"\blaser power(?:\s+of)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*w\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            thickness_match = re.search(
+                r"\blayer thickness(?:\s+of)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*"
+                r"((?:μ|µ|u)\s*m|mm)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if power_match is None or thickness_match is None:
+                continue
+            laser_power = float(power_match.group(1))
+            layer_thickness = float(thickness_match.group(1))
+            unit = thickness_match.group(2).replace(" ", "").lower()
+            layer_thickness_mm = (
+                layer_thickness / 1000 if unit != "mm" else layer_thickness
+            )
+            if laser_power > 0 and layer_thickness_mm > 0:
+                return laser_power, layer_thickness_mm
+        return None
 
     def _is_recovered_scanning_speed_mechanical_finding(
         self,
@@ -12676,6 +12871,8 @@ class ResearchUnderstandingService:
             reasons.append("paper_level_association")
         if "process_conditions_not_isolated" in _strings(effect.get("warnings")):
             reasons.append("process_conditions_not_isolated")
+        if "source_unit_inconsistency" in _strings(effect.get("warnings")):
+            reasons.append("source_unit_inconsistency")
         if "author_attributed_mechanism" in _strings(effect.get("warnings")):
             reasons.append("author_attributed_mechanism")
         if (

@@ -544,6 +544,7 @@ def build_goal_review_packet(
                 "sample_id": _text(item.get("sample_id")),
                 "finding_id": finding_id,
                 "claim_id": _text(item.get("claim_id")),
+                "label_status": _text(item.get("label_status")),
                 "open_url": _goal_review_url(
                     collection_id,
                     goal_id,

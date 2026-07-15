@@ -220,6 +220,11 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "expert_action",
         "issue_type",
         "expert_note",
+        "label_status",
+        "ai_review_status",
+        "ai_review_issue_type",
+        "ai_review_note",
+        "ai_reviewer",
         "fill_instruction",
         "accept_rule",
         "reject_issue_options",
@@ -250,6 +255,11 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "source_open",
     ]
     assert decision_rows[1].split("\t") == [
+        "",
+        "",
+        "",
+        "",
+        "",
         "",
         "",
         "",
@@ -516,6 +526,14 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
     summary = _summary()
     summary["goals"][0]["question"] = "How does preheating affect ductility?"
     candidate = summary["goals"][0]["review_packet"]["candidates"][0]
+    candidate["label_status"] = "silver"
+    candidate["suggested_target"] = {
+        "source": "ai_review_feedback",
+        "review_status": "correct",
+        "issue_type": "none",
+        "note": "AI confirms the paper-level finding against the cited quote.",
+        "reviewer": "ai-reviewer-codex-v2",
+    }
     candidate["review_work_order"] = {
         "allowed_actions": ["reject", "correct", "skip"],
         "blocked_actions": ["accept"],
@@ -529,13 +547,17 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
 
     assert len(rows) == 2
     header = rows[0].split("\t")
-    assert header[:4] == [
+    assert header[:8] == [
         "expert_action",
         "issue_type",
         "expert_note",
-        "fill_instruction",
+        "label_status",
+        "ai_review_status",
+        "ai_review_issue_type",
+        "ai_review_note",
+        "ai_reviewer",
     ]
-    assert header[14:19] == [
+    assert header[19:24] == [
         "collection_id",
         "priority",
         "goal_id",
@@ -545,6 +567,13 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
     values = rows[1].split("\t")
     row = dict(zip(header, values, strict=True))
     assert row["expert_action"] == ""
+    assert row["label_status"] == "silver"
+    assert row["ai_review_status"] == "correct"
+    assert row["ai_review_issue_type"] == "none"
+    assert row["ai_review_note"] == (
+        "AI confirms the paper-level finding against the cited quote."
+    )
+    assert row["ai_reviewer"] == "ai-reviewer-codex-v2"
     assert "Fill expert_action with accept, reject, correct, or skip" in row[
         "fill_instruction"
     ]

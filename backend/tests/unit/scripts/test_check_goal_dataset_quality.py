@@ -306,6 +306,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
 
     dataset = _dataset_payload(
         item_overrides={
+            "label_status": "silver",
             "dataset_use_status": "review_candidate",
             "presentation_bucket": "review_queue",
             "trace_status": "evidence_derived",
@@ -329,6 +330,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
                 "statement": "Preheating increased ductility by 14%.",
                 "review_status": "correct",
                 "note": "AI suggestion; human review still required.",
+                "reviewer": "ai-reviewer-codex-v2",
             },
         }
     )
@@ -340,6 +342,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
 
     assert packet["candidate_count"] == 1
     candidate = packet["candidates"][0]
+    assert candidate["label_status"] == "silver"
     assert candidate["statement"] == "Preheating increased ductility by 14%."
     assert candidate["claim_id"] == "claim-1"
     assert candidate["variables"] == ["preheating"]
@@ -353,6 +356,7 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         == "review selected table rows before accepting or correcting"
     )
     assert candidate["recommended_action_code"] == "review_table_rows"
+    assert candidate["suggested_target"]["reviewer"] == "ai-reviewer-codex-v2"
     assert candidate["acceptance_gate"] == {
         "status": "review_required",
         "accept_allowed": True,

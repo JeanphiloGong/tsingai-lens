@@ -552,6 +552,11 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
         "expert_action",
         "issue_type",
         "expert_note",
+        "label_status",
+        "ai_review_status",
+        "ai_review_issue_type",
+        "ai_review_note",
+        "ai_reviewer",
         "fill_instruction",
         "accept_rule",
         "reject_issue_options",
@@ -585,6 +590,15 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
     for row in _ranked_review_candidates(summary):
         candidate = _mapping(row.get("candidate"))
         goal_id = _text(row.get("goal_id"))
+        suggested = _mapping(candidate.get("suggested_target"))
+        suggested_reviewer = _text(suggested.get("reviewer"))
+        normalized_reviewer = suggested_reviewer.lower()
+        agent_review = (
+            suggested
+            if normalized_reviewer.startswith("ai-reviewer")
+            or normalized_reviewer.startswith("agent-")
+            else {}
+        )
         work_order = _mapping(candidate.get("review_work_order"))
         hint = _mapping(candidate.get("review_decision_hint"))
         gate = _mapping(candidate.get("acceptance_gate"))
@@ -624,6 +638,11 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
                     "",
                     "",
                     "",
+                    _text(candidate.get("label_status")),
+                    _text(agent_review.get("review_status")),
+                    _text(agent_review.get("issue_type")),
+                    _text(agent_review.get("note")),
+                    _text(agent_review.get("reviewer")),
                     DECISION_BOARD_FILL_INSTRUCTION,
                     _decision_board_accept_rule(
                         gate,

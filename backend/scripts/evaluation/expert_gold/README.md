@@ -273,7 +273,9 @@ Use `review-priority.md` to decide which candidates to inspect first, then use
 with priority, allowed actions, required checks, source quote, and open links.
 The board includes empty `expert_action`, `issue_type`, `expert_note`, and
 `corrected_*` columns for human input, plus `fill_instruction`, `accept_rule`,
-and `reject_issue_options` columns that explain how to complete each row.
+and `reject_issue_options` columns that explain how to complete each row. Read-only
+`label_status` and `ai_review_*` columns expose the current Agent review so the
+expert can confirm or override it; they never prefill `expert_action`.
 In the browser review workspace, paste the filled TSV directly into Reviewed
 decisions and run Dry run before Import decisions. For offline CLI workflows,
 merge it back into the JSONL template first:

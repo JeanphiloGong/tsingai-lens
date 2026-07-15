@@ -669,6 +669,28 @@ def test_objective_understanding_projects_pairwise_comparison_as_finding():
         claim["claim_id"],
     )
     assert review_finding["title"] == "scanning strategy -> yield strength"
+    assert review_finding["statement"] == (
+        "Selected source table rows report yield strength of 462.02 MPa for "
+        "scanning strategy A, versus 278.76 MPa for scanning strategy B, with "
+        "energy density 150 and scanning speed 0.111 and hatch spacing 0.12 "
+        "fixed. The corresponding condition rows report relative-density "
+        "values of 99.45 for scanning strategy A and 96.7 for scanning strategy "
+        "B. This paired observation does not separate a direct "
+        "scanning-strategy effect from a relative-density-mediated contribution."
+    )
+    assert review_finding["mediators"] == ["relative density"]
+    assert review_finding["relation_chain"][0]["mediators"] == [
+        "relative density"
+    ]
+    assert review_finding["comparison_summary"]["controlled_conditions"] == [
+        {"axis": "energy density", "value": "150"},
+        {"axis": "scanning speed", "value": "0.111"},
+        {"axis": "hatch spacing", "value": "0.12"},
+    ]
+    assert "relative_density_mediator_not_isolated" in review_finding["warnings"]
+    assert "relative_density_mediator_not_isolated" in review_finding[
+        "review_reasons"
+    ]
     assert review_finding["dataset_use_status"] == "review_candidate"
     assert review_finding["evidence_bundle"]["condition_context"] == [
         condition_ref["evidence_ref_id"]
@@ -700,6 +722,8 @@ def test_objective_understanding_projects_pairwise_comparison_as_finding():
         reprojected,
         claim["claim_id"],
     )
+    assert reprojected_finding["statement"] == review_finding["statement"]
+    assert reprojected_finding["mediators"] == ["relative density"]
     assert reprojected_finding["evidence_bundle"]["condition_context"] == [
         reprojected_condition_refs[0]["evidence_ref_id"]
     ]
@@ -12711,7 +12735,9 @@ def test_table_row_review_candidate_syncs_projected_relation_semantics():
         service._finding_as_review_candidate(
             finding,
             reason="table_row_needs_expert_review",
-        )
+        ),
+        evidence_by_id={},
+        tables_by_id={},
     )
 
     expected_statement = (

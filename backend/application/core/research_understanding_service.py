@@ -8545,6 +8545,7 @@ class ResearchUnderstandingService:
         finding: Mapping[str, Any],
         *,
         statement: str,
+        scanning_strategy_density_context: Mapping[str, Any],
     ) -> str:
         text = (_text(statement) or "").strip()
         if not text:
@@ -8578,6 +8579,23 @@ class ResearchUnderstandingService:
             fixed_clause = (
                 f", with {' and '.join(conditions)} fixed" if conditions else ""
             )
+            if scanning_strategy_density_context:
+                baseline_density = _text(
+                    scanning_strategy_density_context.get("baseline_density")
+                )
+                observed_density = _text(
+                    scanning_strategy_density_context.get("observed_density")
+                )
+                return (
+                    f"Selected source table rows report {outcome} of {observed_value} "
+                    f"for {observed_label}, versus {baseline_value} for "
+                    f"{baseline_label}{fixed_clause}. The corresponding condition "
+                    f"rows report relative-density values of {observed_density} for "
+                    f"{observed_label} and {baseline_density} for {baseline_label}. "
+                    "This paired observation does not separate a direct "
+                    "scanning-strategy effect from a relative-density-mediated "
+                    "contribution."
+                )
             if _normalize_match_text(_text(summary.get("variable")) or "") == (
                 "heat treatment type"
             ):
@@ -8650,6 +8668,134 @@ class ResearchUnderstandingService:
         if normalized == "hip" or "hot isostatic" in normalized:
             return "HIP treatment bundle"
         return f"{treatment} treatment bundle"
+
+    def _scanning_strategy_density_context(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, Any]:
+        summary = _mapping(finding.get("comparison_summary"))
+        if _normalize_match_text(_text(summary.get("variable")) or "") not in {
+            "scan strategy",
+            "scanning strategy",
+        }:
+            return {}
+        baseline = _mapping(summary.get("baseline"))
+        observed = _mapping(summary.get("observed"))
+        baseline_strategy = re.sub(
+            r"^(?:scanning|scan)\s+strategy\s*=?\s*",
+            "",
+            _text(baseline.get("label")) or "",
+            flags=re.IGNORECASE,
+        ).strip()
+        observed_strategy = re.sub(
+            r"^(?:scanning|scan)\s+strategy\s*=?\s*",
+            "",
+            _text(observed.get("label")) or "",
+            flags=re.IGNORECASE,
+        ).strip()
+        if not baseline_strategy or not observed_strategy:
+            return {}
+        controlled_conditions = [
+            dict(condition)
+            for condition in _mapping_list(summary.get("controlled_conditions"))
+        ]
+        common_context = {
+            axis: value
+            for condition in controlled_conditions
+            if (axis := _text(condition.get("axis")))
+            and (value := _text(condition.get("value")))
+        }
+        for ref_id in _strings(
+            _mapping(finding.get("evidence_bundle")).get("condition_context")
+        ):
+            ref = evidence_by_id.get(ref_id, {})
+            source_ref = _text(_locator_mapping(ref.get("locator")).get("source_ref"))
+            table = tables_by_id.get(source_ref or "")
+            if table is None:
+                continue
+            baseline_match = self._comparison_condition_table_row(
+                table,
+                comparison_axis="scanning strategy",
+                context={
+                    **common_context,
+                    "scanning strategy": baseline_strategy,
+                },
+            )
+            observed_match = self._comparison_condition_table_row(
+                table,
+                comparison_axis="scanning strategy",
+                context={
+                    **common_context,
+                    "scanning strategy": observed_strategy,
+                },
+            )
+            if baseline_match is None or observed_match is None:
+                continue
+            headers = list(table.column_headers)
+            relative_density_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if _normalize_match_text(header) == "relative density"
+                ),
+                None,
+            )
+            if relative_density_index is None:
+                continue
+            baseline_row = baseline_match[1]
+            observed_row = observed_match[1]
+            baseline_density = _text(baseline_row[relative_density_index])
+            observed_density = _text(observed_row[relative_density_index])
+            if (
+                not baseline_density
+                or not observed_density
+                or self._energy_density_condition_matches(
+                    baseline_density,
+                    observed_density,
+                )
+            ):
+                continue
+            hatch_spacing_index = next(
+                (
+                    index
+                    for index, header in enumerate(headers)
+                    if _normalize_match_text(self._display_axis_label(header))
+                    in {"hatch space", "hatch spacing"}
+                ),
+                None,
+            )
+            if hatch_spacing_index is not None:
+                baseline_hatch = _text(baseline_row[hatch_spacing_index])
+                observed_hatch = _text(observed_row[hatch_spacing_index])
+                if (
+                    baseline_hatch
+                    and observed_hatch
+                    and self._energy_density_condition_matches(
+                        baseline_hatch,
+                        observed_hatch,
+                    )
+                    and not any(
+                        self._axis_labels_match(
+                            _text(condition.get("axis")) or "",
+                            "hatch spacing",
+                        )
+                        for condition in controlled_conditions
+                    )
+                ):
+                    controlled_conditions.append(
+                        {"axis": "hatch spacing", "value": baseline_hatch}
+                    )
+            return {
+                "baseline_density": baseline_density,
+                "observed_density": observed_density,
+                "baseline_label": f"scanning strategy {baseline_strategy}",
+                "observed_label": f"scanning strategy {observed_strategy}",
+                "controlled_conditions": controlled_conditions,
+            }
+        return {}
 
     def _finding_table_row_statement_text(self, finding: Mapping[str, Any]) -> str:
         statements = [
@@ -8799,7 +8945,11 @@ class ResearchUnderstandingService:
             goal_axes=goal_axes,
         )
         return primary, [
-            self._finding_with_review_candidate_table_semantics(finding)
+            self._finding_with_review_candidate_table_semantics(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
             for finding in review_queue
         ]
 
@@ -9989,16 +10139,58 @@ class ResearchUnderstandingService:
     def _finding_with_review_candidate_table_semantics(
         self,
         finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
     ) -> dict[str, Any]:
         updated = dict(finding)
+        summary = _mapping(updated.get("comparison_summary"))
+        scanning_strategy_density_context = (
+            self._scanning_strategy_density_context(
+                updated,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
+        )
+        if scanning_strategy_density_context:
+            summary = {
+                **summary,
+                "baseline": {
+                    **_mapping(summary.get("baseline")),
+                    "label": scanning_strategy_density_context["baseline_label"],
+                },
+                "observed": {
+                    **_mapping(summary.get("observed")),
+                    "label": scanning_strategy_density_context["observed_label"],
+                },
+                "controlled_conditions": scanning_strategy_density_context[
+                    "controlled_conditions"
+                ],
+            }
+            updated["comparison_summary"] = summary
+            updated["mediators"] = _dedupe_strings(
+                [*_strings(updated.get("mediators")), "relative density"]
+            )
+            updated["warnings"] = _dedupe_strings(
+                [
+                    *_strings(updated.get("warnings")),
+                    "relative_density_mediator_not_isolated",
+                ]
+            )
+            updated["review_reasons"] = _dedupe_strings(
+                [
+                    *_strings(updated.get("review_reasons")),
+                    "relative_density_mediator_not_isolated",
+                ]
+            )
         table_row_statement = self._finding_table_row_statement_text(updated)
         if not table_row_statement:
             return updated
         review_statement = self._review_candidate_table_row_statement(
             updated,
             statement=table_row_statement,
+            scanning_strategy_density_context=scanning_strategy_density_context,
         )
-        summary = _mapping(updated.get("comparison_summary"))
         is_heat_treatment_bundle = (
             _normalize_match_text(_text(summary.get("variable")) or "")
             == "heat treatment type"
@@ -10046,6 +10238,18 @@ class ResearchUnderstandingService:
                         **(
                             {"variable": bundle_variable}
                             if is_heat_treatment_bundle
+                            else {}
+                        ),
+                        **(
+                            {
+                                "mediators": _dedupe_strings(
+                                    [
+                                        *_strings(segment.get("mediators")),
+                                        "relative density",
+                                    ]
+                                )
+                            }
+                            if scanning_strategy_density_context
                             else {}
                         ),
                     }

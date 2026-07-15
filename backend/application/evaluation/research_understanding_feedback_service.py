@@ -1004,14 +1004,14 @@ def _training_evidence_ref_ids(
     if expert_ref_ids:
         return expert_ref_ids
     bundle = _mapping(finding.get("evidence_bundle"))
-    result_ids = {
+    training_ids = {
         ref_id
-        for role in ("direct_result", "mechanism")
+        for role in ("direct_result", "mechanism", "condition_context")
         for ref_id in _strings(bundle.get(role))
         if ref_id in evidence_ref_ids
     }
-    if result_ids:
-        return result_ids
+    if training_ids:
+        return training_ids
     return set(evidence_ref_ids)
 
 
@@ -1828,8 +1828,19 @@ def _training_messages(
     )
     if not statement:
         return []
-    evidence_lines = []
-    for index, record in enumerate(evidence_records[:8], start=1):
+    evidence_lines: list[str] = []
+    condition_lines: list[str] = []
+    result_records = [
+        record
+        for record in evidence_records
+        if _text(record.get("evidence_role")) != "condition_context"
+    ]
+    condition_records = [
+        record
+        for record in evidence_records
+        if _text(record.get("evidence_role")) == "condition_context"
+    ]
+    for index, record in enumerate(result_records[:8], start=1):
         text = _text(record.get("training_source_text")) or _text(record.get("quote"))
         if not text:
             text = _text(record.get("source_text"))
@@ -1844,6 +1855,21 @@ def _training_messages(
         page = _text(record.get("page"))
         location = f" p. {page}" if page else ""
         evidence_lines.append(f"[E{index}] {source_label}{location}: {text}")
+    for index, record in enumerate(condition_records[:8], start=1):
+        text = _text(record.get("training_source_text")) or _text(record.get("quote"))
+        if not text:
+            text = _text(record.get("source_text"))
+        if not text:
+            continue
+        source_label = (
+            _text(record.get("source_label"))
+            or _text(record.get("label"))
+            or _text(record.get("document_id"))
+            or f"condition {index}"
+        )
+        page = _text(record.get("page"))
+        location = f" p. {page}" if page else ""
+        condition_lines.append(f"[CE{index}] {source_label}{location}: {text}")
     context_lines = []
     for index, record in enumerate(context_records[:4], start=1):
         parts = [
@@ -1892,18 +1918,23 @@ def _training_messages(
             )
         ),
     }
-    user_content = "\n".join(
+    user_lines = [
+        "Extract one evidence-grounded materials research finding from the source evidence.",
+        "Return only a JSON object with statement, variables, mediators, outcomes, direction, scope_summary, support_grade, generalization_status, generalization_note, and evidence_ref_ids.",
+        "",
+        "Evidence:",
+        *(evidence_lines or ["No source evidence text available."]),
+    ]
+    if condition_lines:
+        user_lines.extend(["", "Condition evidence:", *condition_lines])
+    user_lines.extend(
         [
-            "Extract one evidence-grounded materials research finding from the source evidence.",
-            "Return only a JSON object with statement, variables, mediators, outcomes, direction, scope_summary, support_grade, generalization_status, generalization_note, and evidence_ref_ids.",
-            "",
-            "Evidence:",
-            *(evidence_lines or ["No source evidence text available."]),
             "",
             "Context:",
             *(context_lines or ["No structured context available."]),
         ]
     )
+    user_content = "\n".join(user_lines)
     return [
         {"role": "user", "content": user_content},
         {

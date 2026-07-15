@@ -914,8 +914,8 @@ review-queue 泛化候选误当作当前专家结论。`by_quality_decision`
 `training_messages`、`protocol_readiness`、`acceptance_gate`、`context_refs`、
 `feedback_refs` 和 `metadata`。`evidence_refs` 保留完整审计证据链，包含
 direct、mechanism、condition context、background 等角色；`training_evidence_refs`
-只保留应作为监督输入的 direct/mechanism 证据，若旧样本没有角色分桶则回退到
-`evidence_refs`。每条 evidence record 里的 `source_text` 保留完整原文块供审计；
+只保留应作为监督输入的 direct/mechanism/condition context 证据，若旧样本没有角色
+分桶则回退到 `evidence_refs`。每条 evidence record 里的 `source_text` 保留完整原文块供审计；
 `training_source_text` 优先使用精确 `quote`，没有 quote 时才回退到 `source_text`。
 只有 fingerprint 与当前 Finding 一致的 feedback/curation 才进入
 `feedback_refs`、`expert_target`、`gold`、`training_ready` 和训练消息；不一致或没有
@@ -937,8 +937,10 @@ fingerprint 的历史记录列在 `metadata.ignored_feedback_refs` / `ignored_cu
 Finding 复核界面提示专家是否只差复核决定，还是还需要补变量、结果、方向/范围、
 support 或可追溯证据。
 离线训练或微调准备应优先消费
-`training_evidence_refs[*].training_source_text`，不要把 condition/background
-证据当作结论监督文本。`training_messages` 是从
+`training_evidence_refs[*].training_source_text`；其中 condition context 只用于约束实验
+分组和固定变量，不能当作结论证据，background/noise 不进入训练证据。`training_messages` 会
+把 condition context 单独放在 `Condition evidence` 段，避免与 direct/mechanism 结论证据
+混淆。`training_messages` 是从
 `training_evidence_refs` 和 `expert_target` 派生的 chat-style
 `[{role, content}]` 样本：user message 包含可审计证据与上下文，assistant message
 是专家确认或校正后的结构化 finding JSON，并保留

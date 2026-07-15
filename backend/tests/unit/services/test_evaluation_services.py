@@ -993,6 +993,100 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_fr
     assert dataset["quality_summary"]["warning_counts"]["unavailable_trace"] == 0
 
 
+def test_research_understanding_feedback_service_keeps_condition_context_for_training():
+    record = _sample_understanding().to_record()
+    record["model_traces"] = []
+    record["evidence_refs"].append(
+        {
+            "evidence_ref_id": "ev-condition",
+            "source_kind": "table",
+            "document_id": "doc-1",
+            "label": "P001 process conditions",
+            "locator": {"source_ref": "table-process"},
+            "traceability_status": "direct",
+            "evidence_role": "condition_context",
+            "quote": (
+                "The non-preheated and 150 C preheated groups used the same "
+                "LPBF settings."
+            ),
+        }
+    )
+    finding = record["presentation"]["findings"][0]
+    finding["evidence_ref_ids"] = ["ev-1", "ev-condition"]
+    finding["evidence_bundle"] = {
+        "direct_result": ["ev-1"],
+        "condition_context": ["ev-condition"],
+    }
+    record["presentation"]["findings"] = [finding]
+    record["presentation"]["evidence_items"].append(
+        {
+            "evidence_ref_id": "ev-condition",
+            "document_id": "doc-1",
+            "title": "P001 process conditions",
+            "source_label": "P001 p.2",
+            "source_kind": "table",
+            "source_ref": "table-process",
+            "page": "2",
+            "quote": (
+                "The non-preheated and 150 C preheated groups used the same "
+                "LPBF settings."
+            ),
+            "source_text": (
+                "The non-preheated and 150 C preheated groups used the same "
+                "LPBF settings."
+            ),
+            "traceability_status": "direct",
+            "evidence_role": "condition_context",
+        }
+    )
+    understanding = ResearchUnderstanding.from_mapping(record)
+    repository = FakeEvaluationRepository()
+    repository.feedback = (
+        ResearchUnderstandingFeedback.from_mapping(
+            {
+                "feedback_id": "ruf-condition-context",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": finding["finding_id"],
+                "claim_id": finding["claim_id"],
+                "finding_fingerprint": ruf_service._finding_fingerprint(finding),
+                "review_status": "correct",
+                "issue_type": "none",
+                "note": "The result and controlled conditions match the sources.",
+                "reviewer": "materials-expert",
+                "created_at": "2026-07-15T09:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(understanding),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(record),
+    )
+
+    dataset = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    sample = dataset["items"][0]
+    assert [
+        ref["evidence_ref_id"] for ref in sample["training_evidence_refs"]
+    ] == ["ev-1", "ev-condition"]
+    assert [block["role"] for block in sample["input_blocks"]] == [
+        "direct_result",
+        "condition_context",
+    ]
+    assert sample["dataset_use_status"] == "training_ready"
+    user_message = sample["training_messages"][0]["content"]
+    assert "Preheating increased ductility by 14%." in user_message
+    assert "Evidence:\n[E1]" in user_message
+    assert "Condition evidence:\n[CE1]" in user_message
+    assert "non-preheated and 150 C preheated groups" in user_message
+
+
 def test_research_understanding_feedback_service_derives_dataset_input_blocks_when_matched_trace_failed():
     record = _sample_understanding().to_record()
     record["model_traces"] = [

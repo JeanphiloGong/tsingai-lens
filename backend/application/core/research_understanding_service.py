@@ -5764,6 +5764,7 @@ class ResearchUnderstandingService:
             and self._relation_can_drive_presentation_finding(
                 relation,
                 evidence_by_id=evidence_by_id,
+                existing_effects=effects,
             )
             and self._relation_matches_goal_axis(relation, goal_axes)
         ]
@@ -13116,6 +13117,14 @@ class ResearchUnderstandingService:
                     _strings(relation.get("source_object_ids")),
                 )
             ]
+        direct_relations = [
+            relation
+            for relation in direct_relations
+            if self._relation_can_support_presentation_claim(
+                relation,
+                claim_evidence_ref_ids=evidence_ref_ids,
+            )
+        ]
         related_relations = [
             relation
             for relation in direct_relations
@@ -13795,15 +13804,65 @@ class ResearchUnderstandingService:
         relation: Mapping[str, Any],
         *,
         evidence_by_id: Mapping[str, Mapping[str, Any]],
+        existing_effects: list[dict[str, Any]],
     ) -> bool:
         if "semantic_relation" not in _strings(relation.get("warnings")):
             return True
+        evidence_ref_ids = _strings(relation.get("evidence_ref_ids"))
         evidence_refs = [
             evidence_by_id[ref_id]
-            for ref_id in _strings(relation.get("evidence_ref_ids"))
+            for ref_id in evidence_ref_ids
             if ref_id in evidence_by_id
         ]
-        if not evidence_refs:
+        if not evidence_refs or len(evidence_refs) != len(evidence_ref_ids):
+            return False
+        document_ids = {
+            document_id
+            for ref in evidence_refs
+            if (document_id := _text(ref.get("document_id")))
+        }
+        if len(document_ids) != 1:
+            return False
+        relation_subject_key = self._axis_key(
+            self._presentation_relation_side(relation.get("subject"))
+        )
+        object_chain = self._relation_object_chain(relation)
+        relation_outcome_key = _normalize_match_text(
+            object_chain[-1] if object_chain else ""
+        )
+        if relation_outcome_key in {"ductility", "elongation to failure"}:
+            relation_outcome_key = "elongation"
+        relation_document_id = next(iter(document_ids))
+        matches_existing_effect = False
+        for effect in existing_effects:
+            if _text(effect.get("claim_type")) not in {
+                "comparison",
+                "finding",
+                "mechanism",
+            }:
+                continue
+            if (
+                self._axis_key(_text(effect.get("variable_axis")) or "")
+                != relation_subject_key
+            ):
+                continue
+            effect_outcome_key = _normalize_match_text(
+                _text(effect.get("target_property")) or ""
+            )
+            if effect_outcome_key in {"ductility", "elongation to failure"}:
+                effect_outcome_key = "elongation"
+            if effect_outcome_key != relation_outcome_key:
+                continue
+            effect_document_ids = {
+                document_id
+                for ref_id in _strings(effect.get("evidence_ref_ids"))
+                if (ref := evidence_by_id.get(ref_id)) is not None
+                if (document_id := _text(ref.get("document_id")))
+            }
+            if relation_document_id in effect_document_ids:
+                matches_existing_effect = True
+                break
+        if not matches_existing_effect:
             return False
         if any(
             "table"
@@ -13824,6 +13883,22 @@ class ResearchUnderstandingService:
                 statement,
                 flags=re.IGNORECASE,
             )
+        )
+
+    def _relation_can_support_presentation_claim(
+        self,
+        relation: Mapping[str, Any],
+        *,
+        claim_evidence_ref_ids: list[str],
+    ) -> bool:
+        if "semantic_relation" not in _strings(relation.get("warnings")):
+            return True
+        relation_evidence_ref_ids = set(
+            _strings(relation.get("evidence_ref_ids"))
+        )
+        return bool(
+            relation_evidence_ref_ids
+            and relation_evidence_ref_ids <= set(claim_evidence_ref_ids)
         )
 
     def _relation_matches_goal_axis(

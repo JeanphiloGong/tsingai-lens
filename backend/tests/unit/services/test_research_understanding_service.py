@@ -14786,6 +14786,185 @@ def test_with_presentation_does_not_promote_table_only_semantic_relation():
     assert understanding["presentation"]["findings"] == []
 
 
+def test_with_presentation_does_not_promote_unanchored_numeric_semantic_relation():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "limited",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-semantic-range",
+                "goal_id": "goal-semantic-range",
+                "title": "How does scan rotation affect yield strength?",
+            },
+            "claims": [],
+            "relations": [
+                {
+                    "relation_id": "rel_semantic_range",
+                    "relation_type": "conditional",
+                    "subject": "scan strategy rotation angle",
+                    "predicate": "correlates",
+                    "object": "yield strength prediction",
+                    "statement": (
+                        "Variation in scan strategy rotation angle correlates "
+                        "with yield strength prediction values ranging from "
+                        "310.48 MPa to 356.9 MPa."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.7,
+                    "evidence_ref_ids": ["evref_prediction_table"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["oeu_prediction_table"],
+                    "warnings": ["semantic_relation"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_prediction_table",
+                    "source_kind": "table",
+                    "document_id": "paper-texture",
+                    "label": "Prediction and experimental yield strength",
+                    "locator": {"source_ref": "table-prediction"},
+                    "fact_ids": ["oeu_prediction_table"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "scan strategy rotation angle"
+                        ]
+                    },
+                    "property_scope": ["yield strength"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    assert understanding["presentation"]["findings"] == []
+
+
+def test_with_presentation_does_not_attach_semantic_relation_extra_evidence_to_claim():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-preheat-evidence",
+                "goal_id": "goal-preheat-evidence",
+                "title": "How does build platform preheating affect ductility?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat",
+                    "claim_type": "finding",
+                    "statement": "Build platform preheating increased ductility by 14%.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["oeu_preheat"],
+                    "warnings": [],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_grounded",
+                    "relation_type": "increases",
+                    "subject": "build platform preheating",
+                    "predicate": "increases",
+                    "object": "ductility",
+                    "statement": "Build platform preheating increased ductility by 14%.",
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_preheat"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["oeu_preheat"],
+                    "warnings": [],
+                },
+                {
+                    "relation_id": "rel_preheat_semantic_cross_paper",
+                    "relation_type": "increases",
+                    "subject": "build platform preheating",
+                    "predicate": "increases",
+                    "object": "microstructure -> ductility",
+                    "statement": (
+                        "Build platform preheating increased ductility through "
+                        "microstructure evolution."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.8,
+                    "evidence_ref_ids": ["evref_preheat", "evref_unrelated_ved"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["oeu_preheat", "oeu_unrelated_ved"],
+                    "warnings": ["semantic_relation"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_preheat",
+                    "source_kind": "paragraph",
+                    "document_id": "paper-preheat",
+                    "label": "Preheating result",
+                    "locator": {"source_ref": "block-preheat"},
+                    "fact_ids": ["oeu_preheat"],
+                    "quote": "Preheating increased ductility by 14%.",
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+                {
+                    "evidence_ref_id": "evref_unrelated_ved",
+                    "source_kind": "paragraph",
+                    "document_id": "paper-fatigue",
+                    "label": "Unrelated VED result",
+                    "locator": {"source_ref": "block-unrelated-ved"},
+                    "fact_ids": ["oeu_unrelated_ved"],
+                    "quote": (
+                        "Equivalent diameter increased from 81 to 115 um as "
+                        "energy density increased from 50.8 to 84 J/mm3."
+                    ),
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["build platform preheating"]
+                    },
+                    "property_scope": ["ductility"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    findings = understanding["presentation"]["findings"]
+    assert len(findings) == 1
+    assert findings[0]["relation_ids"] == ["rel_preheat_grounded"]
+    assert findings[0]["evidence_bundle"]["direct_result"] == ["evref_preheat"]
+
+
 def test_with_presentation_projects_property_axis_relation_as_finding():
     corrosion_text = (
         "The porosity level and pore size are factors affecting pitting "

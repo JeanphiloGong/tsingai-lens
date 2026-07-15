@@ -75,22 +75,6 @@ class _StructuredProtocolDraft(BaseModel):
             "citations, source facts, or multiple actions in one string."
         ),
     )
-    proposed_measurements: list[str] = Field(
-        default_factory=list,
-        max_length=12,
-        description=(
-            "One plain proposed measurement choice per list item. Do not include "
-            "category labels, citations, or source-backed claims."
-        ),
-    )
-    proposed_controls: list[str] = Field(
-        min_length=1,
-        max_length=12,
-        description=(
-            "One plain proposed control per list item. Do not include category labels, "
-            "citations, or source-backed claims."
-        ),
-    )
     design_risks: list[str] = Field(
         min_length=1,
         max_length=12,
@@ -1067,7 +1051,8 @@ class GoalSessionService:
         repair_prompt = (
             f"{prompt}\n\n"
             "Repair the protocol as structured data. Return only proposed variable "
-            "manipulations, proposed measurements, proposed controls, and design risks. "
+            "manipulations and design risks. Lens derives measurements and controls "
+            "deterministically from the curated Findings and variable matrix. "
             "Do not generate or restate source-backed facts; Lens derives those directly "
             "from the curated Findings. Proposed items must not invent numeric settings, "
             "sample counts, standards, or named methods. Do not copy source numbers, "
@@ -1111,6 +1096,14 @@ class GoalSessionService:
             curated_findings,
             allowed_source_labels=allowed_source_labels,
         )
+        ved_grounding = any(
+            re.search(
+                r"\bVED\b|volumetric\s+energy\s+density",
+                item,
+                flags=re.IGNORECASE,
+            )
+            for item in grounding["variable_observations"]
+        )
         variable_items = [
             f"- Source-backed: {item}" for item in grounding["variable_observations"]
         ]
@@ -1121,21 +1114,19 @@ class GoalSessionService:
         measurement_items = [
             f"- Source-backed: {item}" for item in grounding["reported_outcomes"]
         ]
-        measurement_items.extend(
-            self._safe_proposed_protocol_items(
-                draft.proposed_measurements,
-                fallback=(
-                    "The expert selects validated methods for the source-backed "
-                    "outcomes."
-                ),
-            )
+        measurement_items.append(
+            "- Proposed design choice: The expert selects validated methods for "
+            "the source-backed outcomes."
         )
-        control_items = self._safe_proposed_protocol_items(
-            draft.proposed_controls,
-            fallback=(
-                "The expert defines controls for non-manipulated material, process, "
-                "and test variables."
-            ),
+        control_items = []
+        if ved_grounding:
+            control_items.append(
+                "- Proposed design choice: Keep the VED constituents identified as "
+                "fixed in the Variable matrix unchanged across conditions."
+            )
+        control_items.append(
+            "- Proposed design choice: The expert defines controls for "
+            "non-manipulated material, process, and test variables."
         )
         evidence_limits = [
             f"- Evidence limit: {item}" for item in grounding["evidence_limits"]
@@ -1151,14 +1142,6 @@ class GoalSessionService:
             if has_affirmative_ved_isolation_claim(text):
                 continue
             design_risks.append(f"- Design risk: {text}")
-        ved_grounding = any(
-            re.search(
-                r"\bVED\b|volumetric\s+energy\s+density",
-                item,
-                flags=re.IGNORECASE,
-            )
-            for item in grounding["variable_observations"]
-        )
         if ved_grounding and not any(
             "does not isolate" in item.lower() for item in design_risks
         ):
@@ -1268,33 +1251,16 @@ class GoalSessionService:
 
     def _proposed_protocol_text(self, value: str) -> str:
         raw_text = " ".join(str(value or "").split()).strip()
+        text = self._clean_protocol_text(raw_text)
         if re.search(
             r"(?:Source-backed|Proposed design choice|Evidence limit|Design risk)\s*:",
-            raw_text,
+            text,
             flags=re.IGNORECASE,
         ):
             raise ValueError("proposed protocol item contains an embedded category label")
-        text = self._clean_protocol_text(value)
         if proposed_design_choice_has_unsupported_detail(text):
             raise ValueError("proposed protocol item contains an unsupported detail")
         return text
-
-    def _safe_proposed_protocol_items(
-        self,
-        values: list[str],
-        *,
-        fallback: str,
-    ) -> list[str]:
-        items: list[str] = []
-        for value in values:
-            try:
-                text = self._proposed_protocol_text(value)
-            except ValueError:
-                continue
-            items.append(f"- Proposed design choice: {text}")
-        if items:
-            return items
-        return [f"- Proposed design choice: {fallback}"]
 
     def _clean_protocol_text(self, value: str) -> str:
         text = " ".join(str(value or "").split()).strip()
@@ -1412,8 +1378,11 @@ class GoalSessionService:
                 "propose a constituent-controlled or factorial validation. Changing one "
                 "constituent estimates that constituent-mediated path; never call it an "
                 "isolated or universal VED-only effect. Separate source-backed "
-                "observations from protocol choices, and mark uncited settings or methods "
-                "as a proposed design choice. In Variable matrix, Measurements, and "
+                "observations from protocol choices, and mark uncited variable "
+                "manipulations as a proposed design choice. Lens derives Measurements "
+                "from source-backed outcomes and Controls from the variable matrix plus "
+                "expert-selection placeholders; do not invent measurement methods or "
+                "control variables. In Variable matrix, Measurements, and "
                 "Controls, prefix every bullet with exactly 'Source-backed:' and include "
                 "exact bracket citations such as [Source 1], or prefix it with exactly "
                 "'Proposed design choice:'. Do not leave these bullets unlabeled. For "

@@ -1002,7 +1002,8 @@ Risks or limits
 """
     repaired_protocol = {
         "proposed_variable_manipulations": [
-            "Compare ambient and preheated builds while the expert selects the levels."
+            "Proposed design choice: Compare ambient and preheated builds while "
+            "the expert selects the levels."
         ],
         "proposed_measurements": [
             "The expert selects a validated defect-characterization method."
@@ -1052,6 +1053,10 @@ Risks or limits
     assert len(llm_client.beta.chat.completions.calls) == 1
     parse_call = llm_client.beta.chat.completions.calls[0]
     assert parse_call["response_format"].__name__ == "_StructuredProtocolDraft"
+    assert set(parse_call["response_format"].model_fields) == {
+        "proposed_variable_manipulations",
+        "design_risks",
+    }
     repair_prompt = parse_call["messages"][1]["content"]
     assert "Repair the protocol as structured data" in repair_prompt
     assert "Normalize the protocol into the required evidence/design fields" in (
@@ -1068,10 +1073,6 @@ def test_protocol_renderer_replaces_ved_isolation_claim_with_mediated_boundary(
         proposed_variable_manipulations=[
             "Vary laser power to create VED levels while holding scan speed, "
             "hatch spacing, and layer thickness fixed."
-        ],
-        proposed_measurements=["Measure fatigue strength."],
-        proposed_controls=[
-            "Hold scan speed, hatch spacing, and layer thickness fixed."
         ],
         design_risks=[
             "This protocol isolates VED by fixing its constituent parameters."
@@ -1109,17 +1110,19 @@ def test_protocol_renderer_drops_unattributed_source_details_from_proposals(
     tmp_path,
 ):
     service, _ = _service(tmp_path, content="unused")
-    draft = _StructuredProtocolDraft(
-        proposed_variable_manipulations=[
-            "Vary laser power to create VED levels while holding scan speed, "
-            "hatch spacing, and layer thickness fixed."
-        ],
-        proposed_measurements=[
-            "Measure maximum defect length by LCSM.",
-            "Measure fatigue strength at 10⁴ cycles.",
-        ],
-        proposed_controls=["Use 316L on the same PBF-LB machine."],
-        design_risks=["Review uncontrolled process interactions."],
+    draft = _StructuredProtocolDraft.model_validate(
+        {
+            "proposed_variable_manipulations": [
+                "Vary laser power to create VED levels while holding scan speed, "
+                "hatch spacing, and layer thickness fixed."
+            ],
+            "proposed_measurements": [
+                "Measure maximum defect length by LCSM.",
+                "Measure fatigue strength at 10⁴ cycles.",
+            ],
+            "proposed_controls": ["Use 316L on the same PBF-LB machine."],
+            "design_risks": ["Review uncontrolled process interactions."],
+        }
     )
     finding = {
         "finding": "Coupled VED parameter sets were associated with fatigue strength.",
@@ -1147,6 +1150,54 @@ def test_protocol_renderer_drops_unattributed_source_details_from_proposals(
     assert (
         "Proposed design choice: The expert defines controls for non-manipulated "
         "material, process, and test variables."
+    ) in answer
+    assert service._protocol_contract_is_valid(answer) is True
+
+
+def test_protocol_renderer_does_not_delegate_measurements_or_controls_to_model(
+    tmp_path,
+):
+    service, _ = _service(tmp_path, content="unused")
+    draft = _StructuredProtocolDraft.model_validate(
+        {
+            "proposed_variable_manipulations": [
+                "Vary laser power to create VED levels while holding scan speed, "
+                "hatch spacing, and layer thickness fixed."
+            ],
+            "proposed_measurements": ["Measure any convenient material response."],
+            "proposed_controls": [
+                "Keep nozzle height, lens calibration, and chamber pressure constant."
+            ],
+            "design_risks": ["Review uncontrolled process interactions."],
+        }
+    )
+    finding = {
+        "finding": "Coupled VED parameter sets were associated with fatigue strength.",
+        "variables": ["coupled parameter sets grouped by VED"],
+        "outcomes": ["fatigue strength"],
+        "direction": "associated",
+        "scope_summary": "316L stainless steel, one paper",
+        "generalization_note": "Treat as paper-level evidence.",
+        "evidence": [{"evidence_source": "Source 1"}],
+    }
+
+    answer = service._render_protocol_draft(
+        draft,
+        allowed_source_labels={"Source 1"},
+        curated_findings=[finding],
+    )
+
+    assert "any convenient material response" not in answer
+    assert "nozzle height" not in answer
+    assert "lens calibration" not in answer
+    assert "chamber pressure" not in answer
+    assert (
+        "Proposed design choice: The expert selects validated methods for the "
+        "source-backed outcomes."
+    ) in answer
+    assert (
+        "Proposed design choice: Keep the VED constituents identified as fixed "
+        "in the Variable matrix unchanged across conditions."
     ) in answer
     assert service._protocol_contract_is_valid(answer) is True
 

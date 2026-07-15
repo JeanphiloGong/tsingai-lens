@@ -53,6 +53,9 @@ own database connections, SQL, schema initialization, or row encoding.
   Proposed design choices cannot contain unattributed numeric, material,
   equipment, or method-acronym details; unsupported generated details are
   dropped in favor of an explicit expert-selection placeholder.
+  Structured model output is limited to variable manipulations and design
+  risks. Measurements come from source-backed Finding outcomes, while controls
+  come from the variable matrix and explicit expert-selection placeholders.
   Existing Copilot drafts that violate either rule are reported as stale
   instead of being promoted for review.
 - `brief_service.py`

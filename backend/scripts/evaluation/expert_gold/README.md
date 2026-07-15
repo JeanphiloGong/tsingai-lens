@@ -550,7 +550,8 @@ LENS_CHECK_PASSWORD=admin.. \
 ```
 
 `--runtime-write-check` creates a small manual smoke experiment-plan draft for
-the first checked goal and immediately updates it to `archived`. It proves the
+a protocol-ready checked goal when one exists, otherwise the first checked goal,
+and immediately updates it to `archived`. It proves the
 running API can persist editable goal-scoped plans, but it does not call the
 LLM or create a Goal Copilot source message. The stricter Goal Copilot save
 contract is enforced in application code and tests: a saved plan with

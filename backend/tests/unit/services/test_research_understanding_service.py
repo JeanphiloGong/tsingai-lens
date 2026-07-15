@@ -7598,7 +7598,7 @@ def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_target
     assert finding["support_grade"] == "partial"
 
 
-def test_with_presentation_recalls_goal_variable_relation_when_claim_is_off_axis():
+def test_with_presentation_filters_claim_and_evidence_recalibrated_off_axis_relation():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(
         {
@@ -7655,6 +7655,20 @@ def test_with_presentation_recalls_goal_variable_relation_when_claim_is_off_axis
                     "context_ids": ["ctx_preheat"],
                     "source_object_ids": ["unit_preheat"],
                 },
+                {
+                    "relation_id": "rel_preheat_grain_coarsening",
+                    "relation_type": "increases",
+                    "subject": "build platform preheating",
+                    "predicate": "increases",
+                    "object": "grain coarsening",
+                    "statement": (
+                        "Build platform preheating increases grain coarsening."
+                    ),
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_ved_grains"],
+                    "context_ids": ["ctx_ved_grains"],
+                    "source_object_ids": ["unit_ved_grains"],
+                },
             ],
             "evidence_refs": [
                 {
@@ -7680,6 +7694,20 @@ def test_with_presentation_recalls_goal_variable_relation_when_claim_is_off_axis
                         "and changed the microstructure."
                     ),
                 },
+                {
+                    "evidence_ref_id": "evref_ved_grains",
+                    "source_kind": "text_window",
+                    "document_id": "paper-3",
+                    "label": "P003 VED result",
+                    "locator": {"source_ref": "blk-ved-grains"},
+                    "fact_ids": ["unit_ved_grains"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Grain size increased from 81 to 115 um as VED increased "
+                        "from 50.8 to 84 J/mm3."
+                    ),
+                },
             ],
             "contexts": [
                 {
@@ -7701,6 +7729,13 @@ def test_with_presentation_recalls_goal_variable_relation_when_claim_is_off_axis
                 },
                 {
                     "context_id": "ctx_preheat",
+                    "label": "Claim applicability",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {"process": "LPBF"},
+                    "property_scope": ["microstructure"],
+                },
+                {
+                    "context_id": "ctx_ved_grains",
                     "label": "Claim applicability",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "LPBF"},

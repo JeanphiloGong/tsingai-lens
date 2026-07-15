@@ -5071,6 +5071,16 @@ class ResearchUnderstandingService:
             )
             for effect in effects
         ]
+        if _text(scope.get("scope_type")) == "goal" and goal_axes:
+            findings = [
+                finding
+                for finding in findings
+                if any(
+                    self._axis_labels_match(variable, axis)
+                    for variable in _strings(finding.get("variables"))
+                    for axis in goal_axes
+                )
+            ]
         findings = [
             finding
             for finding in findings

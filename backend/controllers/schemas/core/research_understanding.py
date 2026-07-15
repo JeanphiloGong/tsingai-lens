@@ -531,10 +531,25 @@ class ResearchUnderstandingDatasetQualitySummaryResponse(BaseModel):
     by_quality_decision: dict[str, int] = Field(default_factory=dict)
     by_presentation_bucket: dict[str, int] = Field(default_factory=dict)
     by_bucket_quality_decision: dict[str, dict[str, int]] = Field(default_factory=dict)
+    by_review_reason: dict[str, int] = Field(default_factory=dict)
+    by_system_warning: dict[str, int] = Field(default_factory=dict)
+    by_review_candidate_reason: dict[str, int] = Field(default_factory=dict)
+    by_review_candidate_warning: dict[str, int] = Field(default_factory=dict)
+    optimization_breakdown: dict[str, dict[str, dict[str, dict[str, int]]]] = Field(
+        default_factory=dict
+    )
     top_error_categories: list[dict[str, Any]] = Field(default_factory=list)
     top_issue_types: list[dict[str, Any]] = Field(default_factory=list)
     top_review_reasons: list[dict[str, Any]] = Field(default_factory=list)
     top_system_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    top_variable_issue_types: list[dict[str, Any]] = Field(default_factory=list)
+    top_outcome_issue_types: list[dict[str, Any]] = Field(default_factory=list)
+    top_direction_issue_types: list[dict[str, Any]] = Field(default_factory=list)
+    top_evidence_role_issue_types: list[dict[str, Any]] = Field(default_factory=list)
+    top_variable_review_reasons: list[dict[str, Any]] = Field(default_factory=list)
+    top_outcome_review_reasons: list[dict[str, Any]] = Field(default_factory=list)
+    top_direction_review_reasons: list[dict[str, Any]] = Field(default_factory=list)
+    top_evidence_role_review_reasons: list[dict[str, Any]] = Field(default_factory=list)
     warning_counts: dict[str, int] = Field(default_factory=dict)
 
 

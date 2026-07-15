@@ -210,10 +210,80 @@ class FakeResearchUnderstandingFeedbackService:
                 "by_bucket_quality_decision": {
                     "primary": {"accepted_after_curation_match": 1}
                 },
+                "by_review_reason": {"single_paper_evidence": 1},
+                "by_system_warning": {"needs_expert_review": 1},
+                "by_review_candidate_reason": {},
+                "by_review_candidate_warning": {},
+                "optimization_breakdown": {
+                    "by_variable": {
+                        "build platform preheating": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                    "by_outcome": {
+                        "ductility": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                    "by_direction": {
+                        "increases": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                    "by_evidence_role": {
+                        "direct_result": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                },
                 "top_error_categories": [{"name": "none", "count": 1}],
                 "top_issue_types": [{"name": "none", "count": 1}],
-                "top_review_reasons": [],
-                "top_system_warnings": [],
+                "top_review_reasons": [{"name": "single_paper_evidence", "count": 1}],
+                "top_system_warnings": [{"name": "needs_expert_review", "count": 1}],
+                "top_variable_issue_types": [],
+                "top_outcome_issue_types": [],
+                "top_direction_issue_types": [],
+                "top_evidence_role_issue_types": [],
+                "top_variable_review_reasons": [
+                    {
+                        "name": "build platform preheating",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "top_outcome_review_reasons": [
+                    {
+                        "name": "ductility",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "top_direction_review_reasons": [
+                    {
+                        "name": "increases",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "top_evidence_role_review_reasons": [
+                    {
+                        "name": "direct_result",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
                 "warning_counts": {
                     "missing_evidence": 0,
                     "missing_source_text": 0,
@@ -901,6 +971,18 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.quality_summary.by_bucket_quality_decision == {
         "primary": {"accepted_after_curation_match": 1}
     }
+    assert response.quality_summary.by_review_reason == {"single_paper_evidence": 1}
+    assert response.quality_summary.by_system_warning == {"needs_expert_review": 1}
+    assert response.quality_summary.optimization_breakdown["by_variable"][
+        "build platform preheating"
+    ]["issue_type"] == {"none": 1}
+    assert response.quality_summary.top_evidence_role_review_reasons == [
+        {
+            "name": "direct_result",
+            "metric": "single_paper_evidence",
+            "count": 1,
+        }
+    ]
     assert response.items[0].label_status == "gold"
     assert response.items[0].presentation_bucket == "primary"
     assert response.items[0].evidence_refs[0]["source_text"] == (

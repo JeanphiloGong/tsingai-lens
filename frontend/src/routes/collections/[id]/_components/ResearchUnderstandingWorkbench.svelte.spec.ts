@@ -4012,7 +4012,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 								accept_count: 1,
 								reject_count: 0,
 								correct_count: 0,
-								next_review_finding_id: ''
+								next_review_finding_id: 'finding_mechanism_limited'
 							}
 						],
 						affected_goals: [
@@ -4100,6 +4100,15 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(browserPage.getByText('goal_1a7a26d850b9').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('1 actionable, 0 skipped · accept 1, reject 0, correct 0'))
+			.toBeInTheDocument();
+		await browserPage
+			.getByRole('button', {
+				name: 'Review next finding Annealing may reduce cellular substructure.'
+			})
+			.click();
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect
+			.element(findingDetail.getByText('Annealing may reduce cellular substructure.').first())
 			.toBeInTheDocument();
 		await expect
 			.element(

@@ -3564,9 +3564,21 @@
 	}
 
 	function reviewImportNextFindingLabel(record: Record<string, unknown>) {
-		return typeof record.next_review_finding_id === 'string' && record.next_review_finding_id
-			? formatShortIdentifier(record.next_review_finding_id)
+		const finding = reviewImportNextFinding(record);
+		if (finding) return finding.statement || finding.title;
+		const findingId = reviewImportNextFindingId(record);
+		return findingId ? formatShortIdentifier(findingId) : '';
+	}
+
+	function reviewImportNextFindingId(record: Record<string, unknown>) {
+		return typeof record.next_review_finding_id === 'string'
+			? record.next_review_finding_id
 			: '';
+	}
+
+	function reviewImportNextFinding(record: Record<string, unknown>) {
+		const findingId = reviewImportNextFindingId(record);
+		return allDisplayFindingRows.find((finding) => finding.finding_id === findingId) ?? null;
 	}
 
 	async function submitReviewImport(dryRun: boolean) {
@@ -4497,6 +4509,22 @@
 																		finding: reviewImportNextFindingLabel(goalProgress)
 																	})}
 																</small>
+																{#if reviewImportNextFinding(goalProgress)}
+																	<button
+																		type="button"
+																		class="research-understanding-workbench__review-import-next"
+																		aria-label={$t(
+																			'research.understanding.reviewImportOpenNextFinding',
+																			{
+																				finding: reviewImportNextFindingLabel(goalProgress)
+																			}
+																		)}
+																		on:click={() =>
+																			openFindingDetail(reviewImportNextFindingId(goalProgress))}
+																	>
+																		{$t('research.understanding.reviewLoopOpenNextFinding')}
+																	</button>
+																{/if}
 															{/if}
 														</li>
 													{/each}
@@ -7017,6 +7045,25 @@
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-next {
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__review-import-next:hover,
+	.research-understanding-workbench__review-import-next:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
 	}
 
 	.research-understanding-workbench__review-import-issues {

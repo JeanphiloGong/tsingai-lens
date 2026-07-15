@@ -417,6 +417,7 @@ const translations: Record<Language, Translations> = {
 				reviewImportGoalProgress:
 					'{actionable} actionable, {skipped} skipped · accept {accept}, reject {reject}, correct {correct}',
 				reviewImportNextFinding: 'Next finding: {finding}',
+				reviewImportOpenNextFinding: 'Review next finding {finding}',
 				reviewImportUnknownGoal: 'Unknown goal',
 				reviewImportAffectedGoalsTitle: 'Affected goal readiness',
 				reviewImportAffectedGoalReadiness:
@@ -3802,6 +3803,7 @@ const translations: Record<Language, Translations> = {
 				reviewImportGoalProgress:
 					'{actionable} 行可写入，{skipped} 行待复核 · accept {accept}，reject {reject}，correct {correct}',
 				reviewImportNextFinding: '下一条 Finding：{finding}',
+				reviewImportOpenNextFinding: '复核下一条 Finding {finding}',
 				reviewImportUnknownGoal: '未知研究目标',
 				reviewImportAffectedGoalsTitle: '受影响研究目标状态',
 				reviewImportAffectedGoalReadiness:

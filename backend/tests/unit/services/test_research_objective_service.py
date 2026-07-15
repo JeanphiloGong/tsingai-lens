@@ -5374,6 +5374,13 @@ def test_research_objective_service_resolves_measurements_from_process_units(
                 "value": 236.65,
             },
             "unit": "MPa",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-mechanical-results",
+                    "evidence_role": "direct_support",
+                }
+            ],
             "resolution_status": "partial",
             "confidence": 0.8,
         }
@@ -5396,6 +5403,13 @@ def test_research_objective_service_resolves_measurements_from_process_units(
             "test_condition": {
                 "Build atmosphere": "argon",
             },
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-process-conditions",
+                    "evidence_role": "background_context",
+                }
+            ],
             "resolution_status": "resolved",
             "confidence": 0.8,
         }
@@ -5460,6 +5474,18 @@ def test_research_objective_service_resolves_measurements_from_process_units(
             "Sample number": "2",
         },
     }
+    assert resolved_measurement.source_refs == (
+        {
+            "source_kind": "table",
+            "source_ref": "table-mechanical-results",
+            "evidence_role": "direct_support",
+        },
+        {
+            "source_kind": "table",
+            "source_ref": "table-process-conditions",
+            "evidence_role": "condition_context",
+        },
+    )
     assert resolved_measurement.resolution_status == "resolved"
 
 

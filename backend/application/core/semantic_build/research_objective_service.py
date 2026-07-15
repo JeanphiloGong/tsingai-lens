@@ -4183,6 +4183,7 @@ class ResearchObjectiveService:
                 continue
             merged_process_context = dict(unit.process_context)
             merged_test_condition = dict(unit.test_condition)
+            context_source_refs: list[dict[str, Any]] = []
             for context_unit in context_units:
                 merged_process_context = {
                     **context_unit.process_context,
@@ -4192,6 +4193,16 @@ class ResearchObjectiveService:
                     **context_unit.test_condition,
                     **merged_test_condition,
                 }
+                context_source_refs.extend(
+                    {
+                        **dict(source_ref),
+                        "evidence_role": "condition_context",
+                    }
+                    for source_ref in context_unit.source_refs
+                )
+            merged_source_refs = self._dedupe_objective_source_refs(
+                (unit.source_refs, context_source_refs)
+            )
             merged_sample_context = self._objective_resolved_sample_context(
                 sample_context=unit.sample_context,
                 context_sample_context=self._merged_objective_context_sample_context(
@@ -4202,6 +4213,7 @@ class ResearchObjectiveService:
                 merged_process_context == unit.process_context
                 and merged_test_condition == unit.test_condition
                 and merged_sample_context == unit.sample_context
+                and merged_source_refs == unit.source_refs
             ):
                 resolved_units.append(unit)
                 continue
@@ -4224,6 +4236,7 @@ class ResearchObjectiveService:
                     "process_context": merged_process_context,
                     "sample_context": merged_sample_context,
                     "test_condition": merged_test_condition,
+                    "source_refs": merged_source_refs,
                     "resolved_condition": resolved_condition,
                     "resolution_status": "resolved",
                 }

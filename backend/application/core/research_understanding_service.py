@@ -5167,6 +5167,14 @@ class ResearchUnderstandingService:
             )
             for finding in review_queue_findings
         ]
+        review_queue_findings = [
+            self._finding_with_preheating_table_comparison(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
+            for finding in review_queue_findings
+        ]
         review_queue_findings = self._review_findings_without_low_magnitude_table_rows(
             review_queue_findings,
             evidence_by_id=evidence_by_id,
@@ -7274,11 +7282,98 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         tables_by_id: Mapping[str, SourceTable],
     ) -> float | None:
+        comparison = self._finding_preheating_table_comparison_values(
+            finding,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
+        )
+        if _text(comparison.get("outcome_axis")) not in {
+            "yield strength",
+            "ultimate tensile strength",
+        }:
+            return None
+        baseline = _float_text(comparison.get("baseline"))
+        observed = _float_text(comparison.get("observed"))
+        if baseline is None or observed is None or baseline == 0:
+            return None
+        return abs(observed - baseline) / abs(baseline) * 100
+
+    def _finding_with_preheating_table_comparison(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, Any]:
+        if not self._finding_has_only_table_direct_result(
+            finding,
+            evidence_by_id=evidence_by_id,
+        ) or self._finding_has_non_direct_text_support(
+            _mapping(finding.get("evidence_bundle")),
+            evidence_by_id=evidence_by_id,
+        ):
+            return dict(finding)
+        comparison = self._finding_preheating_table_comparison_values(
+            finding,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
+        )
+        outcome_axis = _text(comparison.get("outcome_axis")) or ""
+        baseline = _text(comparison.get("baseline")) or ""
+        observed = _text(comparison.get("observed")) or ""
+        if not outcome_axis or not baseline or not observed:
+            return dict(finding)
+
+        unit = self._specific_mechanical_property_unit(outcome_axis).strip()
+        baseline_value = f"{baseline}{unit}" if unit == "%" else f"{baseline} {unit}"
+        observed_value = f"{observed}{unit}" if unit == "%" else f"{observed} {unit}"
+        baseline_value = baseline_value.strip()
+        observed_value = observed_value.strip()
+        baseline_number = _float_text(baseline)
+        observed_number = _float_text(observed)
+        if baseline_number is None or observed_number is None:
+            return dict(finding)
+        if observed_number > baseline_number:
+            direction = "increases"
+        elif observed_number < baseline_number:
+            direction = "decreases"
+        else:
+            direction = "unchanged"
+        statement = (
+            f"The source table reports {outcome_axis} of {baseline_value} for the "
+            f"non-preheated condition and {observed_value} for the preheated "
+            "condition."
+        )
+        variable = _text(next(iter(_strings(finding.get("variables"))), "")) or ""
+        updated = dict(finding)
+        updated["statement"] = statement
+        updated["direction"] = direction
+        updated["comparison_summary"] = {
+            "variable": variable,
+            "direction": direction,
+            "outcome": outcome_axis,
+            "baseline": {"label": "non-preheated", "value": baseline_value},
+            "observed": {"label": "preheated", "value": observed_value},
+            "controlled_conditions": [],
+        }
+        updated["relation_chain"] = [
+            {**segment, "statement": statement, "direction": direction}
+            for segment in _mapping_list(finding.get("relation_chain"))
+        ]
+        return updated
+
+    def _finding_preheating_table_comparison_values(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, str]:
         variable_text = _normalize_match_text(
             " ".join(_strings(finding.get("variables")))
         )
         if "preheat" not in variable_text:
-            return None
+            return {}
         outcome_keys = {
             self._axis_key(outcome) for outcome in _strings(finding.get("outcomes"))
         }
@@ -7288,8 +7383,10 @@ class ResearchUnderstandingService:
             outcome_axis = "yield strength"
         elif "tensile strength" in outcome_keys:
             outcome_axis = "ultimate tensile strength"
+        elif "elongation" in outcome_keys or "ductility" in outcome_keys:
+            outcome_axis = "elongation"
         else:
-            return None
+            return {}
 
         for ref_id in _strings(
             _mapping(finding.get("evidence_bundle")).get("direct_result")
@@ -7304,23 +7401,27 @@ class ResearchUnderstandingService:
             outcome_index = indexes.get(outcome_axis)
             if condition_index is None or outcome_index is None:
                 continue
-            baseline: float | None = None
-            observed: float | None = None
+            baseline = ""
+            observed = ""
             for row in table.table_matrix:
                 if len(row) <= max(condition_index, outcome_index):
                     continue
                 label = _normalize_match_text(row[condition_index])
-                value = _float_text(row[outcome_index])
-                if value is None:
+                value = _numeric_text(row[outcome_index])
+                if not value:
                     continue
                 if "non preheated" in label or "without preheat" in label:
                     baseline = value
                 elif label == "preheated" or label.startswith("preheated "):
                     observed = value
-            if baseline is None or observed is None or baseline == 0:
+            if not baseline or not observed:
                 continue
-            return abs(observed - baseline) / abs(baseline) * 100
-        return None
+            return {
+                "outcome_axis": outcome_axis,
+                "baseline": baseline,
+                "observed": observed,
+            }
+        return {}
 
     def _finding_is_low_magnitude_prediction_comparison(
         self,

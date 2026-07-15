@@ -11936,8 +11936,27 @@ def test_low_magnitude_filter_reads_preheating_strength_delta_from_source_table(
         },
     ]
 
+    projected_elongation = service._finding_with_preheating_table_comparison(
+        review_queue[1],
+        evidence_by_id=evidence_by_id,
+        tables_by_id={table.table_id: table},
+    )
+
+    assert projected_elongation["statement"] == (
+        "The source table reports elongation of 72% for the non-preheated "
+        "condition and 82% for the preheated condition."
+    )
+    assert projected_elongation["comparison_summary"] == {
+        "variable": "build platform preheating temperature",
+        "direction": "increases",
+        "outcome": "elongation",
+        "baseline": {"label": "non-preheated", "value": "72%"},
+        "observed": {"label": "preheated", "value": "82%"},
+        "controlled_conditions": [],
+    }
+
     filtered = service._review_findings_without_low_magnitude_table_rows(
-        review_queue,
+        [review_queue[0], projected_elongation],
         evidence_by_id=evidence_by_id,
         tables_by_id={table.table_id: table},
     )

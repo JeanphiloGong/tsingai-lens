@@ -3372,7 +3372,9 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
         "With a methodology established for predicting the crystallographic "
         "texture of L-PBF manufactured samples based on build orientation and "
         "scan strategy rotation angles, this approach was leveraged for "
-        "predicting the yield strength of the materials."
+        "predicting the yield strength of the materials. The Bishop-Hill models "
+        "were adopted, with the established crystallographic texture serving "
+        "as the primary input."
     )
     validation_text = (
         "Remarkably, there is a strong alignment between the model's "
@@ -3561,7 +3563,11 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
     assert "author_summary_table_mismatch" in build_orientation["warnings"]
     assert build_orientation["evidence_bundle"]["direct_result"] == [
         "evref_recovered_texture_yield_build_orientation_blk-yield-validation",
+        "evref_recovered_texture_yield_build_orientation_mechanics_blk-yield-setup",
         "evref_recovered_texture_yield_build_orientation_table_tbl-yield-validation",
+    ]
+    assert build_orientation["evidence_bundle"]["mechanism"] == [
+        "evref_recovered_texture_yield_build_orientation_mechanics_blk-yield-setup"
     ]
     assert build_orientation["evidence_bundle"]["condition_context"] == [
         "evref_recovered_texture_yield_build_orientation_condition_blk-angle-definitions"
@@ -3576,6 +3582,9 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
     ]["quote"]
     assert "363.1" in evidence_by_id[
         "evref_recovered_texture_yield_build_orientation_table_tbl-yield-validation"
+    ]["quote"]
+    assert "crystallographic texture serving as the primary input" in evidence_by_id[
+        "evref_recovered_texture_yield_build_orientation_mechanics_blk-yield-setup"
     ]["quote"]
 
     persisted = ResearchUnderstanding.from_mapping(

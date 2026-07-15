@@ -1123,6 +1123,18 @@ class ResearchUnderstandingService:
                     )
                     else []
                 )
+                if _text(spec.get("slug")).startswith("texture_yield_"):
+                    supporting_block = self._best_recovered_spec_source_block(
+                        document_id,
+                        blocks_by_id={
+                            block_id: candidate
+                            for block_id, candidate in blocks_by_id.items()
+                            if block_id != _text(block.block_id)
+                        },
+                        predicate=self._is_texture_yield_conclusion_block,
+                    )
+                    if supporting_block is not None:
+                        supporting_blocks.append(supporting_block)
                 mechanical_property_table = (
                     self._best_specific_mechanical_property_table(
                         document_id,
@@ -2802,9 +2814,13 @@ class ResearchUnderstandingService:
                 continue
             supporting_ref_id = f"evref_recovered_{slug}_mechanics_{supporting_block_id}"
             evidence_ref_ids.append(supporting_ref_id)
-            supporting_quote = self._recovered_spec_evidence_quote(
-                supporting_block,
-                spec=spec,
+            supporting_quote = (
+                _short_text(_text(supporting_block.text), limit=900)
+                if slug.startswith("texture_yield_")
+                else self._recovered_spec_evidence_quote(
+                    supporting_block,
+                    spec=spec,
+                )
             )
             evidence_refs.append(
                 {
@@ -12108,6 +12124,8 @@ class ResearchUnderstandingService:
             mediators.append("microstructure evolution")
         if " texture evolution " in normalized:
             mediators.append("texture evolution")
+        if " crystallographic texture " in normalized:
+            mediators.append("crystallographic texture")
         if (
             " homogenized microstructure " in normalized
             or " homogenised microstructure " in normalized
@@ -14108,8 +14126,17 @@ class ResearchUnderstandingService:
             if table is not None
             else quote
             if (
-                (_text(ref.get("evidence_ref_id")) or "").startswith(
-                    "evref_recovered_heat_treatment_microstructure_mechanics_"
+                (
+                    (_text(ref.get("evidence_ref_id")) or "").startswith(
+                        "evref_recovered_heat_treatment_microstructure_mechanics_"
+                    )
+                    or (
+                        (_text(ref.get("evidence_ref_id")) or "").startswith(
+                            "evref_recovered_texture_yield_"
+                        )
+                        and "_mechanics_"
+                        in (_text(ref.get("evidence_ref_id")) or "")
+                    )
                 )
                 and quote
             )

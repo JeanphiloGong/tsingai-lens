@@ -2877,6 +2877,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.element(browserPage.getByRole('heading', { name: 'Findings' }))
 			.toBeInTheDocument();
 		const summary = browserPage.getByLabelText('Research understanding summary');
+		const findingsSection = browserPage
+			.getByRole('heading', { name: 'Findings' })
+			.element()
+			.closest('section');
+		expect(findingsSection).toBeTruthy();
+		expect(findingsSection!.compareDocumentPosition(summary.element()) & 4).toBe(4);
 		await expect.element(summary.getByText('Primary findings', { exact: true })).toBeInTheDocument();
 		await expect
 			.element(summary.getByText('1 / 6 papers covered by primary findings'))

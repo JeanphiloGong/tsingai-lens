@@ -3734,6 +3734,179 @@
 	</div>
 
 	{#if understanding}
+		{#if usesFindings || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
+
+			{#if !detailMode}
+				<section
+					class="research-understanding-workbench__column research-understanding-workbench__column--list"
+					aria-label={$t('research.understanding.findingsWorkspace')}
+				>
+					<div class="research-understanding-workbench__column-heading">
+						<h4>{$t('research.understanding.findingsWorkspace')}</h4>
+						{#if usesFindings}
+							<span>
+								{$t('research.understanding.filteredClaimCount', {
+									shown: visibleFindingRows.length,
+									total: findingRows.length
+								})}
+							</span>
+						{/if}
+					</div>
+					{#if usesFindings}
+						{#if visibleFindingRows.length}
+							<div
+								class="research-understanding-workbench__table-wrap"
+								aria-label={$t('research.understanding.findingsTable')}
+							>
+								<table class="research-understanding-workbench__findings-table">
+									<thead>
+										<tr>
+											<th scope="col">{$t('research.understanding.findingColumn')}</th>
+											<th scope="col">{$t('research.understanding.variablesColumn')}</th>
+											<th scope="col">{$t('research.understanding.mechanismColumn')}</th>
+											<th scope="col">{$t('research.understanding.resultColumn')}</th>
+											<th scope="col">{$t('research.understanding.scopeColumn')}</th>
+											<th scope="col">{$t('research.understanding.evidenceGradeColumn')}</th>
+											<th scope="col">{$t('research.understanding.evidenceBasisColumn')}</th>
+											<th scope="col">{$t('research.understanding.datasetTrustColumn')}</th>
+											<th scope="col">{$t('research.understanding.actionsColumn')}</th>
+										</tr>
+									</thead>
+										<tbody>
+											{#each visibleFindingRows as finding (finding.finding_id)}
+												{@const curation = findingCurationFor(finding)}
+												{@const displayFinding = findingForDisplay(finding, curation)}
+												{@const findingFeedback = findingFeedbackFor(finding)}
+												{@const usagePreview = findingUsagePreview(displayFinding)}
+												{@const trust = findingDatasetTrust(finding)}
+												<tr>
+													<td class="research-understanding-workbench__finding-main">
+														<button
+															type="button"
+															on:click={() => openFindingDetail(finding.finding_id)}
+														>
+															<strong id={findingSummaryId(displayFinding)}>
+																{displayFinding.statement || displayFinding.title}
+															</strong>
+															{#if displayFinding.title && displayFinding.title !== displayFinding.statement}
+																<span>{displayFinding.title}</span>
+															{/if}
+																{#if curation || findingFeedback.length}
+																	<span>
+																		{[
+																			curation ? findingTrustSourceLabel(trust.source) : '',
+																			findingFeedback.length
+																				? $t('research.understanding.feedbackCount', {
+																						count: findingFeedback.length
+																					})
+																			: ''
+																	]
+																		.filter(Boolean)
+																		.join(' · ')}
+																</span>
+															{/if}
+														</button>
+													</td>
+													<td>{findingListLabel(displayFinding.variables)}</td>
+													<td>{findingListLabel(displayFinding.mediators)}</td>
+													<td>
+														{#if displayFinding.direction}
+															<span>{relationLabel(displayFinding.direction)}</span>
+														{/if}
+														{#if displayFinding.outcomes.length}
+															<span>{findingListLabel(displayFinding.outcomes)}</span>
+														{:else}
+															<span>{findingListLabel([])}</span>
+														{/if}
+														{#if finding.comparison_summary}
+															<div class="research-understanding-workbench__comparison-mini">
+																{#if findingComparisonValueLabel(finding)}
+																	<strong>{findingComparisonValueLabel(finding)}</strong>
+																{/if}
+																{#if findingComparisonContextLabel(finding)}
+																	<span>{findingComparisonContextLabel(finding)}</span>
+																{/if}
+															</div>
+														{/if}
+													</td>
+													<td title={displayFinding.scope_summary || ''}>{findingScopeTableLabel(displayFinding)}</td>
+													<td>
+														<span class="research-understanding-workbench__grade">
+															{supportGradeLabel(displayFinding.support_grade)}
+														</span>
+													</td>
+													<td>
+														<div class="research-understanding-workbench__basis">
+															<strong>{usagePreview.title}</strong>
+															<span>{findingDirectEvidenceLabel(displayFinding)}</span>
+															<span>{findingPaperCoverageLabel(displayFinding)}</span>
+															<span>{usagePreview.datasetNote}</span>
+															{#if usagePreview.nextAction}
+																<span>{usagePreview.nextAction}</span>
+															{/if}
+																{#if findingReviewReasonSummary(displayFinding)}
+																	<span>{findingReviewReasonSummary(displayFinding)}</span>
+																{/if}
+															</div>
+														</td>
+														<td>
+															<div class="research-understanding-workbench__trust">
+																<span
+																	class={`research-understanding-workbench__trust-badge research-understanding-workbench__trust-badge--${trust.labelStatus}`}
+																>
+																	{datasetLabelStatusLabel(trust.labelStatus)}
+																</span>
+																<small>{findingDatasetTrustSubtitle(trust)}</small>
+																<small>{findingReviewStatusLabel(findingReviewStatusForDisplay(finding, trust))}</small>
+															</div>
+														</td>
+													<td>
+														<div class="research-understanding-workbench__finding-actions">
+															<button
+																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
+																on:click={() => openFindingDetail(finding.finding_id)}
+															>
+																{$t('research.understanding.openFindingDetail')}
+															</button>
+															<button
+																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
+																on:click={() => openFindingReject(finding.finding_id)}
+															>
+																{$t('research.understanding.quickReject')}
+															</button>
+															<button
+																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
+																on:click={() => openFindingCorrection(finding.finding_id)}
+															>
+																{$t('research.understanding.quickCorrect')}
+															</button>
+														</div>
+													</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{:else}
+							<div class="research-understanding-workbench__empty">
+								{$t('research.understanding.noFindings')}
+							</div>
+						{/if}
+					{:else}
+						<div class="research-understanding-workbench__empty">
+							{#if hasUnprojectedEffects}
+								{$t('research.understanding.noExpertFindings')}
+							{:else}
+								{$t('research.understanding.noFindings')}
+							{/if}
+						</div>
+					{/if}
+					</section>
+			{/if}
+		{/if}
 		{#if usesFindings}
 			<div
 				class="research-understanding-workbench__summary"
@@ -4757,176 +4930,7 @@
 				{/if}
 			{/if}
 
-			{#if !detailMode}
-				<section
-					class="research-understanding-workbench__column research-understanding-workbench__column--list"
-					aria-label={$t('research.understanding.findingsWorkspace')}
-				>
-					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.findingsWorkspace')}</h4>
-						{#if usesFindings}
-							<span>
-								{$t('research.understanding.filteredClaimCount', {
-									shown: visibleFindingRows.length,
-									total: findingRows.length
-								})}
-							</span>
-						{/if}
-					</div>
-					{#if usesFindings}
-						{#if visibleFindingRows.length}
-							<div
-								class="research-understanding-workbench__table-wrap"
-								aria-label={$t('research.understanding.findingsTable')}
-							>
-								<table class="research-understanding-workbench__findings-table">
-									<thead>
-										<tr>
-											<th scope="col">{$t('research.understanding.findingColumn')}</th>
-											<th scope="col">{$t('research.understanding.variablesColumn')}</th>
-											<th scope="col">{$t('research.understanding.mechanismColumn')}</th>
-											<th scope="col">{$t('research.understanding.resultColumn')}</th>
-											<th scope="col">{$t('research.understanding.scopeColumn')}</th>
-											<th scope="col">{$t('research.understanding.evidenceGradeColumn')}</th>
-											<th scope="col">{$t('research.understanding.evidenceBasisColumn')}</th>
-											<th scope="col">{$t('research.understanding.datasetTrustColumn')}</th>
-											<th scope="col">{$t('research.understanding.actionsColumn')}</th>
-										</tr>
-									</thead>
-										<tbody>
-											{#each visibleFindingRows as finding (finding.finding_id)}
-												{@const curation = findingCurationFor(finding)}
-												{@const displayFinding = findingForDisplay(finding, curation)}
-												{@const findingFeedback = findingFeedbackFor(finding)}
-												{@const usagePreview = findingUsagePreview(displayFinding)}
-												{@const trust = findingDatasetTrust(finding)}
-												<tr>
-													<td class="research-understanding-workbench__finding-main">
-														<button
-															type="button"
-															on:click={() => openFindingDetail(finding.finding_id)}
-														>
-															<strong id={findingSummaryId(displayFinding)}>
-																{displayFinding.statement || displayFinding.title}
-															</strong>
-															{#if displayFinding.title && displayFinding.title !== displayFinding.statement}
-																<span>{displayFinding.title}</span>
-															{/if}
-																{#if curation || findingFeedback.length}
-																	<span>
-																		{[
-																			curation ? findingTrustSourceLabel(trust.source) : '',
-																			findingFeedback.length
-																				? $t('research.understanding.feedbackCount', {
-																						count: findingFeedback.length
-																					})
-																			: ''
-																	]
-																		.filter(Boolean)
-																		.join(' · ')}
-																</span>
-															{/if}
-														</button>
-													</td>
-													<td>{findingListLabel(displayFinding.variables)}</td>
-													<td>{findingListLabel(displayFinding.mediators)}</td>
-													<td>
-														{#if displayFinding.direction}
-															<span>{relationLabel(displayFinding.direction)}</span>
-														{/if}
-														{#if displayFinding.outcomes.length}
-															<span>{findingListLabel(displayFinding.outcomes)}</span>
-														{:else}
-															<span>{findingListLabel([])}</span>
-														{/if}
-														{#if finding.comparison_summary}
-															<div class="research-understanding-workbench__comparison-mini">
-																{#if findingComparisonValueLabel(finding)}
-																	<strong>{findingComparisonValueLabel(finding)}</strong>
-																{/if}
-																{#if findingComparisonContextLabel(finding)}
-																	<span>{findingComparisonContextLabel(finding)}</span>
-																{/if}
-															</div>
-														{/if}
-													</td>
-													<td title={displayFinding.scope_summary || ''}>{findingScopeTableLabel(displayFinding)}</td>
-													<td>
-														<span class="research-understanding-workbench__grade">
-															{supportGradeLabel(displayFinding.support_grade)}
-														</span>
-													</td>
-													<td>
-														<div class="research-understanding-workbench__basis">
-															<strong>{usagePreview.title}</strong>
-															<span>{findingDirectEvidenceLabel(displayFinding)}</span>
-															<span>{findingPaperCoverageLabel(displayFinding)}</span>
-															<span>{usagePreview.datasetNote}</span>
-															{#if usagePreview.nextAction}
-																<span>{usagePreview.nextAction}</span>
-															{/if}
-																{#if findingReviewReasonSummary(displayFinding)}
-																	<span>{findingReviewReasonSummary(displayFinding)}</span>
-																{/if}
-															</div>
-														</td>
-														<td>
-															<div class="research-understanding-workbench__trust">
-																<span
-																	class={`research-understanding-workbench__trust-badge research-understanding-workbench__trust-badge--${trust.labelStatus}`}
-																>
-																	{datasetLabelStatusLabel(trust.labelStatus)}
-																</span>
-																<small>{findingDatasetTrustSubtitle(trust)}</small>
-																<small>{findingReviewStatusLabel(findingReviewStatusForDisplay(finding, trust))}</small>
-															</div>
-														</td>
-													<td>
-														<div class="research-understanding-workbench__finding-actions">
-															<button
-																type="button"
-																aria-describedby={findingSummaryId(displayFinding)}
-																on:click={() => openFindingDetail(finding.finding_id)}
-															>
-																{$t('research.understanding.openFindingDetail')}
-															</button>
-															<button
-																type="button"
-																aria-describedby={findingSummaryId(displayFinding)}
-																on:click={() => openFindingReject(finding.finding_id)}
-															>
-																{$t('research.understanding.quickReject')}
-															</button>
-															<button
-																type="button"
-																aria-describedby={findingSummaryId(displayFinding)}
-																on:click={() => openFindingCorrection(finding.finding_id)}
-															>
-																{$t('research.understanding.quickCorrect')}
-															</button>
-														</div>
-													</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{:else}
-							<div class="research-understanding-workbench__empty">
-								{$t('research.understanding.noFindings')}
-							</div>
-						{/if}
-					{:else}
-						<div class="research-understanding-workbench__empty">
-							{#if hasUnprojectedEffects}
-								{$t('research.understanding.noExpertFindings')}
-							{:else}
-								{$t('research.understanding.noFindings')}
-							{/if}
-						</div>
-					{/if}
-				</section>
-			{:else}
+			{#if detailMode}
 				<section
 					class="research-understanding-workbench__detail-view"
 					aria-label={selectedFinding
@@ -6085,6 +6089,7 @@
 <style>
 	.research-understanding-workbench {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 14px;
 		min-width: 0;
 		max-width: 100%;
@@ -6106,6 +6111,7 @@
 	.research-understanding-workbench__heading div,
 	.research-understanding-workbench__column {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 12px;
 		min-width: 0;
 	}

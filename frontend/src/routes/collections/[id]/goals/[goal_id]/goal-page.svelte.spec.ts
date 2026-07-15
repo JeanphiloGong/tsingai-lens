@@ -593,7 +593,7 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 
 		await browserPage.getByText('Dataset', { exact: true }).click();
 		await browserPage
-			.getByLabelText('Reviewed JSONL rows')
+			.getByLabelText('Reviewed decisions')
 			.fill(
 				[
 					'{"finding_id":"finding_claim_1","claim_id":"claim_1","action":"accept"}',

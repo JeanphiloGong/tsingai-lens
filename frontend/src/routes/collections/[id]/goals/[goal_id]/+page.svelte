@@ -518,6 +518,7 @@
 		max-width: 1280px;
 		margin: 0 auto;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 18px;
 	}
 
@@ -531,8 +532,16 @@
 	}
 
 	.breadcrumb a {
+		flex: 0 0 auto;
 		color: var(--accent);
 		text-decoration: none;
+	}
+
+	.breadcrumb span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.goal-header,
@@ -546,11 +555,9 @@
 	}
 
 	.goal-header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 18px;
-		padding: 24px;
+		display: grid;
+		gap: 12px;
+		padding: 16px 18px;
 	}
 
 	.eyebrow {
@@ -568,9 +575,10 @@
 	}
 
 	.goal-header h2 {
-		max-width: 860px;
-		font-size: 28px;
-		line-height: 36px;
+		max-width: 1120px;
+		font-size: 20px;
+		line-height: 28px;
+		overflow-wrap: anywhere;
 	}
 
 	.goal-meta,
@@ -581,7 +589,7 @@
 	}
 
 	.goal-meta {
-		margin-top: 12px;
+		margin-top: 6px;
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
@@ -850,10 +858,6 @@
 	}
 
 	@media (max-width: 760px) {
-		.goal-header {
-			display: grid;
-		}
-
 		.goal-progress__grid {
 			grid-template-columns: 1fr;
 		}

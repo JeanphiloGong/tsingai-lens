@@ -918,7 +918,8 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
                             ],
                             "evidence_ref_ids": ["ev-1", "ev-2", "ev-3"],
                             "evidence_bundle": {
-                                "direct_result": ["ev-1", "ev-2", "ev-3"]
+                                "direct_result": ["ev-1", "ev-2"],
+                                "condition_context": ["ev-3"],
                             },
                             "warnings": [
                                 "non_single_variable_table_comparison",
@@ -967,6 +968,10 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
     )
 
     assert all(item["status"] == "pass" for item in summary["checks"])
+    assert any(
+        item["name"] == "condition evidence preserves confounded process settings"
+        for item in summary["checks"]
+    )
 
 
 def test_evaluate_goal_analysis_payload_rejects_scan_speed_confounded_review_rows():

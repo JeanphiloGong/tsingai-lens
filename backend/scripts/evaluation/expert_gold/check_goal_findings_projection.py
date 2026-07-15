@@ -215,6 +215,8 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
                 "375.13",
                 "7.21",
             ],
+        ],
+        "required_condition_evidence_sets": [
             [
                 "hatch",
                 "scan strategy",

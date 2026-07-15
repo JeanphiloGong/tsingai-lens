@@ -15815,6 +15815,17 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
         }
     )
     direct_refs = finding["evidence_bundle"]["direct_result"]
+    condition_refs = finding["evidence_bundle"]["condition_context"]
+    assert direct_refs == [
+        "evref_recovered_scan_speed_density_microstructure_"
+        "blk-scan-speed-conclusion",
+        "evref_recovered_scan_speed_density_microstructure_"
+        "table_tbl-mechanical-properties",
+    ]
+    assert condition_refs == [
+        "evref_recovered_scan_speed_density_microstructure_"
+        "condition_table_tbl-processing-parameters"
+    ]
     mechanism_refs = finding["evidence_bundle"]["mechanism"]
     assert mechanism_refs == [
         "evref_recovered_scan_speed_density_microstructure_"
@@ -15825,13 +15836,20 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
     }
+    assert evidence_by_id[condition_refs[0]]["evidence_role"] == "condition_context"
     direct_evidence_text = " ".join(evidence_by_id[ref_id]["quote"] for ref_id in direct_refs)
+    condition_evidence_text = " ".join(
+        evidence_by_id[ref_id]["quote"] for ref_id in condition_refs
+    )
     assert "Yield Strength (MPa)" in direct_evidence_text
     assert "Ultimate Tensile Strength (MPa)" in direct_evidence_text
     assert "Elongation (%)" in direct_evidence_text
     assert "236.65" in direct_evidence_text
     assert "459.58" in direct_evidence_text
     assert "6.40" in direct_evidence_text
+    assert "Scan strategy" in condition_evidence_text
+    assert "Scanning speed (mm/s)" in condition_evidence_text
+    assert "Energy density (J/mm 3 )" in condition_evidence_text
     statement = finding["statement"]
     assert "  " not in statement
     assert "Across the tested SLM parameter sets" in statement

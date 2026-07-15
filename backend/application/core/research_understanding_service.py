@@ -1232,9 +1232,16 @@ class ResearchUnderstandingService:
                     table
                     for table in [
                         mechanical_property_table,
-                        processing_parameter_table,
                         ved_fatigue_strength_table,
                         texture_yield_table,
+                    ]
+                    if table is not None
+                ]
+                condition_tables = [
+                    table
+                    for table in [
+                        processing_parameter_table,
+                        ved_fabrication_parameter_table,
                     ]
                     if table is not None
                 ]
@@ -1422,9 +1429,7 @@ class ResearchUnderstandingService:
                         objective=objective,
                         spec=recovered_spec,
                         condition_block=condition_block,
-                        condition_tables=[ved_fabrication_parameter_table]
-                        if ved_fabrication_parameter_table is not None
-                        else [],
+                        condition_tables=condition_tables,
                         supporting_blocks=supporting_blocks,
                         supporting_tables=supporting_tables,
                     )

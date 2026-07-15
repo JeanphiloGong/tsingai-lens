@@ -5115,6 +5115,11 @@
 										<p>{selectedFindingDecision.body}</p>
 									</section>
 								{/if}
+								<details
+									class="research-understanding-workbench__review-audit"
+									aria-label={$t('research.understanding.findingReviewAudit')}
+								>
+									<summary>{$t('research.understanding.findingReviewAudit')}</summary>
 								{#if selectedFindingUsagePath}
 									<section
 										class="research-understanding-workbench__usage-path"
@@ -5346,6 +5351,7 @@
 										{/each}
 									</ul>
 								</section>
+								</details>
 								{#if selectedRelatedReviewFindings.length}
 									<section
 										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--related-review"
@@ -7610,6 +7616,32 @@
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
+	}
+
+	.research-understanding-workbench__review-audit {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-audit[open] {
+		display: grid;
+		gap: 10px;
+		padding: 0 10px 10px;
+	}
+
+	.research-understanding-workbench__review-audit > summary {
+		padding: 10px 12px;
+		cursor: pointer;
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 750;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__review-audit[open] > summary {
+		margin: 0 -10px;
+		border-bottom: 1px solid var(--border-default);
 	}
 
 	.research-understanding-workbench__basis-panel--review-reasons {

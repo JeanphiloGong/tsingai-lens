@@ -735,6 +735,7 @@ const translations: Record<Language, Translations> = {
 				findingDecisionMissingDirectBody:
 					'This finding has no direct result evidence. Repair or reject the evidence binding before use.',
 				findingUsagePath: 'Expert use path',
+				findingReviewAudit: 'Review criteria and downstream readiness',
 				findingUsageCurrent: 'Current use',
 				findingUsageDataset: 'Dataset status',
 				findingUsageUpgrade: 'Upgrade checklist',
@@ -4107,6 +4108,7 @@ const translations: Record<Language, Translations> = {
 				findingDecisionMissingDirectBody:
 					'该研究发现没有直接结果证据。使用前需要修复或拒绝当前证据绑定。',
 				findingUsagePath: '专家使用路径',
+				findingReviewAudit: '复核标准与下游可用性',
 				findingUsageCurrent: '当前用途',
 				findingUsageDataset: '数据集状态',
 				findingUsageUpgrade: '升级检查项',

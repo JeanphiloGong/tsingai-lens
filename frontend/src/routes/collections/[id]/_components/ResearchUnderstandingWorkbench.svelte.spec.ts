@@ -1780,6 +1780,23 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('keeps downstream audit metadata collapsed while source evidence stays visible', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const findingDetail = await openMechanismClaimDetail();
+		const auditDetails = findingDetail.getByLabelText(
+			'Review criteria and downstream readiness'
+		);
+		await expect.element(auditDetails).toBeInTheDocument();
+		expect((auditDetails.element() as HTMLDetailsElement).open).toBe(false);
+		await expect
+			.element(findingDetail.getByRole('heading', { name: 'Finding evidence' }))
+			.toBeVisible();
+	});
+
 	it('shows the backend dataset review action in selected finding details', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

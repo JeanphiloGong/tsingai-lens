@@ -908,6 +908,12 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert "Controls" in prompt_messages[0]["content"]
     assert "Risks or limits" in prompt_messages[0]["content"]
     assert "Do not collapse protocol answers into one paragraph" in prompt_messages[0]["content"]
+    assert "operational manipulation" in prompt_messages[0]["content"]
+    assert "derived or composite variable" in prompt_messages[0]["content"]
+    assert "volumetric energy density" in prompt_messages[0]["content"]
+    assert "every constituent parameter is fixed" in prompt_messages[0]["content"]
+    assert "confounded comparison" in prompt_messages[0]["content"]
+    assert "proposed design choice" in prompt_messages[0]["content"]
     prompt = prompt_messages[1]["content"]
     assert "curated_research_findings" in prompt
     assert "150 C preheating improves LPBF 316L ductility" in prompt

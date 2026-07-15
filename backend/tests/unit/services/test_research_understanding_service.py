@@ -12008,6 +12008,8 @@ def test_with_presentation_keeps_uts_table_when_text_only_supports_yield_and_elo
                     text=(
                         "Monotonic tensile deformation behavior of specimens "
                         "fabricated with and without preheating is shown in Figure 5. "
+                        "The ultimate tensile strength of the present alloy increased "
+                        "compared with additively manufactured and wrought counterparts. "
                         "Interestingly, preheating increased elongation and yield "
                         "strength by approximately 14% and 4%, respectively."
                     ),
@@ -12072,6 +12074,8 @@ def test_with_presentation_keeps_uts_table_when_text_only_supports_yield_and_elo
                     "evidence_role": "direct_support",
                     "quote": (
                         "Monotonic tensile deformation behavior is shown in Figure 5. "
+                        "The ultimate tensile strength of the present alloy increased "
+                        "compared with additively manufactured and wrought counterparts. "
                         "Preheating increased elongation and yield strength by 14% "
                         "and 4%, respectively."
                     ),

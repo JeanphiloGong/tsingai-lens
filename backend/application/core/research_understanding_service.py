@@ -10283,13 +10283,17 @@ class ResearchUnderstandingService:
         if all(ref_id.startswith("evref_recovered_") for ref_id in direct_ref_ids):
             return {key: list(value) for key, value in evidence_bundle.items()}
         target_terms = self._finding_target_terms(effect, outcomes)
+        variable_values: list[str] = []
         variable_terms: set[str] = set()
         relation_terms: set[str] = set()
         for relation in relations:
+            relation_variable = self._presentation_relation_side(
+                relation.get("subject")
+            )
+            if relation_variable:
+                variable_values.append(relation_variable)
             variable_terms.update(
-                _quote_hint_terms(
-                    self._presentation_relation_side(relation.get("subject"))
-                )
+                _quote_hint_terms(relation_variable)
             )
             for value in (
                 _text(relation.get("predicate")),
@@ -10305,6 +10309,9 @@ class ResearchUnderstandingService:
             _text(effect.get("effect_direction")),
         ):
             relation_terms.update(_quote_hint_terms(value))
+        if effect_variable := _text(effect.get("variable_axis")):
+            variable_values.append(effect_variable)
+        variable_values = _dedupe_strings(variable_values)
         if not target_terms or not (variable_terms or relation_terms):
             return {key: list(value) for key, value in evidence_bundle.items()}
         ranked_direct_refs: list[tuple[tuple[int, int, int, int, int], str]] = []
@@ -10415,6 +10422,13 @@ class ResearchUnderstandingService:
             target_hits = _quote_term_hits(bounded, target_terms)
             variable_hits = _quote_term_hits(bounded, variable_terms)
             if not (target_hits and variable_hits):
+                continue
+            if not self._evidence_ref_has_joint_variable_and_target(
+                evidence_ref,
+                blocks_by_id=blocks_by_id,
+                variable_values=variable_values,
+                target_terms=target_terms,
+            ):
                 continue
             candidates.append((score, -index, ref_id))
         if not candidates:
@@ -10627,6 +10641,47 @@ class ResearchUnderstandingService:
                 or _quote_term_hits(bounded, relation_terms)
             )
         )
+
+    def _evidence_ref_has_joint_variable_and_target(
+        self,
+        evidence_ref: Mapping[str, Any],
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+        variable_values: list[str],
+        target_terms: set[str],
+    ) -> bool:
+        locator = _locator_mapping(evidence_ref.get("locator"))
+        block = blocks_by_id.get(_text(locator.get("source_ref")) or "")
+        source_texts = _dedupe_strings(
+            [
+                _text(evidence_ref.get("quote")) or "",
+                _text(block.text if block else None) or "",
+            ]
+        )
+        has_preheating_variable = any(
+            {"preheat", "preheating"}
+            & set(_normalize_match_text(variable).split())
+            for variable in variable_values
+        )
+        for source_text in source_texts:
+            for sentence in _quote_sentences(source_text):
+                normalized_sentence = f" {_normalize_match_text(sentence)} "
+                variable_matches = self._variable_matches_direct_evidence(
+                    variable_values,
+                    sentence,
+                ) or (
+                    has_preheating_variable
+                    and (
+                        " preheat " in normalized_sentence
+                        or " preheating " in normalized_sentence
+                    )
+                )
+                if variable_matches and _quote_term_hits(
+                    normalized_sentence,
+                    target_terms,
+                ):
+                    return True
+        return False
 
     def _finding_target_terms(
         self,

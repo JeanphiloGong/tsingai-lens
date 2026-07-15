@@ -33,7 +33,7 @@ from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
 from application.goal.protocol_contract import (
-    has_affirmative_ved_isolation_claim,
+    has_affirmative_ved_only_effect_claim,
     proposed_design_choice_has_unsupported_detail,
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
@@ -81,7 +81,7 @@ class _StructuredProtocolDraft(BaseModel):
         description=(
             "One plain design risk per list item. Do not repeat evidence limits or "
             "include category labels. Do not claim that changing a VED constituent "
-            "isolates a universal VED-only effect."
+            "isolates a universal VED-only effect or propose confirming such an effect."
         ),
     )
 
@@ -1059,7 +1059,7 @@ class GoalSessionService:
             "material identifiers, equipment names, or method acronyms into proposed "
             "items; Lens renders supported observations separately. A VED design may estimate a "
             "selected constituent-mediated path, but must not claim to isolate a "
-            "universal VED-only effect.\n"
+            "universal VED-only effect or propose confirming one.\n"
             "Normalize the protocol into the required evidence/design fields."
             f"\n\nPrevious draft:\n<draft>\n{answer}\n</draft>"
         )
@@ -1139,7 +1139,7 @@ class GoalSessionService:
                 for marker in ("paper-level", "cross-paper", "generalization")
             ):
                 continue
-            if has_affirmative_ved_isolation_claim(text):
+            if has_affirmative_ved_only_effect_claim(text):
                 continue
             design_risks.append(f"- Design risk: {text}")
         if ved_grounding and not any(
@@ -1377,7 +1377,8 @@ class GoalSessionService:
                 "multiple constituent parameters, label it as a confounded comparison and "
                 "propose a constituent-controlled or factorial validation. Changing one "
                 "constituent estimates that constituent-mediated path; never call it an "
-                "isolated or universal VED-only effect. Separate source-backed "
+                "isolated or universal VED-only effect, and never make confirmation of a "
+                "VED-only effect the validation target. Separate source-backed "
                 "observations from protocol choices, and mark uncited variable "
                 "manipulations as a proposed design choice. Lens derives Measurements "
                 "from source-backed outcomes and Controls from the variable matrix plus "

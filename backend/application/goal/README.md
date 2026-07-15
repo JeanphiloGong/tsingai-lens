@@ -49,7 +49,8 @@ own database connections, SQL, schema initialization, or row encoding.
   persistence: at least one constituent parameter must change, every other
   constituent must be explicitly changed or fixed, and no constituent may be
   both changed and fixed. A constituent-controlled design is represented as
-  that constituent-mediated path, not as an isolated universal VED effect.
+  that constituent-mediated path, not as an isolated universal VED effect or
+  as an experiment intended to confirm a VED-only effect.
   Proposed design choices cannot contain unattributed numeric, material,
   equipment, or method-acronym details; unsupported generated details are
   dropped in favor of an explicit expert-selection placeholder.

@@ -113,6 +113,21 @@ This estimates a laser-power-mediated path and does not isolate a universal VED-
     assert ved_design_is_scientifically_consistent(content) is True
 
 
+def test_ved_design_contract_rejects_ved_only_effect_as_validation_target():
+    content = """Hypothesis: VED is associated with fatigue strength.
+Variable matrix:
+Vary laser power to create VED levels while holding scan speed, hatch spacing, and layer thickness fixed.
+Measurements:
+Measure fatigue strength.
+Controls:
+Hold scan speed, hatch spacing, and layer thickness fixed.
+Risks or limits:
+Additional experiments may confirm VED-only effects.
+"""
+
+    assert ved_design_is_scientifically_consistent(content) is False
+
+
 @pytest.mark.parametrize(
     "item",
     [

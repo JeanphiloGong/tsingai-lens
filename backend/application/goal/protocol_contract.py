@@ -65,6 +65,13 @@ _VED_ISOLATION_PATTERN = re.compile(
     r"(?:的)?(?:单变量|独立|直接|普适)?(?:效应|影响)?",
     re.IGNORECASE,
 )
+_VED_ONLY_EFFECT_PATTERN = re.compile(
+    r"(?:\bVED(?:-only|\s+only)\b|"
+    r"volumetric\s+energy\s+density(?:-only|\s+only))"
+    r"\s+(?:effect|effects|impact|impacts)\b|"
+    r"(?:体积能量密度|VED)(?:的)?(?:单变量|独立|普适)(?:效应|影响)",
+    re.IGNORECASE,
+)
 _NEGATION_BEFORE_PATTERN = re.compile(
     r"(?:\bnot\b|\bnever\b|\bcannot\b|\bcan['’]t\b)"
     r"(?:\s+\w+){0,3}\s*$|(?:不能|不可|无法|并非|不)\s*$",
@@ -92,7 +99,7 @@ _RISK_LABELS = (
 def ved_design_is_scientifically_consistent(content: str) -> bool:
     """Return whether a VED design has operational and causal boundaries."""
 
-    if has_affirmative_ved_isolation_claim(content):
+    if has_affirmative_ved_only_effect_claim(content):
         return False
 
     variable_section = _section(content, _VARIABLE_LABELS, _MEASUREMENT_LABELS)
@@ -125,11 +132,12 @@ def ved_design_is_scientifically_consistent(content: str) -> bool:
     )
 
 
-def has_affirmative_ved_isolation_claim(content: str) -> bool:
-    for match in _VED_ISOLATION_PATTERN.finditer(content):
-        prefix = content[max(0, match.start() - 48) : match.start()]
-        if not _NEGATION_BEFORE_PATTERN.search(prefix):
-            return True
+def has_affirmative_ved_only_effect_claim(content: str) -> bool:
+    for pattern in (_VED_ISOLATION_PATTERN, _VED_ONLY_EFFECT_PATTERN):
+        for match in pattern.finditer(content):
+            prefix = content[max(0, match.start() - 48) : match.start()]
+            if not _NEGATION_BEFORE_PATTERN.search(prefix):
+                return True
     return False
 
 

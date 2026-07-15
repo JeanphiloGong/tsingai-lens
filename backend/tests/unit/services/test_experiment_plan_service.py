@@ -550,6 +550,39 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
         )
 
 
+def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
+    tmp_path,
+):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    content = _ved_protocol(operational=True).replace(
+        "validate the isolated effect before causal interpretation",
+        "additional experiments may confirm VED-only effects",
+    )
+    _write_goal_message(
+        goal_session_repository,
+        content=content,
+        review_gate="protocol_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VED design"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="VED-only validation target",
+            content=content,
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
 def test_experiment_plan_service_rejects_unattributed_source_detail_in_proposal(
     tmp_path,
 ):

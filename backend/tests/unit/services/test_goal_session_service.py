@@ -1075,7 +1075,8 @@ def test_protocol_renderer_replaces_ved_isolation_claim_with_mediated_boundary(
             "hatch spacing, and layer thickness fixed."
         ],
         design_risks=[
-            "This protocol isolates VED by fixing its constituent parameters."
+            "This protocol isolates VED by fixing its constituent parameters.",
+            "Additional experiments may confirm VED-only effects.",
         ],
     )
     finding = {
@@ -1099,6 +1100,7 @@ def test_protocol_renderer_replaces_ved_isolation_claim_with_mediated_boundary(
     )
 
     assert "isolates VED by fixing" not in answer
+    assert "confirm VED-only effects" not in answer
     assert (
         "Changing one or more VED constituents estimates the selected "
         "constituent-mediated path; it does not isolate a universal VED-only effect."

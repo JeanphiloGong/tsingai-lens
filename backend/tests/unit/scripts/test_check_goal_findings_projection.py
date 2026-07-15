@@ -223,7 +223,6 @@ def _goal_061_axis_summary(
                 {"axis": "Laser Powder Bed Fusion", "status": "context"},
                 {"axis": "scan strategy rotation angle", "status": "primary"},
                 {"axis": "build orientation angle", "status": "primary"},
-                {"axis": "build orientation", "status": "primary"},
             ],
             "properties": [
                 {"axis": "crystallographic texture", "status": "mechanism"},
@@ -1348,6 +1347,32 @@ def test_evaluate_goal_analysis_payload_fails_stale_review_queue_multi_paper_bou
 
 def test_evaluate_goal_analysis_payload_accepts_model_validation_primary_target():
     check = _load_goal_findings_check_module()
+    result_quote = (
+        "The yield strength increased from the 0-0-0 configuration to the "
+        "45-22.5-0 condition, with deviations generally less than 5%."
+    )
+    table_quote = (
+        "Table 3: α β θ, Yield Strength Prediction (MPa), Yield Strength "
+        "Experiment (MPa). Rows: 0 0 0 310.48 334.2; "
+        "0 0 45 328.67 351.9; 45 22.5 0 341.85 363.1."
+    )
+    table_audit = {
+        "columns": [
+            "α (°)",
+            "β (°)",
+            "θ (°)",
+            "Yield Strength Prediction (MPa)",
+            "Yield Strength Experiment (MPa)",
+        ],
+        "relevant_rows": [
+            {"row_index": 1, "cells": ["0", "0", "0", "310.48", "334.2"]},
+            {"row_index": 3, "cells": ["0", "0", "45", "328.67", "351.9"]},
+            {
+                "row_index": 5,
+                "cells": ["45", "22.5", "0", "341.85", "363.1"],
+            },
+        ],
+    }
 
     summary = check.evaluate_goal_analysis_payload(
         {
@@ -1356,76 +1381,152 @@ def test_evaluate_goal_analysis_payload_accepts_model_validation_primary_target(
                 "state": "ready",
                 "presentation": {
                     "summary": _goal_061_axis_summary(
-                        evidence_count=1,
+                        evidence_count=4,
+                        primary_finding_count=2,
                         review_queue_finding_count=0,
                     ),
                     "primary_findings": [
                         {
-                            "finding_id": "finding-1",
-                            "title": (
-                                "scan strategy rotation angle and β build "
-                                "orientation angle -> yield strength"
-                            ),
+                            "finding_id": "finding-build-orientation",
+                            "title": "α and β build orientation angles -> yield strength",
                             "statement": (
-                                "Changing scan strategy rotation angle and build "
-                                "orientation, including β build orientation angle, "
-                                "was experimentally validated against "
-                                "crystallographic-texture-based Bishop-Hill yield "
-                                "strength predictions; yield strength increased "
-                                "from the 0-0-0 configuration to the 45-22.5-0 "
-                                "condition with deviations generally below 5%."
+                                "At fixed scan strategy rotation angle θ=0°, changing "
+                                "build orientation from α=0° and β=0° to α=45° and "
+                                "β=22.5° increased experimental yield strength from "
+                                "334.2 MPa to 363.1 MPa. The authors describe model "
+                                "deviations as generally below 5%, but the Table 3 "
+                                "values do not uniformly satisfy that summary."
                             ),
-                            "variables": [
-                                "scan strategy rotation angle",
-                                "β build orientation angle",
-                            ],
+                            "variables": ["α and β build orientation angles"],
                             "mediators": ["crystallographic texture"],
                             "outcomes": ["yield strength"],
                             "scope_summary": (
                                 "316L stainless steel, scan strategy rotation angle, "
-                                "β build orientation angle, crystallographic texture, "
-                                "yield strength"
+                                "α build orientation angle, β build orientation angle, "
+                                "crystallographic texture, yield strength"
                             ),
-                            "evidence_ref_ids": ["ev-1"],
-                            "evidence_bundle": {"direct_result": ["ev-1"]},
+                            "evidence_ref_ids": ["ev-build-result", "ev-build-table"],
+                            "evidence_bundle": {
+                                "direct_result": ["ev-build-result", "ev-build-table"]
+                            },
                             "comparison_summary": {
-                                "variable": (
-                                    "scan strategy rotation angle and β build "
-                                    "orientation angle"
-                                ),
+                                "variable": "α and β build orientation angles",
                                 "direction": "increases",
                                 "outcome": "yield strength",
                                 "baseline": {
-                                    "label": "0-0-0 configuration",
-                                    "value": "",
+                                    "label": "α=0°, β=0°",
+                                    "value": "334.2 MPa",
                                 },
                                 "observed": {
-                                    "label": "45-22.5-0 condition",
-                                    "value": "",
+                                    "label": "α=45°, β=22.5°",
+                                    "value": "363.1 MPa",
                                 },
-                                "controlled_conditions": [],
+                                "controlled_conditions": [
+                                    {
+                                        "axis": "scan strategy rotation angle (θ)",
+                                        "value": "0°",
+                                    }
+                                ],
                             },
-                            "warnings": ["model_validation_finding"],
+                            "warnings": [
+                                "model_validation_finding",
+                                "author_summary_table_mismatch",
+                            ],
                             **_paper_level_boundary_fields(),
-                        }
+                        },
+                        {
+                            "finding_id": "finding-scan-rotation",
+                            "title": "scan strategy rotation angle -> yield strength",
+                            "statement": (
+                                "At fixed build orientation α=0° and β=0°, changing "
+                                "scan strategy rotation angle θ from 0° to 45° "
+                                "increased experimental yield strength from 334.2 MPa "
+                                "to 351.9 MPa. The authors describe model deviations "
+                                "as generally below 5%, but the Table 3 values do not "
+                                "uniformly satisfy that summary."
+                            ),
+                            "variables": ["scan strategy rotation angle"],
+                            "mediators": ["crystallographic texture"],
+                            "outcomes": ["yield strength"],
+                            "scope_summary": (
+                                "316L stainless steel, scan strategy rotation angle, "
+                                "α build orientation angle, β build orientation angle, "
+                                "crystallographic texture, yield strength"
+                            ),
+                            "evidence_ref_ids": ["ev-scan-result", "ev-scan-table"],
+                            "evidence_bundle": {
+                                "direct_result": ["ev-scan-result", "ev-scan-table"]
+                            },
+                            "comparison_summary": {
+                                "variable": "scan strategy rotation angle (θ)",
+                                "direction": "increases",
+                                "outcome": "yield strength",
+                                "baseline": {"label": "θ=0°", "value": "334.2 MPa"},
+                                "observed": {"label": "θ=45°", "value": "351.9 MPa"},
+                                "controlled_conditions": [
+                                    {"axis": "α build orientation angle", "value": "0°"},
+                                    {"axis": "β build orientation angle", "value": "0°"},
+                                ],
+                            },
+                            "warnings": [
+                                "model_validation_finding",
+                                "author_summary_table_mismatch",
+                            ],
+                            **_paper_level_boundary_fields(),
+                        },
                     ],
                     "review_queue_findings": [],
                     "evidence_items": [
                         {
-                            "evidence_ref_id": "ev-1",
+                            "evidence_ref_id": "ev-build-result",
                             "document_id": "doc-1",
-                            "source_ref": "blk-1",
+                            "source_ref": "blk-result",
+                            "source_kind": "paragraph",
                             "page": "8",
-                            "quote": (
-                                "The yield strength increased from the 0-0-0 "
-                                "configuration to the 45-22.5-0 condition, "
-                                "with deviations generally less than 5%."
-                            ),
+                            "quote": result_quote,
                             "href": (
                                 "/collections/col-1/documents/doc-1"
-                                "?view=parsed-paper&source_ref=blk-1&page=8"
+                                "?view=parsed-paper&source_ref=blk-result&page=8"
                             ),
-                        }
+                        },
+                        {
+                            "evidence_ref_id": "ev-build-table",
+                            "document_id": "doc-1",
+                            "source_ref": "tbl-validation",
+                            "source_kind": "table",
+                            "page": "8",
+                            "quote": table_quote,
+                            "href": (
+                                "/collections/col-1/documents/doc-1"
+                                "?view=parsed-paper&source_ref=tbl-validation&page=8"
+                            ),
+                            "table_audit": table_audit,
+                        },
+                        {
+                            "evidence_ref_id": "ev-scan-result",
+                            "document_id": "doc-1",
+                            "source_ref": "blk-result",
+                            "source_kind": "paragraph",
+                            "page": "8",
+                            "quote": result_quote,
+                            "href": (
+                                "/collections/col-1/documents/doc-1"
+                                "?view=parsed-paper&source_ref=blk-result&page=8"
+                            ),
+                        },
+                        {
+                            "evidence_ref_id": "ev-scan-table",
+                            "document_id": "doc-1",
+                            "source_ref": "tbl-validation",
+                            "source_kind": "table",
+                            "page": "8",
+                            "quote": table_quote,
+                            "href": (
+                                "/collections/col-1/documents/doc-1"
+                                "?view=parsed-paper&source_ref=tbl-validation&page=8"
+                            ),
+                            "table_audit": table_audit,
+                        },
                     ],
                 },
             },
@@ -1433,21 +1534,23 @@ def test_evaluate_goal_analysis_payload_accepts_model_validation_primary_target(
         source_index={
             "documents": {"doc-1"},
             "sources": {
-                "blk-1": {
+                "blk-result": {
                     "kind": "block",
                     "document_id": "doc-1",
                     "page": "8",
-                    "text": (
-                        "The yield strength increased from the 0-0-0 "
-                        "configuration to the 45-22.5-0 condition, "
-                        "with deviations generally less than 5%."
-                    ),
+                    "text": result_quote,
+                },
+                "tbl-validation": {
+                    "kind": "table",
+                    "document_id": "doc-1",
+                    "page": "8",
+                    "text": table_quote,
                 },
             },
         },
     )
 
-    assert summary["primary_finding_count"] == 1
+    assert summary["primary_finding_count"] == 2
     assert summary["review_queue_finding_count"] == 0
     assert all(item["status"] == "pass" for item in summary["checks"])
 

@@ -86,24 +86,50 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
     "goal_061c9c049e69": {
         "finding_terms": [
-            ["scan strategy", "build orientation"],
+            ["α and β build orientation angles"],
+            ["scan strategy rotation angle"],
             ["yield strength"],
             ["texture", "crystallographic"],
-            ["0-0-0"],
-            ["45-22.5-0"],
-            ["5"],
+            ["334.2"],
+            ["351.9"],
+            ["363.1"],
+            ["do not uniformly satisfy"],
         ],
         "evidence_terms": [
             ["yield strength"],
-            ["0-0-0"],
-            ["45-22.5-0"],
-            ["less than 5"],
+            ["yield strength prediction"],
+            ["yield strength experiment"],
+            ["334.2"],
+            ["351.9"],
+            ["363.1"],
         ],
         "comparison_terms": [
-            ["0-0-0"],
-            ["45-22.5-0"],
+            ["α=0°", "α=0"],
+            ["β=0°", "β=0"],
+            ["α=45°", "α=45"],
+            ["β=22.5°", "β=22.5"],
+            ["θ=0°", "θ=0"],
+            ["θ=45°", "θ=45"],
+            ["334.2"],
+            ["351.9"],
+            ["363.1"],
             ["yield strength"],
         ],
+        "required_primary_finding_sets": [
+            [
+                "α and β build orientation angles",
+                "fixed scan strategy rotation angle",
+                "334.2",
+                "363.1",
+            ],
+            [
+                "scan strategy rotation angle",
+                "fixed build orientation",
+                "334.2",
+                "351.9",
+            ],
+        ],
+        "require_table_direct_evidence_per_primary_finding": True,
     },
     "goal_6bf7d2c1030e": {
         "finding_terms": [
@@ -184,11 +210,18 @@ GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
 }
 GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
-    "goal_061c9c049e69": [["model_validation_finding"]],
+    "goal_061c9c049e69": [
+        ["model_validation_finding"],
+        ["author_summary_table_mismatch"],
+    ],
 }
 GOAL_AXIS_SEMANTIC_EXPECTATIONS: dict[str, dict[str, list[str]]] = {
     "goal_061c9c049e69": {
-        "required": ["β build orientation angle", "scan strategy rotation angle"],
+        "required": [
+            "scan strategy rotation angle",
+            "α build orientation angle",
+            "β build orientation angle",
+        ],
         "forbidden": ["β ->", "β scan strategy rotation angle"],
     },
 }
@@ -197,6 +230,9 @@ GOAL_ALL_FINDING_FORBIDDEN_TERMS: dict[str, list[str]] = {
         "laser power from 100 to 120 decreased density from 98.70 % to 98.45 %",
     ],
     "goal_061c9c049e69": [
+        "scan strategy rotation angle and build orientation -> yield strength",
+        "β build orientation angle remained at 0°",
+        "prediction deviations were generally below 5%",
         "yield strength prediction from 310.48 mpa",
         "prediction from 310.48 mpa to 314.37 mpa",
     ],
@@ -216,7 +252,7 @@ GOAL_MIN_PRIMARY_AXIS_COVERAGE: dict[str, dict[str, int]] = {
     "goal_0914003ad572": {"variables": 2, "properties": 2},
     "goal_1a7a26d850b9": {"variables": 3, "properties": 2},
     "goal_399171646354": {"variables": 1, "properties": 1},
-    "goal_061c9c049e69": {"variables": 3, "properties": 2},
+    "goal_061c9c049e69": {"variables": 2, "properties": 2},
     "goal_6bf7d2c1030e": {"variables": 1, "properties": 3},
     "goal_3037e425673a": {"variables": 2, "properties": 1},
 }
@@ -785,6 +821,20 @@ def evaluate_goal_analysis_payload(
             _combined_text(primary_findings, keys=("comparison_summary",)),
             expectation.get("comparison_terms") or [],
         )
+        missing_distinct_finding_sets = _missing_distinct_finding_sets(
+            primary_findings,
+            expectation.get("required_primary_finding_sets") or [],
+        )
+        missing_table_finding_ids = [
+            str(finding.get("finding_id") or "unknown")
+            for finding in primary_findings
+            if not any(
+                str(evidence_items.get(evidence_id, {}).get("source_kind") or "")
+                .lower()
+                .endswith("table")
+                for evidence_id in _direct_evidence_ids(finding)
+            )
+        ]
         checks.extend(
             [
                 _check(
@@ -810,6 +860,29 @@ def evaluate_goal_analysis_payload(
                     "primary finding comparison summary preserves expert comparison",
                     not missing_comparison_terms,
                     _missing_terms_detail(missing_comparison_terms),
+                )
+            )
+        if expectation.get("required_primary_finding_sets"):
+            checks.append(
+                _check(
+                    goal_id,
+                    "primary findings preserve distinct expert comparisons",
+                    not missing_distinct_finding_sets,
+                    _missing_terms_detail(missing_distinct_finding_sets),
+                )
+            )
+        if expectation.get("require_table_direct_evidence_per_primary_finding"):
+            checks.append(
+                _check(
+                    goal_id,
+                    "each primary finding cites direct table evidence",
+                    bool(primary_findings) and not missing_table_finding_ids,
+                    (
+                        "all primary findings cite table evidence"
+                        if not missing_table_finding_ids
+                        else "missing="
+                        + json.dumps(missing_table_finding_ids, ensure_ascii=False)
+                    ),
                 )
             )
         forbidden_terms = [
@@ -1186,12 +1259,18 @@ def _finding_symbol_scope_failures(findings: list[dict[str, Any]]) -> list[str]:
         variables = list(dict.fromkeys(variables))
         if not variables:
             continue
+        controlled_axes = {
+            str(condition.get("axis") or "")
+            for condition in _dict_rows(comparison.get("controlled_conditions"))
+        }
         scope_summary = str(finding.get("scope_summary") or "")
         missing = [axis for axis in variables if axis not in scope_summary]
         forbidden = [
             axis
             for axis in symbol_axes
-            if axis not in variables and axis in scope_summary
+            if axis not in variables
+            and axis not in controlled_axes
+            and axis in scope_summary
         ]
         if missing or forbidden:
             failures.append(
@@ -1256,6 +1335,37 @@ def _missing_direct_evidence_sets(
             for item_text in item_texts
         ):
             missing.append(terms)
+    return missing
+
+
+def _missing_distinct_finding_sets(
+    findings: list[dict[str, Any]],
+    required_sets: list[list[str]],
+) -> list[list[str]]:
+    finding_texts = [
+        _combined_text(
+            [finding],
+            keys=("title", "statement", "variables", "comparison_summary"),
+        )
+        for finding in findings
+    ]
+    used_indexes: set[int] = set()
+    missing: list[list[str]] = []
+    for terms in required_sets:
+        normalized_terms = [term.lower() for term in terms if term]
+        match = next(
+            (
+                index
+                for index, finding_text in enumerate(finding_texts)
+                if index not in used_indexes
+                and all(term in finding_text for term in normalized_terms)
+            ),
+            None,
+        )
+        if match is None:
+            missing.append(terms)
+        else:
+            used_indexes.add(match)
     return missing
 
 

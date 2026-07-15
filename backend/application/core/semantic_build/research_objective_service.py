@@ -5491,9 +5491,28 @@ class ResearchObjectiveService:
                 allow_multi_axis=allow_multi_axis,
             )
 
+        current_sample_axes = self._objective_sample_axis_values(current)
+        baseline_sample_axes = self._objective_sample_axis_values(baseline)
+        if objective_context is not None and objective_context.variable_process_axes:
+            changed_sample_axes = self._objective_changed_axis_values(
+                current_axes=current_sample_axes,
+                baseline_axes=baseline_sample_axes,
+            )
+            for axis in changed_sample_axes:
+                if not any(
+                    self._axis_values_match(axis, goal_axis)
+                    or self._axis_label_is_mentioned(axis, goal_axis)
+                    or self._objective_preheating_condition_column_matches_axis(
+                        axis,
+                        current_sample_axes[axis],
+                        axis_key=self._normalize_property_label(goal_axis) or "",
+                    )
+                    for goal_axis in objective_context.variable_process_axes
+                ):
+                    return None
         return self._objective_single_changed_axis_from_values(
-            current_axes=self._objective_sample_axis_values(current),
-            baseline_axes=self._objective_sample_axis_values(baseline),
+            current_axes=current_sample_axes,
+            baseline_axes=baseline_sample_axes,
             allow_multi_axis=allow_multi_axis,
         )
 
@@ -5652,9 +5671,6 @@ class ResearchObjectiveService:
             if axis in baseline_axes and current_axes[axis] != baseline_axes[axis]
         ]
         if len(changed_axes) != 1:
-            for primary_axis in ("volumetric energy density", "energy density"):
-                if primary_axis in changed_axes:
-                    return primary_axis
             if allow_multi_axis and len(changed_axes) > 1:
                 return ", ".join(changed_axes)
             return None

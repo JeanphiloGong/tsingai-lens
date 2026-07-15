@@ -6728,6 +6728,73 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
     assert comparison_units == ()
 
 
+def test_research_objective_service_does_not_promote_ved_when_sample_controls_change(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-elongation",
+            "variable_process_axes": ["energy density"],
+            "target_property_axes": ["elongation"],
+        }
+    )
+
+    def elongation_unit(
+        evidence_unit_id: str,
+        *,
+        specimen: str,
+        energy_density: str,
+        treatment: str,
+        value: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-elongation",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "elongation",
+                "sample_context": {
+                    "Specimens": specimen,
+                    "Laser energy density (J/mm3)": energy_density,
+                    "Type of heat treatment": treatment,
+                },
+                "value_payload": {
+                    "source_value_text": str(value),
+                    "value": value,
+                },
+                "unit": "%",
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        )
+
+    comparison_units = service._build_objective_pairwise_comparison_units(
+        (
+            elongation_unit(
+                "oeu-elongation-as-slm",
+                specimen="as-SLM (120/100)",
+                energy_density="333",
+                treatment="-",
+                value=35.0,
+            ),
+            elongation_unit(
+                "oeu-elongation-hip-slm",
+                specimen="HIP-SLM (140/100)",
+                energy_density="389",
+                treatment="HIP",
+                value=52.7,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert comparison_units == ()
+
+
 def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
     tmp_path,
 ):

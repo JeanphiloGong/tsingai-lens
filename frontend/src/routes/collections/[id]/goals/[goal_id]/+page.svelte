@@ -64,8 +64,14 @@
 	$: currentDocumentLabel = progressDocumentLabel(progress);
 	$: selectedPlan = plans.find((plan) => plan.plan_id === selectedPlanId) ?? null;
 	$: selectedPlanEditWarning = experimentPlanEditWarning(selectedPlan, planContent);
+	$: selectedPlanSourceWarning = experimentPlanSourceWarning(selectedPlan);
+	$: selectedPlanCanEnterReview = canEnterReview(selectedPlan);
 	$: canSaveSelectedPlan = Boolean(
-		selectedPlan && planTitle.trim() && planContent.trim() && !selectedPlanEditWarning
+		selectedPlan &&
+			planTitle.trim() &&
+			planContent.trim() &&
+			!selectedPlanEditWarning &&
+			(planStatus !== 'ready_for_review' || selectedPlanCanEnterReview)
 	);
 	$: if (browser && collectionId && goalId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
@@ -222,6 +228,38 @@
 		return isCopilotPlan(plan)
 			? $t('research.goalWorkspace.experimentPlanCopilotSource')
 			: $t('research.goalWorkspace.experimentPlanManualSource');
+	}
+
+	function sourceValidity(plan: ExperimentPlan | null) {
+		if (!isCopilotPlan(plan)) return '';
+		const value = metadataText(plan, 'source_validity');
+		return value === 'current' || value === 'stale' ? value : 'unverified';
+	}
+
+	function sourceValidityLabel(plan: ExperimentPlan | null) {
+		const value = sourceValidity(plan);
+		if (value === 'current') {
+			return $t('research.goalWorkspace.experimentPlanSourceCurrent');
+		}
+		if (value === 'stale') {
+			return $t('research.goalWorkspace.experimentPlanSourceStale');
+		}
+		return $t('research.goalWorkspace.experimentPlanSourceUnverified');
+	}
+
+	function experimentPlanSourceWarning(plan: ExperimentPlan | null) {
+		const value = sourceValidity(plan);
+		if (value === 'stale') {
+			return $t('research.goalWorkspace.experimentPlanSourceStaleWarning');
+		}
+		if (value === 'unverified') {
+			return $t('research.goalWorkspace.experimentPlanSourceUnverifiedWarning');
+		}
+		return '';
+	}
+
+	function canEnterReview(plan: ExperimentPlan | null) {
+		return !isCopilotPlan(plan) || sourceValidity(plan) === 'current';
 	}
 
 	function sourceModeLabel(value: string) {
@@ -424,11 +462,18 @@
 							>
 								<strong>{plan.title}</strong>
 								<span>{statusLabel(plan.status)}</span>
-								<small>{planSourceLabel(plan)} · {selectedPlanReviewGateLabel(plan)}</small>
+								<small>
+									{planSourceLabel(plan)}{#if isCopilotPlan(plan)} · {sourceValidityLabel(plan)}{/if}
+								</small>
 							</button>
 						{/each}
 					</div>
 					<form class="experiment-plans__editor" on:submit|preventDefault={savePlanEdits}>
+						{#if selectedPlanSourceWarning}
+							<p class="experiment-plans__source-warning" role="alert">
+								{selectedPlanSourceWarning}
+							</p>
+						{/if}
 						<label>
 							<span>{$t('research.goalWorkspace.experimentPlanTitle')}</span>
 							<input id="experiment-plan-title" name="experiment_plan_title" bind:value={planTitle} />
@@ -441,7 +486,7 @@
 								bind:value={planStatus}
 							>
 								<option value="draft">{$t('research.goalWorkspace.experimentPlanDraft')}</option>
-								<option value="ready_for_review">
+								<option value="ready_for_review" disabled={!selectedPlanCanEnterReview}>
 									{$t('research.goalWorkspace.experimentPlanReady')}
 								</option>
 								<option value="archived">{$t('research.goalWorkspace.experimentPlanArchived')}</option>
@@ -468,6 +513,9 @@
 									<strong>
 										{planSourceLabel(selectedPlan)}
 									</strong>
+									{#if isCopilotPlan(selectedPlan)}
+										<span>{sourceValidityLabel(selectedPlan)}</span>
+									{/if}
 									<span>{selectedPlanReviewGateLabel(selectedPlan)}</span>
 								</div>
 								<div class="experiment-plans__provenance-meta">
@@ -765,6 +813,17 @@
 		border: 1px solid rgba(217, 119, 6, 0.32);
 		border-radius: var(--radius-md);
 		background: rgba(255, 251, 235, 0.86);
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+		padding: 10px 12px;
+	}
+
+	.experiment-plans__source-warning {
+		margin: 0;
+		border: 1px solid rgba(185, 28, 28, 0.35);
+		border-radius: var(--radius-md);
+		background: rgba(254, 242, 242, 0.92);
 		color: var(--text-primary);
 		font-size: 13px;
 		line-height: 20px;

@@ -42,6 +42,9 @@ vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
 
+let defaultPlanSourceValidity = 'current';
+let defaultPlanSourceValidityReasons: string[] = [];
+
 function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	return new Response(JSON.stringify(body), {
 		status,
@@ -74,6 +77,8 @@ function structuredProtocol(sourceLabel = 'Source 1') {
 
 describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 	beforeEach(() => {
+		defaultPlanSourceValidity = 'current';
+		defaultPlanSourceValidityReasons = [];
 		authState.set({
 			status: 'authenticated',
 			user: {
@@ -258,7 +263,12 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 										href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
 									}
 								],
-								metadata: {},
+								metadata: {
+									source: 'goal_copilot',
+									review_gate: 'protocol_ready_findings',
+									source_validity: defaultPlanSourceValidity,
+									source_validity_reasons: defaultPlanSourceValidityReasons
+								},
 								created_by: 'expert-a',
 								created_at: '2026-07-13T00:00:00+00:00',
 								updated_at: '2026-07-13T00:00:00+00:00'
@@ -879,6 +889,49 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		).toBe(false);
 	});
 
+	it('shows stale copilot sources and prevents review promotion', async () => {
+		defaultPlanSourceValidity = 'stale';
+		defaultPlanSourceValidityReasons = ['source_finding_changed'];
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Source Findings or evidence changed', { exact: true }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This draft uses an older Finding or evidence version. Rebuild it in Copilot before marking it ready for review.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
+			.toBeDisabled();
+		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).not.toBeDisabled();
+	});
+
+	it('shows legacy copilot sources as unverified', async () => {
+		defaultPlanSourceValidity = 'unverified';
+		defaultPlanSourceValidityReasons = ['source_finding_snapshot_missing'];
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Source version unverified', { exact: true }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This legacy draft has no exact Finding and evidence version. Rebuild it in Copilot before marking it ready for review.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
+			.toBeDisabled();
+	});
+
 	it('opens the experiment plan requested by the copilot deep link', async () => {
 		setPage({
 			params: { id: 'col_123', goal_id: 'goal_1' },
@@ -936,7 +989,9 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 									source_session_id: 'session_2',
 									source_mode: 'collection_grounded',
 									used_evidence_ids: ['ev_1'],
-									review_gate: 'protocol_ready_findings'
+									review_gate: 'protocol_ready_findings',
+									source_validity: 'current',
+									source_validity_reasons: []
 								},
 								created_by: 'expert-a',
 								created_at: '2026-07-13T00:01:00+00:00',
@@ -985,20 +1040,16 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
 		await expect
-			.element(browserPage.getByText('Manual expert draft · No automated review gate recorded'))
+			.element(browserPage.getByText('Manual expert draft', { exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(
-				browserPage.getByText(
-					'Generated from reviewed Goal Copilot evidence · Reviewed protocol-ready findings'
-				)
-			)
+			.element(browserPage.getByText('Goal Copilot draft', { exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Generated from reviewed Goal Copilot evidence', { exact: true }))
+			.element(browserPage.getByText('Current Finding and evidence version', { exact: true }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Reviewed protocol-ready findings', { exact: true }))
+			.element(browserPage.getByText('Created under the protocol-ready review gate', { exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Collection evidence answer')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('protocol_ready_findings')).not.toBeInTheDocument();

@@ -3734,12 +3734,17 @@ class ResearchUnderstandingService:
             )
             if block is None:
                 continue
+            condition_block = self._best_preheating_condition_source_block(
+                document_id,
+                blocks_by_id=blocks_by_id,
+            )
             recovered.append(
                 self._recovered_preheating_ductility_finding(
                     block,
                     collection_id=_text(payload.get("collection_id")),
                     objective_context=objective_context,
                     objective=objective,
+                    condition_block=condition_block,
                 )
             )
         return [item for item in recovered if item]
@@ -3850,6 +3855,54 @@ class ResearchUnderstandingService:
                 best = ranked
         return best[2] if best else None
 
+    def _best_preheating_condition_source_block(
+        self,
+        document_id: str,
+        *,
+        blocks_by_id: Mapping[str, SourceBlock],
+    ) -> SourceBlock | None:
+        best: tuple[int, int, str, SourceBlock] | None = None
+        for block in blocks_by_id.values():
+            if block.document_id != document_id:
+                continue
+            normalized = f" {_normalize_match_text(_text(block.text) or '')} "
+            if not all(
+                term in normalized
+                for term in (
+                    " layer thickness ",
+                    " hatch spacing ",
+                    " laser power ",
+                )
+            ) or not (
+                " scan speed " in normalized or " scanning speed " in normalized
+            ):
+                continue
+            if not (
+                " preheating temperature " in normalized
+                or " p150 " in normalized
+                or " np " in normalized
+            ):
+                continue
+            heading = f" {_normalize_match_text(_text(block.heading_path) or '')} "
+            score = 4
+            if " method " in heading or " material " in heading:
+                score += 4
+            if " optimized process parameter" in normalized:
+                score += 3
+            if " each condition " in normalized or (
+                " np " in normalized and " p150 " in normalized
+            ):
+                score += 2
+            ranked = (
+                score,
+                -(block.block_order or 0),
+                _text(block.block_id) or "",
+                block,
+            )
+            if best is None or ranked > best:
+                best = ranked
+        return best[3] if best else None
+
     def _recovered_preheating_ductility_finding(
         self,
         block: SourceBlock,
@@ -3857,6 +3910,7 @@ class ResearchUnderstandingService:
         collection_id: str,
         objective_context: Mapping[str, Any],
         objective: Mapping[str, Any],
+        condition_block: SourceBlock | None,
     ) -> dict[str, Any]:
         block_id = _text(block.block_id)
         document_id = _text(block.document_id)
@@ -3879,8 +3933,9 @@ class ResearchUnderstandingService:
             ["build platform preheating temperature"],
             objective_context=objective_context,
         )
-        return {
-            "evidence_ref": {
+        evidence_ref_ids = [evidence_ref_id]
+        evidence_refs = [
+            {
                 "evidence_ref_id": evidence_ref_id,
                 "source_kind": _text(block.block_type) or "text_window",
                 "document_id": document_id,
@@ -3903,7 +3958,57 @@ class ResearchUnderstandingService:
                     page=_text(block.page),
                     quote_text=quote,
                 ),
-            },
+            }
+        ]
+        condition_block_id = (
+            _text(condition_block.block_id) if condition_block else None
+        )
+        if condition_block is not None and condition_block_id:
+            condition_ref_id = (
+                "evref_recovered_preheating_ductility_condition_"
+                f"{condition_block_id}"
+            )
+            condition_quote = _short_text(_text(condition_block.text), limit=900)
+            evidence_ref_ids.append(condition_ref_id)
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": condition_ref_id,
+                    "source_kind": _text(condition_block.block_type) or "text_window",
+                    "document_id": _text(condition_block.document_id) or document_id,
+                    "label": (
+                        _text(condition_block.heading_path)
+                        or "Recovered condition evidence"
+                    ),
+                    "locator": {
+                        "source_ref": condition_block_id,
+                        "source_kind": (
+                            _text(condition_block.block_type) or "text_window"
+                        ),
+                        **(
+                            {"page": condition_block.page}
+                            if condition_block.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": 0.86,
+                    "traceability_status": "resolved",
+                    "evidence_role": "condition_context",
+                    "quote": condition_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=(
+                            _text(condition_block.document_id) or document_id
+                        ),
+                        source_ref=condition_block_id,
+                        page=_text(condition_block.page),
+                        quote_text=condition_quote,
+                    ),
+                }
+            )
+        return {
+            "evidence_refs": evidence_refs,
             "context": {
                 "context_id": context_id,
                 "label": "Recovered source scope",
@@ -3925,7 +4030,7 @@ class ResearchUnderstandingService:
                 "status": "supported",
                 "confidence": 0.86,
                 "strength": "moderate",
-                "evidence_ref_ids": [evidence_ref_id],
+                "evidence_ref_ids": evidence_ref_ids,
                 "context_ids": [context_id],
                 "source_object_ids": [claim_id],
                 "warnings": ["author_attributed_mechanism"],
@@ -3940,7 +4045,7 @@ class ResearchUnderstandingService:
                 "conditions": material_scope,
                 "status": "supported",
                 "confidence": 0.86,
-                "evidence_ref_ids": [evidence_ref_id],
+                "evidence_ref_ids": evidence_ref_ids,
                 "context_ids": [context_id],
                 "source_object_ids": [claim_id],
                 "warnings": [
@@ -7811,12 +7916,17 @@ class ResearchUnderstandingService:
                 )
                 if block is None:
                     continue
+                condition_block = self._best_preheating_condition_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                )
                 recovered.append(
                     self._recovered_preheating_ductility_finding(
                         block,
                         collection_id=collection_id,
                         objective_context=objective_context,
                         objective=objective,
+                        condition_block=condition_block,
                     )
                 )
                 break

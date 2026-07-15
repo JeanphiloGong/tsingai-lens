@@ -2833,6 +2833,20 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
             ],
             blocks=[
                 SourceBlock(
+                    block_id="blk-preheat-process-conditions",
+                    document_id="paper-preheat",
+                    block_type="paragraph",
+                    text=(
+                        "For both NP and P150 conditions, the optimized process "
+                        "parameters were a layer thickness of 50 μm, hatch "
+                        "spacing of 0.11 mm, laser power of 200 W, and scan speed "
+                        "of 1833 mm/s."
+                    ),
+                    block_order=37,
+                    page=3,
+                    heading_path="Materials and methods",
+                ),
+                SourceBlock(
                     block_id="blk-preheat-conclusion",
                     document_id="paper-preheat",
                     block_type="list_item",
@@ -2973,6 +2987,10 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     assert primary[0]["evidence_bundle"]["mechanism"] == [
         "evref_recovered_preheating_ductility_blk-preheat-conclusion"
     ]
+    assert primary[0]["evidence_bundle"]["condition_context"] == [
+        "evref_recovered_preheating_ductility_condition_"
+        "blk-preheat-process-conditions"
+    ]
     assert primary[0]["comparison_summary"] == {
         "variable": "build platform preheating temperature",
         "direction": "increases",
@@ -3003,6 +3021,15 @@ def test_objective_understanding_recovers_preheating_ductility_finding_from_conc
     assert "Preheated" in table_ref["quote"]
     assert "72" in table_ref["quote"]
     assert "82" in table_ref["quote"]
+    condition_ref = evidence_by_id[
+        "evref_recovered_preheating_ductility_condition_"
+        "blk-preheat-process-conditions"
+    ]
+    assert condition_ref["source_ref"] == "blk-preheat-process-conditions"
+    assert condition_ref["page"] == "3"
+    assert condition_ref["evidence_role"] == "condition_context"
+    assert "laser power of 200 W" in condition_ref["quote"]
+    assert "scan speed of 1833 mm/s" in condition_ref["quote"]
     misaligned_narrative = {
         **primary[0],
         "claim_id": "claim-unrelated-to-preheating-recovery",

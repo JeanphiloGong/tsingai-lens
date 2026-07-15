@@ -59,6 +59,20 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["14"],
             ["gnd"],
         ],
+        "required_condition_evidence_sets": [
+            [
+                "np",
+                "p150",
+                "layer thickness",
+                "50",
+                "hatch spacing",
+                "0.11",
+                "laser power",
+                "200",
+                "scan speed",
+                "1833",
+            ],
+        ],
     },
     "goal_1a7a26d850b9": {
         "finding_terms": [

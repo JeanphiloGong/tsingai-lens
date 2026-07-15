@@ -7077,6 +7077,25 @@ def test_finding_scope_excludes_unrelated_specific_treatment_condition():
         "stainless steel 316L, scan speed, energy density, density, SLM"
     )
 
+    hip_scope = understanding_module._compact_finding_scope_summary(
+        (
+            "stainless steel 316L, laser power, density, HIP, "
+            "(120/ 200) HIP-SLM, SLM"
+        ),
+        variables=["laser power", "energy density"],
+        outcomes=["density"],
+        statement=(
+            "Under heat treatment type HIP and scan speed 200, laser power "
+            "changed from 100 W to 120 W while energy density changed from "
+            "139 J/mm3 to 167 J/mm3."
+        ),
+    )
+
+    assert hip_scope == (
+        "stainless steel 316L, laser power, energy density, density, HIP"
+    )
+    assert "(120/ 200) HIP-SLM" not in hip_scope
+
 
 def test_with_presentation_filters_generic_finding_scope_tokens():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())

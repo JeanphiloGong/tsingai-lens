@@ -14880,6 +14880,12 @@ def _is_generic_finding_scope_token(value: str) -> bool:
         return True
     if re.search(r"\(\s*\d+/\s*$", text):
         return True
+    if re.fullmatch(
+        r"\(\s*\d+\s*/\s*\d+\s*\)\s*(?:as|ht|hip)[-\s]?slm",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
     return text.lower() in {
         "axis",
         "condition",

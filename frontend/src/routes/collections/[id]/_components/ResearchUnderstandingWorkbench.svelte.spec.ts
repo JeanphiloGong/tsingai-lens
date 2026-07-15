@@ -2343,6 +2343,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(reviewLoop.getByText('Support is partial.')).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('heat treatment', { exact: true })).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('yield strength', { exact: true })).toBeInTheDocument();
+		const decisionBoardUrl = new URL(
+			reviewLoop
+				.getByRole('link', { name: 'Download decision board TSV' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(decisionBoardUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(decisionBoardUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(decisionBoardUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(decisionBoardUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
+		expect(decisionBoardUrl.searchParams.get('format')).toBe('decision_board_tsv');
 		await expect.element(reviewLoop.getByRole('button', { name: 'Review evidence' })).toBeInTheDocument();
 		await expect
 			.element(reviewLoop.getByRole('button', { name: 'Accept paper-level' }))
@@ -3529,11 +3543,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		);
 		expect(decisionTemplateUrl.searchParams.get('format')).toBe('decision_template');
 
+		const decisionBoardLink = Array.from(datasetRegion?.querySelectorAll('a') ?? []).find(
+			(link) => link.textContent?.trim() === 'Decision board TSV'
+		);
+		expect(decisionBoardLink).toBeTruthy();
 		const decisionBoardUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Decision board TSV' })
-				.element()
-				.getAttribute('href') ?? '',
+			decisionBoardLink?.getAttribute('href') ?? '',
 			'http://localhost'
 		);
 		expect(decisionBoardUrl.pathname).toBe(

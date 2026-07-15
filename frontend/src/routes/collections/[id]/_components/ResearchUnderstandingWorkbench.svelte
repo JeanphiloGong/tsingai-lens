@@ -3784,6 +3784,13 @@
 							</a>
 							<a
 								class="research-understanding-workbench__review-loop-link"
+								href={datasetDownloadUrl('decision_board_tsv', 'review_candidate')}
+								download
+							>
+								{$t('research.understanding.reviewLoopDownloadDecisionBoard')}
+							</a>
+							<a
+								class="research-understanding-workbench__review-loop-link"
 								href={datasetDownloadUrl('review_packet', 'review_candidate')}
 								download
 							>

@@ -15066,6 +15066,15 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                             "119",
                             "93.58",
                         ],
+                        ["280) as-SLM (120/", "-", "120", "100", "333", "98.11"],
+                        [
+                            "280) HIP-SLM (120/",
+                            "HIP",
+                            "120",
+                            "280",
+                            "119",
+                            "92.08",
+                        ],
                     ],
                 )
             ],

@@ -15134,6 +15134,13 @@ class ResearchUnderstandingService:
         hint_terms["result_numeric"].update(
             _quote_result_numeric_hint_terms(finding.get("statement"))
         )
+        comparison_summary = _mapping(finding.get("comparison_summary"))
+        for side in ("baseline", "observed"):
+            result_value = _text(_mapping(comparison_summary.get(side)).get("value"))
+            if result_value:
+                hint_terms["result_numeric"].update(
+                    _quote_numeric_hint_terms(result_value)
+                )
         hint_terms["result_numeric_endpoints"].update(
             _quote_result_numeric_endpoint_terms(finding.get("statement"))
         )
@@ -16352,11 +16359,16 @@ class ResearchUnderstandingService:
             if max_numeric_hits > 0
             and int(row["_numeric_statement_hits"]) == max_numeric_hits
         ]
-        precision_rows = cited_rows or endpoint_rows or _dedupe_rows_by_index(
-            [
-                *(result_precision_rows or numeric_precision_rows),
-                *[row for row in row_records if row["_statement_hits"] > 0],
-            ],
+        precision_rows = (
+            cited_rows
+            or endpoint_rows
+            or result_precision_rows
+            or _dedupe_rows_by_index(
+                [
+                    *numeric_precision_rows,
+                    *[row for row in row_records if row["_statement_hits"] > 0],
+                ]
+            )
         )
         scored_rows = precision_rows or [row for row in row_records if row["_score"] > 0]
         relevant_rows = sorted(

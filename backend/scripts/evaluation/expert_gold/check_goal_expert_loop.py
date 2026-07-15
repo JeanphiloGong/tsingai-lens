@@ -1140,29 +1140,23 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
             "--reviewer <human-reviewer> --format text"
         ),
     ]
-    layers = _mapping(summary.get("layers"))
-    experiment_layer = _mapping(layers.get("experiment_design"))
-    if experiment_layer.get("status") == "pass":
-        commands.extend(
-            [
-                (
-                    f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-                    f"--collection-id {collection_id} --format messages-jsonl "
-                    "--require-training-ready"
-                ),
-                (
-                    f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-                    f"--collection-id {collection_id} --format training-jsonl "
-                    "--require-training-ready"
-                ),
-            ]
-        )
-    else:
-        commands.append(
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
-            f"--collection-id {collection_id} --format messages-jsonl --require-training-ready"
-        )
+    commands.extend(_training_export_commands(collection_id))
     return commands
+
+
+def _training_export_commands(collection_id: str) -> list[str]:
+    return [
+        (
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format messages-jsonl "
+            "--require-training-ready"
+        ),
+        (
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_goal_dataset_quality.py "
+            f"--collection-id {collection_id} --format training-jsonl "
+            "--require-training-ready"
+        ),
+    ]
 
 
 def _first_pending_goal_href(summary: dict[str, Any]) -> str:

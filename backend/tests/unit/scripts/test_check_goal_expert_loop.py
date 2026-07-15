@@ -303,6 +303,15 @@ def test_check_goal_expert_loop_expert_gate_fails_on_remaining_work(monkeypatch)
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == (
         "not_checked"
     )
+    text = check.render_text_summary(summary)
+    assert (
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format messages-jsonl --require-training-ready"
+        in text
+    )
+    assert (
+        "./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py --collection-id col-1 --format training-jsonl --require-training-ready"
+        in text
+    )
 
 
 def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):

@@ -33,7 +33,8 @@ from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
 from application.goal.protocol_contract import (
-    ved_design_is_operationally_consistent,
+    has_affirmative_ved_isolation_claim,
+    ved_design_is_scientifically_consistent,
 )
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.collection_service import CollectionService
@@ -93,7 +94,8 @@ class _StructuredProtocolDraft(BaseModel):
         max_length=12,
         description=(
             "One plain design risk per list item. Do not repeat evidence limits or "
-            "include category labels."
+            "include category labels. Do not claim that changing a VED constituent "
+            "isolates a universal VED-only effect."
         ),
     )
 
@@ -1066,7 +1068,9 @@ class GoalSessionService:
             "manipulations, proposed measurements, proposed controls, and design risks. "
             "Do not generate or restate source-backed facts; Lens derives those directly "
             "from the curated Findings. Proposed items must not invent numeric settings, "
-            "sample counts, standards, or named methods.\n"
+            "sample counts, standards, or named methods. A VED design may estimate a "
+            "selected constituent-mediated path, but must not claim to isolate a "
+            "universal VED-only effect.\n"
             "Normalize the protocol into the required evidence/design fields."
             f"\n\nPrevious draft:\n<draft>\n{answer}\n</draft>"
         )
@@ -1132,7 +1136,25 @@ class GoalSessionService:
                 for marker in ("paper-level", "cross-paper", "generalization")
             ):
                 continue
+            if has_affirmative_ved_isolation_claim(text):
+                continue
             design_risks.append(f"- Design risk: {text}")
+        ved_grounding = any(
+            re.search(
+                r"\bVED\b|volumetric\s+energy\s+density",
+                item,
+                flags=re.IGNORECASE,
+            )
+            for item in grounding["variable_observations"]
+        )
+        if ved_grounding and not any(
+            "does not isolate" in item.lower() for item in design_risks
+        ):
+            design_risks.append(
+                "- Design risk: Changing one or more VED constituents estimates "
+                "the selected constituent-mediated path; it does not isolate a "
+                "universal VED-only effect."
+            )
         if not design_risks:
             design_risks.append(
                 "- Design risk: The proposed choices require expert validation for "
@@ -1292,7 +1314,7 @@ class GoalSessionService:
             item = line.split(":", 1)[1]
             if category_pattern.search(item):
                 return False
-        return ved_design_is_operationally_consistent(answer)
+        return ved_design_is_scientifically_consistent(answer)
 
     def _is_protocol_draft(self, answer: str) -> bool:
         normalized = answer.lower()
@@ -1362,7 +1384,9 @@ class GoalSessionService:
                 "change and which remain fixed. Never say that a derived variable changes "
                 "while every constituent parameter is fixed. If the cited evidence changes "
                 "multiple constituent parameters, label it as a confounded comparison and "
-                "propose an isolated or factorial validation. Separate source-backed "
+                "propose a constituent-controlled or factorial validation. Changing one "
+                "constituent estimates that constituent-mediated path; never call it an "
+                "isolated or universal VED-only effect. Separate source-backed "
                 "observations from protocol choices, and mark uncited settings or methods "
                 "as a proposed design choice. In Variable matrix, Measurements, and "
                 "Controls, prefix every bullet with exactly 'Source-backed:' and include "

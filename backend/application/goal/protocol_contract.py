@@ -53,6 +53,23 @@ _VED_COMPONENT_PATTERNS = {
         re.IGNORECASE,
     ),
 }
+_VED_ISOLATION_PATTERN = re.compile(
+    r"\bisolat(?:e|es|ed|ing)\s+(?:an?\s+|the\s+)?"
+    r"(?:(?:effect|impact)\s+of\s+)?"
+    r"(?:(?:universal|independent|direct)\s+)?"
+    r"(?:VED(?:-only)?|volumetric\s+energy\s+density)"
+    r"(?:\s+(?:effect|impact))?|"
+    r"(?:\bVED(?:-only)?\b|volumetric\s+energy\s+density)"
+    r"\s+(?:effect|impact)\s+(?:is|was|can\s+be)\s+isolat(?:ed|able)|"
+    r"(?:隔离|独立识别|分离)(?:了|出)?(?:体积能量密度|VED)"
+    r"(?:的)?(?:单变量|独立|直接|普适)?(?:效应|影响)?",
+    re.IGNORECASE,
+)
+_NEGATION_BEFORE_PATTERN = re.compile(
+    r"(?:\bnot\b|\bnever\b|\bcannot\b|\bcan['’]t\b)"
+    r"(?:\s+\w+){0,3}\s*$|(?:不能|不可|无法|并非|不)\s*$",
+    re.IGNORECASE,
+)
 _VARIABLE_LABELS = ("Variable matrix", "变量矩阵", "变量")
 _MEASUREMENT_LABELS = (
     "Measurements",
@@ -72,8 +89,11 @@ _RISK_LABELS = (
 )
 
 
-def ved_design_is_operationally_consistent(content: str) -> bool:
-    """Return whether a VED manipulation names changed and fixed constituents."""
+def ved_design_is_scientifically_consistent(content: str) -> bool:
+    """Return whether a VED design has operational and causal boundaries."""
+
+    if has_affirmative_ved_isolation_claim(content):
+        return False
 
     variable_section = _section(content, _VARIABLE_LABELS, _MEASUREMENT_LABELS)
     if not variable_section or not _VED_PATTERN.search(variable_section):
@@ -103,6 +123,14 @@ def ved_design_is_operationally_consistent(content: str) -> bool:
     return bool(changed) and not changed.intersection(fixed) and (
         changed.union(fixed) == components
     )
+
+
+def has_affirmative_ved_isolation_claim(content: str) -> bool:
+    for match in _VED_ISOLATION_PATTERN.finditer(content):
+        prefix = content[max(0, match.start() - 48) : match.start()]
+        if not _NEGATION_BEFORE_PATTERN.search(prefix):
+            return True
+    return False
 
 
 def _section(

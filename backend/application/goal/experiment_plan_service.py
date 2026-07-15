@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from application.evaluation import ResearchUnderstandingFeedbackService
 from application.goal.protocol_contract import (
-    ved_design_is_operationally_consistent,
+    ved_design_is_scientifically_consistent,
 )
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
 from domain.ports import ExperimentPlanRepository, GoalSessionRepository
@@ -328,7 +328,7 @@ def _source_validity(
     plan: ExperimentPlanRecord,
     dataset_items: tuple[Mapping[str, Any], ...] | None,
 ) -> tuple[str, list[str]]:
-    if not ved_design_is_operationally_consistent(plan.content):
+    if not ved_design_is_scientifically_consistent(plan.content):
         return "stale", ["protocol_design_inconsistent"]
     if dataset_items is None:
         return "unverified", ["source_dataset_unavailable"]
@@ -416,10 +416,9 @@ def _validate_goal_copilot_plan_edit(
 
 
 def _validate_ved_design(content: str) -> None:
-    if not ved_design_is_operationally_consistent(content):
+    if not ved_design_is_scientifically_consistent(content):
         raise ValueError(
-            "VED design must identify at least one changed constituent and mark "
-            "every other constituent as changed or fixed"
+            "VED design violates the constituent-state or causal-boundary contract"
         )
 
 

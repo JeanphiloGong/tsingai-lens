@@ -507,12 +507,43 @@ def test_experiment_plan_service_rejects_ved_plan_without_operational_constituen
         ),
     )
 
-    with pytest.raises(ValueError, match="VED design must identify"):
+    with pytest.raises(ValueError, match="VED design"):
         service.create_plan(
             collection_id="col_1",
             goal_id="goal_1",
             title="VED validation matrix",
             content=_ved_protocol(operational=False),
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
+def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    content = _ved_protocol(operational=True).replace(
+        "validate the isolated effect before causal interpretation",
+        "this design isolates the effect of VED from its constituent parameters",
+    )
+    _write_goal_message(
+        goal_session_repository,
+        content=content,
+        review_gate="protocol_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VED design"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="VED isolation matrix",
+            content=content,
             source_message_id="msg_1",
             created_by="expert-a",
             metadata={"source": "goal_copilot"},
@@ -853,7 +884,7 @@ def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_pat
         metadata={"source": "goal_copilot"},
     )
 
-    with pytest.raises(ValueError, match="VED design must identify"):
+    with pytest.raises(ValueError, match="VED design"):
         service.update_plan(
             collection_id="col_1",
             goal_id="goal_1",

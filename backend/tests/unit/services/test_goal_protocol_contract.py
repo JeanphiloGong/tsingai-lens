@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from application.goal.protocol_contract import (
-    ved_design_is_operationally_consistent,
+    ved_design_is_scientifically_consistent,
 )
 
 
@@ -33,7 +33,7 @@ Treat the result as a laser-power-mediated VED path.
     ],
 )
 def test_ved_design_contract_accepts_operational_designs(content):
-    assert ved_design_is_operationally_consistent(content) is True
+    assert ved_design_is_scientifically_consistent(content) is True
 
 
 @pytest.mark.parametrize(
@@ -64,7 +64,7 @@ Review confounding.
 def test_ved_design_contract_rejects_designs_without_a_changed_constituent(
     content,
 ):
-    assert ved_design_is_operationally_consistent(content) is False
+    assert ved_design_is_scientifically_consistent(content) is False
 
 
 def test_ved_design_contract_rejects_a_constituent_marked_changed_and_fixed():
@@ -79,4 +79,34 @@ Risks or limits:
 Review confounding.
 """
 
-    assert ved_design_is_operationally_consistent(content) is False
+    assert ved_design_is_scientifically_consistent(content) is False
+
+
+def test_ved_design_contract_rejects_an_affirmative_ved_isolation_claim():
+    content = """Hypothesis: VED is associated with fatigue strength.
+Variable matrix:
+Vary laser power to create VED levels while holding scan speed, hatch spacing, and layer thickness fixed.
+Measurements:
+Measure fatigue strength.
+Controls:
+Hold scan speed, hatch spacing, and layer thickness fixed.
+Risks or limits:
+This design isolates the effect of VED from all constituent parameters.
+"""
+
+    assert ved_design_is_scientifically_consistent(content) is False
+
+
+def test_ved_design_contract_allows_an_explicit_non_isolation_boundary():
+    content = """Hypothesis: VED is associated with fatigue strength.
+Variable matrix:
+Vary laser power to create VED levels while holding scan speed, hatch spacing, and layer thickness fixed.
+Measurements:
+Measure fatigue strength.
+Controls:
+Hold scan speed, hatch spacing, and layer thickness fixed.
+Risks or limits:
+This estimates a laser-power-mediated path and does not isolate a universal VED-only effect.
+"""
+
+    assert ved_design_is_scientifically_consistent(content) is True

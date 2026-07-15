@@ -48,8 +48,10 @@ own database connections, SQL, schema initialization, or row encoding.
   Enforces the operational VED design rule shared by chat generation and plan
   persistence: at least one constituent parameter must change, every other
   constituent must be explicitly changed or fixed, and no constituent may be
-  both changed and fixed. Existing Copilot drafts that violate this rule are
-  reported as stale instead of being promoted for review.
+  both changed and fixed. A constituent-controlled design is represented as
+  that constituent-mediated path, not as an isolated universal VED effect.
+  Existing Copilot drafts that violate either rule are reported as stale
+  instead of being promoted for review.
 - `brief_service.py`
   Optional goal-first collection-seeding path. It shapes a thin research brief
   and registers a `seed_collection` handoff into Source, but it is not required

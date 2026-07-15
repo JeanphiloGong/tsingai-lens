@@ -6,7 +6,7 @@ from application.core.comparison_service import ComparisonRowsNotReadyError
 from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError
 from application.evaluation import ResearchUnderstandingFeedbackService
 from application.goal.experiment_plan_service import ExperimentPlanService
-from application.goal.session_service import GoalSessionService
+from application.goal.session_service import GoalSessionService, _StructuredProtocolDraft
 from application.source.collection_service import CollectionService
 from domain.core.research_understanding import ResearchUnderstanding
 from infra.persistence.factory import build_goal_session_repository
@@ -1058,6 +1058,51 @@ Risks or limits
         repair_prompt
     )
     assert invalid_draft.strip() in repair_prompt
+
+
+def test_protocol_renderer_replaces_ved_isolation_claim_with_mediated_boundary(
+    tmp_path,
+):
+    service, _ = _service(tmp_path, content="unused")
+    draft = _StructuredProtocolDraft(
+        proposed_variable_manipulations=[
+            "Vary laser power to create VED levels while holding scan speed, "
+            "hatch spacing, and layer thickness fixed."
+        ],
+        proposed_measurements=["Measure fatigue strength."],
+        proposed_controls=[
+            "Hold scan speed, hatch spacing, and layer thickness fixed."
+        ],
+        design_risks=[
+            "This protocol isolates VED by fixing its constituent parameters."
+        ],
+    )
+    finding = {
+        "finding": (
+            "Coupled PBF-LB parameter sets grouped by VED were associated with "
+            "fatigue strength."
+        ),
+        "variables": ["coupled PBF-LB parameter sets grouped by VED"],
+        "mediators": ["defect structure"],
+        "outcomes": ["fatigue strength"],
+        "direction": "associated",
+        "scope_summary": "316L stainless steel, one paper",
+        "generalization_note": "Treat as paper-level evidence.",
+        "evidence": [{"evidence_source": "Source 1"}],
+    }
+
+    answer = service._render_protocol_draft(
+        draft,
+        allowed_source_labels={"Source 1"},
+        curated_findings=[finding],
+    )
+
+    assert "isolates VED by fixing" not in answer
+    assert (
+        "Changing one or more VED constituents estimates the selected "
+        "constituent-mediated path; it does not isolate a universal VED-only effect."
+    ) in answer
+    assert service._protocol_contract_is_valid(answer) is True
 
 
 def test_goal_chat_limits_protocol_when_repair_still_violates_contract(tmp_path):

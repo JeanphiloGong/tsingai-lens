@@ -6939,7 +6939,70 @@ class ResearchUnderstandingService:
                 outcomes=merged_outcomes,
             )
             if representative_statement:
+                representative_segment = next(
+                    (
+                        segment
+                        for segment in merged["relation_chain"]
+                        if _text(segment.get("statement"))
+                        == representative_statement
+                    ),
+                    {},
+                )
+                representative_relation_id = _text(
+                    representative_segment.get("relation_id")
+                )
+                right_relation_ids = {
+                    *_strings(right.get("relation_ids")),
+                    *(
+                        _text(segment.get("relation_id")) or ""
+                        for segment in _mapping_list(right.get("relation_chain"))
+                    ),
+                }
+                representative_source = (
+                    right
+                    if representative_relation_id
+                    and representative_relation_id in right_relation_ids
+                    else left
+                )
                 merged["statement"] = representative_statement
+                merged["finding_id"] = _text(
+                    representative_source.get("finding_id")
+                ) or merged["finding_id"]
+                merged["claim_id"] = _text(
+                    representative_source.get("claim_id")
+                ) or merged["claim_id"]
+                merged["confidence"] = representative_source.get("confidence")
+                merged["paper_count"] = _safe_count(
+                    representative_source.get("paper_count")
+                )
+                merged["evidence_ref_ids"] = list(
+                    _strings(representative_source.get("evidence_ref_ids"))
+                )
+                merged["evidence_count"] = len(merged["evidence_ref_ids"])
+                merged["context_ids"] = list(
+                    _strings(representative_source.get("context_ids"))
+                )
+                merged["relation_ids"] = (
+                    [representative_relation_id]
+                    if representative_relation_id
+                    else list(_strings(representative_source.get("relation_ids")))
+                )
+                merged["relation_chain"] = (
+                    [dict(representative_segment)]
+                    if representative_segment
+                    else list(
+                        _mapping_list(representative_source.get("relation_chain"))
+                    )
+                )
+                merged["evidence_bundle"] = {
+                    key: list(_strings(value))
+                    for key, value in _mapping(
+                        representative_source.get("evidence_bundle")
+                    ).items()
+                }
+                merged["scope_summary"] = _text(
+                    representative_source.get("scope_summary")
+                ) or merged["scope_summary"]
                 merged["comparison_summary"] = self._finding_comparison_summary(
                     representative_statement,
                     variables=merged_variables,

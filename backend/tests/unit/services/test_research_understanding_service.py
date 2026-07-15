@@ -12383,6 +12383,108 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
     )
 
 
+def test_with_presentation_keeps_representative_table_axis_provenance():
+    service = ResearchUnderstandingService()
+    small_statement = (
+        "Under scan speed 100 and heat treatment type Furnace HT, laser power 120 "
+        "decreased density from 98.70 % (laser power 100) to 98.45 %."
+    )
+    large_statement = (
+        "Under scan speed 200 and heat treatment type Furnace HT, laser power 120 "
+        "increased density from 90.00 % (laser power 100) to 98.00 %."
+    )
+    findings = [
+        {
+            "finding_id": "finding_relation_rel_small_delta",
+            "claim_id": "relation_rel_small_delta",
+            "title": "laser power -> density",
+            "statement": small_statement,
+            "variables": ["laser power"],
+            "mediators": [],
+            "outcomes": ["density"],
+            "direction": "decreases",
+            "relation_chain": [
+                {
+                    "relation_id": "rel_small_delta",
+                    "variable": "laser power",
+                    "mediators": [],
+                    "outcome": "density",
+                    "direction": "decreases",
+                    "statement": small_statement,
+                }
+            ],
+            "scope_summary": "stainless steel 316L",
+            "support_grade": "partial",
+            "review_status": "needs_review",
+            "confidence": 0.62,
+            "paper_count": 1,
+            "evidence_count": 1,
+            "evidence_ref_ids": ["evref_small_delta"],
+            "context_ids": ["ctx_small_delta"],
+            "relation_ids": ["rel_small_delta"],
+            "evidence_bundle": {"direct_result": ["evref_small_delta"]},
+            "warnings": ["deterministic_relation"],
+        },
+        {
+            "finding_id": "finding_relation_rel_large_delta",
+            "claim_id": "relation_rel_large_delta",
+            "title": "laser power -> density",
+            "statement": large_statement,
+            "variables": ["laser power"],
+            "mediators": [],
+            "outcomes": ["density"],
+            "direction": "increases",
+            "relation_chain": [
+                {
+                    "relation_id": "rel_large_delta",
+                    "variable": "laser power",
+                    "mediators": [],
+                    "outcome": "density",
+                    "direction": "increases",
+                    "statement": large_statement,
+                }
+            ],
+            "scope_summary": "stainless steel 316L",
+            "support_grade": "partial",
+            "review_status": "needs_review",
+            "confidence": 0.62,
+            "paper_count": 1,
+            "evidence_count": 1,
+            "evidence_ref_ids": ["evref_large_delta"],
+            "context_ids": ["ctx_large_delta"],
+            "relation_ids": ["rel_large_delta"],
+            "evidence_bundle": {"direct_result": ["evref_large_delta"]},
+            "warnings": ["deterministic_relation"],
+        },
+    ]
+    evidence_by_id = {
+        "evref_small_delta": {
+            "document_id": "paper-density",
+            "locator": {"source_ref": "tbl-density"},
+        },
+        "evref_large_delta": {
+            "document_id": "paper-density",
+            "locator": {"source_ref": "tbl-density"},
+        },
+    }
+
+    finding = service._merge_duplicate_presentation_findings(
+        findings,
+        evidence_by_id=evidence_by_id,
+    )[0]
+
+    assert "scan speed 200" in finding["statement"]
+    assert finding["finding_id"] == "finding_relation_rel_large_delta"
+    assert finding["claim_id"] == "relation_rel_large_delta"
+    assert finding["relation_ids"] == ["rel_large_delta"]
+    assert finding["context_ids"] == ["ctx_large_delta"]
+    assert finding["evidence_ref_ids"] == ["evref_large_delta"]
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_large_delta"]
+    assert [item["relation_id"] for item in finding["relation_chain"]] == [
+        "rel_large_delta"
+    ]
+
+
 def test_low_magnitude_filter_reads_preheating_strength_delta_from_source_table():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     table = SourceTable(

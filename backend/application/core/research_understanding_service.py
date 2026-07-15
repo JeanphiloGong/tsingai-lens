@@ -816,12 +816,17 @@ class ResearchUnderstandingService:
             )
             if block is None:
                 continue
+            condition_table = self._best_porosity_corrosion_process_table(
+                document_id,
+                tables_by_id=tables_by_id or {},
+            )
             recovered.append(
                 self._recovered_porosity_corrosion_finding(
                     block,
                     collection_id=_text(payload.get("collection_id")),
                     objective_context=objective_context,
                     objective=objective,
+                    condition_table=condition_table,
                 )
             )
         return [item for item in recovered if item]
@@ -3035,6 +3040,7 @@ class ResearchUnderstandingService:
         collection_id: str,
         objective_context: Mapping[str, Any],
         objective: Mapping[str, Any],
+        condition_table: SourceTable | None = None,
     ) -> dict[str, Any]:
         block_id = _text(block.block_id)
         document_id = _text(block.document_id)
@@ -3045,9 +3051,14 @@ class ResearchUnderstandingService:
         relation_id = f"rel_recovered_porosity_corrosion_{block_id}"
         context_id = f"ctx_recovered_porosity_corrosion_{block_id}"
         quote = _short_text(_text(block.text), limit=420)
-        statement = (
-            "Lower porosity in SLM 316L increased pitting potential and "
-            "stabilized the passive film, improving pitting-corrosion resistance."
+        process_conditions_not_isolated = (
+            self._porosity_corrosion_process_conditions_not_isolated(
+                source_text=_text(block.text) or "",
+                condition_table=condition_table,
+            )
+        )
+        statement = self._porosity_corrosion_association_statement(
+            process_conditions_not_isolated=process_conditions_not_isolated,
         )
         material_scope = _strings(
             objective_context.get("material_scope") or objective.get("material_scope")
@@ -3056,8 +3067,8 @@ class ResearchUnderstandingService:
             ["porosity level", "pore size"],
             objective_context=objective_context,
         )
-        return {
-            "evidence_ref": {
+        evidence_refs = [
+            {
                 "evidence_ref_id": evidence_ref_id,
                 "source_kind": _text(block.block_type) or "text_window",
                 "document_id": document_id,
@@ -3079,7 +3090,56 @@ class ResearchUnderstandingService:
                     source_ref=block_id,
                     page=_text(block.page),
                 ),
-            },
+            }
+        ]
+        evidence_ref_ids = [evidence_ref_id]
+        condition_table_id = _text(condition_table.table_id if condition_table else None)
+        if condition_table_id:
+            condition_ref_id = (
+                "evref_recovered_porosity_corrosion_condition_"
+                f"{condition_table_id}"
+            )
+            condition_quote = self._presentation_table_source_text(condition_table)
+            evidence_ref_ids.append(condition_ref_id)
+            evidence_refs.append(
+                {
+                    "evidence_ref_id": condition_ref_id,
+                    "source_kind": "table",
+                    "document_id": _text(condition_table.document_id) or document_id,
+                    "label": (
+                        _text(condition_table.caption_text)
+                        or "SLM process conditions"
+                    ),
+                    "locator": {
+                        "source_ref": condition_table_id,
+                        "source_kind": "table",
+                        **(
+                            {"page": condition_table.page}
+                            if condition_table.page is not None
+                            else {}
+                        ),
+                    },
+                    "fact_ids": [claim_id],
+                    "anchor_ids": [],
+                    "confidence": 0.82,
+                    "traceability_status": "resolved",
+                    "evidence_role": "condition_context",
+                    "quote": condition_quote,
+                    "href": _presentation_evidence_href(
+                        collection_id=collection_id,
+                        document_id=_text(condition_table.document_id) or document_id,
+                        source_ref=condition_table_id,
+                        page=_text(condition_table.page),
+                        quote_text=condition_quote,
+                    ),
+                }
+            )
+        warnings = ["paper_level_association", "needs_expert_review"]
+        if process_conditions_not_isolated:
+            warnings.append("process_conditions_not_isolated")
+        return {
+            "evidence_ref": evidence_refs[0],
+            "evidence_refs": evidence_refs,
             "context": {
                 "context_id": context_id,
                 "label": "Recovered source scope",
@@ -3091,36 +3151,154 @@ class ResearchUnderstandingService:
                     "source_heading": _text(block.heading_path),
                 },
                 "property_scope": ["pitting corrosion behavior"],
-                "limitations": ["Recovered from parsed source text"],
+                "limitations": [
+                    "Paper-level association; causal effect not isolated",
+                    *(
+                        ["Laser power and scan speed changed together"]
+                        if process_conditions_not_isolated
+                        else []
+                    ),
+                ],
             },
             "claim": {
                 "claim_id": claim_id,
                 "claim_type": "finding",
                 "statement": statement,
-                "status": "supported",
+                "status": "limited",
                 "confidence": 0.82,
                 "strength": "moderate",
-                "evidence_ref_ids": [evidence_ref_id],
+                "evidence_ref_ids": evidence_ref_ids,
                 "context_ids": [context_id],
-                "source_object_ids": [claim_id],
-                "warnings": [],
+                "source_object_ids": [block_id],
+                "warnings": warnings,
             },
             "relation": {
                 "relation_id": relation_id,
-                "relation_type": "improves",
+                "relation_type": "associated",
                 "subject": "porosity level",
-                "predicate": "improves",
+                "predicate": "associated",
                 "object": "pitting corrosion behavior",
                 "statement": statement,
                 "conditions": material_scope,
-                "status": "supported",
+                "status": "limited",
                 "confidence": 0.82,
-                "evidence_ref_ids": [evidence_ref_id],
+                "evidence_ref_ids": evidence_ref_ids,
                 "context_ids": [context_id],
-                "source_object_ids": [claim_id],
-                "warnings": ["recovered_from_source_text"],
+                "source_object_ids": [block_id],
+                "warnings": _dedupe_strings(
+                    ["recovered_from_source_text", *warnings]
+                ),
             },
         }
+
+    def _best_porosity_corrosion_process_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            score = self._porosity_corrosion_process_table_score(table)
+            if score <= 0:
+                continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _porosity_corrosion_process_table_score(self, table: SourceTable) -> int:
+        headers = list(table.column_headers)
+        if not headers and table.table_matrix:
+            headers = [_text(cell) or "" for cell in table.table_matrix[0]]
+        normalized_headers = [_normalize_match_text(header) for header in headers]
+
+        def column_index(*terms: str) -> int | None:
+            for index, header in enumerate(normalized_headers):
+                if all(term in header for term in terms):
+                    return index
+            return None
+
+        laser_power_index = column_index("laser", "power")
+        scan_speed_index = column_index("scan", "speed")
+        energy_density_index = column_index("energy", "density")
+        if (
+            laser_power_index is None
+            or scan_speed_index is None
+            or energy_density_index is None
+        ):
+            return 0
+
+        rows = list(table.table_matrix)
+        if rows and [
+            _normalize_match_text(_text(cell) or "") for cell in rows[0]
+        ] == normalized_headers:
+            rows = rows[1:]
+
+        def distinct_values(index: int) -> set[str]:
+            return {
+                value
+                for row in rows
+                if index < len(row)
+                and (value := _normalize_match_text(_text(row[index]) or ""))
+            }
+
+        if (
+            len(distinct_values(laser_power_index)) < 2
+            or len(distinct_values(scan_speed_index)) < 2
+        ):
+            return 0
+        score = 8
+        if len(distinct_values(energy_density_index)) == 1:
+            score += 2
+        if column_index("layer", "thickness") is not None:
+            score += 1
+        return score
+
+    def _porosity_corrosion_process_conditions_not_isolated(
+        self,
+        *,
+        source_text: str,
+        condition_table: SourceTable | None,
+    ) -> bool:
+        if (
+            condition_table is not None
+            and self._porosity_corrosion_process_table_score(condition_table) > 0
+        ):
+            return True
+        normalized = f" {_normalize_match_text(source_text)} "
+        return (
+            " laser power " in normalized
+            and " scanning speed " in normalized
+            and (
+                " changes in " in normalized
+                or " changed " in normalized
+                or " various porosities " in normalized
+            )
+        )
+
+    def _porosity_corrosion_association_statement(
+        self,
+        *,
+        process_conditions_not_isolated: bool,
+    ) -> str:
+        statement = (
+            "Across the tested SLM conditions, lower-porosity samples were "
+            "associated with higher pitting potential and a more stable passive "
+            "film, consistent with better pitting-corrosion resistance."
+        )
+        if process_conditions_not_isolated:
+            return (
+                f"{statement} Laser power and scan speed changed together across "
+                "the samples, so the evidence does not isolate porosity as a "
+                "causal variable."
+            )
+        return (
+            f"{statement} This paper-level evidence does not isolate porosity as "
+            "a causal variable."
+        )
 
     def _consume_relation_trace(
         self,
@@ -5366,6 +5544,18 @@ class ResearchUnderstandingService:
             for finding in findings
         ]
         findings = [
+            self._finding_with_paper_level_corrosion_association_guard(
+                finding,
+                evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
+            )
+            for finding in findings
+        ]
+        findings = self._merge_duplicate_presentation_findings(
+            findings,
+            evidence_by_id=evidence_by_id,
+        )
+        findings = [
             self._finding_with_observed_symbol_axis(finding)
             for finding in findings
         ]
@@ -5961,12 +6151,17 @@ class ResearchUnderstandingService:
                 )
                 if block is None:
                     continue
+                condition_table = self._best_porosity_corrosion_process_table(
+                    document_id,
+                    tables_by_id=tables_by_id,
+                )
                 recovered.append(
                     self._recovered_porosity_corrosion_finding(
                         block,
                         collection_id=collection_id,
                         objective_context=objective_context,
                         objective=objective,
+                        condition_table=condition_table,
                     )
                 )
                 break
@@ -6890,6 +7085,104 @@ class ResearchUnderstandingService:
             }
             for segment in _mapping_list(updated.get("relation_chain"))
         ]
+        return self._finding_with_refreshed_use_boundary(updated)
+
+    def _finding_with_paper_level_corrosion_association_guard(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> dict[str, Any]:
+        variable_text = _normalize_match_text(" ".join(_strings(finding.get("variables"))))
+        outcome_text = _normalize_match_text(" ".join(_strings(finding.get("outcomes"))))
+        if "porosity" not in variable_text or not (
+            "corrosion" in outcome_text or "pitting" in outcome_text
+        ):
+            return dict(finding)
+
+        bundle = _mapping(finding.get("evidence_bundle"))
+        direct_ref_ids = _strings(bundle.get("direct_result"))
+        direct_document_ids = {
+            document_id
+            for ref_id in direct_ref_ids
+            if (document_id := _text(evidence_by_id.get(ref_id, {}).get("document_id")))
+        }
+        if direct_document_ids:
+            if len(direct_document_ids) != 1:
+                return dict(finding)
+        elif int(finding.get("paper_count") or 0) != 1:
+            return dict(finding)
+        relevant_ref_ids = _dedupe_strings(
+            [
+                *direct_ref_ids,
+                *_strings(bundle.get("condition_context")),
+            ]
+        )
+        evidence_text = " ".join(
+            " ".join(
+                value
+                for value in (
+                    _text(evidence_by_id.get(ref_id, {}).get("label")),
+                    _text(evidence_by_id.get(ref_id, {}).get("quote")),
+                )
+                if value
+            )
+            for ref_id in relevant_ref_ids
+        )
+        condition_table = next(
+            (
+                table
+                for ref_id in relevant_ref_ids
+                if (
+                    source_ref := _text(
+                        _locator_mapping(
+                            evidence_by_id.get(ref_id, {}).get("locator")
+                        ).get("source_ref")
+                    )
+                )
+                and (table := tables_by_id.get(source_ref)) is not None
+                and self._porosity_corrosion_process_table_score(table) > 0
+            ),
+            None,
+        )
+        process_conditions_not_isolated = (
+            self._porosity_corrosion_process_conditions_not_isolated(
+                source_text=evidence_text,
+                condition_table=condition_table,
+            )
+        )
+        statement = self._porosity_corrosion_association_statement(
+            process_conditions_not_isolated=process_conditions_not_isolated,
+        )
+        warnings = [
+            *_strings(finding.get("warnings")),
+            "paper_level_association",
+            "needs_expert_review",
+        ]
+        if process_conditions_not_isolated:
+            warnings.append("process_conditions_not_isolated")
+
+        updated = dict(finding)
+        updated.update(
+            {
+                "statement": statement,
+                "direction": "associated",
+                "support_grade": "partial",
+                "review_status": "needs_review",
+                "paper_count": 1,
+                "comparison_summary": None,
+                "warnings": _dedupe_strings(warnings),
+                "relation_chain": [
+                    {
+                        **segment,
+                        "direction": "associated",
+                        "statement": statement,
+                    }
+                    for segment in _mapping_list(finding.get("relation_chain"))
+                ],
+            }
+        )
         return self._finding_with_refreshed_use_boundary(updated)
 
     def _is_recovered_scanning_speed_mechanical_finding(
@@ -10444,9 +10737,13 @@ class ResearchUnderstandingService:
             )
             if not (has_low_porosity_direction and has_corrosion_mechanism):
                 continue
-            return (
-                "Lower porosity in SLM 316L increased pitting potential and "
-                "stabilized the passive film, improving pitting-corrosion resistance."
+            return self._porosity_corrosion_association_statement(
+                process_conditions_not_isolated=(
+                    self._porosity_corrosion_process_conditions_not_isolated(
+                        source_text=source_text,
+                        condition_table=None,
+                    )
+                ),
             )
         return ""
 
@@ -11834,6 +12131,10 @@ class ResearchUnderstandingService:
             effect.get("warnings")
         ):
             reasons.append("single_variable_effect_not_isolated")
+        if "paper_level_association" in _strings(effect.get("warnings")):
+            reasons.append("paper_level_association")
+        if "process_conditions_not_isolated" in _strings(effect.get("warnings")):
+            reasons.append("process_conditions_not_isolated")
         if (
             support_grade == "partial"
             and self._finding_has_direct_support(evidence_bundle)

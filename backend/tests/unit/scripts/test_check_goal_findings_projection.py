@@ -232,6 +232,99 @@ def _goal_061_axis_summary(
     }
 
 
+def _goal_399_corrosion_payload():
+    statement = (
+        "Across the tested SLM conditions, lower-porosity samples were associated "
+        "with higher pitting potential and a more stable passive film, consistent "
+        "with better pitting-corrosion resistance. Laser power and scan speed "
+        "changed together across the samples, so the evidence does not isolate "
+        "porosity as a causal variable."
+    )
+    return {
+        "goal": {
+            "goal_id": "goal_399171646354",
+            "question": "How does porosity affect pitting corrosion behavior?",
+        },
+        "understanding": {
+            "state": "limited",
+            "presentation": {
+                "summary": {
+                    "evidence_count": 2,
+                    "primary_finding_count": 1,
+                    "review_queue_finding_count": 0,
+                    "review_queue_count": 0,
+                    "axis_coverage": {
+                        "variables": [
+                            {"axis": "porosity level", "status": "primary"},
+                        ],
+                        "properties": [
+                            {
+                                "axis": "pitting corrosion behavior",
+                                "status": "primary",
+                            },
+                        ],
+                    },
+                },
+                "primary_findings": [
+                    {
+                        "finding_id": "finding-porosity-corrosion",
+                        "title": "porosity level -> pitting corrosion behavior",
+                        "statement": statement,
+                        "variables": ["porosity level"],
+                        "mediators": ["passive film"],
+                        "outcomes": ["pitting corrosion behavior"],
+                        "direction": "associated",
+                        "evidence_ref_ids": ["ev-corrosion", "ev-process"],
+                        "evidence_bundle": {
+                            "direct_result": ["ev-corrosion"],
+                            "condition_context": ["ev-process"],
+                        },
+                        "warnings": [
+                            "paper_level_association",
+                            "process_conditions_not_isolated",
+                        ],
+                        "review_reasons": [
+                            "paper_level_association",
+                            "process_conditions_not_isolated",
+                        ],
+                        **_paper_level_boundary_fields(),
+                    }
+                ],
+                "review_queue_findings": [],
+                "evidence_items": [
+                    {
+                        "evidence_ref_id": "ev-corrosion",
+                        "source_kind": "paragraph",
+                        "quote": (
+                            "Porosities were highly sensitive to pitting corrosion. "
+                            "The pitting potential gradually increases with decreased "
+                            "porosity, resistance can slow the corrosion rate, and the "
+                            "passive film on the low-porosity sample was more stable."
+                        ),
+                        "href": (
+                            "/collections/col-1/documents/doc-5"
+                            "?source_ref=blk-corrosion"
+                        ),
+                    },
+                    {
+                        "evidence_ref_id": "ev-process",
+                        "source_kind": "table",
+                        "quote": (
+                            "Columns: Laser power | Scan speed | Layer thick- ness | "
+                            "Energy density. Rows: 375 | 2100 | 20 | 100 / "
+                            "255 | 1400 | 20 | 100 / 135 | 750 | 20 | 100."
+                        ),
+                        "href": (
+                            "/collections/col-1/documents/doc-5"
+                            "?source_ref=tbl-process"
+                        ),
+                    },
+                ],
+            },
+        },
+    }
+
+
 def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
     check = _load_goal_findings_check_module()
 
@@ -283,6 +376,33 @@ def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
     assert summary["primary_finding_count"] == 1
     assert summary["direct_evidence_count"] == 2
     assert all(item["status"] == "pass" for item in summary["checks"])
+
+
+def test_evaluate_goal_analysis_payload_accepts_paper_level_corrosion_association():
+    check = _load_goal_findings_check_module()
+
+    summary = check.evaluate_goal_analysis_payload(_goal_399_corrosion_payload())
+
+    assert all(item["status"] == "pass" for item in summary["checks"])
+
+
+def test_evaluate_goal_analysis_payload_rejects_causal_corrosion_projection():
+    check = _load_goal_findings_check_module()
+    payload = _goal_399_corrosion_payload()
+    finding = payload["understanding"]["presentation"]["primary_findings"][0]
+    finding["statement"] = (
+        "Lower porosity in SLM 316L increased pitting potential and stabilized "
+        "the passive film, improving pitting-corrosion resistance."
+    )
+    finding["direction"] = "improves"
+
+    summary = check.evaluate_goal_analysis_payload(payload)
+
+    failed_checks = {
+        item["name"] for item in summary["checks"] if item["status"] == "fail"
+    }
+    assert "primary findings match goal-specific expert expectations" in failed_checks
+    assert "primary findings avoid over-specific unsupported terms" in failed_checks
 
 
 def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artifacts():

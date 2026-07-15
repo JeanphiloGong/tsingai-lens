@@ -2232,9 +2232,15 @@ def test_objective_understanding_promotes_porosity_corrosion_result_to_primary_f
     finding = understanding["presentation"]["primary_findings"][0]
     assert finding["title"] == "porosity level -> pitting corrosion behavior"
     assert finding["statement"] == (
-        "Lower porosity in SLM 316L increased pitting potential and stabilized "
-        "the passive film, improving pitting-corrosion resistance."
+        "Across the tested SLM conditions, lower-porosity samples were associated "
+        "with higher pitting potential and a more stable passive film, consistent "
+        "with better pitting-corrosion resistance. Laser power and scan speed "
+        "changed together across the samples, so the evidence does not isolate "
+        "porosity as a causal variable."
     )
+    assert finding["direction"] == "associated"
+    assert "paper_level_association" in finding["warnings"]
+    assert "process_conditions_not_isolated" in finding["review_reasons"]
     evidence_item = understanding["presentation"]["evidence_items"][0]
     assert "pitting potential gradually increases" in evidence_item["quote"]
     assert "passive film" in evidence_item["quote"]
@@ -2275,6 +2281,35 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
                 )
             ],
             tables=[
+                SourceTable(
+                    table_id="tbl-corrosion-process",
+                    document_id="paper-corrosion",
+                    table_order=1,
+                    page=2,
+                    caption_text="Table 1 SLM 316L process parameters",
+                    caption_block_id=None,
+                    bbox=None,
+                    heading_path="2 Experimental",
+                    column_headers=[
+                        "Test",
+                        "Laser power (W)",
+                        "Scan speed (mm/s)",
+                        "Layer thickness (μm)",
+                        "Energy density (J/mm3)",
+                    ],
+                    table_matrix=[
+                        [
+                            "Test",
+                            "Laser power (W)",
+                            "Scan speed (mm/s)",
+                            "Layer thickness (μm)",
+                            "Energy density (J/mm3)",
+                        ],
+                        ["1", "375", "2100", "20", "100"],
+                        ["2", "255", "1400", "20", "100"],
+                        ["3", "135", "750", "20", "100"],
+                    ],
+                ),
                 SourceTable(
                     table_id="tbl-corrosion-polarization",
                     document_id="paper-corrosion",
@@ -2377,11 +2412,20 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
     assert primary[0]["title"] == "porosity level -> pitting corrosion behavior"
     assert primary[0]["variables"] == ["porosity level"]
     assert primary[0]["statement"] == (
-        "Lower porosity in SLM 316L increased pitting potential and stabilized "
-        "the passive film, improving pitting-corrosion resistance."
+        "Across the tested SLM conditions, lower-porosity samples were associated "
+        "with higher pitting potential and a more stable passive film, consistent "
+        "with better pitting-corrosion resistance. Laser power and scan speed "
+        "changed together across the samples, so the evidence does not isolate "
+        "porosity as a causal variable."
     )
+    assert primary[0]["direction"] == "associated"
+    assert "paper_level_association" in primary[0]["warnings"]
+    assert "process_conditions_not_isolated" in primary[0]["review_reasons"]
     assert primary[0]["evidence_bundle"]["direct_result"] == [
         "evref_recovered_porosity_corrosion_blk-corrosion-conclusion"
+    ]
+    assert primary[0]["evidence_bundle"]["condition_context"] == [
+        "evref_recovered_porosity_corrosion_condition_tbl-corrosion-process"
     ]
     evidence_by_id = {
         item["evidence_ref_id"]: item
@@ -2392,6 +2436,13 @@ def test_objective_understanding_recovers_porosity_corrosion_finding_from_source
     assert recovered["page"] == "8"
     assert "pitting potential gradually increases" in recovered["quote"]
     assert "passive film" in recovered["quote"]
+    condition = evidence_by_id[
+        "evref_recovered_porosity_corrosion_condition_tbl-corrosion-process"
+    ]
+    assert condition["source_ref"] == "tbl-corrosion-process"
+    assert condition["source_kind"] == "table"
+    assert "Laser power" in condition["quote"]
+    assert "Scan speed" in condition["quote"]
 
 
 def test_objective_understanding_recovers_preheating_ductility_finding_from_conclusion_when_units_are_metric_tables():
@@ -7481,9 +7532,13 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
     assert finding["evidence_bundle"]["direct_result"] == ["evref_corrosion_text"]
     assert finding["evidence_bundle"]["uncategorized"] == ["evref_density_table"]
     assert finding["statement"] == (
-        "Lower porosity in SLM 316L increased pitting potential and stabilized "
-        "the passive film, improving pitting-corrosion resistance."
+        "Across the tested SLM conditions, lower-porosity samples were associated "
+        "with higher pitting potential and a more stable passive film, consistent "
+        "with better pitting-corrosion resistance. This paper-level evidence does "
+        "not isolate porosity as a causal variable."
     )
+    assert finding["direction"] == "associated"
+    assert "paper_level_association" in finding["warnings"]
     assert finding["support_grade"] == "partial"
     evidence_by_id = {
         item["evidence_ref_id"]: item
@@ -10914,6 +10969,15 @@ def test_with_presentation_promotes_single_paper_relation_with_aligned_direct_ev
     assert finding["title"] == "porosity level -> pitting corrosion behavior"
     assert finding["mediators"] == ["passive film"]
     assert finding["evidence_bundle"]["mechanism"] == ["evref_corrosion"]
+    assert finding["statement"] == (
+        "Across the tested SLM conditions, lower-porosity samples were associated "
+        "with higher pitting potential and a more stable passive film, consistent "
+        "with better pitting-corrosion resistance. This paper-level evidence does "
+        "not isolate porosity as a causal variable."
+    )
+    assert finding["direction"] == "associated"
+    assert "paper_level_association" in finding["warnings"]
+    assert "process_conditions_not_isolated" not in finding["review_reasons"]
     assert finding["support_grade"] == "partial"
     assert understanding["presentation"]["primary_findings"] == [finding]
     assert understanding["presentation"]["review_queue_findings"] == []
@@ -14454,6 +14518,14 @@ def test_with_presentation_projects_property_axis_relation_as_finding():
     assert finding["title"] == "porosity level -> pitting corrosion behavior"
     assert finding["variables"] == ["porosity level"]
     assert finding["outcomes"] == ["pitting corrosion behavior"]
+    assert finding["statement"] == (
+        "Across the tested SLM conditions, lower-porosity samples were associated "
+        "with higher pitting potential and a more stable passive film, consistent "
+        "with better pitting-corrosion resistance. This paper-level evidence does "
+        "not isolate porosity as a causal variable."
+    )
+    assert finding["direction"] == "associated"
+    assert "paper_level_association" in finding["warnings"]
     direct_refs = finding["evidence_bundle"]["direct_result"]
     assert direct_refs == ["evref_recovered_porosity_corrosion_blk-corrosion"]
     evidence_by_id = {

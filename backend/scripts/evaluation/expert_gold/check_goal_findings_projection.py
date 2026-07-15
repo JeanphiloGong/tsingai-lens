@@ -75,6 +75,12 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["porosity"],
             ["pitting corrosion"],
             ["passive film"],
+            ["associated"],
+            ["laser power and scan speed changed together"],
+            ["does not isolate porosity as a causal variable"],
+        ],
+        "forbidden_primary_terms": [
+            "Lower porosity in SLM 316L increased pitting potential",
         ],
         "evidence_terms": [
             ["porosity"],
@@ -82,6 +88,14 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["pitting potential"],
             ["passive film"],
             ["corrosion rate"],
+        ],
+        "required_condition_evidence_sets": [
+            [
+                "laser power",
+                "scan speed",
+                "layer thickness",
+                "energy density",
+            ],
         ],
     },
     "goal_061c9c049e69": {
@@ -225,6 +239,10 @@ GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
 }
 GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
+    "goal_399171646354": [
+        ["paper_level_association"],
+        ["process_conditions_not_isolated"],
+    ],
     "goal_061c9c049e69": [
         ["model_validation_finding"],
         ["author_summary_table_mismatch"],
@@ -540,6 +558,12 @@ def evaluate_goal_analysis_payload(
         for evidence_id in direct_evidence_ids
         if evidence_id in evidence_items
     ]
+    resolved_condition_evidence = [
+        evidence_items[evidence_id]
+        for finding in primary_findings
+        for evidence_id in _finding_evidence_role_ids(finding, "condition_context")
+        if evidence_id in evidence_items
+    ]
     review_expectation = GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS.get(goal_id)
     target_findings = review_findings if review_expectation else primary_findings
     target_evidence_ids = review_evidence_ids if review_expectation else direct_evidence_ids
@@ -836,6 +860,10 @@ def evaluate_goal_analysis_payload(
             resolved_direct_evidence,
             expectation.get("required_direct_evidence_sets") or [],
         )
+        missing_condition_evidence_sets = _missing_direct_evidence_sets(
+            resolved_condition_evidence,
+            expectation.get("required_condition_evidence_sets") or [],
+        )
         missing_comparison_terms = _missing_term_groups(
             _combined_text(primary_findings, keys=("comparison_summary",)),
             expectation.get("comparison_terms") or [],
@@ -879,6 +907,15 @@ def evaluate_goal_analysis_payload(
                     "primary finding comparison summary preserves expert comparison",
                     not missing_comparison_terms,
                     _missing_terms_detail(missing_comparison_terms),
+                )
+            )
+        if expectation.get("required_condition_evidence_sets"):
+            checks.append(
+                _check(
+                    goal_id,
+                    "condition evidence preserves confounded process settings",
+                    not missing_condition_evidence_sets,
+                    _missing_terms_detail(missing_condition_evidence_sets),
                 )
             )
         if expectation.get("required_primary_finding_sets"):
@@ -1111,7 +1148,7 @@ def _combined_text(
                 parts.extend(str(item) for item in value)
             elif value is not None:
                 parts.append(str(value))
-    return " ".join(parts).lower()
+    return re.sub(r"(?<=\w)-\s+(?=\w)", "", " ".join(parts)).lower()
 
 
 def _finding_boundary_summary(
@@ -1419,6 +1456,13 @@ def _direct_evidence_ids(finding: dict[str, Any]) -> list[str]:
         for item in finding.get("evidence_ref_ids") or []
         if str(item)
     ]
+
+
+def _finding_evidence_role_ids(finding: dict[str, Any], role: str) -> list[str]:
+    bundle = finding.get("evidence_bundle") or {}
+    if not isinstance(bundle, dict):
+        return []
+    return [str(item) for item in bundle.get(role) or [] if str(item)]
 
 
 def _finding_evidence_bundle_ids(finding: dict[str, Any]) -> list[str]:

@@ -3924,6 +3924,43 @@ describe('ResearchUnderstandingWorkbench', () => {
 		);
 	});
 
+	it('explains when the running backend lacks collection dataset routes', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-understanding/dataset/collection') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ detail: 'not found' }, 404, 'Not Found'));
+			}
+			if (path.endsWith('/research-understanding/dataset') && method === 'GET') {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path.endsWith('/research-understanding/feedback') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			if (path.endsWith('/research-understanding/curations') && method === 'GET') {
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			}
+			return Promise.resolve(jsonResponse({}));
+		});
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding: goalUnderstandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		const datasetSummary = datasetSummaryLocator();
+		await expect.element(datasetSummary).toBeInTheDocument();
+		const datasetRegion = datasetSummary.element().closest('details');
+		expect(datasetRegion).toBeTruthy();
+		clickDatasetSummary(datasetRegion);
+		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
+		await expect
+			.poll(() => datasetRegion?.textContent ?? '')
+			.toContain(
+				'Collection-level dataset export is unavailable in the running backend. Restart or update the backend before reviewing collection-wide hotspots.'
+			);
+	});
+
 	it('dry-runs pasted review decisions before import', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);

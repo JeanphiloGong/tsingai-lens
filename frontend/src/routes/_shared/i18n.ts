@@ -344,6 +344,8 @@ const translations: Record<Language, Translations> = {
 				datasetReady:
 					'{count} finding sample(s) can be exported. Gold is expert-confirmed; candidate still needs review.',
 				datasetUnavailable: 'Dataset export is unavailable for this scope.',
+				collectionDatasetRouteUnavailable:
+					'Collection-level dataset export is unavailable in the running backend. Restart or update the backend before reviewing collection-wide hotspots.',
 				datasetError: 'Dataset export is unavailable: {message}',
 				datasetDownloadJson: 'Download JSON',
 				datasetDownloadJsonl: 'Download JSONL',
@@ -3729,6 +3731,8 @@ const translations: Record<Language, Translations> = {
 				datasetReady:
 					'当前可导出 {count} 条 finding 样本。Gold 为专家确认；Candidate 仍需复核。',
 				datasetUnavailable: '当前范围暂不能导出数据集。',
+				collectionDatasetRouteUnavailable:
+					'运行中的后端暂不支持全集合数据集导出。请重启或更新后端后，再查看全集合优化热点。',
 				datasetError: '数据集导出不可用：{message}',
 				datasetDownloadJson: '下载 JSON',
 				datasetDownloadJsonl: '下载 JSONL',

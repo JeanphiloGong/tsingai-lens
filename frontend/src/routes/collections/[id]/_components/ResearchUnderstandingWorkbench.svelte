@@ -3305,7 +3305,7 @@
 			if (requestSequence === collectionDatasetRequestSequence) {
 				collectionDatasetSummary = null;
 				collectionDatasetError = isHttpStatusError(error, 404)
-					? ''
+					? $t('research.understanding.collectionDatasetRouteUnavailable')
 					: error instanceof Error
 						? error.message
 						: $t('error.unexpected');

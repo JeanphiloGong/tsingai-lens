@@ -6492,11 +6492,6 @@ def test_with_presentation_projects_findings_contract():
                 "status": "context",
                 "finding_id": "finding_claim_density",
             },
-            {
-                "axis": "laser beam powder bed fusion",
-                "status": "missing",
-                "finding_id": "",
-            },
         ],
         "properties": [
             {
@@ -10704,11 +10699,10 @@ def test_with_presentation_axis_coverage_distinguishes_mechanism_from_missing():
         "status": "primary",
         "finding_id": "finding_claim_recovered_ved_defects_fatigue_blk-fatigue-result",
     } in coverage["properties"]
-    assert {
-        "axis": "laser beam powder bed fusion",
-        "status": "context",
-        "finding_id": "finding_claim_recovered_ved_defects_fatigue_blk-fatigue-result",
-    } in coverage["variables"]
+    assert all(
+        "powder bed fusion" not in item["axis"].lower()
+        for item in coverage["variables"]
+    )
     assert {
         "axis": "volumetric energy density",
         "status": "primary",
@@ -10809,7 +10803,7 @@ def test_with_presentation_axis_coverage_treats_mechanical_properties_as_parent_
     } in coverage["properties"]
 
 
-def test_with_presentation_axis_coverage_marks_platform_process_as_context():
+def test_with_presentation_axis_coverage_excludes_platform_process_from_variables():
     service = ResearchUnderstandingService(
         structured_extractor=_FakeSemanticExtractor(),
         source_artifact_repository=_FakeSourceArtifactRepository(
@@ -10892,19 +10886,10 @@ def test_with_presentation_axis_coverage_marks_platform_process_as_context():
 
     assert understanding is not None
     coverage = understanding["presentation"]["summary"]["axis_coverage"]
-    assert [
-        item["axis"]
+    assert all(
+        "powder bed fusion" not in item["axis"].lower()
         for item in coverage["variables"]
-        if "powder bed fusion" in item["axis"].lower()
-    ] == ["laser beam powder bed fusion"]
-    assert {
-        "axis": "laser beam powder bed fusion",
-        "status": "context",
-        "finding_id": (
-            "finding_claim_recovered_texture_yield_build_orientation_"
-            "blk-yield-validation"
-        ),
-    } in coverage["variables"]
+    )
     assert {
         "axis": "yield strength",
         "status": "review_queue",
@@ -15260,6 +15245,13 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
     assert "internally consistent with m/s" in statement
     assert "treat the scanning-speed unit as unresolved" in statement
     assert finding["direction"] == "associated"
+    assert "slm" in finding["scope_summary"].lower()
+    assert all(
+        item["axis"] != "selective laser melting"
+        for item in understanding["presentation"]["summary"]["axis_coverage"][
+            "variables"
+        ]
+    )
     assert {
         segment["direction"] for segment in finding["relation_chain"]
     } == {"associated"}

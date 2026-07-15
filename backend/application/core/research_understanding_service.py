@@ -5811,6 +5811,11 @@ class ResearchUnderstandingService:
                 ),
             ]
         )
+        variable_axes = [
+            axis
+            for axis in variable_axes
+            if not self._is_platform_process_context_axis(axis)
+        ]
         findings = [
             self._presentation_finding(
                 effect,

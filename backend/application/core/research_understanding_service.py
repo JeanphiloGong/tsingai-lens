@@ -10499,6 +10499,16 @@ class ResearchUnderstandingService:
                     "microstructure and texture evolution."
                 )
             statement_was_cleaned = True
+        if re.search(r"\bauthors?\s+attributed\b", statement, flags=re.IGNORECASE):
+            effect = {
+                **effect,
+                "warnings": _dedupe_strings(
+                    [
+                        *_strings(effect.get("warnings")),
+                        "author_attributed_mechanism",
+                    ]
+                ),
+            }
         review_status = self._finding_review_status(effect)
         scope_summary = _compact_finding_scope_summary(
             _text(effect.get("context_summary")) or "",

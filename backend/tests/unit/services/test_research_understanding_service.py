@@ -8821,6 +8821,8 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
         segment["statement"] == finding["statement"]
         for segment in finding["relation_chain"]
     )
+    assert "author_attributed_mechanism" in finding["warnings"]
+    assert "author_attributed_mechanism" in finding["review_reasons"]
     assert "ı" not in finding["statement"]
     assert not {
         "microstructure evolution",

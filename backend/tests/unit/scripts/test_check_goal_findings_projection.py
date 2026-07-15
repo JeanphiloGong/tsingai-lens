@@ -86,17 +86,42 @@ def _paper_level_review_candidate_boundary_fields():
 def _ved_fatigue_strength_primary_finding():
     return {
         "finding_id": "finding-ved-fatigue-strength",
-        "title": "VED -> fatigue strength",
-        "statement": (
-            "Increasing volumetric energy density (VED) lowered defect fraction, "
-            "size, and complexity; from L-VED to M-VED it increased fatigue "
-            "strength at 10^4 cycles from 340 MPa to 450 MPa."
+        "title": (
+            "coupled PBF-LB parameter sets grouped by volumetric energy density "
+            "-> fatigue strength"
         ),
-        "variables": ["VED", "volumetric energy density"],
+        "statement": (
+            "Across the tested L-VED, M-VED, and H-VED PBF-LB parameter sets, "
+            "fatigue strength at 10^4 cycles was 340, 450, and 470 MPa, "
+            "respectively. Maximum defect length was 394, 179, and 86 μm, "
+            "respectively. FAT50 was non-monotonic across the printed conditions "
+            "(93, 82, and 97 MPa) and remained below wrought 316L (256 MPa). "
+            "The authors associated the higher-VED conditions with lower defect "
+            "fraction, size, and complexity and slightly improved fatigue life. "
+            "Laser power and scanning speed were both varied to create these VED "
+            "levels, so the comparison does not isolate a VED-only effect."
+        ),
+        "variables": [
+            "coupled PBF-LB parameter sets grouped by volumetric energy density"
+        ],
         "mediators": ["defect structure"],
         "outcomes": ["fatigue strength"],
-        "evidence_ref_ids": ["ev-1", "ev-fatigue-strength"],
-        "evidence_bundle": {"direct_result": ["ev-1", "ev-fatigue-strength"]},
+        "evidence_ref_ids": ["ev-1", "ev-fatigue-strength", "ev-condition"],
+        "evidence_bundle": {
+            "direct_result": ["ev-1", "ev-fatigue-strength"],
+            "condition_context": ["ev-condition"],
+        },
+        "warnings": [
+            "process_conditions_not_isolated",
+            "single_variable_effect_not_isolated",
+            "needs_expert_review",
+        ],
+        "review_reasons": [
+            "single_paper_evidence",
+            "process_conditions_not_isolated",
+            "single_variable_effect_not_isolated",
+            "needs_expert_review",
+        ],
         **_paper_level_boundary_fields(),
     }
 
@@ -106,24 +131,37 @@ def _ved_fatigue_strength_table_evidence(**extra):
         "evidence_ref_id": "ev-fatigue-strength",
         "source_kind": "table",
         "quote": (
-            "At layer thickness 30, volumetric energy density increased from "
-            "50.8 to 79.4 and fatigue strength increased from 340 MPa to 450 MPa."
+            "Fatigue strength and defect data: L-VED 93 340 394; "
+            "M-VED 82 450 179; H-VED 97 470 86; Wrought 256 390."
         ),
         "href": "/collections/col-1/documents/doc-1?source_ref=tbl-fatigue",
         "table_audit": {
             "columns": [
                 "Printed 316L",
-                "VED",
+                "FAT50 % [MPa]",
                 "FAT at 10^4 cycles [MPa]",
+                "Max. Defect length [μm]",
             ],
             "relevant_rows": [
                 {
                     "row_index": 1,
-                    "cells": ["L-VED", "50.8", "340"],
+                    "cells": ["L-VED", "93", "340", "394"],
+                    "aligned": True,
                 },
                 {
                     "row_index": 2,
-                    "cells": ["M-VED", "79.4", "450"],
+                    "cells": ["M-VED", "82", "450", "179"],
+                    "aligned": True,
+                },
+                {
+                    "row_index": 3,
+                    "cells": ["H-VED", "97", "470", "86"],
+                    "aligned": True,
+                },
+                {
+                    "row_index": 4,
+                    "cells": ["Wrought", "256", "390", "-"],
+                    "aligned": True,
                 },
             ],
         },
@@ -131,8 +169,22 @@ def _ved_fatigue_strength_table_evidence(**extra):
     }
 
 
+def _ved_fatigue_condition_evidence(**extra):
+    return {
+        "evidence_ref_id": "ev-condition",
+        "source_kind": "paragraph",
+        "quote": (
+            "By varying the scanning speed and laser power, three different VED "
+            "levels were applied: L-VED at 50.8 J/mm3, M-VED at 79.4 J/mm3, "
+            "and H-VED at 84.3 J/mm3."
+        ),
+        "href": "/collections/col-1/documents/doc-1?source_ref=blk-condition",
+        **extra,
+    }
+
+
 def _goal_3037_axis_summary(
-    evidence_count: int = 2,
+    evidence_count: int = 3,
     primary_finding_count: int = 1,
     review_queue_finding_count: int = 0,
 ):
@@ -335,26 +387,7 @@ def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
                 "state": "limited",
                 "presentation": {
                     "summary": _goal_3037_axis_summary(),
-                    "primary_findings": [
-                        {
-                            "finding_id": "finding-ved-fatigue-strength",
-                            "title": "VED -> fatigue strength",
-                            "statement": (
-                                "Increasing volumetric energy density (VED) "
-                                "lowered defect fraction, size, and complexity; "
-                                "from L-VED to M-VED it increased fatigue "
-                                "strength at 10^4 cycles from 340 MPa to 450 MPa."
-                            ),
-                            "variables": ["VED", "volumetric energy density"],
-                            "mediators": ["defect structure"],
-                            "outcomes": ["fatigue strength"],
-                            "evidence_ref_ids": ["ev-1", "ev-fatigue-strength"],
-                            "evidence_bundle": {
-                                "direct_result": ["ev-1", "ev-fatigue-strength"]
-                            },
-                            **_paper_level_boundary_fields(),
-                        }
-                    ],
+                    "primary_findings": [_ved_fatigue_strength_primary_finding()],
                     "review_queue_findings": [],
                     "evidence_items": [
                         {
@@ -367,6 +400,7 @@ def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
                             "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
                         },
                         _ved_fatigue_strength_table_evidence(),
+                        _ved_fatigue_condition_evidence(),
                     ],
                 },
             },
@@ -415,25 +449,7 @@ def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artif
                 "state": "limited",
                 "presentation": {
                     "summary": _goal_3037_axis_summary(),
-                    "primary_findings": [
-                        {
-                            "finding_id": "finding-ved-fatigue-strength",
-                            "title": "VED -> fatigue strength",
-                            "statement": (
-                                "Increasing volumetric energy density (VED) "
-                                "lowered defect fraction and increased fatigue "
-                                "strength from 340 MPa to 450 MPa."
-                            ),
-                            "variables": ["VED", "volumetric energy density"],
-                            "mediators": ["defect structure"],
-                            "outcomes": ["fatigue strength"],
-                            "evidence_ref_ids": ["ev-1", "ev-fatigue-strength"],
-                            "evidence_bundle": {
-                                "direct_result": ["ev-1", "ev-fatigue-strength"]
-                            },
-                            **_paper_level_boundary_fields(),
-                        }
-                    ],
+                    "primary_findings": [_ved_fatigue_strength_primary_finding()],
                     "review_queue_findings": [],
                     "evidence_items": [
                         {
@@ -456,6 +472,11 @@ def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artif
                             source_ref="tbl-fatigue",
                             page="10",
                         ),
+                        _ved_fatigue_condition_evidence(
+                            document_id="doc-1",
+                            source_ref="blk-condition",
+                            page="3",
+                        ),
                     ],
                 },
             },
@@ -477,11 +498,20 @@ def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artif
                         "document_id": "doc-1",
                         "page": "10",
                         "text": (
-                            "At layer thickness 30, volumetric energy density "
-                            "increased from 50.8 to 79.4 and fatigue strength "
-                            "increased from 340 MPa to 450 MPa."
+                            "L-VED 93 340 394; M-VED 82 450 179; H-VED 97 470 86; "
+                            "Wrought 256 390."
                         ),
-                    }
+                    },
+                    "blk-condition": {
+                        "kind": "block",
+                        "document_id": "doc-1",
+                        "page": "3",
+                        "text": (
+                            "By varying the scanning speed and laser power, three "
+                            "different VED levels were applied: L-VED at 50.8 J/mm3, "
+                            "M-VED at 79.4 J/mm3, and H-VED at 84.3 J/mm3."
+                        ),
+                    },
                 },
             },
     )
@@ -575,7 +605,8 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
     evidence["table_audit"]["relevant_rows"] = [
         {
             "row_index": 2,
-            "cells": ["M-VED", "79.4", "450"],
+            "cells": ["M-VED", "82", "450", "179"],
+            "aligned": True,
         },
     ]
     summary = check.evaluate_goal_analysis_payload(
@@ -598,6 +629,7 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
                             "href": "/collections/col-1/documents/doc-1?source_ref=blk-1",
                         },
                         evidence,
+                        _ved_fatigue_condition_evidence(),
                     ],
                 },
             },

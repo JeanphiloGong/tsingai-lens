@@ -202,16 +202,44 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
     "goal_3037e425673a": {
         "finding_terms": [
-            ["ved", "volumetric energy density"],
+            [
+                "coupled pbf-lb parameter sets grouped by volumetric energy "
+                "density"
+            ],
             ["defect"],
-            "fatigue strength",
-            ["340", "450"],
+            ["fatigue strength"],
+            ["340"],
+            ["450"],
+            ["470"],
+            ["fat50 was non-monotonic"],
+            ["93"],
+            ["82"],
+            ["97"],
+            ["wrought 316l (256 mpa)"],
+            ["laser power and scanning speed were both varied"],
+            ["does not isolate a ved-only effect"],
         ],
         "evidence_terms": [
             ["increasing ved"],
             ["defect"],
             ["fatigue strength"],
-            ["340", "450"],
+            ["340"],
+            ["450"],
+            ["470"],
+            ["93"],
+            ["82"],
+            ["97"],
+            ["256"],
+        ],
+        "required_condition_evidence_sets": [
+            [
+                "varying",
+                "scanning speed",
+                "laser power",
+                "50.8",
+                "79.4",
+                "84.3",
+            ],
         ],
     },
 }
@@ -253,6 +281,10 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
     ],
     "goal_6bf7d2c1030e": [
         ["non_single_variable_table_comparison"],
+        ["single_variable_effect_not_isolated"],
+    ],
+    "goal_3037e425673a": [
+        ["process_conditions_not_isolated"],
         ["single_variable_effect_not_isolated"],
     ],
 }
@@ -1644,6 +1676,16 @@ def _statement_numeric_endpoint_terms(statement: str) -> list[str]:
         if not observed_match:
             continue
         endpoints.extend([match.group(1), observed_match.group(1)])
+    for match in re.finditer(
+        r"(?P<values>[-+]?\d+(?:\.\d+)?(?:\s*,\s*[-+]?\d+(?:\.\d+)?)*"
+        r"(?:\s*,?\s+and\s+[-+]?\d+(?:\.\d+)?)?)\s*"
+        r"(?:(?:mpa|μm|um)\b|%(?!\w))",
+        statement,
+        flags=re.IGNORECASE,
+    ):
+        endpoints.extend(
+            re.findall(r"[-+]?\d+(?:\.\d+)?", match.group("values"))
+        )
     return _dedupe_strings(endpoints)
 
 

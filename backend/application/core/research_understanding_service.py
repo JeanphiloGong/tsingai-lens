@@ -1168,15 +1168,55 @@ class ResearchUnderstandingService:
                     if table is not None
                 ]
                 recovered_spec = spec
-                if (
-                    _text(spec.get("slug")) == "ved_defects_fatigue"
-                    and ved_fatigue_strength_table is not None
-                ):
-                    table_statement = self._ved_fatigue_strength_table_statement(
-                        ved_fatigue_strength_table
+                if _text(spec.get("slug")) == "ved_defects_fatigue":
+                    coupled_process_parameters = (
+                        self._ved_condition_varies_multiple_process_parameters(
+                            condition_block
+                        )
                     )
-                    if table_statement:
-                        recovered_spec = {**spec, "statement": table_statement}
+                    table_statement = (
+                        self._ved_fatigue_strength_table_statement(
+                            ved_fatigue_strength_table,
+                            coupled_process_parameters=coupled_process_parameters,
+                        )
+                        if ved_fatigue_strength_table is not None
+                        else ""
+                    )
+                    if coupled_process_parameters and not table_statement:
+                        table_statement = (
+                            "The authors associated the tested higher-VED PBF-LB "
+                            "parameter sets with lower defect fraction, size, and "
+                            "complexity and slightly improved fatigue life. Laser "
+                            "power and scanning speed were both varied to create "
+                            "these VED levels, so the comparison does not isolate "
+                            "a VED-only effect."
+                        )
+                    recovered_spec = {
+                        **spec,
+                        **({"statement": table_statement} if table_statement else {}),
+                        **(
+                            {
+                                "subject": (
+                                    "coupled PBF-LB parameter sets grouped by "
+                                    "volumetric energy density"
+                                ),
+                                "relation_type": "associated",
+                                "predicate": "associated",
+                                "process_axes": [
+                                    "volumetric energy density",
+                                    "laser power",
+                                    "scanning speed",
+                                ],
+                                "warnings": [
+                                    "process_conditions_not_isolated",
+                                    "single_variable_effect_not_isolated",
+                                    "needs_expert_review",
+                                ],
+                            }
+                            if coupled_process_parameters
+                            else {}
+                        ),
+                    }
                 specific_spec_axes = _strings(spec.get("specific_mechanical_axes"))
                 if mechanical_property_table is not None and specific_spec_axes:
                     specific_object = _join_display_values(specific_spec_axes)
@@ -1537,14 +1577,20 @@ class ResearchUnderstandingService:
             score += 4
         return score
 
-    def _ved_fatigue_strength_table_statement(self, table: SourceTable) -> str:
+    def _ved_fatigue_strength_table_statement(
+        self,
+        table: SourceTable,
+        *,
+        coupled_process_parameters: bool = False,
+    ) -> str:
         indexes = self._ved_fatigue_strength_column_indexes(table)
         label_index = indexes.get("label")
         fatigue_index = indexes.get("fatigue_strength")
         defect_index = indexes.get("defect_length")
+        fat50_index = indexes.get("fat50")
         if label_index is None or fatigue_index is None:
             return ""
-        rows: dict[str, tuple[str, str]] = {}
+        rows: dict[str, tuple[str, str, str]] = {}
         for row in table.table_matrix:
             if len(row) <= max(label_index, fatigue_index):
                 continue
@@ -1555,31 +1601,70 @@ class ResearchUnderstandingService:
                 if defect_index is not None and len(row) > defect_index
                 else ""
             )
+            fat50 = (
+                _numeric_text(row[fat50_index])
+                if fat50_index is not None and len(row) > fat50_index
+                else ""
+            )
             if not label or not fatigue_strength:
                 continue
             if "l ved" in label:
-                rows["L-VED"] = (fatigue_strength, defect_length)
+                rows["L-VED"] = (fatigue_strength, defect_length, fat50)
             elif "m ved" in label:
-                rows["M-VED"] = (fatigue_strength, defect_length)
+                rows["M-VED"] = (fatigue_strength, defect_length, fat50)
             elif "h ved" in label:
-                rows["H-VED"] = (fatigue_strength, defect_length)
+                rows["H-VED"] = (fatigue_strength, defect_length, fat50)
+            elif "wrought" in label:
+                rows["Wrought"] = (fatigue_strength, defect_length, fat50)
         low = rows.get("L-VED")
         medium = rows.get("M-VED")
         if not low or not medium:
             return ""
-        defect_clause = ""
-        if low[1] and medium[1]:
-            defect_clause = (
-                f" and reduced maximum defect length from {low[1]} μm "
-                f"to {medium[1]} μm"
+        high = rows.get("H-VED")
+        wrought = rows.get("Wrought")
+        parts: list[str] = []
+        if high:
+            parts.append(
+                "Across the tested L-VED, M-VED, and H-VED PBF-LB parameter "
+                "sets, fatigue strength at 10^4 cycles was "
+                f"{low[0]}, {medium[0]}, and {high[0]} MPa, respectively."
             )
-        return (
-            "Increasing VED lowered defect fraction, size, and complexity; "
-            f"from L-VED to M-VED it increased fatigue strength at 10^4 cycles "
-            f"from {low[0]} MPa to {medium[0]} MPa{defect_clause}. "
-            "Remaining LoF defects still kept fatigue resistance below wrought "
-            "316L steel."
+            if low[1] and medium[1] and high[1]:
+                parts.append(
+                    "Maximum defect length was "
+                    f"{low[1]}, {medium[1]}, and {high[1]} μm, respectively."
+                )
+            if low[2] and medium[2] and high[2]:
+                wrought_clause = (
+                    f" and remained below wrought 316L ({wrought[2]} MPa)"
+                    if wrought and wrought[2]
+                    else ""
+                )
+                parts.append(
+                    "FAT50 was non-monotonic across the printed conditions "
+                    f"({low[2]}, {medium[2]}, and {high[2]} MPa){wrought_clause}."
+                )
+        else:
+            parts.append(
+                "Across the tested L-VED and M-VED PBF-LB parameter sets, "
+                "fatigue strength at 10^4 cycles was "
+                f"{low[0]} and {medium[0]} MPa, respectively."
+            )
+            if low[1] and medium[1]:
+                parts.append(
+                    "Maximum defect length was "
+                    f"{low[1]} and {medium[1]} μm, respectively."
+                )
+        parts.append(
+            "The authors associated the higher-VED conditions with lower defect "
+            "fraction, size, and complexity and slightly improved fatigue life."
         )
+        if coupled_process_parameters:
+            parts.append(
+                "Laser power and scanning speed were both varied to create these "
+                "VED levels, so the comparison does not isolate a VED-only effect."
+            )
+        return " ".join(parts)
 
     def _ved_fatigue_strength_column_indexes(
         self,
@@ -1595,6 +1680,8 @@ class ResearchUnderstandingService:
                 indexes.setdefault("label", index)
             if " fat at 10 " in normalized or " fatigue strength " in normalized:
                 indexes.setdefault("fatigue_strength", index)
+            if " fat50 " in normalized or " fatigue limit at 50 " in normalized:
+                indexes.setdefault("fat50", index)
             if " defect length " in normalized:
                 indexes.setdefault("defect_length", index)
         return indexes
@@ -2348,6 +2435,28 @@ class ResearchUnderstandingService:
         if " introduction " in heading or " abstract " in heading:
             score -= 3
         return score
+
+    def _ved_condition_varies_multiple_process_parameters(
+        self,
+        block: SourceBlock | None,
+    ) -> bool:
+        if block is None:
+            return False
+        normalized = f" {_normalize_match_text(_text(block.text))} "
+        has_laser_power = " laser power " in normalized
+        has_scan_speed = (
+            " scanning speed " in normalized or " scan speed " in normalized
+        )
+        has_variation = any(
+            term in normalized
+            for term in (
+                " by varying ",
+                " were varied ",
+                " both varied ",
+                " changed together ",
+            )
+        )
+        return has_laser_power and has_scan_speed and has_variation
 
     def _normalized_block_text(self, block: SourceBlock) -> str:
         return f" {_normalize_match_text((_text(block.heading_path) or '') + ' ' + (_text(block.text) or ''))} "
@@ -14068,10 +14177,7 @@ def _table_row_is_aligned(
 
 
 def _table_row_cells_are_aligned(cells: list[str], columns: list[str]) -> bool:
-    return not columns or (
-        len(cells) == len(columns)
-        and all(_text(cell) and _text(cell) != "-" for cell in cells)
-    )
+    return not columns or len(cells) == len(columns)
 
 
 def _table_audit_has_unaligned_rows(table_audit: Mapping[str, Any] | None) -> bool:

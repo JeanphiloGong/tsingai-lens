@@ -2935,6 +2935,7 @@ def test_objective_understanding_recovers_ved_fatigue_from_relevant_frames_when_
                         ("L-VED", "610 ± 6", "93", "0.15", "340", "394"),
                         ("M-VED", "595 ± 13", "82", "0.14", "450", "179"),
                         ("H-VED", "560 ± 4", "97", "0.17", "470", "86"),
+                        ("Wrought", "624 ± 2", "256", "0.41", "390", "-"),
                     ),
                 )
             ],
@@ -2982,8 +2983,12 @@ def test_objective_understanding_recovers_ved_fatigue_from_relevant_frames_when_
     assert primary[0]["title"] == "VED -> fatigue strength"
     assert primary[0]["outcomes"] == ["fatigue strength"]
     assert primary[0]["mediators"] == ["defect structure"]
-    assert "340 MPa to 450 MPa" in primary[0]["statement"]
-    assert "394 μm to 179 μm" in primary[0]["statement"]
+    assert "340, 450, and 470 MPa" in primary[0]["statement"]
+    assert "394, 179, and 86 μm" in primary[0]["statement"]
+    assert "FAT50 was non-monotonic" in primary[0]["statement"]
+    assert "93, 82, and 97 MPa" in primary[0]["statement"]
+    assert "wrought 316L (256 MPa)" in primary[0]["statement"]
+    assert "The authors associated" in primary[0]["statement"]
     assert primary[0]["evidence_bundle"]["direct_result"] == [
         "evref_recovered_ved_defects_fatigue_blk-fatigue-result",
         "evref_recovered_ved_defects_fatigue_table_tbl-fatigue-strength",
@@ -3008,18 +3013,14 @@ def test_objective_understanding_recovers_ved_fatigue_from_relevant_frames_when_
         "FAT at 10 4 cycles [MPa]",
         "Max. Defect length (LCSM) [ μ m]",
     ]
-    assert recovered_table["table_audit"]["relevant_rows"] == [
-        {
-            "row_index": 1,
-            "cells": ["L-VED", "610 ± 6", "93", "0.15", "340", "394"],
-            "aligned": True,
-        },
-        {
-            "row_index": 2,
-            "cells": ["M-VED", "595 ± 13", "82", "0.14", "450", "179"],
-            "aligned": True,
-        },
-    ]
+    relevant_rows = recovered_table["table_audit"]["relevant_rows"]
+    assert all(row["aligned"] for row in relevant_rows)
+    assert {row["row_index"]: row["cells"] for row in relevant_rows} == {
+        1: ["L-VED", "610 ± 6", "93", "0.15", "340", "394"],
+        2: ["M-VED", "595 ± 13", "82", "0.14", "450", "179"],
+        3: ["H-VED", "560 ± 4", "97", "0.17", "470", "86"],
+        4: ["Wrought", "624 ± 2", "256", "0.41", "390", "-"],
+    }
     assert "quote=" in (recovered["href"] or "")
     assert "lower%20fraction%20of%20defects" in (recovered["href"] or "")
 
@@ -3058,8 +3059,9 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
                     block_type="paragraph",
                     text=(
                         "Three sets of samples were deposited using an SLM 280HL "
-                        "PBF-LB equipment. Low, medium, and high VED levels were "
-                        "applied."
+                        "PBF-LB equipment. By varying the scanning speed and laser "
+                        "power, low (L-VED at 50.8 J/mm3), medium (M-VED at 79.4 "
+                        "J/mm3), and high (H-VED at 84.3 J/mm3) levels were applied."
                     ),
                     block_order=47,
                     page=3,
@@ -3097,6 +3099,7 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
                         ("L-VED", "610 ± 6", "93", "0.15", "340", "394"),
                         ("M-VED", "595 ± 13", "82", "0.14", "450", "179"),
                         ("H-VED", "560 ± 4", "97", "0.17", "470", "86"),
+                        ("Wrought", "624 ± 2", "256", "0.41", "390", "-"),
                     ),
                 )
             ],
@@ -3254,10 +3257,21 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
     primary = understanding["presentation"]["primary_findings"]
     review_queue = understanding["presentation"]["review_queue_findings"]
     finding = primary[0]
-    assert finding["title"] == "VED -> fatigue strength"
+    assert finding["title"] == (
+        "coupled PBF-LB parameter sets grouped by volumetric energy density -> "
+        "fatigue strength"
+    )
+    assert finding["variables"] == [
+        "coupled PBF-LB parameter sets grouped by volumetric energy density"
+    ]
     assert finding["outcomes"] == ["fatigue strength"]
-    assert "340 MPa to 450 MPa" in finding["statement"]
-    assert "394 μm to 179 μm" in finding["statement"]
+    assert "340, 450, and 470 MPa" in finding["statement"]
+    assert "394, 179, and 86 μm" in finding["statement"]
+    assert "FAT50 was non-monotonic" in finding["statement"]
+    assert "wrought 316L (256 MPa)" in finding["statement"]
+    assert "does not isolate a VED-only effect" in finding["statement"]
+    assert "process_conditions_not_isolated" in finding["warnings"]
+    assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     assert finding["evidence_bundle"]["direct_result"] == [
         "evref_recovered_ved_defects_fatigue_blk-fatigue-result",
         "evref_recovered_ved_defects_fatigue_table_tbl-fatigue-strength",
@@ -13826,7 +13840,22 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
 
     understanding = service.build_objective_understanding(payload)
 
-    finding = understanding["presentation"]["primary_findings"][0]
+    findings = [
+        *understanding["presentation"]["primary_findings"],
+        *understanding["presentation"]["review_queue_findings"],
+    ]
+    finding = next(
+        item
+        for item in findings
+        if item["title"]
+        == (
+            "coupled PBF-LB parameter sets grouped by volumetric energy density "
+            "-> fatigue strength"
+        )
+    )
+    assert "does not isolate a VED-only effect" in finding["statement"]
+    assert "process_conditions_not_isolated" in finding["warnings"]
+    assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     condition_refs = finding["evidence_bundle"]["condition_context"]
     assert condition_refs
     evidence_by_id = {

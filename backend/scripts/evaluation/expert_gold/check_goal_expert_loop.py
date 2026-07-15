@@ -161,10 +161,11 @@ def check_goal_expert_loop(
         api_base_url=api_base_url,
         require_training_ready=effective_require_all_training_ready,
     )
+    runtime_goal_id = _runtime_write_goal_id(dataset, goal_ids)
     runtime_contract = _runtime_contract_layer(
         api_base_url,
         collection_id=collection_id,
-        goal_id=goal_ids[0] if goal_ids else "",
+        goal_id=runtime_goal_id,
         runtime_write_check=effective_runtime_write_check,
     )
     layers = {
@@ -336,6 +337,7 @@ def _runtime_contract_layer(
         return {
             "status": "not_checked",
             "api_base_url": "",
+            "goal_id": goal_id,
             "runtime_write_check": runtime_write_check,
             "checks": [],
             "requirement": "Pass --api-base-url to verify running API routes.",
@@ -348,6 +350,7 @@ def _runtime_contract_layer(
         return {
             "status": "fail",
             "api_base_url": base_url,
+            "goal_id": goal_id,
             "checks": [],
             "error": str(exc),
             "requirement": "Running API exposes goal-session and experiment-plan routes.",
@@ -383,6 +386,7 @@ def _runtime_contract_layer(
         and not any(check["status"] == "fail" for check in checks)
         else "fail",
         "api_base_url": base_url,
+        "goal_id": goal_id,
         "runtime_write_check": runtime_write_check,
         "checks": checks,
         "requirement": (
@@ -394,6 +398,16 @@ def _runtime_contract_layer(
     if diagnostic:
         result["diagnostic"] = diagnostic
     return result
+
+
+def _runtime_write_goal_id(dataset: dict[str, Any], goal_ids: tuple[str, ...]) -> str:
+    for goal in _mapping_list(dataset.get("goals")):
+        if int(goal.get("protocol_ready_count") or 0) <= 0:
+            continue
+        goal_id = _text(goal.get("goal_id"))
+        if goal_id:
+            return goal_id
+    return goal_ids[0] if goal_ids else ""
 
 
 def _experiment_plan_route_checks(paths: dict[str, Any]) -> list[dict[str, str]]:

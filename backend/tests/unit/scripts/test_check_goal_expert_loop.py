@@ -884,6 +884,73 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
     ]
 
 
+def test_check_goal_expert_loop_runtime_write_uses_protocol_ready_goal(monkeypatch):
+    check = _load_goal_expert_loop_module()
+    dataset = _completed_dataset_payload()
+    dataset["goals"][0]["protocol_ready_count"] = 0
+    write_kwargs = []
+
+    monkeypatch.setattr(
+        check,
+        "_load_sibling_module",
+        lambda _filename, module_name: (
+            type(
+                "FindingsModule",
+                (),
+                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+            )
+            if module_name == "check_goal_findings_projection"
+            else type(
+                "DatasetModule",
+                (),
+                {"check_goal_dataset_quality": staticmethod(lambda **_: dataset)},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check,
+        "_fetch_openapi_paths",
+        lambda _base_url, **_: _runtime_paths(check),
+    )
+
+    def fake_write_checks(_base_url, **kwargs):
+        write_kwargs.append(kwargs)
+        return [
+            {
+                "name": "write smoke experiment plan",
+                "path": (
+                    f"/api/v1/collections/{kwargs['collection_id']}/goals/"
+                    f"{kwargs['goal_id']}/experiment-plans"
+                ),
+                "method": "post/patch",
+                "status": "pass",
+                "detail": "created and archived smoke plan",
+            }
+        ]
+
+    monkeypatch.setattr(check, "_experiment_plan_write_checks", fake_write_checks)
+
+    summary = check.check_goal_expert_loop(
+        collection_id="col-1",
+        goal_ids=("goal-1", "goal-2"),
+        api_base_url="http://localhost:5173",
+        runtime_write_check=True,
+    )
+
+    runtime_contract = summary["layers"]["experiment_design"]["runtime_contract"]
+    assert write_kwargs == [
+        {
+            "collection_id": "col-1",
+            "goal_id": "goal-2",
+            "cookie": "",
+        }
+    ]
+    assert runtime_contract["goal_id"] == "goal-2"
+    assert runtime_contract["checks"][-1]["path"] == (
+        "/api/v1/collections/col-1/goals/goal-2/experiment-plans"
+    )
+
+
 def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
     monkeypatch,
 ):

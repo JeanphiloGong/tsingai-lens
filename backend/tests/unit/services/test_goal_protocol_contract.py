@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from application.goal.protocol_contract import (
+    proposed_design_choice_has_unsupported_detail,
     ved_design_is_scientifically_consistent,
 )
 
@@ -110,3 +111,26 @@ This estimates a laser-power-mediated path and does not isolate a universal VED-
 """
 
     assert ved_design_is_scientifically_consistent(content) is True
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        "Measure fatigue strength at 10^4 cycles.",
+        "Measure fatigue strength at 10⁴ cycles.",
+        "Measure maximum defect length by LCSM.",
+        "Use the same PBF-LB machine.",
+        "Use 316L stainless steel.",
+    ],
+)
+def test_proposed_design_choice_rejects_unattributed_source_details(item):
+    assert proposed_design_choice_has_unsupported_detail(item) is True
+
+
+def test_proposed_design_choice_allows_source_independent_actions():
+    assert (
+        proposed_design_choice_has_unsupported_detail(
+            "Vary laser power to create VED levels while the expert selects the levels."
+        )
+        is False
+    )

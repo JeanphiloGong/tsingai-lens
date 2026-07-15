@@ -1105,6 +1105,52 @@ def test_protocol_renderer_replaces_ved_isolation_claim_with_mediated_boundary(
     assert service._protocol_contract_is_valid(answer) is True
 
 
+def test_protocol_renderer_drops_unattributed_source_details_from_proposals(
+    tmp_path,
+):
+    service, _ = _service(tmp_path, content="unused")
+    draft = _StructuredProtocolDraft(
+        proposed_variable_manipulations=[
+            "Vary laser power to create VED levels while holding scan speed, "
+            "hatch spacing, and layer thickness fixed."
+        ],
+        proposed_measurements=[
+            "Measure maximum defect length by LCSM.",
+            "Measure fatigue strength at 10⁴ cycles.",
+        ],
+        proposed_controls=["Use 316L on the same PBF-LB machine."],
+        design_risks=["Review uncontrolled process interactions."],
+    )
+    finding = {
+        "finding": "Coupled VED parameter sets were associated with fatigue strength.",
+        "variables": ["coupled parameter sets grouped by VED"],
+        "outcomes": ["fatigue strength"],
+        "direction": "associated",
+        "scope_summary": "316L stainless steel, one paper",
+        "generalization_note": "Treat as paper-level evidence.",
+        "evidence": [{"evidence_source": "Source 1"}],
+    }
+
+    answer = service._render_protocol_draft(
+        draft,
+        allowed_source_labels={"Source 1"},
+        curated_findings=[finding],
+    )
+
+    assert "Proposed design choice: Measure maximum defect length by LCSM" not in answer
+    assert "Proposed design choice: Measure fatigue strength at 10⁴ cycles" not in answer
+    assert "Proposed design choice: Use 316L on the same PBF-LB machine" not in answer
+    assert (
+        "Proposed design choice: The expert selects validated methods for the "
+        "source-backed outcomes."
+    ) in answer
+    assert (
+        "Proposed design choice: The expert defines controls for non-manipulated "
+        "material, process, and test variables."
+    ) in answer
+    assert service._protocol_contract_is_valid(answer) is True
+
+
 def test_goal_chat_limits_protocol_when_repair_still_violates_contract(tmp_path):
     invalid_draft = """Hypothesis
 VED improves fatigue strength [Source 1].

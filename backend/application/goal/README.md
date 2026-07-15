@@ -50,6 +50,9 @@ own database connections, SQL, schema initialization, or row encoding.
   constituent must be explicitly changed or fixed, and no constituent may be
   both changed and fixed. A constituent-controlled design is represented as
   that constituent-mediated path, not as an isolated universal VED effect.
+  Proposed design choices cannot contain unattributed numeric, material,
+  equipment, or method-acronym details; unsupported generated details are
+  dropped in favor of an explicit expert-selection placeholder.
   Existing Copilot drafts that violate either rule are reported as stale
   instead of being promoted for review.
 - `brief_service.py`

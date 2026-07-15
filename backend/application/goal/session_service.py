@@ -34,6 +34,8 @@ from application.evaluation.research_understanding_feedback_service import (
 )
 from application.goal.protocol_contract import (
     has_affirmative_ved_isolation_claim,
+    proposed_design_choice_has_unsupported_detail,
+    proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
 )
 from application.core.workspace_overview_service import WorkspaceService
@@ -1068,7 +1070,9 @@ class GoalSessionService:
             "manipulations, proposed measurements, proposed controls, and design risks. "
             "Do not generate or restate source-backed facts; Lens derives those directly "
             "from the curated Findings. Proposed items must not invent numeric settings, "
-            "sample counts, standards, or named methods. A VED design may estimate a "
+            "sample counts, standards, or named methods. Do not copy source numbers, "
+            "material identifiers, equipment names, or method acronyms into proposed "
+            "items; Lens renders supported observations separately. A VED design may estimate a "
             "selected constituent-mediated path, but must not claim to isolate a "
             "universal VED-only effect.\n"
             "Normalize the protocol into the required evidence/design fields."
@@ -1118,13 +1122,21 @@ class GoalSessionService:
             f"- Source-backed: {item}" for item in grounding["reported_outcomes"]
         ]
         measurement_items.extend(
-            f"- Proposed design choice: {self._proposed_protocol_text(item)}"
-            for item in draft.proposed_measurements
+            self._safe_proposed_protocol_items(
+                draft.proposed_measurements,
+                fallback=(
+                    "The expert selects validated methods for the source-backed "
+                    "outcomes."
+                ),
+            )
         )
-        control_items = [
-            f"- Proposed design choice: {self._proposed_protocol_text(item)}"
-            for item in draft.proposed_controls
-        ]
+        control_items = self._safe_proposed_protocol_items(
+            draft.proposed_controls,
+            fallback=(
+                "The expert defines controls for non-manipulated material, process, "
+                "and test variables."
+            ),
+        )
         evidence_limits = [
             f"- Evidence limit: {item}" for item in grounding["evidence_limits"]
         ]
@@ -1263,15 +1275,26 @@ class GoalSessionService:
         ):
             raise ValueError("proposed protocol item contains an embedded category label")
         text = self._clean_protocol_text(value)
-        unsupported_detail = re.search(
-            r"(?:[±+\-]?\d+(?:\.\d+)?\s*(?:%|percent|replicates?|samples?|"
-            r"W|kW|mm|µm|μm|MPa|GPa|°C))|\b(?:ASTM|ISO|DIN|GB/T)\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if unsupported_detail:
+        if proposed_design_choice_has_unsupported_detail(text):
             raise ValueError("proposed protocol item contains an unsupported detail")
         return text
+
+    def _safe_proposed_protocol_items(
+        self,
+        values: list[str],
+        *,
+        fallback: str,
+    ) -> list[str]:
+        items: list[str] = []
+        for value in values:
+            try:
+                text = self._proposed_protocol_text(value)
+            except ValueError:
+                continue
+            items.append(f"- Proposed design choice: {text}")
+        if items:
+            return items
+        return [f"- Proposed design choice: {fallback}"]
 
     def _clean_protocol_text(self, value: str) -> str:
         text = " ".join(str(value or "").split()).strip()
@@ -1314,7 +1337,9 @@ class GoalSessionService:
             item = line.split(":", 1)[1]
             if category_pattern.search(item):
                 return False
-        return ved_design_is_scientifically_consistent(answer)
+        return proposed_design_choices_are_source_independent(
+            answer
+        ) and ved_design_is_scientifically_consistent(answer)
 
     def _is_protocol_draft(self, answer: str) -> bool:
         normalized = answer.lower()
@@ -1401,7 +1426,9 @@ class GoalSessionService:
                 "Risks or limits, distinguish 'Evidence limit:' from 'Design risk:'. Do "
                 "not invent numeric levels, standards, sample sizes, or named methods; "
                 "when they are not source-backed, say that the expert must select or "
-                "confirm them. Boundary example: Bad: change VED while laser power, scan "
+                "confirm them. Never put source numbers, material identifiers, equipment "
+                "names, or method acronyms in a Proposed design choice; source facts belong "
+                "only in Source-backed lines. Boundary example: Bad: change VED while laser power, scan "
                 "speed, hatch spacing, and layer thickness are fixed. Good: Proposed "
                 "design choice: vary laser power to create VED levels, hold scan speed, "
                 "hatch spacing, and layer thickness fixed, and have the expert select "

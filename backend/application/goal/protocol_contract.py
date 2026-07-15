@@ -133,6 +133,21 @@ def has_affirmative_ved_isolation_claim(content: str) -> bool:
     return False
 
 
+def proposed_design_choice_has_unsupported_detail(item: str) -> bool:
+    if any(character.isdigit() for character in item):
+        return True
+    acronyms = re.findall(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*\b", item)
+    return any(acronym != "VED" for acronym in acronyms)
+
+
+def proposed_design_choices_are_source_independent(content: str) -> bool:
+    return all(
+        not proposed_design_choice_has_unsupported_detail(match.group(1))
+        for line in content.splitlines()
+        if (match := _PROPOSED_CHOICE_PATTERN.search(line))
+    )
+
+
 def _section(
     content: str,
     start_labels: tuple[str, ...],

@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from application.evaluation import ResearchUnderstandingFeedbackService
 from application.goal.protocol_contract import (
+    proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
 )
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
@@ -212,6 +213,7 @@ class ExperimentPlanService:
             raise ValueError(
                 "goal copilot answer is not a structured protocol draft"
             )
+        _validate_proposed_design_choices(content)
         _validate_ved_design(content)
         return session, message
 
@@ -328,7 +330,9 @@ def _source_validity(
     plan: ExperimentPlanRecord,
     dataset_items: tuple[Mapping[str, Any], ...] | None,
 ) -> tuple[str, list[str]]:
-    if not ved_design_is_scientifically_consistent(plan.content):
+    if not proposed_design_choices_are_source_independent(
+        plan.content
+    ) or not ved_design_is_scientifically_consistent(plan.content):
         return "stale", ["protocol_design_inconsistent"]
     if dataset_items is None:
         return "unverified", ["source_dataset_unavailable"]
@@ -405,6 +409,7 @@ def _validate_goal_copilot_plan_edit(
 ) -> None:
     if not _has_protocol_draft_structure(content):
         raise ValueError("goal copilot answer is not a structured protocol draft")
+    _validate_proposed_design_choices(content)
     _validate_ved_design(content)
     visible_source_labels = [
         label
@@ -419,6 +424,13 @@ def _validate_ved_design(content: str) -> None:
     if not ved_design_is_scientifically_consistent(content):
         raise ValueError(
             "VED design violates the constituent-state or causal-boundary contract"
+        )
+
+
+def _validate_proposed_design_choices(content: str) -> None:
+    if not proposed_design_choices_are_source_independent(content):
+        raise ValueError(
+            "Proposed design choice contains an unattributed numeric or named detail"
         )
 
 

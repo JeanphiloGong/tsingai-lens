@@ -550,6 +550,50 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
         )
 
 
+def test_experiment_plan_service_rejects_unattributed_source_detail_in_proposal(
+    tmp_path,
+):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    content = """**Hypothesis**
+Coupled VED parameter sets were associated with fatigue strength [Source 1].
+
+**Variable matrix**
+- Proposed design choice: Vary laser power to create VED levels while holding scan speed, hatch spacing, and layer thickness fixed.
+
+**Measurements**
+- Proposed design choice: Measure fatigue strength at 10⁴ cycles using LCSM.
+
+**Controls**
+- Proposed design choice: Hold scan speed, hatch spacing, and layer thickness fixed.
+
+**Risks or limits**
+- Design risk: Treat the result as a laser-power-mediated path.
+"""
+    _write_goal_message(
+        goal_session_repository,
+        content=content,
+        review_gate="protocol_ready_findings",
+    )
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Proposed design choice"):
+        service.create_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            title="VED measurement protocol",
+            content=content,
+            source_message_id="msg_1",
+            created_by="expert-a",
+            metadata={"source": "goal_copilot"},
+        )
+
+
 def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
     goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
     _write_goal_message(

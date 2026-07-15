@@ -5129,6 +5129,10 @@ class ResearchUnderstandingService:
             for finding in findings
         ]
         findings = self._findings_without_redundant_generic_mechanical_rows(findings)
+        findings = self._findings_without_redundant_multi_outcome_rows(
+            findings,
+            evidence_by_id=evidence_by_id,
+        )
         primary_findings, review_queue_findings = self._partition_presentation_findings(
             findings,
             evidence_by_id=evidence_by_id,
@@ -8302,6 +8306,68 @@ class ResearchUnderstandingService:
                 )
             )
         ]
+
+    def _findings_without_redundant_multi_outcome_rows(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        def outcome_keys(finding: Mapping[str, Any]) -> set[str]:
+            keys: set[str] = set()
+            for outcome in _strings(finding.get("outcomes")):
+                normalized = _normalize_match_text(outcome)
+                if normalized in {"ductility", "elongation", "elongation to failure"}:
+                    normalized = "ductility"
+                if normalized:
+                    keys.add(normalized)
+            return keys
+
+        indexed = [
+            (
+                finding,
+                outcome_keys(finding),
+                self._finding_document_ids(finding, evidence_by_id=evidence_by_id),
+            )
+            for finding in findings
+        ]
+        retained: list[dict[str, Any]] = []
+        for index, (finding, finding_outcomes, document_ids) in enumerate(indexed):
+            if len(finding_outcomes) <= 1 or not document_ids:
+                retained.append(finding)
+                continue
+            variables = _strings(finding.get("variables"))
+            covered_outcomes: set[str] = set()
+            for candidate_index, (
+                candidate,
+                candidate_outcomes,
+                candidate_document_ids,
+            ) in enumerate(indexed):
+                if candidate_index == index or len(candidate_outcomes) >= len(
+                    finding_outcomes
+                ):
+                    continue
+                if not document_ids & candidate_document_ids:
+                    continue
+                if (_text(candidate.get("support_grade")) or "") not in {
+                    "strong",
+                    "partial",
+                }:
+                    continue
+                if not _strings(
+                    _mapping(candidate.get("evidence_bundle")).get("direct_result")
+                ) or not _mapping_list(candidate.get("relation_chain")):
+                    continue
+                if not any(
+                    self._axis_labels_match(variable, candidate_variable)
+                    for variable in variables
+                    for candidate_variable in _strings(candidate.get("variables"))
+                ):
+                    continue
+                covered_outcomes.update(finding_outcomes & candidate_outcomes)
+            if covered_outcomes != finding_outcomes:
+                retained.append(finding)
+        return retained
 
     def _finding_has_concrete_mechanical_outcome(
         self,

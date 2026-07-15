@@ -10728,6 +10728,71 @@ def test_with_presentation_merges_duplicate_row_level_findings():
     assert understanding["presentation"]["review_queue_findings"] == [finding]
 
 
+def test_presentation_filters_multi_outcome_row_covered_by_specific_findings():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    evidence_by_id = {
+        "evref_ductility": {"document_id": "paper-1"},
+        "evref_mechanism": {"document_id": "paper-1"},
+        "evref_yield": {"document_id": "paper-1"},
+        "evref_uts": {"document_id": "paper-1"},
+    }
+    findings = [
+        {
+            "finding_id": "finding_recovered_ductility",
+            "claim_id": "claim_recovered_preheating_ductility_blk-1",
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["ductility"],
+            "support_grade": "partial",
+            "evidence_ref_ids": ["evref_ductility"],
+            "evidence_bundle": {"direct_result": ["evref_ductility"]},
+            "relation_chain": [{"outcome": "ductility"}],
+        },
+        {
+            "finding_id": "finding_mechanism",
+            "claim_id": "claim_preheating_mechanism",
+            "variables": ["build platform preheating"],
+            "outcomes": ["ductility", "yield strength"],
+            "support_grade": "partial",
+            "evidence_ref_ids": ["evref_mechanism"],
+            "evidence_bundle": {"direct_result": ["evref_mechanism"]},
+            "relation_chain": [
+                {"outcome": "ductility and yield strength"}
+            ],
+        },
+        {
+            "finding_id": "finding_yield",
+            "claim_id": "relation_rel_yield",
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["yield strength"],
+            "support_grade": "partial",
+            "evidence_ref_ids": ["evref_yield"],
+            "evidence_bundle": {"direct_result": ["evref_yield"]},
+            "relation_chain": [{"outcome": "yield strength"}],
+        },
+        {
+            "finding_id": "finding_uts",
+            "claim_id": "relation_rel_uts",
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["ultimate tensile strength"],
+            "support_grade": "partial",
+            "evidence_ref_ids": ["evref_uts"],
+            "evidence_bundle": {"direct_result": ["evref_uts"]},
+            "relation_chain": [{"outcome": "ultimate tensile strength"}],
+        },
+    ]
+
+    filtered = service._findings_without_redundant_multi_outcome_rows(
+        findings,
+        evidence_by_id=evidence_by_id,
+    )
+
+    assert [finding["finding_id"] for finding in filtered] == [
+        "finding_recovered_ductility",
+        "finding_yield",
+        "finding_uts",
+    ]
+
+
 def test_with_presentation_keeps_same_paper_comparable_finding_when_recovered_expert_finding_exists():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

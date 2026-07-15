@@ -15922,7 +15922,9 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
                             "Relative density",
                         ],
                         ["2", "4", "0.114", "A", "0.175", "100", "93.9"],
-                        ["3", "5", "0.12", "A", "0.167", "100", "96.2"],
+                        ["5", "11", "0.12", "A", "0.167", "100", "96.2"],
+                        ["3", "5", "0.111", "A", "0.12", "150", "97.14"],
+                        ["6", "14", "0.12", "A", "0.111", "150", "99.45"],
                     ],
                 ),
                 SourceTable(
@@ -15955,9 +15957,10 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
                             "Elongation (%)",
                             "Microhardness (HV)",
                         ],
-                        ["1", "1", "236.65", "375.13", "7.21", "215.65"],
                         ["2", "4", "341.38", "459.58", "6.62", "219.4"],
+                        ["5", "11", "177.68", "203.48", "3.31", "182.8"],
                         ["3", "5", "302.24", "384.5", "6.40", "189.1"],
+                        ["6", "14", "462.02", "584.44", "41.9", "223.4"],
                     ],
                 )
             ],
@@ -16033,6 +16036,10 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
         "ultimate tensile strength",
         "elongation",
     ]
+    assert finding["mediators"] == [
+        "author-attributed refined microstructure",
+        "observed relative density (not isolated)",
+    ]
     assert (
         "mechanical properties"
         not in {
@@ -16072,36 +16079,53 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     assert "Yield Strength (MPa)" in direct_evidence_text
     assert "Ultimate Tensile Strength (MPa)" in direct_evidence_text
     assert "Elongation (%)" in direct_evidence_text
-    assert "236.65" in direct_evidence_text
+    assert "177.68" in direct_evidence_text
+    assert "462.02" in direct_evidence_text
     assert "459.58" in direct_evidence_text
-    assert "6.40" in direct_evidence_text
+    assert "41.9" in direct_evidence_text
     assert "Scan strategy" in condition_evidence_text
     assert "Scanning speed (mm/s)" in condition_evidence_text
     assert "Energy density (J/mm 3 )" in condition_evidence_text
+    assert "Sample number: 4" in condition_evidence_text
+    assert "Sample number: 11" in condition_evidence_text
+    assert "Sample number: 5" in condition_evidence_text
+    assert "Sample number: 14" in condition_evidence_text
+    assert "Relative density: 93.9" in condition_evidence_text
+    assert "Relative density: 99.45" in condition_evidence_text
     statement = finding["statement"]
     assert "  " not in statement
-    assert "Across the tested SLM parameter sets" in statement
-    assert "higher-scanning-speed conditions" in statement
-    assert "densification" in statement
-    assert "microstructure" in statement
+    assert "aligned source tables do not show a uniform scanning-speed response" in statement
+    assert "energy density 100 J/mm3 and scan strategy A" in statement
+    assert "reported scanning-speed value from 0.167 to 0.175" in statement
+    assert "hatch spacing changed from 0.12 to 0.114 mm" in statement
+    assert "relative density from 96.2 to 93.9%" in statement
+    assert "yield strength from 177.68 to 341.38 MPa" in statement
+    assert "energy density 150 J/mm3 and scan strategy A" in statement
+    assert "reported scanning-speed value from 0.111 to 0.12" in statement
+    assert "relative density from 99.45 to 97.14%" in statement
+    assert "yield strength from 462.02 to 302.24 MPa" in statement
+    assert "elongation from 41.9 to 6.40%" in statement
     assert "yield strength" in statement
     assert "ultimate tensile strength" in statement
     assert "elongation" in statement
-    assert "scan strategy, hatch spacing, and energy density also varied" in statement
-    assert "do not isolate a scanning-speed effect" in statement
+    assert "not uniformly supported by Tables 1 and 2" in statement
+    assert "not an isolated scanning-speed effect" in statement
     assert "scanning speed from 0.167 to 0.175" not in statement
     assert "yield strength (302.24 to 341.38 MPa)" not in statement
     assert "ultimate tensile strength (384.5 to 459.58 MPa)" not in statement
     assert "elongation (6.40 to 6.62%)" not in statement
-    assert (
-        "associated source table reports yield strength, ultimate tensile "
-        "strength, and elongation measurements"
-    ) in statement
+    assert "higher strength and ductility in one condition" in statement
+    assert "lower values in another" in statement
+    assert "did not improve density in either pair" in statement
     assert "Yield Strength 236.65-341.38 MPa" not in statement
     assert "values traceable in the associated source table" not in statement
     assert finding["direction"] == "associated"
     assert "single_variable_effect_not_isolated" in finding["warnings"]
     assert "single_variable_effect_not_isolated" in finding["review_reasons"]
+    assert "author_summary_table_mismatch" in finding["warnings"]
+    assert "response_direction_not_uniform" in finding["warnings"]
+    assert "author_attributed_mechanism" in finding["warnings"]
+    assert "density_mediator_not_isolated" in finding["warnings"]
     assert {
         segment["direction"] for segment in finding["relation_chain"]
     } == {"associated"}
@@ -16202,7 +16226,9 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
                             "Relative density",
                         ],
                         ["2", "4", "0.114", "A", "0.175", "100", "93.9"],
-                        ["3", "5", "0.12", "A", "0.167", "100", "96.2"],
+                        ["5", "11", "0.12", "A", "0.167", "100", "96.2"],
+                        ["3", "5", "0.111", "A", "0.12", "150", "97.14"],
+                        ["6", "14", "0.12", "A", "0.111", "150", "99.45"],
                     ],
                 ),
                 SourceTable(
@@ -16235,9 +16261,10 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
                             "Elongation (%)",
                             "Microhardness (HV)",
                         ],
-                        ["1", "1", "236.65", "375.13", "7.21", "215.65"],
                         ["2", "4", "341.38", "459.58", "6.62", "219.4"],
+                        ["5", "11", "177.68", "203.48", "3.31", "182.8"],
                         ["3", "5", "302.24", "384.5", "6.40", "189.1"],
+                        ["6", "14", "462.02", "584.44", "41.9", "223.4"],
                     ],
                 )
             ],
@@ -16389,29 +16416,32 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
     ]
     statement = finding["statement"]
     assert "  " not in statement
-    assert "Across the tested SLM parameter sets" in statement
-    assert "higher-scanning-speed conditions" in statement
-    assert "densification" in statement
-    assert "microstructure" in statement
+    assert "aligned source tables do not show a uniform scanning-speed response" in statement
+    assert "energy density 100 J/mm3 and scan strategy A" in statement
+    assert "reported scanning-speed value from 0.167 to 0.175" in statement
+    assert "relative density from 96.2 to 93.9%" in statement
+    assert "energy density 150 J/mm3 and scan strategy A" in statement
+    assert "reported scanning-speed value from 0.111 to 0.12" in statement
+    assert "relative density from 99.45 to 97.14%" in statement
     assert "yield strength" in statement
     assert "ultimate tensile strength" in statement
     assert "elongation" in statement
-    assert "scan strategy, hatch spacing, and energy density also varied" in statement
-    assert "do not isolate a scanning-speed effect" in statement
+    assert "not uniformly supported by Tables 1 and 2" in statement
+    assert "not an isolated scanning-speed effect" in statement
     assert "scanning speed from 0.167 to 0.175" not in statement
     assert "yield strength (302.24 to 341.38 MPa)" not in statement
     assert "ultimate tensile strength (384.5 to 459.58 MPa)" not in statement
     assert "elongation (6.40 to 6.62%)" not in statement
-    assert (
-        "associated source table reports yield strength, ultimate tensile "
-        "strength, and elongation measurements"
-    ) in statement
+    assert "higher strength and ductility in one condition" in statement
+    assert "lower values in another" in statement
     assert "Yield Strength 236.65-341.38 MPa" not in statement
     assert "values traceable in the associated source table" not in statement
     assert "non_single_variable_table_comparison" in finding["warnings"]
     assert "non_single_variable_table_comparison" in finding["review_reasons"]
     assert "single_variable_effect_not_isolated" in finding["warnings"]
     assert "single_variable_effect_not_isolated" in finding["review_reasons"]
+    assert "author_summary_table_mismatch" in finding["warnings"]
+    assert "response_direction_not_uniform" in finding["warnings"]
     assert "source_unit_inconsistency" in finding["warnings"]
     assert "source_unit_inconsistency" in finding["review_reasons"]
     assert "source reports scanning speed in mm/s" in statement

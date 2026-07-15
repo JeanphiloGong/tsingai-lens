@@ -722,7 +722,7 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
     assert (
-        "table direct evidence covers statement numeric endpoints"
+        "table evidence covers statement numeric endpoints"
         in failed_names
     )
 
@@ -978,18 +978,40 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
                                 "elongation"
                             ),
                             "statement": (
-                                "Across the tested SLM parameter sets, the authors "
-                                "reported that higher-scanning-speed conditions "
-                                "showed better densification and a refined "
-                                "microstructure. Because scan strategy, hatch "
-                                "spacing, and energy density also varied, these "
-                                "data do not isolate a scanning-speed effect."
+                                "The aligned source tables do not show a uniform "
+                                "scanning-speed response. At energy density 100 "
+                                "J/mm3 and scan strategy A, increasing the reported "
+                                "scanning-speed value from 0.167 to 0.175 while "
+                                "hatch spacing changed from 0.12 to 0.114 mm changed "
+                                "relative density from 96.2 to 93.9% and yield "
+                                "strength from 177.68 to 341.38 MPa, ultimate "
+                                "tensile strength from 203.48 to 459.58 MPa, and "
+                                "elongation from 3.31 to 6.62%. At energy density "
+                                "150 J/mm3 and scan strategy A, increasing the "
+                                "reported scanning-speed value from 0.111 to 0.12 "
+                                "while hatch spacing changed from 0.12 to 0.111 mm "
+                                "changed relative density from 99.45 to 97.14% and "
+                                "yield strength from 462.02 to 302.24 MPa, ultimate "
+                                "tensile strength from 584.44 to 384.5 MPa, and "
+                                "elongation from 41.9 to 6.40%. Thus higher reported "
+                                "speed coincided with higher strength and ductility "
+                                "in one condition but lower values in another, and "
+                                "it did not improve density in either pair. The "
+                                "authors' general higher-speed densification and "
+                                "mechanical-performance summary is not uniformly "
+                                "supported by Tables 1 and 2. Because hatch spacing "
+                                "changed in each pair, these are coupled condition-"
+                                "level comparisons, not an isolated scanning-speed "
+                                "effect."
                             ),
                             "variables": [
                                 "coupled SLM parameter sets: scanning strategy, "
                                 "scanning speed, hatch spacing, and energy density"
                             ],
-                            "mediators": ["microstructure", "densification"],
+                            "mediators": [
+                                "author-attributed refined microstructure",
+                                "observed relative density (not isolated)",
+                            ],
                             "outcomes": [
                                 "yield strength",
                                 "ultimate tensile strength",
@@ -1003,10 +1025,18 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
                             "warnings": [
                                 "non_single_variable_table_comparison",
                                 "single_variable_effect_not_isolated",
+                                "author_summary_table_mismatch",
+                                "response_direction_not_uniform",
+                                "author_attributed_mechanism",
+                                "density_mediator_not_isolated",
                             ],
                             "review_reasons": [
                                 "non_single_variable_table_comparison",
                                 "single_variable_effect_not_isolated",
+                                "author_summary_table_mismatch",
+                                "response_direction_not_uniform",
+                                "author_attributed_mechanism",
+                                "density_mediator_not_isolated",
                             ],
                             **_paper_level_boundary_fields(),
                         }
@@ -1027,8 +1057,10 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
                             "quote": (
                                 "Mechanical properties include Yield Strength "
                                 "(MPa), Ultimate Tensile Strength (MPa), and "
-                                "Elongation (%) with values 236.65, "
-                                "375.13, and 7.21."
+                                "Elongation (%). Sample 4: 341.38, 459.58, 6.62; "
+                                "sample 11: 177.68, 203.48, 3.31; sample 5: "
+                                "302.24, 384.5, 6.40; sample 14: 462.02, 584.44, "
+                                "41.9."
                             ),
                             "href": "/collections/col-1/documents/doc-1?source_ref=tbl-1",
                         },
@@ -1036,7 +1068,11 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
                             "evidence_ref_id": "ev-3",
                             "quote": (
                                 "SLM processing parameters: Hatch space, Scan "
-                                "strategy, Scanning speed, and Energy density."
+                                "strategy, Scanning speed, Energy density, and "
+                                "Relative density. Sample 4: 0.114, A, 0.175, 100, "
+                                "93.9; sample 11: 0.12, A, 0.167, 100, 96.2; "
+                                "sample 5: 0.111, A, 0.12, 150, 97.14; sample 14: "
+                                "0.12, A, 0.111, 150, 99.45."
                             ),
                             "href": "/collections/col-1/documents/doc-1?source_ref=tbl-2",
                         },

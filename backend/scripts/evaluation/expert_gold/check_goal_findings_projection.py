@@ -179,7 +179,15 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["scan strategy"],
             ["hatch spacing"],
             ["energy density"],
-            ["do not isolate a scanning-speed effect"],
+            ["not an isolated scanning-speed effect"],
+            ["aligned source tables do not show a uniform scanning-speed response"],
+            ["100", "0.167", "0.175", "96.2", "93.9"],
+            ["177.68", "341.38", "203.48", "459.58", "3.31", "6.62"],
+            ["150", "0.111", "0.12", "99.45", "97.14"],
+            ["462.02", "302.24", "584.44", "384.5", "41.9", "6.40"],
+            ["not uniformly supported by tables 1 and 2"],
+            ["author-attributed refined microstructure"],
+            ["observed relative density", "not isolated"],
             "elongation",
             ["yield strength"],
             ["ultimate tensile strength"],
@@ -214,9 +222,12 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
                 "elongation",
                 "mpa",
                 "%",
-                "236.65",
-                "375.13",
-                "7.21",
+                "177.68",
+                "341.38",
+                "462.02",
+                "302.24",
+                "41.9",
+                "6.40",
             ],
         ],
         "required_condition_evidence_sets": [
@@ -225,6 +236,14 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
                 "scan strategy",
                 "scanning speed",
                 "energy density",
+                "0.167",
+                "0.175",
+                "0.111",
+                "0.12",
+                "96.2",
+                "93.9",
+                "99.45",
+                "97.14",
             ],
         ],
     },
@@ -318,6 +337,10 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
     "goal_6bf7d2c1030e": [
         ["non_single_variable_table_comparison"],
         ["single_variable_effect_not_isolated"],
+        ["author_summary_table_mismatch"],
+        ["response_direction_not_uniform"],
+        ["author_attributed_mechanism"],
+        ["density_mediator_not_isolated"],
     ],
     "goal_3037e425673a": [
         ["process_conditions_not_isolated"],
@@ -738,7 +761,7 @@ def evaluate_goal_analysis_payload(
         ),
         _check(
             goal_id,
-            "table direct evidence covers statement numeric endpoints",
+            "table evidence covers statement numeric endpoints",
             not endpoint_audit["failures"],
             _table_audit_detail(endpoint_audit),
         ),
@@ -1674,7 +1697,7 @@ def _finding_table_endpoint_summary(
             continue
         table_items = [
             item
-            for evidence_id in _direct_evidence_ids(finding)
+            for evidence_id in _finding_evidence_bundle_ids(finding)
             if (item := evidence_items.get(evidence_id))
             and _is_table_evidence(item, source_index=source_index)
         ]

@@ -1421,8 +1421,18 @@ class ResearchUnderstandingService:
                             "energy density",
                         ]
                         statement = self._unisolated_scanning_speed_statement(
-                            specific_spec_axes
+                            specific_spec_axes,
+                            mechanical_table=mechanical_property_table,
+                            processing_table=processing_parameter_table,
                         )
+                        if "not show a uniform scanning-speed response" in statement:
+                            warnings = _dedupe_strings(
+                                [
+                                    *warnings,
+                                    "author_summary_table_mismatch",
+                                    "response_direction_not_uniform",
+                                ]
+                            )
                     recovered_spec = {
                         **spec,
                         "subject": subject,
@@ -2109,36 +2119,11 @@ class ResearchUnderstandingService:
         processing_table: SourceTable,
         axes: list[str],
     ) -> dict[str, Any]:
-        mechanical_indexes = self._specific_mechanical_property_column_indexes(
-            mechanical_table
-        )
-        processing_indexes = self._slm_processing_parameter_column_indexes(
-            processing_table
-        )
-        if not {"sample", "scanning_speed"} <= set(processing_indexes):
-            return {}
-        if not {"sample"} <= set(mechanical_indexes):
-            return {}
-        mechanical_rows = self._mechanical_property_rows(
+        joined_rows = self._joined_scanning_speed_property_rows(
             mechanical_table,
-            indexes=mechanical_indexes,
-            axes=axes,
-        )
-        if not mechanical_rows:
-            return {}
-        joined_rows = []
-        for process_row in self._processing_parameter_rows(
             processing_table,
-            indexes=processing_indexes,
-        ):
-            sample = _text(process_row.get("sample"))
-            condition = _text(process_row.get("condition"))
-            mechanical_row = mechanical_rows.get(sample or "") or mechanical_rows.get(
-                f"condition:{condition}"
-            )
-            if not mechanical_row:
-                continue
-            joined_rows.append({**process_row, "properties": mechanical_row})
+            axes,
+        )
         best: tuple[tuple[int, float, float], dict[str, Any]] | None = None
         for left_index, left in enumerate(joined_rows):
             for right in joined_rows[left_index + 1 :]:
@@ -2155,6 +2140,37 @@ class ResearchUnderstandingService:
                 if best is None or rank > best[0]:
                     best = (rank, candidate)
         return best[1] if best else {}
+
+    def _joined_scanning_speed_property_rows(
+        self,
+        mechanical_table: SourceTable,
+        processing_table: SourceTable,
+        axes: list[str],
+    ) -> list[dict[str, Any]]:
+        mechanical_indexes = self._specific_mechanical_property_column_indexes(
+            mechanical_table
+        )
+        processing_indexes = self._slm_processing_parameter_column_indexes(
+            processing_table
+        )
+        mechanical_rows = self._mechanical_property_rows(
+            mechanical_table,
+            indexes=mechanical_indexes,
+            axes=axes,
+        )
+        joined_rows: list[dict[str, Any]] = []
+        for process_row in self._processing_parameter_rows(
+            processing_table,
+            indexes=processing_indexes,
+        ):
+            sample = _text(process_row.get("sample"))
+            condition = _text(process_row.get("condition"))
+            mechanical_row = mechanical_rows.get(sample or "") or mechanical_rows.get(
+                f"condition:{condition}"
+            )
+            if mechanical_row:
+                joined_rows.append({**process_row, "properties": mechanical_row})
+        return joined_rows
 
     def _mechanical_property_rows(
         self,
@@ -2237,6 +2253,12 @@ class ResearchUnderstandingService:
             ):
                 item["hatch_spacing"] = hatch
             if (
+                (density_index := indexes.get("relative_density")) is not None
+                and len(row) > density_index
+                and (density := _numeric_text(row[density_index]))
+            ):
+                item["relative_density"] = density
+            if (
                 (laser_power_index := indexes.get("laser_power")) is not None
                 and len(row) > laser_power_index
                 and (laser_power := _numeric_text(row[laser_power_index]))
@@ -2316,6 +2338,10 @@ class ResearchUnderstandingService:
             "hatch_spacing": _text(low.get("hatch_spacing"))
             or _text(high.get("hatch_spacing"))
             or "",
+            "low_hatch_spacing": _text(low.get("hatch_spacing")) or "",
+            "high_hatch_spacing": _text(high.get("hatch_spacing")) or "",
+            "low_relative_density": _text(low.get("relative_density")) or "",
+            "high_relative_density": _text(high.get("relative_density")) or "",
             "laser_power": _text(low.get("laser_power"))
             or _text(high.get("laser_power"))
             or "",
@@ -2393,7 +2419,21 @@ class ResearchUnderstandingService:
             "use the table rows as direct evidence rather than a single global range."
         )
 
-    def _unisolated_scanning_speed_statement(self, axes: list[str]) -> str:
+    def _unisolated_scanning_speed_statement(
+        self,
+        axes: list[str],
+        *,
+        mechanical_table: SourceTable | None = None,
+        processing_table: SourceTable | None = None,
+    ) -> str:
+        if mechanical_table is not None and processing_table is not None:
+            aligned_summary = self._coupled_scanning_speed_property_summary(
+                mechanical_table,
+                processing_table,
+                axes,
+            )
+            if aligned_summary:
+                return aligned_summary
         return (
             "Across the tested SLM parameter sets, the authors reported that "
             "higher-scanning-speed conditions showed better densification, a "
@@ -2401,6 +2441,154 @@ class ResearchUnderstandingService:
             "Because scan strategy, hatch spacing, and energy density also varied, "
             "these data do not isolate a scanning-speed effect. "
             f"{self._specific_mechanical_property_table_statement(axes)}"
+        )
+
+    def _coupled_scanning_speed_property_summary(
+        self,
+        mechanical_table: SourceTable,
+        processing_table: SourceTable,
+        axes: list[str],
+    ) -> str:
+        joined_rows = self._joined_scanning_speed_property_rows(
+            mechanical_table,
+            processing_table,
+            axes,
+        )
+        comparisons: list[dict[str, Any]] = []
+        for left_index, left in enumerate(joined_rows):
+            for right in joined_rows[left_index + 1 :]:
+                if not self._coupled_scanning_speed_pair(left, right):
+                    continue
+                comparison = self._controlled_scanning_speed_comparison_candidate(
+                    left,
+                    right,
+                    axes=axes,
+                )
+                if comparison:
+                    comparisons.append(comparison)
+
+        higher = self._strongest_uniform_property_comparison(
+            comparisons,
+            direction="higher",
+        )
+        lower = self._strongest_uniform_property_comparison(
+            comparisons,
+            direction="lower",
+        )
+        if not higher or not lower:
+            return ""
+        if not all(
+            self._comparison_density_decreases_with_speed(comparison)
+            for comparison in (higher, lower)
+        ):
+            return ""
+
+        return " ".join(
+            [
+                "The aligned source tables do not show a uniform scanning-speed "
+                "response.",
+                self._coupled_scanning_speed_comparison_sentence(higher),
+                self._coupled_scanning_speed_comparison_sentence(lower),
+                "Thus higher reported speed coincided with higher strength and "
+                "ductility in one condition but lower values in another, and it "
+                "did not improve density in either pair.",
+                "The authors' general higher-speed densification and "
+                "mechanical-performance summary is not uniformly supported by "
+                "Tables 1 and 2.",
+                "Because hatch spacing changed in each pair, these are coupled "
+                "condition-level comparisons, not an isolated scanning-speed "
+                "effect.",
+            ]
+        )
+
+    def _coupled_scanning_speed_pair(
+        self,
+        left: Mapping[str, Any],
+        right: Mapping[str, Any],
+    ) -> bool:
+        for key in ("energy_density", "scan_strategy"):
+            left_value = _normalize_match_text(_text(left.get(key)) or "")
+            right_value = _normalize_match_text(_text(right.get(key)) or "")
+            if not left_value or left_value != right_value:
+                return False
+        for key in ("laser_power", "layer_thickness"):
+            left_value = _normalize_match_text(_text(left.get(key)) or "")
+            right_value = _normalize_match_text(_text(right.get(key)) or "")
+            if left_value and right_value and left_value != right_value:
+                return False
+        left_hatch = _float_text(left.get("hatch_spacing"))
+        right_hatch = _float_text(right.get("hatch_spacing"))
+        return (
+            left_hatch is not None
+            and right_hatch is not None
+            and left_hatch != right_hatch
+            and _float_text(left.get("scanning_speed"))
+            != _float_text(right.get("scanning_speed"))
+        )
+
+    def _strongest_uniform_property_comparison(
+        self,
+        comparisons: list[dict[str, Any]],
+        *,
+        direction: str,
+    ) -> dict[str, Any]:
+        ranked: list[tuple[float, dict[str, Any]]] = []
+        for comparison in comparisons:
+            changes: list[float] = []
+            for item in _mapping_list(comparison.get("properties")):
+                low_value = _float_text(item.get("low_float"))
+                high_value = _float_text(item.get("high_float"))
+                if low_value is None or high_value is None or low_value == 0:
+                    continue
+                changes.append((high_value - low_value) / abs(low_value))
+            if not changes:
+                continue
+            if direction == "higher" and not all(change > 0 for change in changes):
+                continue
+            if direction == "lower" and not all(change < 0 for change in changes):
+                continue
+            ranked.append((sum(abs(change) for change in changes), comparison))
+        return max(ranked, key=lambda item: item[0])[1] if ranked else {}
+
+    def _comparison_density_decreases_with_speed(
+        self,
+        comparison: Mapping[str, Any],
+    ) -> bool:
+        low_density = _float_text(comparison.get("low_relative_density"))
+        high_density = _float_text(comparison.get("high_relative_density"))
+        return (
+            low_density is not None
+            and high_density is not None
+            and high_density < low_density
+        )
+
+    def _coupled_scanning_speed_comparison_sentence(
+        self,
+        comparison: Mapping[str, Any],
+    ) -> str:
+        properties = _join_display_values(
+            [
+                (
+                    f"{axis} from {_text(item.get('low'))} to "
+                    f"{_text(item.get('high'))}"
+                    f"{self._specific_mechanical_property_unit(axis)}"
+                )
+                for item in _mapping_list(comparison.get("properties"))
+                if (axis := _text(item.get("axis")))
+                and _text(item.get("low"))
+                and _text(item.get("high"))
+            ]
+        )
+        return (
+            f"At energy density {_text(comparison.get('energy_density'))} J/mm3 "
+            f"and scan strategy {_text(comparison.get('scan_strategy'))}, "
+            "increasing the reported scanning-speed value from "
+            f"{_text(comparison.get('low_speed'))} to "
+            f"{_text(comparison.get('high_speed'))} while hatch spacing changed "
+            f"from {_text(comparison.get('low_hatch_spacing'))} to "
+            f"{_text(comparison.get('high_hatch_spacing'))} mm changed relative "
+            f"density from {_text(comparison.get('low_relative_density'))} to "
+            f"{_text(comparison.get('high_relative_density'))}% and {properties}."
         )
 
     def _specific_mechanical_property_column_indexes(
@@ -2455,6 +2643,8 @@ class ResearchUnderstandingService:
                 indexes.setdefault("scanning_speed", index)
             if " energy density " in normalized:
                 indexes.setdefault("energy_density", index)
+            if " relative density " in normalized:
+                indexes.setdefault("relative_density", index)
             if " hatch space " in normalized or " hatch spacing " in normalized:
                 indexes.setdefault("hatch_spacing", index)
             if " laser power " in normalized:
@@ -6876,6 +7066,7 @@ class ResearchUnderstandingService:
         quote_hints_by_ref = self._finding_quote_hints_by_evidence_ref(
             findings,
             relations_by_id=relations_by_id,
+            evidence_by_id=evidence_by_id,
         )
         presentation_evidence_ref_ids = self._presentation_evidence_ref_ids(
             [*primary_findings, *review_queue_findings],
@@ -8327,8 +8518,6 @@ class ResearchUnderstandingService:
     ) -> dict[str, Any]:
         if not self._is_recovered_scanning_speed_mechanical_finding(finding):
             return dict(finding)
-        if not self._finding_statement_has_scanning_speed_range(finding):
-            return dict(finding)
 
         mechanical_table = self._finding_source_table(
             finding,
@@ -8344,13 +8533,9 @@ class ResearchUnderstandingService:
         )
         if mechanical_table is None or processing_table is None:
             return dict(finding)
-        axes = self._specific_mechanical_outcomes(
-            finding,
-            evidence_by_id=evidence_by_id,
-        ) or _strings(finding.get("outcomes"))
         axes = [
             axis
-            for axis in axes
+            for axis in _strings(finding.get("outcomes"))
             if axis
             in {
                 "yield strength",
@@ -8369,7 +8554,14 @@ class ResearchUnderstandingService:
             return dict(finding)
 
         updated = dict(finding)
-        updated["statement"] = self._unisolated_scanning_speed_statement(axes)
+        updated["statement"] = self._unisolated_scanning_speed_statement(
+            axes,
+            mechanical_table=mechanical_table,
+            processing_table=processing_table,
+        )
+        has_table_mismatch = (
+            "not show a uniform scanning-speed response" in updated["statement"]
+        )
         updated["variables"] = [_SLM_COUPLED_PARAMETER_SET_LABEL]
         updated["title"] = self._finding_title(
             variables=updated["variables"],
@@ -8379,12 +8571,27 @@ class ResearchUnderstandingService:
         updated["direction"] = "associated"
         updated["support_grade"] = "partial"
         updated["review_status"] = "needs_review"
+        if has_table_mismatch:
+            updated["mediators"] = [
+                "author-attributed refined microstructure",
+                "observed relative density (not isolated)",
+            ]
         updated["warnings"] = _dedupe_strings(
             [
                 *_strings(updated.get("warnings")),
                 "non_single_variable_table_comparison",
                 "single_variable_effect_not_isolated",
                 "needs_expert_review",
+                *(
+                    [
+                        "author_summary_table_mismatch",
+                        "response_direction_not_uniform",
+                        "author_attributed_mechanism",
+                        "density_mediator_not_isolated",
+                    ]
+                    if has_table_mismatch
+                    else []
+                ),
             ]
         )
         updated["review_reasons"] = _dedupe_strings(
@@ -8393,6 +8600,16 @@ class ResearchUnderstandingService:
                 "non_single_variable_table_comparison",
                 "single_variable_effect_not_isolated",
                 "needs_expert_review",
+                *(
+                    [
+                        "author_summary_table_mismatch",
+                        "response_direction_not_uniform",
+                        "author_attributed_mechanism",
+                        "density_mediator_not_isolated",
+                    ]
+                    if has_table_mismatch
+                    else []
+                ),
             ]
         )
         updated["comparison_summary"] = None
@@ -8408,6 +8625,16 @@ class ResearchUnderstandingService:
                         *_strings(segment.get("warnings")),
                         "non_single_variable_table_comparison",
                         "single_variable_effect_not_isolated",
+                        *(
+                            [
+                                "author_summary_table_mismatch",
+                                "response_direction_not_uniform",
+                                "author_attributed_mechanism",
+                                "density_mediator_not_isolated",
+                            ]
+                            if has_table_mismatch
+                            else []
+                        ),
                     ]
                 ),
             }
@@ -14532,13 +14759,23 @@ class ResearchUnderstandingService:
         findings: list[dict[str, Any]],
         *,
         relations_by_id: Mapping[str, dict[str, Any]],
+        evidence_by_id: Mapping[str, dict[str, Any]],
     ) -> dict[str, dict[str, set[str]]]:
         hints_by_ref: dict[str, dict[str, set[str]]] = {}
         for finding in findings:
-            direct_ref_ids = _strings(
-                _mapping(finding.get("evidence_bundle")).get("direct_result")
+            evidence_bundle = _mapping(finding.get("evidence_bundle"))
+            condition_table_ref_ids = [
+                ref_id
+                for ref_id in _strings(evidence_bundle.get("condition_context"))
+                if _text(evidence_by_id.get(ref_id, {}).get("source_kind")) == "table"
+            ]
+            hinted_ref_ids = _dedupe_strings(
+                [
+                    *_strings(evidence_bundle.get("direct_result")),
+                    *condition_table_ref_ids,
+                ]
             )
-            if not direct_ref_ids:
+            if not hinted_ref_ids:
                 continue
             hint_terms = self._quote_hints_for_finding(
                 finding,
@@ -14546,7 +14783,7 @@ class ResearchUnderstandingService:
             )
             if not any(hint_terms.values()):
                 continue
-            for ref_id in direct_ref_ids:
+            for ref_id in hinted_ref_ids:
                 ref_hints = hints_by_ref.setdefault(
                     ref_id,
                     {

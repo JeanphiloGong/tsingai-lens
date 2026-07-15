@@ -13894,18 +13894,18 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
     payload["objective"] = {
         "objective_id": "obj-ved-fatigue",
         "question": (
-            "How does volumetric energy density affect defect structure and "
-            "fatigue strength of 316L stainless steel?"
+            "How do volumetric energy density and layer thickness affect defect "
+            "structure and fatigue strength of 316L stainless steel?"
         ),
         "material_scope": ["316L stainless steel"],
-        "process_axes": ["volumetric energy density"],
+        "process_axes": ["volumetric energy density", "layer thickness"],
         "property_axes": ["defect structure", "fatigue strength"],
     }
     payload["objective_context"] = {
         "objective_id": "obj-ved-fatigue",
         "question": payload["objective"]["question"],
         "material_scope": ["316L stainless steel"],
-        "variable_process_axes": ["volumetric energy density"],
+        "variable_process_axes": ["volumetric energy density", "layer thickness"],
         "target_property_axes": ["defect structure", "fatigue strength"],
     }
     payload["evidence_units"] = [
@@ -13995,7 +13995,13 @@ def test_objective_understanding_recovers_ved_fatigue_condition_context():
         "laser power",
         "scanning speed",
         "hatch spacing",
+        "layer thickness",
     ]
+    assert {
+        "axis": "layer thickness",
+        "status": "context",
+        "finding_id": finding["finding_id"],
+    } in understanding["presentation"]["summary"]["axis_coverage"]["variables"]
 
 
 def test_with_presentation_projects_traceable_table_comparison_as_finding():

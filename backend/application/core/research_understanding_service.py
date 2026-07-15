@@ -1190,6 +1190,11 @@ class ResearchUnderstandingService:
                         ).items()
                         if _text(axis) and _text(value)
                     }
+                    context_process_axes = [
+                        "volumetric energy density",
+                        *varied_process_axes,
+                        *fixed_process_axes,
+                    ]
                     coupled_process_parameters = len(varied_process_axes) > 1
                     table_statement = (
                         self._ved_fatigue_strength_table_statement(
@@ -1212,6 +1217,7 @@ class ResearchUnderstandingService:
                         )
                     recovered_spec = {
                         **spec,
+                        "process_axes": context_process_axes,
                         **({"statement": table_statement} if table_statement else {}),
                         **(
                             {
@@ -1221,10 +1227,6 @@ class ResearchUnderstandingService:
                                 ),
                                 "relation_type": "associated",
                                 "predicate": "associated",
-                                "process_axes": [
-                                    "volumetric energy density",
-                                    *varied_process_axes,
-                                ],
                                 "warnings": [
                                     "process_conditions_not_isolated",
                                     "single_variable_effect_not_isolated",

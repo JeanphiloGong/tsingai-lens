@@ -495,7 +495,8 @@ fine-tuning-compatible message rows with:
 
 For evaluation, audit, or dataset registry import, use `training-jsonl` to keep
 the same `messages` payload plus `collection_id`, `goal_id`, `finding_id`,
-`claim_id`, reviewer/status fields, and `evidence_ref_ids` metadata:
+`claim_id`, reviewer/status fields, variables, outcomes, direction,
+scope summary, and `evidence_ref_ids` metadata:
 
 ```bash
 ./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \

@@ -650,6 +650,13 @@ def _training_export_metadata(
         "reviewer": _text(target.get("reviewer")),
         "review_status": _text(target.get("review_status")),
         "issue_type": _text(target.get("issue_type")),
+        "variables": _text_list(target.get("variables") or prediction.get("variables")),
+        "mediators": _text_list(target.get("mediators") or prediction.get("mediators")),
+        "outcomes": _text_list(target.get("outcomes") or prediction.get("outcomes")),
+        "direction": _text(target.get("direction") or prediction.get("direction")),
+        "scope_summary": _text(
+            target.get("scope_summary") or prediction.get("scope_summary")
+        ),
         "support_grade": _text(
             target.get("support_grade") or prediction.get("support_grade")
         ),

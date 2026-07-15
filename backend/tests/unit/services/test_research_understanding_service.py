@@ -8226,6 +8226,117 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
     ]
 
 
+def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    statement = (
+        "Preheating the build plate increased the El% and yield strength of the "
+        "material by approximately 14% and 4%, respectively. This is attributed "
+        "to the microstructure and texture evolution."
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "title": "How does preheating affect mechanical properties?",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_preheat_mechanism",
+                    "claim_type": "mechanism",
+                    "statement": statement,
+                    "status": "supported",
+                    "confidence": 0.88,
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": "rel_microstructure",
+                    "relation_type": "mechanistic",
+                    "subject": "build platform preheating",
+                    "predicate": "explains",
+                    "object": "microstructure evolution",
+                    "statement": statement,
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                },
+                {
+                    "relation_id": "rel_mechanical",
+                    "relation_type": "mechanistic",
+                    "subject": "build platform preheating",
+                    "predicate": "explains",
+                    "object": "microstructure evolution -> mechanical properties",
+                    "statement": statement,
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                },
+                {
+                    "relation_id": "rel_texture",
+                    "relation_type": "mechanistic",
+                    "subject": "build platform preheating",
+                    "predicate": "explains",
+                    "object": "texture evolution",
+                    "statement": statement,
+                    "status": "supported",
+                    "evidence_ref_ids": ["evref_direct"],
+                    "context_ids": ["ctx_goal"],
+                    "source_object_ids": ["unit_direct"],
+                },
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_direct",
+                    "source_kind": "text_window",
+                    "document_id": "paper-1",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-results"},
+                    "fact_ids": ["unit_direct"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": statement,
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_goal",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": ["build platform preheating"]
+                    },
+                    "property_scope": ["mechanical properties"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    assert understanding is not None
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["title"] == (
+        "build platform preheating -> ductility and yield strength"
+    )
+    assert finding["mediators"] == [
+        "microstructure evolution",
+        "texture evolution",
+    ]
+    assert finding["outcomes"] == ["ductility", "yield strength"]
+    assert not {
+        "microstructure evolution",
+        "texture evolution",
+    } & {segment["outcome"] for segment in finding["relation_chain"]}
+
+
 def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

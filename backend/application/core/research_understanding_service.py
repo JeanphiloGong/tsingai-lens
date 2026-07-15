@@ -8404,11 +8404,12 @@ class ResearchUnderstandingService:
                 )
             ]
             fallback_variable = statement_axis
+        _, initial_outcomes = self._finding_roles(effect, relations)
         initial_evidence_bundle = self._finding_evidence_bundle(
             effect,
             evidence_by_id=evidence_by_id,
             relations=relations,
-            outcomes=self._finding_outcomes(effect, relations),
+            outcomes=initial_outcomes,
         )
         initial_display_variables = self._finding_display_variables(
             self._finding_variables(effect, relations),
@@ -8452,8 +8453,7 @@ class ResearchUnderstandingService:
                 )
             ]
         variables = self._finding_variables(effect, relations)
-        mediators = self._finding_mediators(relations)
-        outcomes = self._finding_outcomes(effect, relations)
+        mediators, outcomes = self._finding_roles(effect, relations)
         direction = self._finding_direction(effect, relations)
         relation_ids = list(_strings(effect.get("relation_ids")))
         evidence_bundle = self._finding_evidence_bundle(
@@ -8637,6 +8637,7 @@ class ResearchUnderstandingService:
             "relation_chain": self._finding_relation_chain(
                 relations,
                 variables=display_variables,
+                mediators=mediators,
                 direction=direction,
                 outcomes=outcomes,
             ),
@@ -9798,11 +9799,15 @@ class ResearchUnderstandingService:
         relations: list[dict[str, Any]],
         *,
         variables: list[str] | None = None,
+        mediators: list[str] | None = None,
         direction: str = "",
         outcomes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         chain: list[dict[str, Any]] = []
         display_variables = variables or []
+        display_mediator_keys = {
+            _normalize_match_text(mediator) for mediator in mediators or []
+        }
         display_outcomes = outcomes or []
         for index, relation in enumerate(relations):
             variable = self._presentation_relation_side(relation.get("subject"))
@@ -9820,22 +9825,29 @@ class ResearchUnderstandingService:
                 if text and _looks_user_facing(text):
                     segment_direction = text
                     break
+            terminal_is_mediator = (
+                _normalize_match_text(object_chain[-1]) in display_mediator_keys
+            )
+            segment_mediators = (
+                object_chain if terminal_is_mediator else object_chain[:-1]
+            )
+            if terminal_is_mediator and display_outcomes:
+                segment_outcome = self._finding_title_outcome(display_outcomes)
+            elif (
+                display_outcomes
+                and _normalize_match_text(object_chain[-1]) == "mechanical properties"
+                and _normalize_match_text(display_outcomes[0])
+                != "mechanical properties"
+            ):
+                segment_outcome = display_outcomes[0]
+            else:
+                segment_outcome = object_chain[-1]
             chain.append(
                 {
                     "relation_id": _text(relation.get("relation_id")) or "",
                     "variable": display_variable,
-                    "mediators": object_chain[:-1],
-                    "outcome": (
-                        display_outcomes[0]
-                        if (
-                            display_outcomes
-                            and _normalize_match_text(object_chain[-1])
-                            == "mechanical properties"
-                            and _normalize_match_text(display_outcomes[0])
-                            != "mechanical properties"
-                        )
-                        else object_chain[-1]
-                    ),
+                    "mediators": segment_mediators,
+                    "outcome": segment_outcome,
                     "direction": segment_direction or direction,
                     "statement": self._presentation_relation_summary(relation),
                 }
@@ -10091,6 +10103,45 @@ class ResearchUnderstandingService:
             ]
         )
 
+    def _finding_roles(
+        self,
+        effect: Mapping[str, Any],
+        relations: list[dict[str, Any]],
+    ) -> tuple[list[str], list[str]]:
+        mediators = self._finding_mediators(relations)
+        outcomes = self._finding_outcomes(effect, relations)
+        if (_text(effect.get("claim_type")) or "") != "mechanism":
+            return mediators, outcomes
+
+        specific_outcomes = self._specific_mechanical_outcome_terms(
+            _text(effect.get("statement")) or ""
+        )
+        if not specific_outcomes:
+            return mediators, outcomes
+
+        specific_outcome_keys = {
+            _normalize_match_text(outcome) for outcome in specific_outcomes
+        }
+        mechanism_terminals: list[str] = []
+        for relation in relations:
+            object_chain = self._relation_object_chain(relation)
+            if not object_chain:
+                continue
+            terminal = object_chain[-1]
+            if _normalize_match_text(terminal) == "mechanical properties":
+                continue
+            terminal_outcome_keys = {
+                _normalize_match_text(outcome)
+                for outcome in self._specific_mechanical_outcome_terms(terminal)
+            }
+            if terminal_outcome_keys & specific_outcome_keys:
+                continue
+            mechanism_terminals.append(terminal)
+        return (
+            _dedupe_strings([*mediators, *mechanism_terminals]),
+            specific_outcomes,
+        )
+
     def _finding_mediators_from_direct_evidence(self, source_text: str) -> list[str]:
         normalized = f" {_normalize_match_text(source_text)} "
         mediators: list[str] = []
@@ -10204,7 +10255,7 @@ class ResearchUnderstandingService:
         normalized = f" {_normalize_match_text(text)} "
         specific: list[str] = []
         for display, terms in (
-            ("ductility", ("ductility", "elongation")),
+            ("ductility", ("ductility", "elongation", "el")),
             ("yield strength", ("yield strength",)),
             ("tensile strength", ("tensile strength",)),
             ("hardness", ("hardness", "microhardness")),

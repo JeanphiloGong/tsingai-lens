@@ -5011,6 +5011,56 @@ class ResearchUnderstandingService:
                 relations.append(relation)
                 continue
             document_id = next(iter(document_ids))
+            heat_treatment_values = [
+                self._axis_value_from_context("heat treatment type", context)
+                for context in (current_context, baseline_context)
+            ]
+            if any(
+                value
+                and value.strip() != "-"
+                and _normalize_match_text(value)
+                not in {"as slm", "none", "untreated"}
+                for value in heat_treatment_values
+            ):
+                condition_block = self._best_heat_treatment_condition_source_block(
+                    document_id,
+                    blocks_by_id=blocks_by_id,
+                )
+                if condition_block is not None:
+                    condition_ref = self._evidence_ref_from_unit(
+                        {
+                            "evidence_unit_id": source_object_ids[0],
+                            "document_id": document_id,
+                            "confidence": relation.get("confidence"),
+                            "resolution_status": "resolved",
+                        },
+                        source_ref={
+                            "source_kind": _text(condition_block.block_type)
+                            or "paragraph",
+                            "source_ref": condition_block.block_id,
+                            "display_label": _text(condition_block.heading_path)
+                            or "Heat treatment conditions",
+                            "page": condition_block.page,
+                            "evidence_role": "condition_context",
+                            "quote": _short_text(condition_block.text, limit=900),
+                        },
+                        collection_id=collection_id,
+                        blocks_by_id=blocks_by_id,
+                        tables_by_id=tables_by_id,
+                    )
+                    condition_ref_id = (
+                        _text(condition_ref.get("evidence_ref_id")) or ""
+                    )
+                    generated_refs.append(condition_ref)
+                    relations.append(
+                        {
+                            **relation,
+                            "evidence_ref_ids": _dedupe_strings(
+                                [*relation_ref_ids, condition_ref_id]
+                            ),
+                        }
+                    )
+                    continue
             direct_source_refs = {
                 source_ref
                 for ref in direct_refs
@@ -8528,6 +8578,19 @@ class ResearchUnderstandingService:
             fixed_clause = (
                 f", with {' and '.join(conditions)} fixed" if conditions else ""
             )
+            if _normalize_match_text(_text(summary.get("variable")) or "") == (
+                "heat treatment type"
+            ):
+                return (
+                    f"Selected source table rows report {outcome} of {observed_value} "
+                    f"for the {self._heat_treatment_bundle_label(observed_label)}, "
+                    f"versus {baseline_value} for "
+                    f"{self._heat_treatment_bundle_label(baseline_label)}"
+                    f"{fixed_clause}. This comparison evaluates the tested "
+                    "heat-treatment bundle; it does not isolate heat-treatment "
+                    "type from temperature, duration, pressure, atmosphere, or "
+                    "cooling schedule."
+                )
             return (
                 f"Selected source table rows report {outcome} of {observed_value} "
                 f"for {observed_label}, versus {baseline_value} for "
@@ -8567,6 +8630,26 @@ class ResearchUnderstandingService:
             "structured baseline or observed condition is incomplete. Expert "
             "review is required before treating it as a material effect."
         )
+
+    def _heat_treatment_bundle_label(self, label: str | None) -> str:
+        treatment = re.sub(
+            r"^heat treatment type\s*",
+            "",
+            _text(label) or "",
+            flags=re.IGNORECASE,
+        ).strip()
+        normalized = _normalize_match_text(treatment)
+        if (
+            not normalized
+            or treatment == "-"
+            or normalized in {"as slm", "untreated"}
+        ):
+            return "as-SLM"
+        if "furnace" in normalized:
+            return "furnace HT treatment bundle"
+        if normalized == "hip" or "hot isostatic" in normalized:
+            return "HIP treatment bundle"
+        return f"{treatment} treatment bundle"
 
     def _finding_table_row_statement_text(self, finding: Mapping[str, Any]) -> str:
         statements = [
@@ -9915,6 +9998,42 @@ class ResearchUnderstandingService:
             updated,
             statement=table_row_statement,
         )
+        summary = _mapping(updated.get("comparison_summary"))
+        is_heat_treatment_bundle = (
+            _normalize_match_text(_text(summary.get("variable")) or "")
+            == "heat treatment type"
+        )
+        bundle_variable = "heat treatment type and heat treatment parameters"
+        if is_heat_treatment_bundle:
+            outcomes = _strings(updated.get("outcomes"))
+            updated["variables"] = [bundle_variable]
+            updated["title"] = (
+                f"{bundle_variable} -> "
+                f"{_join_display_values(outcomes) or _text(summary.get('outcome'))}"
+            )
+            scope_summary = _text(updated.get("scope_summary")) or ""
+            if scope_summary:
+                updated["scope_summary"] = re.sub(
+                    r"\bheat treatment type\b",
+                    bundle_variable,
+                    scope_summary,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+            updated["warnings"] = _dedupe_strings(
+                [
+                    *_strings(updated.get("warnings")),
+                    "heat_treatment_parameters_not_isolated",
+                    "single_variable_effect_not_isolated",
+                ]
+            )
+            updated["review_reasons"] = _dedupe_strings(
+                [
+                    *_strings(updated.get("review_reasons")),
+                    "heat_treatment_parameters_not_isolated",
+                    "single_variable_effect_not_isolated",
+                ]
+            )
         updated["statement"] = review_statement
         updated["direction"] = "condition-dependent"
         updated["relation_chain"] = [
@@ -9924,6 +10043,11 @@ class ResearchUnderstandingService:
                     {
                         "direction": "condition-dependent",
                         "statement": review_statement,
+                        **(
+                            {"variable": bundle_variable}
+                            if is_heat_treatment_bundle
+                            else {}
+                        ),
                     }
                     if self._finding_statement_is_table_row_comparison(
                         _text(segment.get("statement")) or ""
@@ -9933,11 +10057,29 @@ class ResearchUnderstandingService:
             }
             for segment in _mapping_list(updated.get("relation_chain"))
         ]
-        summary = _mapping(updated.get("comparison_summary"))
         if summary:
             updated["comparison_summary"] = {
                 **summary,
                 "direction": "condition-dependent",
+                **(
+                    {
+                        "variable": bundle_variable,
+                        "baseline": {
+                            **_mapping(summary.get("baseline")),
+                            "label": self._heat_treatment_bundle_label(
+                                _text(_mapping(summary.get("baseline")).get("label"))
+                            ),
+                        },
+                        "observed": {
+                            **_mapping(summary.get("observed")),
+                            "label": self._heat_treatment_bundle_label(
+                                _text(_mapping(summary.get("observed")).get("label"))
+                            ),
+                        },
+                    }
+                    if is_heat_treatment_bundle
+                    else {}
+                ),
             }
         return updated
 

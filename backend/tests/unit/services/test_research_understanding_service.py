@@ -8253,16 +8253,23 @@ def test_with_presentation_does_not_promote_controlled_axis_to_comparison_subjec
 
     finding = _presentation_finding_by_title(
         understanding,
-        "heat treatment type -> density",
+        "heat treatment type and heat treatment parameters -> density",
     )
-    assert finding["title"] == "heat treatment type -> density"
-    assert finding["variables"] == ["heat treatment type"]
-    assert finding["relation_chain"][0]["variable"] == "heat treatment type"
-    assert (
-        "density of 99.33 % for heat treatment type Furnace HT"
-        in finding["statement"]
+    assert finding["variables"] == [
+        "heat treatment type and heat treatment parameters"
+    ]
+    assert finding["relation_chain"][0]["variable"] == (
+        "heat treatment type and heat treatment parameters"
     )
-    assert "versus 98.16 % for heat treatment type HIP" in finding["statement"]
+    assert "density of 99.33 % for the furnace HT treatment bundle" in finding[
+        "statement"
+    ]
+    assert "versus 98.16 % for HIP treatment bundle" in finding["statement"]
+    assert "does not isolate heat-treatment type from temperature" in finding[
+        "statement"
+    ]
+    assert "heat_treatment_parameters_not_isolated" in finding["warnings"]
+    assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     assert " increased " not in f" {finding['statement'].lower()} "
 
 
@@ -14666,6 +14673,22 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     text="",
                 )
             ],
+            blocks=[
+                SourceBlock(
+                    block_id="blk-heat-treatment-conditions",
+                    document_id="paper-density",
+                    block_type="paragraph",
+                    text=(
+                        "A furnace-type heat treatment was conducted at 1100 °C "
+                        "for 0.5 h in Ar-H2 atmosphere, followed by furnace "
+                        "cooling. Hot isostatic pressing (HIP) was performed at "
+                        "1100 °C and 100 MPa for 1.5 h in Ar atmosphere."
+                    ),
+                    block_order=39,
+                    page=3,
+                    heading_path="2. Experimental procedure",
+                )
+            ],
             tables=[
                 SourceTable(
                     table_id="table-density",
@@ -14731,7 +14754,7 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     "status": "supported",
                     "confidence": 0.95,
                     "evidence_ref_ids": ["evref_heat_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_goal", "ctx_comparison"],
                     "source_object_ids": ["oeu_heat_density"],
                     "warnings": [],
                 }
@@ -14751,7 +14774,7 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     "status": "supported",
                     "confidence": 0.95,
                     "evidence_ref_ids": ["evref_heat_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_goal", "ctx_comparison"],
                     "source_object_ids": ["oeu_heat_density"],
                 }
             ],
@@ -14782,6 +14805,28 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                         ],
                     },
                     "property_scope": ["density"],
+                },
+                {
+                    "context_id": "ctx_comparison",
+                    "label": "Comparison boundary",
+                    "material_scope": ["stainless steel 316L"],
+                    "process_context": {
+                        "baseline_context": {
+                            "process_context": {
+                                "Laser power (W)": "120",
+                                "Scan speed (mm/s)": "280",
+                                "Type of heat treatment": "-",
+                            },
+                            "sample_context": {"Specimens": "as-SLM"},
+                        },
+                        "process_context": {
+                            "Laser power (W)": "120",
+                            "Scan speed (mm/s)": "280",
+                            "Type of heat treatment": "Furnace HT",
+                        },
+                        "sample_context": {"Specimens": "HT-SLM"},
+                    },
+                    "property_scope": ["density"],
                 }
             ],
         }
@@ -14791,19 +14836,33 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
 
     assert understanding is not None
     finding = understanding["presentation"]["findings"][0]
-    assert finding["title"] == "heat treatment type -> density"
+    assert finding["title"] == (
+        "heat treatment type and heat treatment parameters -> density"
+    )
+    assert finding["variables"] == [
+        "heat treatment type and heat treatment parameters"
+    ]
     assert finding["evidence_bundle"]["direct_result"] == ["evref_heat_density"]
+    assert len(finding["evidence_bundle"]["condition_context"]) == 1
     assert finding["support_grade"] == "partial"
+    assert "furnace HT treatment bundle" in finding["statement"]
+    assert "as-SLM" in finding["statement"]
+    assert "does not isolate heat-treatment type from temperature" in finding[
+        "statement"
+    ]
+    assert "material effect" not in finding["statement"]
+    assert "heat_treatment_parameters_not_isolated" in finding["warnings"]
+    assert "single_variable_effect_not_isolated" in finding["review_reasons"]
     assert finding["comparison_summary"] == {
-        "variable": "heat treatment type",
+        "variable": "heat treatment type and heat treatment parameters",
         "direction": "condition-dependent",
         "outcome": "density",
         "baseline": {
-            "label": "heat treatment type -",
+            "label": "as-SLM",
             "value": "90.04 %",
         },
         "observed": {
-            "label": "heat treatment type Furnace HT",
+            "label": "furnace HT treatment bundle",
             "value": "93.58 %",
         },
         "controlled_conditions": [
@@ -14821,7 +14880,11 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
         "evref_heat_density"
     ]
     assert review_finding["dataset_use_status"] == "review_candidate"
-    evidence_item = understanding["presentation"]["evidence_items"][0]
+    evidence_by_id = {
+        item["evidence_ref_id"]: item
+        for item in understanding["presentation"]["evidence_items"]
+    }
+    evidence_item = evidence_by_id["evref_heat_density"]
     assert "Specimens:" not in evidence_item["quote"]
     assert "200) as-SLM (120/" not in evidence_item["quote"]
     assert "Type of heat treatment: -" in evidence_item["quote"]
@@ -14850,6 +14913,14 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
             "aligned": True,
         },
     ]
+    condition_ref_id = review_finding["evidence_bundle"]["condition_context"][0]
+    condition_item = evidence_by_id[condition_ref_id]
+    assert condition_item["source_ref"] == "blk-heat-treatment-conditions"
+    assert condition_item["evidence_role"] == "condition_context"
+    assert "1100 °C" in condition_item["quote"]
+    assert "0.5 h" in condition_item["quote"]
+    assert "100 MPa" in condition_item["quote"]
+    assert "1.5 h" in condition_item["quote"]
     response_payload = ResearchUnderstandingResponse.model_validate(
         understanding
     ).model_dump()

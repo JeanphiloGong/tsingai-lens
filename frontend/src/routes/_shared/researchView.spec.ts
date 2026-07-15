@@ -929,13 +929,70 @@ describe('research view shared helpers', () => {
 				by_review_candidate_warning: {
 					table_row_alignment_uncertain: 1
 				},
+				optimization_breakdown: {
+					by_variable: {
+						'scan speed': {
+							issue_type: {
+								wrong_direction: 1,
+								none: 0
+							},
+							error_category: {
+								direction_error: 1
+							},
+							review_candidate_reason: {
+								table_row_needs_expert_review: 1
+							},
+							system_warning: {
+								table_row_alignment_uncertain: 1
+							}
+						}
+					},
+					by_evidence_role: {
+						table_row: {
+							issue_type: {},
+							error_category: {},
+							review_candidate_reason: {
+								table_row_needs_expert_review: 1
+							},
+							system_warning: {
+								table_row_alignment_uncertain: 1
+							}
+						}
+					}
+				},
 				top_error_categories: [{ name: 'unreviewed', count: 2 }],
 				top_issue_types: [{ name: 'unreviewed', count: 2 }],
 				top_review_reasons: [
 					{ name: 'single_paper_evidence', count: 2 },
 					{ name: 'partial_support', count: 1 }
 				],
-				top_system_warnings: [{ name: 'table_row_alignment_uncertain', count: 1 }]
+				top_system_warnings: [{ name: 'table_row_alignment_uncertain', count: 1 }],
+				top_variable_issue_types: [
+					{ name: 'scan speed', metric: 'wrong_direction', count: 1 }
+				],
+				top_outcome_issue_types: [{ name: 'density', metric: 'wrong_direction', count: 1 }],
+				top_direction_issue_types: [
+					{ name: 'condition-dependent', metric: 'wrong_direction', count: 1 }
+				],
+				top_evidence_role_issue_types: [
+					{ name: 'table_row', metric: 'wrong_direction', count: 1 }
+				],
+				top_variable_review_reasons: [
+					{ name: 'scan speed', metric: 'table_row_needs_expert_review', count: 1 }
+				],
+				top_outcome_review_reasons: [
+					{ name: 'density', metric: 'table_row_needs_expert_review', count: 1 }
+				],
+				top_direction_review_reasons: [
+					{
+						name: 'condition-dependent',
+						metric: 'table_row_needs_expert_review',
+						count: 1
+					}
+				],
+				top_evidence_role_review_reasons: [
+					{ name: 'table_row', metric: 'table_row_needs_expert_review', count: 1 }
+				]
 			},
 			items: [
 					{
@@ -1018,6 +1075,26 @@ describe('research view shared helpers', () => {
 		]);
 		expect(dataset.quality_summary.top_system_warnings).toEqual([
 			{ name: 'table_row_alignment_uncertain', count: 1 }
+		]);
+		expect(dataset.quality_summary.optimization_breakdown.by_variable['scan speed']).toEqual({
+			issue_type: {
+				wrong_direction: 1
+			},
+			error_category: {
+				direction_error: 1
+			},
+			review_candidate_reason: {
+				table_row_needs_expert_review: 1
+			},
+			system_warning: {
+				table_row_alignment_uncertain: 1
+			}
+		});
+		expect(dataset.quality_summary.top_variable_issue_types).toEqual([
+			{ name: 'scan speed', metric: 'wrong_direction', count: 1 }
+		]);
+		expect(dataset.quality_summary.top_evidence_role_review_reasons).toEqual([
+			{ name: 'table_row', metric: 'table_row_needs_expert_review', count: 1 }
 		]);
 		expect(dataset.items[0]).toMatchObject({
 			sample_id: 'sample_1',

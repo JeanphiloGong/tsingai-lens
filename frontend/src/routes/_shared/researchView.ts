@@ -422,6 +422,21 @@ export type ResearchUnderstandingDatasetCountEntry = {
 	name: string;
 	count: number;
 };
+export type ResearchUnderstandingDatasetMetricEntry = ResearchUnderstandingDatasetCountEntry & {
+	metric: string;
+};
+export type ResearchUnderstandingDatasetOptimizationBreakdown = Record<
+	string,
+	Record<
+		string,
+		{
+			issue_type: Record<string, number>;
+			error_category: Record<string, number>;
+			review_candidate_reason: Record<string, number>;
+			system_warning: Record<string, number>;
+		}
+	>
+>;
 export type ResearchUnderstandingDatasetSample = {
 	sample_id: string;
 	finding_id: string;
@@ -462,10 +477,19 @@ export type ResearchUnderstandingDataset = {
 		by_system_warning: Record<string, number>;
 		by_review_candidate_reason: Record<string, number>;
 		by_review_candidate_warning: Record<string, number>;
+		optimization_breakdown: ResearchUnderstandingDatasetOptimizationBreakdown;
 		top_error_categories: ResearchUnderstandingDatasetCountEntry[];
 		top_issue_types: ResearchUnderstandingDatasetCountEntry[];
 		top_review_reasons: ResearchUnderstandingDatasetCountEntry[];
 		top_system_warnings: ResearchUnderstandingDatasetCountEntry[];
+		top_variable_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_outcome_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_direction_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_evidence_role_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_variable_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+		top_outcome_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+		top_direction_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+		top_evidence_role_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
 	};
 	items: ResearchUnderstandingDatasetSample[];
 	warnings: string[];
@@ -984,6 +1008,46 @@ function toCountEntries(value: unknown): ResearchUnderstandingDatasetCountEntry[
 		.filter((item): item is ResearchUnderstandingDatasetCountEntry => item !== null);
 }
 
+function toMetricEntries(value: unknown): ResearchUnderstandingDatasetMetricEntry[] {
+	return asArray(value)
+		.map((item) => {
+			const record = asRecord(item);
+			if (!record) return null;
+			const name = toText(record.name);
+			const metric = toText(record.metric);
+			const count = toNumber(record.count);
+			return name && metric && count > 0 ? { name, metric, count } : null;
+		})
+		.filter((item): item is ResearchUnderstandingDatasetMetricEntry => item !== null);
+}
+
+function toOptimizationBreakdown(
+	value: unknown
+): ResearchUnderstandingDatasetOptimizationBreakdown {
+	const record = asRecord(value);
+	if (!record) return {};
+	const result: ResearchUnderstandingDatasetOptimizationBreakdown = {};
+	for (const [dimension, dimensionValue] of Object.entries(record)) {
+		const dimensionRecord = asRecord(dimensionValue);
+		if (!dimensionRecord) continue;
+		const normalizedDimension: ResearchUnderstandingDatasetOptimizationBreakdown[string] = {};
+		for (const [name, bucketValue] of Object.entries(dimensionRecord)) {
+			const bucketRecord = asRecord(bucketValue);
+			if (!bucketRecord) continue;
+			normalizedDimension[name] = {
+				issue_type: toNumberRecord(bucketRecord.issue_type),
+				error_category: toNumberRecord(bucketRecord.error_category),
+				review_candidate_reason: toNumberRecord(bucketRecord.review_candidate_reason),
+				system_warning: toNumberRecord(bucketRecord.system_warning)
+			};
+		}
+		if (Object.keys(normalizedDimension).length) {
+			result[dimension] = normalizedDimension;
+		}
+	}
+	return result;
+}
+
 function toOptionalNumber(value: unknown): number | null {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string' && value.trim() !== '') {
@@ -1174,10 +1238,23 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 			by_system_warning: toNumberRecord(qualitySummary.by_system_warning),
 			by_review_candidate_reason: toNumberRecord(qualitySummary.by_review_candidate_reason),
 			by_review_candidate_warning: toNumberRecord(qualitySummary.by_review_candidate_warning),
+			optimization_breakdown: toOptimizationBreakdown(qualitySummary.optimization_breakdown),
 			top_error_categories: toCountEntries(qualitySummary.top_error_categories),
 			top_issue_types: toCountEntries(qualitySummary.top_issue_types),
 			top_review_reasons: toCountEntries(qualitySummary.top_review_reasons),
-			top_system_warnings: toCountEntries(qualitySummary.top_system_warnings)
+			top_system_warnings: toCountEntries(qualitySummary.top_system_warnings),
+			top_variable_issue_types: toMetricEntries(qualitySummary.top_variable_issue_types),
+			top_outcome_issue_types: toMetricEntries(qualitySummary.top_outcome_issue_types),
+			top_direction_issue_types: toMetricEntries(qualitySummary.top_direction_issue_types),
+			top_evidence_role_issue_types: toMetricEntries(
+				qualitySummary.top_evidence_role_issue_types
+			),
+			top_variable_review_reasons: toMetricEntries(qualitySummary.top_variable_review_reasons),
+			top_outcome_review_reasons: toMetricEntries(qualitySummary.top_outcome_review_reasons),
+			top_direction_review_reasons: toMetricEntries(qualitySummary.top_direction_review_reasons),
+			top_evidence_role_review_reasons: toMetricEntries(
+				qualitySummary.top_evidence_role_review_reasons
+			)
 		},
 		items: asArray(record?.items)
 			.map((item) => normalizeResearchUnderstandingDatasetSample(item))

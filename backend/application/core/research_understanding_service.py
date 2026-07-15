@@ -6644,6 +6644,9 @@ class ResearchUnderstandingService:
 
     def _presentation_recovery_process_axes_from_title(self, title: str) -> list[str]:
         normalized = f" {_normalize_match_text(title)} "
+        has_volumetric_energy_density = (
+            " volumetric energy density " in normalized or " ved " in normalized
+        )
         axes: list[str] = []
         for display, terms in (
             ("laser beam powder bed fusion", ("laser beam powder bed fusion", "laser powder bed fusion", "lpbf", "pbf lb", "powder bed fusion")),
@@ -6659,6 +6662,8 @@ class ResearchUnderstandingService:
             ("build orientation", ("build orientation",)),
             ("volumetric energy density", ("volumetric energy density", "ved")),
         ):
+            if display == "energy density" and has_volumetric_energy_density:
+                continue
             if any(f" {_normalize_match_text(term)} " in normalized for term in terms):
                 axes.append(display)
         return _dedupe_strings(axes)

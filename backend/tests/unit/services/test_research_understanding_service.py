@@ -10708,6 +10708,9 @@ def test_with_presentation_axis_coverage_distinguishes_mechanism_from_missing():
         "status": "primary",
         "finding_id": "finding_claim_recovered_ved_defects_fatigue_blk-fatigue-result",
     } in coverage["variables"]
+    assert all(
+        item["axis"] != "energy density" for item in coverage["variables"]
+    )
 
 
 def test_with_presentation_axis_coverage_treats_mechanical_properties_as_parent_axis():

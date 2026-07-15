@@ -11872,6 +11872,81 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
     )
 
 
+def test_low_magnitude_filter_reads_preheating_strength_delta_from_source_table():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    table = SourceTable(
+        table_id="tbl-mechanical",
+        document_id="paper-1",
+        table_order=2,
+        caption_text="Monotonic tensile properties under build platform conditions.",
+        caption_block_id=None,
+        page=8,
+        bbox=None,
+        heading_path="Results",
+        column_headers=(
+            "Build platform conditions",
+            "ı y (MPa)",
+            "ı u (MPa)",
+            "El%",
+        ),
+        table_matrix=(
+            ("Non-preheated", "448", "617", "72"),
+            ("Preheated", "465", "618", "82"),
+            ("Wrought", "255-310", "535-623", "30-40"),
+        ),
+    )
+    evidence_by_id = {
+        "evref_uts": {
+            "evidence_ref_id": "evref_uts",
+            "source_kind": "table",
+            "document_id": "paper-1",
+            "locator": {"source_ref": "tbl-mechanical"},
+        },
+        "evref_elongation": {
+            "evidence_ref_id": "evref_elongation",
+            "source_kind": "table",
+            "document_id": "paper-1",
+            "locator": {"source_ref": "tbl-mechanical"},
+        },
+    }
+    review_queue = [
+        {
+            "finding_id": "finding_uts",
+            "title": "build platform preheating temperature -> ultimate tensile strength",
+            "statement": (
+                "Increasing the build platform preheating temperature increases "
+                "ultimate tensile strength."
+            ),
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["ultimate tensile strength"],
+            "evidence_bundle": {"direct_result": ["evref_uts"]},
+            "relation_chain": [],
+        },
+        {
+            "finding_id": "finding_elongation",
+            "title": "build platform preheating temperature -> elongation",
+            "statement": (
+                "Increasing the build platform preheating temperature increases "
+                "elongation."
+            ),
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["elongation"],
+            "evidence_bundle": {"direct_result": ["evref_elongation"]},
+            "relation_chain": [],
+        },
+    ]
+
+    filtered = service._review_findings_without_low_magnitude_table_rows(
+        review_queue,
+        evidence_by_id=evidence_by_id,
+        tables_by_id={table.table_id: table},
+    )
+
+    assert [finding["finding_id"] for finding in filtered] == [
+        "finding_elongation"
+    ]
+
+
 def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
     service = ResearchUnderstandingService(
         structured_extractor=_FakeSemanticExtractor(),

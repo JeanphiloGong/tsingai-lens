@@ -1834,15 +1834,25 @@ class ResearchUnderstandingService:
             headers = list(table.table_matrix[0])
         for index, header in enumerate(headers):
             normalized = f" {_normalize_match_text(header)} "
-            if " condition number " in normalized:
+            normalized_key = normalized.strip()
+            if (
+                " condition number " in normalized
+                or normalized_key
+                in {"build platform condition", "build platform conditions"}
+            ):
                 indexes.setdefault("condition", index)
             if " sample number " in normalized:
                 indexes.setdefault("sample", index)
-            if " yield strength " in normalized:
+            if " yield strength " in normalized or normalized_key in {"y", "y mpa"}:
                 indexes.setdefault("yield strength", index)
-            if " ultimate tensile strength " in normalized:
+            if " ultimate tensile strength " in normalized or normalized_key in {
+                "u",
+                "u mpa",
+                "uts",
+                "uts mpa",
+            }:
                 indexes.setdefault("ultimate tensile strength", index)
-            if " elongation " in normalized:
+            if " elongation " in normalized or normalized_key in {"el", "el percent"}:
                 indexes.setdefault("elongation", index)
         return indexes
 
@@ -5137,6 +5147,7 @@ class ResearchUnderstandingService:
             findings,
             evidence_by_id=evidence_by_id,
             blocks_by_id=blocks_by_id,
+            tables_by_id=tables_by_id,
             goal_axes=variable_axes,
         )
         review_queue_findings = self._review_findings_without_covered_ved_rows(
@@ -5159,6 +5170,7 @@ class ResearchUnderstandingService:
         review_queue_findings = self._review_findings_without_low_magnitude_table_rows(
             review_queue_findings,
             evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
         )
         primary_findings = self._findings_with_review_queue_context(
             primary_findings,
@@ -6848,6 +6860,7 @@ class ResearchUnderstandingService:
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
         blocks_by_id: Mapping[str, SourceBlock],
+        tables_by_id: Mapping[str, SourceTable],
         goal_axes: list[str] | tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         primary: list[dict[str, Any]] = []
@@ -6967,6 +6980,7 @@ class ResearchUnderstandingService:
         review_queue = self._review_findings_without_low_magnitude_table_rows(
             review_queue,
             evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
         )
         return self._promote_uncovered_goal_axis_findings(
             primary,
@@ -7013,6 +7027,7 @@ class ResearchUnderstandingService:
         review_queue: list[dict[str, Any]],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
     ) -> list[dict[str, Any]]:
         density_deltas_by_outcome: dict[str, list[float]] = {}
         for finding in review_queue:
@@ -7035,6 +7050,7 @@ class ResearchUnderstandingService:
             if not self._finding_is_low_magnitude_table_row_candidate(
                 finding,
                 evidence_by_id=evidence_by_id,
+                tables_by_id=tables_by_id,
                 density_deltas_by_outcome=density_deltas_by_outcome,
             )
         ]
@@ -7104,6 +7120,7 @@ class ResearchUnderstandingService:
         finding: Mapping[str, Any],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
         density_deltas_by_outcome: Mapping[str, list[float]],
     ) -> bool:
         if not self._finding_has_only_table_direct_result(
@@ -7117,18 +7134,25 @@ class ResearchUnderstandingService:
         ):
             return False
         statement = self._finding_statement_text(finding)
-        if not self._finding_statement_is_table_row_comparison(statement):
-            return False
-        if self._finding_is_low_magnitude_prediction_comparison(finding, statement):
+        is_table_row_comparison = self._finding_statement_is_table_row_comparison(
+            statement
+        )
+        if is_table_row_comparison and self._finding_is_low_magnitude_prediction_comparison(
+            finding, statement
+        ):
             return True
         mechanical_strength_delta = self._finding_mechanical_strength_relative_delta(
-            finding
+            finding,
+            evidence_by_id=evidence_by_id,
+            tables_by_id=tables_by_id,
         )
         if (
             mechanical_strength_delta is not None
             and mechanical_strength_delta < 0.5
         ):
             return True
+        if not is_table_row_comparison:
+            return False
         density_delta = self._finding_density_percentage_delta(
             finding,
             evidence_by_id=evidence_by_id,
@@ -7205,6 +7229,9 @@ class ResearchUnderstandingService:
     def _finding_mechanical_strength_relative_delta(
         self,
         finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
     ) -> float | None:
         comparison = _mapping(finding.get("comparison_summary"))
         outcome_values = [
@@ -7229,12 +7256,71 @@ class ResearchUnderstandingService:
                 )
             )
             if not matches:
-                return None
+                return self._finding_preheating_strength_relative_delta_from_table(
+                    finding,
+                    evidence_by_id=evidence_by_id,
+                    tables_by_id=tables_by_id,
+                )
             baseline = float(matches[-1].group(1))
             observed = float(matches[-1].group(2))
         if baseline == 0:
             return None
         return abs(observed - baseline) / abs(baseline) * 100
+
+    def _finding_preheating_strength_relative_delta_from_table(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        evidence_by_id: Mapping[str, dict[str, Any]],
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> float | None:
+        variable_text = _normalize_match_text(
+            " ".join(_strings(finding.get("variables")))
+        )
+        if "preheat" not in variable_text:
+            return None
+        outcome_keys = {
+            self._axis_key(outcome) for outcome in _strings(finding.get("outcomes"))
+        }
+        if "ultimate tensile strength" in outcome_keys:
+            outcome_axis = "ultimate tensile strength"
+        elif "yield strength" in outcome_keys:
+            outcome_axis = "yield strength"
+        elif "tensile strength" in outcome_keys:
+            outcome_axis = "ultimate tensile strength"
+        else:
+            return None
+
+        for ref_id in _strings(
+            _mapping(finding.get("evidence_bundle")).get("direct_result")
+        ):
+            ref = evidence_by_id.get(ref_id, {})
+            source_ref = _text(_locator_mapping(ref.get("locator")).get("source_ref"))
+            table = tables_by_id.get(source_ref or "")
+            if table is None:
+                continue
+            indexes = self._specific_mechanical_property_column_indexes(table)
+            condition_index = indexes.get("condition")
+            outcome_index = indexes.get(outcome_axis)
+            if condition_index is None or outcome_index is None:
+                continue
+            baseline: float | None = None
+            observed: float | None = None
+            for row in table.table_matrix:
+                if len(row) <= max(condition_index, outcome_index):
+                    continue
+                label = _normalize_match_text(row[condition_index])
+                value = _float_text(row[outcome_index])
+                if value is None:
+                    continue
+                if "non preheated" in label or "without preheat" in label:
+                    baseline = value
+                elif label == "preheated" or label.startswith("preheated "):
+                    observed = value
+            if baseline is None or observed is None or baseline == 0:
+                continue
+            return abs(observed - baseline) / abs(baseline) * 100
+        return None
 
     def _finding_is_low_magnitude_prediction_comparison(
         self,

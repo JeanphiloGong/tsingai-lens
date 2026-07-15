@@ -906,13 +906,13 @@ class ResearchUnderstandingService:
                 {
                     "slug": "scan_speed_density_microstructure",
                     "subject": "scanning speed",
-                    "predicate": "controls",
+                    "predicate": "associated",
                     "object": (
                         "densification, microstructure, and mechanical properties"
                     ),
                     "statement": (
-                        "Higher scanning speed improved densification, refined "
-                        "the microstructure, and was associated with better "
+                        "In this study, higher scanning speed was associated with "
+                        "better densification, a refined microstructure, and better "
                         "mechanical properties than lower scanning speed."
                     ),
                     "process_axes": ["scanning speed"],
@@ -1152,8 +1152,9 @@ class ResearchUnderstandingService:
                         **spec,
                         "object": specific_object,
                         "statement": (
-                            "Higher scanning speed improved densification and "
-                            "refined the microstructure. "
+                            "In this study, higher scanning speed was associated "
+                            "with better densification, a refined microstructure, "
+                            "and better overall mechanical performance. "
                             f"{value_clause}"
                         ),
                         "property_scope": specific_spec_axes,
@@ -6596,10 +6597,12 @@ class ResearchUnderstandingService:
 
         updated = dict(finding)
         updated["statement"] = (
-            "Higher scanning speed improved densification and refined the "
-            "microstructure. "
+            "In this study, higher scanning speed was associated with better "
+            "densification, a refined microstructure, and better overall "
+            "mechanical performance. "
             f"{self._specific_mechanical_property_table_statement(axes)}"
         )
+        updated["direction"] = "associated"
         updated["support_grade"] = "partial"
         updated["review_status"] = "needs_review"
         updated["warnings"] = _dedupe_strings(
@@ -6621,6 +6624,7 @@ class ResearchUnderstandingService:
             {
                 **segment,
                 "statement": updated["statement"],
+                "direction": "associated",
                 "status": "limited",
                 "warnings": _dedupe_strings(
                     [

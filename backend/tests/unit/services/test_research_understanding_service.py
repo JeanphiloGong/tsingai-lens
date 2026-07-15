@@ -14139,7 +14139,7 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     assert "6.40" in direct_evidence_text
     statement = finding["statement"]
     assert "  " not in statement
-    assert "Higher scanning speed" in statement
+    assert "In this study, higher scanning speed was associated with" in statement
     assert "densification" in statement
     assert "microstructure" in statement
     assert "yield strength" in statement
@@ -14155,6 +14155,10 @@ def test_objective_understanding_recovers_specific_mechanical_property_table_for
     ) in statement
     assert "Yield Strength 236.65-341.38 MPa" not in statement
     assert "values traceable in the associated source table" not in statement
+    assert finding["direction"] == "associated"
+    assert {
+        segment["direction"] for segment in finding["relation_chain"]
+    } == {"associated"}
     coverage = understanding["presentation"]["summary"]["axis_coverage"]["properties"]
     assert {item["axis"]: item["status"] for item in coverage} == {
         "yield strength": "primary",
@@ -14420,7 +14424,7 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
     )
     statement = finding["statement"]
     assert "  " not in statement
-    assert "Higher scanning speed" in statement
+    assert "In this study, higher scanning speed was associated with" in statement
     assert "densification" in statement
     assert "microstructure" in statement
     assert "yield strength" in statement
@@ -14438,6 +14442,10 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
     assert "values traceable in the associated source table" not in statement
     assert "non_single_variable_table_comparison" in finding["warnings"]
     assert "non_single_variable_table_comparison" in finding["review_reasons"]
+    assert finding["direction"] == "associated"
+    assert {
+        segment["direction"] for segment in finding["relation_chain"]
+    } == {"associated"}
 
 
 def test_with_presentation_comparison_summary_extracts_percent_delta_finding():

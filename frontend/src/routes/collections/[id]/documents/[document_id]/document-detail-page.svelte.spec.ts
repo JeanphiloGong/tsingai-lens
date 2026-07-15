@@ -436,6 +436,18 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							page: 3,
 							heading_path: 'Results',
 							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'table-table-1',
+							artifact_type: 'table',
+							artifact_id: 'table-1',
+							block_id: null,
+							table_id: 'table-1',
+							figure_id: null,
+							block_type: null,
+							page: 3,
+							heading_path: 'Results',
+							text_unit_ids: []
 						}
 					],
 					warnings: []
@@ -825,6 +837,27 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			'/api/v1/collections/col_123/documents/doc_1/comparison-semantics'
 		);
 		expect(tracebackCallPaths()).toEqual([]);
+	});
+
+	it('targets a table artifact instead of the first text block on the same page', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=table-1&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		const activeSource = browserPage.getByTestId('markdown-active-source');
+		await expect.element(activeSource).toHaveTextContent('Sample');
+		await expect.element(activeSource).toHaveTextContent('Conductivity');
+		await expect.element(activeSource).toHaveTextContent('12 mS/cm');
+		await expect
+			.element(activeSource)
+			.not.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
+		await expect.poll(() => scrollIntoViewMock.mock.calls.length).toBeGreaterThan(0);
 	});
 
 	it('shows the selected evidence quote from parsed paper source deep links', async () => {

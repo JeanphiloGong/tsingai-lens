@@ -223,9 +223,14 @@
 	}
 
 	function selectRequestedSourceRef(nextModel: DocumentWorkbenchModel) {
+		if (!requestedSourceRef) return false;
+		const sourceMapItem = markdownSourceMapItemForRef(
+			markdownForReader,
+			normalizeSourceRefMatchKey(requestedSourceRef)
+		);
 		const sourceSpan = sourceSpanForSourceRef(nextModel, markdownForReader, requestedSourceRef);
-		if (!sourceSpan) return false;
-		selectedSourceSpanId = sourceSpan.id;
+		if (!sourceSpan && !sourceMapItem) return false;
+		selectedSourceSpanId = sourceSpan?.id ?? '';
 		readerMode = requestedReaderMode ?? 'parsed-paper';
 		sourceJumpToken += 1;
 		return true;
@@ -502,9 +507,6 @@
 					normalizeSourceRefMatchKey(sourceMapItem.block_id)
 			);
 			if (span) return span;
-		}
-		if (sourceMapItem?.page) {
-			return currentModel.source_spans.find((span) => span.page === sourceMapItem.page) ?? null;
 		}
 		return null;
 	}

@@ -344,7 +344,7 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
-        "Do not rerun goal analysis for this state; export the decision template, review it, then dry-run and import human-confirmed decisions."
+        "Do not rerun goal analysis for this state; export the decision workspace, fill expert-decision-board.tsv or the JSONL template, then merge, dry-run, and import human-confirmed decisions."
         in text
     )
     assert "Expert satisfaction: blocked" in text
@@ -366,25 +366,21 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
         in text
     )
     assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/merge_agent_review_results.py "
+        "./.venv/bin/python scripts/evaluation/expert_gold/merge_expert_decision_board.py "
         "<workspace>/reviewed-findings.template.jsonl "
-        "agent-review-results.jsonl --output-path agent-reviewed-findings.jsonl"
-        in text
-    )
-    assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/check_agent_review_draft.py "
-        "agent-reviewed-findings.jsonl --format text"
-        in text
-    )
-    assert (
-        "./.venv/bin/python scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
-        "agent-reviewed-findings.jsonl --output-path human-confirmed-findings.jsonl"
+        "<workspace>/expert-decision-board.tsv --output-path "
+        "<workspace>/reviewed-findings.from-board.jsonl"
         in text
     )
     assert (
         "./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-        "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run "
+        "<workspace>/reviewed-findings.from-board.jsonl --reviewer <human-reviewer> --dry-run "
         "--fail-on-warnings --format text"
+        in text
+    )
+    assert (
+        "./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+        "<workspace>/reviewed-findings.from-board.jsonl --reviewer <human-reviewer> --format text"
         in text
     )
     assert (

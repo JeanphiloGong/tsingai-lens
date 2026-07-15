@@ -1026,7 +1026,8 @@ def _gate_diagnosis(remaining_work: dict[str, Any]) -> list[str]:
             ),
             (
                 "Do not rerun goal analysis for this state; export the decision "
-                "template, review it, then dry-run and import human-confirmed decisions."
+                "workspace, fill expert-decision-board.tsv or the JSONL template, "
+                "then merge, dry-run, and import human-confirmed decisions."
             ),
         ]
     if missing_training:
@@ -1061,22 +1062,20 @@ def _next_step_commands(summary: dict[str, Any]) -> list[str]:
             f"--collection-id {collection_id}"
         ),
         (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/merge_agent_review_results.py "
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/merge_expert_decision_board.py "
             "<workspace>/reviewed-findings.template.jsonl "
-            "agent-review-results.jsonl --output-path agent-reviewed-findings.jsonl"
-        ),
-        (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/check_agent_review_draft.py "
-            "agent-reviewed-findings.jsonl --format text"
-        ),
-        (
-            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/confirm_agent_review_decisions.py "
-            "agent-reviewed-findings.jsonl --output-path human-confirmed-findings.jsonl"
+            "<workspace>/expert-decision-board.tsv "
+            "--output-path <workspace>/reviewed-findings.from-board.jsonl"
         ),
         (
             f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/import_goal_review_decisions.py "
-            "human-confirmed-findings.jsonl --reviewer <human-reviewer> --dry-run "
-            "--fail-on-warnings --format text"
+            "<workspace>/reviewed-findings.from-board.jsonl "
+            "--reviewer <human-reviewer> --dry-run --fail-on-warnings --format text"
+        ),
+        (
+            f"{BACKEND_PYTHON} scripts/evaluation/expert_gold/import_goal_review_decisions.py "
+            "<workspace>/reviewed-findings.from-board.jsonl "
+            "--reviewer <human-reviewer> --format text"
         ),
     ]
     layers = _mapping(summary.get("layers"))

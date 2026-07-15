@@ -3422,6 +3422,10 @@ def test_finding_promotes_matching_preheat_strength_table():
             "variables": ["build platform preheating temperature"],
             "outcomes": ["yield strength"],
             "direction": "increases",
+            "scope_summary": (
+                "316L stainless steel, build platform preheating temperature, "
+                "yield strength, Non-preheated"
+            ),
             "comparison_summary": None,
             "evidence_bundle": bundle,
             "relation_chain": [
@@ -3451,6 +3455,9 @@ def test_finding_promotes_matching_preheat_strength_table():
         "observed": {"label": "preheated", "value": "465 MPa"},
         "controlled_conditions": [],
     }
+    assert finding["scope_summary"] == (
+        "316L stainless steel, build platform preheating temperature, yield strength"
+    )
     assert finding["relation_chain"][0]["statement"] == finding["statement"]
 
     mismatched = service._finding_with_preheating_table_comparison(

@@ -10760,6 +10760,15 @@ class ResearchUnderstandingService:
             "observed": {"label": "preheated", "value": observed_value},
             "controlled_conditions": [],
         }
+        scope_summary = _text(finding.get("scope_summary")) or ""
+        if scope_summary:
+            comparison_arm_labels = {"non preheated", "preheated"}
+            updated["scope_summary"] = ", ".join(
+                token
+                for raw_token in scope_summary.split(",")
+                if (token := raw_token.strip())
+                and _normalize_match_text(token) not in comparison_arm_labels
+            )
         updated["relation_chain"] = [
             {**segment, "statement": statement, "direction": direction}
             for segment in _mapping_list(finding.get("relation_chain"))

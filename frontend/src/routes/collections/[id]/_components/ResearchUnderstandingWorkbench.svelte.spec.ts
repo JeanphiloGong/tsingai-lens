@@ -149,7 +149,59 @@ function datasetResponse(overrides: {
 			by_review_reason: reviewReasons,
 			by_system_warning: systemWarnings,
 			by_review_candidate_reason: overrides.reviewCandidateReasons ?? reviewReasons,
-			by_review_candidate_warning: overrides.reviewCandidateWarnings ?? systemWarnings
+			by_review_candidate_warning: overrides.reviewCandidateWarnings ?? systemWarnings,
+			optimization_breakdown: {
+				by_variable: {
+					'scan speed': {
+						issue_type: { wrong_variable: 2 },
+						error_category: { variable_error: 2 },
+						review_candidate_reason: { single_paper_evidence: 2 },
+						system_warning: {}
+					}
+				},
+				by_outcome: {
+					density: {
+						issue_type: { wrong_direction: 1 },
+						error_category: { direction_error: 1 },
+						review_candidate_reason: { partial_support: 1 },
+						system_warning: {}
+					}
+				},
+				by_direction: {
+					'condition-dependent': {
+						issue_type: { wrong_direction: 1 },
+						error_category: { direction_error: 1 },
+						review_candidate_reason: { partial_support: 1 },
+						system_warning: {}
+					}
+				},
+				by_evidence_role: {
+					table_row: {
+						issue_type: { wrong_variable: 2 },
+						error_category: { variable_error: 2 },
+						review_candidate_reason: { single_paper_evidence: 2 },
+						system_warning: { table_row_alignment_uncertain: 1 }
+					}
+				}
+			},
+			top_variable_issue_types: [{ name: 'scan speed', metric: 'wrong_variable', count: 2 }],
+			top_outcome_issue_types: [{ name: 'density', metric: 'wrong_direction', count: 1 }],
+			top_direction_issue_types: [
+				{ name: 'condition-dependent', metric: 'wrong_direction', count: 1 }
+			],
+			top_evidence_role_issue_types: [
+				{ name: 'table_row', metric: 'wrong_variable', count: 2 }
+			],
+			top_variable_review_reasons: [
+				{ name: 'scan speed', metric: 'single_paper_evidence', count: 2 }
+			],
+			top_outcome_review_reasons: [{ name: 'density', metric: 'partial_support', count: 1 }],
+			top_direction_review_reasons: [
+				{ name: 'condition-dependent', metric: 'partial_support', count: 1 }
+			],
+			top_evidence_role_review_reasons: [
+				{ name: 'table_row', metric: 'single_paper_evidence', count: 2 }
+			]
 		},
 		items: overrides.items ?? [],
 		warnings: []
@@ -3470,6 +3522,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Partial support 1');
 		expect(datasetText).toContain('System warnings');
 		expect(datasetText).toContain('Table row alignment uncertain 1');
+		expect(datasetText).toContain('Optimization hotspots');
+		expect(datasetText).toContain('scan speed');
+		expect(datasetText).toContain('Wrong variable');
+		expect(datasetText).toContain('density');
+		expect(datasetText).toContain('Wrong direction');
+		expect(datasetText).toContain('Evidence role');
 		expect(datasetText).not.toContain('No issue');
 
 		const jsonUrl = new URL(

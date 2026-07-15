@@ -70,7 +70,9 @@ This node owns the collection workspace route family in the frontend.
   decision board TSV, agent review prompts, and review packet download actions
   whenever review candidates remain; the in-browser batch import accepts reviewed JSONL rows or
   spreadsheet-filled TSV decision boards and checks them against the current
-  dataset before writing labels; when
+  dataset before writing labels; the dataset panel surfaces optimization
+  hotspots by variable, outcome, direction, and evidence role so repeated
+  expert-review risks are visible before prompt or model tuning; when
   the backend dataset sample provides an acceptance gate, the detail view also
   shows whether direct accept is allowed, whether correction is required first,
   and the expert checks that must be completed before the finding becomes

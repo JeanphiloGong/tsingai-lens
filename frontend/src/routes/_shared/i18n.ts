@@ -442,6 +442,9 @@ const translations: Record<Language, Translations> = {
 				datasetIssueTypesTitle: 'Expert issue types',
 				datasetReviewReasonsTitle: 'Review priorities',
 				datasetSystemWarningsTitle: 'System warnings',
+				datasetOptimizationHotspotsTitle: 'Optimization hotspots',
+				datasetOptimizationHotspotsBody:
+					'Where expert labels or review risks concentrate by research dimension.',
 				expertSummary: 'Expert readiness summary',
 				expertSummaryReady: 'Ready for expert use',
 				expertSummaryMixed: 'Mixed review and training set',
@@ -636,6 +639,12 @@ const translations: Record<Language, Translations> = {
 					recovered_from_source_text: 'Recovered from source text',
 					deterministic_relation: 'Deterministic relation',
 					missing_evidence_ref: 'Missing evidence reference'
+				},
+				datasetHotspotDimensions: {
+					variable: 'Variable',
+					outcome: 'Outcome',
+					direction: 'Direction',
+					evidence_role: 'Evidence role'
 				},
 				datasetPresentationBuckets: {
 					primary: 'Primary findings',
@@ -3816,6 +3825,8 @@ const translations: Record<Language, Translations> = {
 				datasetIssueTypesTitle: '专家问题类型',
 				datasetReviewReasonsTitle: '复核优先原因',
 				datasetSystemWarningsTitle: '系统风险提示',
+				datasetOptimizationHotspotsTitle: '优化热点',
+				datasetOptimizationHotspotsBody: '专家标注或复核风险按研究维度集中的位置。',
 				expertSummary: '专家可用性摘要',
 				expertSummaryReady: '可供专家使用',
 				expertSummaryMixed: '复核和训练样本混合状态',
@@ -3999,6 +4010,12 @@ const translations: Record<Language, Translations> = {
 					recovered_from_source_text: '从原文恢复',
 					deterministic_relation: '确定性关系',
 					missing_evidence_ref: '缺少证据引用'
+				},
+				datasetHotspotDimensions: {
+					variable: '变量',
+					outcome: '结果',
+					direction: '方向',
+					evidence_role: '证据角色'
 				},
 				datasetPresentationBuckets: {
 					primary: '主研究发现',

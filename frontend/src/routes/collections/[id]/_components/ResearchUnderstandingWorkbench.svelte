@@ -329,6 +329,9 @@
 				)
 			)
 		: [];
+	$: datasetOptimizationHotspots = datasetSummary
+		? datasetHotspotRows(datasetSummary).slice(0, 8)
+		: [];
 	$: collectionDatasetTrainingReadySampleCount =
 		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
 	$: collectionDatasetTrainingMessageSampleCount =
@@ -379,6 +382,9 @@
 					collectionDatasetReviewCandidateSampleCount
 				)
 			)
+		: [];
+	$: collectionDatasetOptimizationHotspots = collectionDatasetSummary
+		? datasetHotspotRows(collectionDatasetSummary).slice(0, 8)
 		: [];
 	$: expertSummary = usesFindings
 		? expertReadinessSummary(
@@ -828,6 +834,66 @@
 
 	function datasetPresentationBucketLabel(bucket: string) {
 		return translatedCatalogLabel('research.understanding.datasetPresentationBuckets', bucket);
+	}
+
+	function datasetHotspotDimensionLabel(dimension: string) {
+		return translatedCatalogLabel('research.understanding.datasetHotspotDimensions', dimension);
+	}
+
+	function datasetHotspotMetricLabel(metric: string) {
+		if (
+			metric === 'single_paper_evidence' ||
+			metric === 'partial_support' ||
+			metric === 'missing_mechanism_evidence' ||
+			metric === 'table_row_needs_expert_review' ||
+			metric === 'needs_cross_paper_confirmation' ||
+			metric === 'needs_expert_review'
+		) {
+			return datasetReviewReasonLabel(metric);
+		}
+		if (
+			metric === 'wrong_variable' ||
+			metric === 'wrong_outcome' ||
+			metric === 'wrong_direction' ||
+			metric === 'wrong_context' ||
+			metric === 'wrong_relation' ||
+			metric === 'evidence_not_grounded' ||
+			metric === 'missing_evidence' ||
+			metric === 'insufficient_evidence' ||
+			metric === 'overclaim' ||
+			metric === 'unclear_statement'
+		) {
+			return datasetIssueTypeLabel(metric);
+		}
+		return translatedCatalogLabel('research.understanding.datasetErrorCategories', metric);
+	}
+
+	function datasetHotspotRows(currentDatasetSummary: ResearchUnderstandingDataset) {
+		const summary = currentDatasetSummary.quality_summary;
+		return [
+			...datasetHotspotEntries('variable', summary.top_variable_issue_types),
+			...datasetHotspotEntries('outcome', summary.top_outcome_issue_types),
+			...datasetHotspotEntries('direction', summary.top_direction_issue_types),
+			...datasetHotspotEntries('evidence_role', summary.top_evidence_role_issue_types),
+			...datasetHotspotEntries('variable', summary.top_variable_review_reasons),
+			...datasetHotspotEntries('outcome', summary.top_outcome_review_reasons),
+			...datasetHotspotEntries('direction', summary.top_direction_review_reasons),
+			...datasetHotspotEntries('evidence_role', summary.top_evidence_role_review_reasons)
+		].sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+	}
+
+	function datasetHotspotEntries(
+		dimension: string,
+		entries: Array<{ name: string; metric: string; count: number }>
+	) {
+		return entries
+			.filter((entry) => entry.name && entry.metric && entry.count > 0)
+			.map((entry) => ({
+				dimension,
+				name: entry.name,
+				metric: entry.metric,
+				count: entry.count
+			}));
 	}
 
 	function trainingMessageDiagnosticLabel(diagnostic: string) {
@@ -4547,6 +4613,24 @@
 													</span>
 												{/each}
 											</div>
+											{#if collectionDatasetOptimizationHotspots.length}
+												<div class="research-understanding-workbench__dataset-hotspots">
+													<div>
+														<strong>{$t('research.understanding.datasetOptimizationHotspotsTitle')}</strong>
+														<p>{$t('research.understanding.datasetOptimizationHotspotsBody')}</p>
+													</div>
+													<ul>
+														{#each collectionDatasetOptimizationHotspots as hotspot, index (`collection-${hotspot.dimension}-${hotspot.name}-${hotspot.metric}-${index}`)}
+															<li>
+																<span>{datasetHotspotDimensionLabel(hotspot.dimension)}</span>
+																<strong>{hotspot.name}</strong>
+																<small>{datasetHotspotMetricLabel(hotspot.metric)}</small>
+																<em>{hotspot.count}</em>
+															</li>
+														{/each}
+													</ul>
+												</div>
+											{/if}
 										{:else if collectionDatasetError}
 											<p
 												class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
@@ -4559,6 +4643,24 @@
 										{:else}
 											<p>{$t('research.understanding.datasetUnavailable')}</p>
 										{/if}
+									</div>
+								{/if}
+								{#if datasetOptimizationHotspots.length}
+									<div class="research-understanding-workbench__dataset-hotspots">
+										<div>
+											<strong>{$t('research.understanding.datasetOptimizationHotspotsTitle')}</strong>
+											<p>{$t('research.understanding.datasetOptimizationHotspotsBody')}</p>
+										</div>
+										<ul>
+											{#each datasetOptimizationHotspots as hotspot, index (`scope-${hotspot.dimension}-${hotspot.name}-${hotspot.metric}-${index}`)}
+												<li>
+													<span>{datasetHotspotDimensionLabel(hotspot.dimension)}</span>
+													<strong>{hotspot.name}</strong>
+													<small>{datasetHotspotMetricLabel(hotspot.metric)}</small>
+													<em>{hotspot.count}</em>
+												</li>
+											{/each}
+										</ul>
 									</div>
 								{/if}
 								{#if datasetErrorCategories.length}
@@ -6637,6 +6739,86 @@
 		min-width: 0;
 		border-top: 1px solid var(--border-default);
 		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots {
+		display: grid;
+		flex-basis: 100%;
+		gap: 8px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots > div {
+		display: grid;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__dataset-hotspots strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots ul {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li {
+		display: grid;
+		grid-template-columns: minmax(58px, max-content) minmax(0, 1fr) max-content;
+		grid-template-areas:
+			"dimension name count"
+			"dimension metric count";
+		gap: 2px 8px;
+		align-items: center;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 6px 8px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > span {
+		grid-area: dimension;
+		color: var(--text-secondary);
+		font-size: 11px;
+		line-height: 16px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > strong {
+		grid-area: name;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > small {
+		grid-area: metric;
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > em {
+		grid-area: count;
+		min-width: 26px;
+		border-radius: 999px;
+		padding: 2px 7px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-style: normal;
+		font-weight: 750;
+		line-height: 18px;
+		text-align: center;
 	}
 
 	.research-understanding-workbench__review-import {

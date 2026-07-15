@@ -11996,6 +11996,203 @@ def test_with_presentation_filters_low_magnitude_table_row_candidate_from_findin
     assert presentation["summary"]["review_queue_finding_count"] == 0
 
 
+def test_with_presentation_keeps_uts_table_when_text_only_supports_yield_and_elongation():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor(),
+        source_artifact_repository=_FakeSourceArtifactRepository(
+            blocks=[
+                SourceBlock(
+                    block_id="blk-preheat-tensile",
+                    document_id="paper-preheat",
+                    block_type="paragraph",
+                    text=(
+                        "Monotonic tensile deformation behavior of specimens "
+                        "fabricated with and without preheating is shown in Figure 5. "
+                        "Interestingly, preheating increased elongation and yield "
+                        "strength by approximately 14% and 4%, respectively."
+                    ),
+                    block_order=136,
+                    page=7,
+                    heading_path="3 Results and discussion",
+                )
+            ]
+        ),
+    )
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-preheat",
+                "goal_id": "goal-preheat",
+                "title": "How does build-platform preheating affect tensile properties?",
+            },
+            "claims": [],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_uts",
+                    "relation_type": "increases",
+                    "subject": "build platform preheating temperature",
+                    "predicate": "increases",
+                    "object": "ultimate tensile strength",
+                    "statement": (
+                        "Increasing the build platform preheating temperature "
+                        "increases ultimate tensile strength."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.9,
+                    "evidence_ref_ids": ["evref_uts_table"],
+                    "context_ids": ["ctx_objective_scope"],
+                    "source_object_ids": ["unit_uts_table"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_uts_table",
+                    "source_kind": "table",
+                    "document_id": "paper-preheat",
+                    "label": "P001 Table 2",
+                    "locator": {"source_ref": "tbl-preheat-tensile", "page": 8},
+                    "fact_ids": ["unit_uts_table"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Monotonic tensile properties. Non-preheated: 448 | 617 | 72. "
+                        "Preheated: 465 | 618 | 82."
+                    ),
+                },
+                {
+                    "evidence_ref_id": "evref_tensile_text",
+                    "source_kind": "text_window",
+                    "document_id": "paper-preheat",
+                    "label": "P001 Results",
+                    "locator": {"source_ref": "blk-preheat-tensile", "page": 7},
+                    "fact_ids": ["unit_tensile_text"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Monotonic tensile deformation behavior is shown in Figure 5. "
+                        "Preheating increased elongation and yield strength by 14% "
+                        "and 4%, respectively."
+                    ),
+                },
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_objective_scope",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "build platform preheating temperature"
+                        ]
+                    },
+                    "property_scope": ["ultimate tensile strength"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    finding = _presentation_finding_by_claim_id(
+        understanding,
+        "relation_rel_preheat_uts",
+    )
+    assert finding["statement"] == (
+        "Increasing the build platform preheating temperature increases "
+        "ultimate tensile strength."
+    )
+    assert finding["evidence_bundle"]["direct_result"] == ["evref_uts_table"]
+    assert "evref_tensile_text" not in finding["evidence_bundle"]["direct_result"]
+
+
+def test_with_presentation_filters_negligible_uts_table_comparison():
+    service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
+    stored = ResearchUnderstanding.from_mapping(
+        {
+            "state": "ready",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-preheat",
+                "goal_id": "goal-preheat",
+                "title": "How does build-platform preheating affect tensile properties?",
+            },
+            "claims": [],
+            "relations": [
+                {
+                    "relation_id": "rel_preheat_uts_negligible",
+                    "relation_type": "increases",
+                    "subject": "build platform preheating temperature",
+                    "predicate": "increases",
+                    "object": "ultimate tensile strength",
+                    "statement": (
+                        "With build conditions controlled, changing build platform "
+                        "preheating temperature from 25 to 150 C increased ultimate "
+                        "tensile strength from 617 MPa to 618 MPa."
+                    ),
+                    "status": "supported",
+                    "confidence": 0.62,
+                    "evidence_ref_ids": ["evref_uts_table"],
+                    "context_ids": ["ctx_objective_scope"],
+                    "source_object_ids": ["unit_uts_table"],
+                    "warnings": ["deterministic_relation"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": "evref_uts_table",
+                    "source_kind": "table",
+                    "document_id": "paper-preheat",
+                    "label": "P001 Table 2",
+                    "locator": {"source_ref": "tbl-preheat-tensile", "page": 8},
+                    "fact_ids": ["unit_uts_table"],
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": (
+                        "Ultimate tensile strength: non-preheated 617 MPa; "
+                        "preheated 618 MPa."
+                    ),
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_objective_scope",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "build platform preheating temperature"
+                        ],
+                        "baseline_context": {
+                            "process_context": {
+                                "Build platform preheating temperature": "25 C"
+                            },
+                            "source_value_text": "617 MPa",
+                            "value": 617,
+                        },
+                        "process_context": {
+                            "Build platform preheating temperature": "150 C"
+                        },
+                    },
+                    "property_scope": ["ultimate tensile strength"],
+                }
+            ],
+        }
+    )
+
+    understanding = service.with_presentation(stored)
+
+    presentation = understanding["presentation"]
+    assert any(
+        effect["claim_id"] == "relation_rel_preheat_uts_negligible"
+        for effect in presentation["effects"]
+    )
+    assert presentation["findings"] == []
+    assert presentation["primary_findings"] == []
+    assert presentation["review_queue_findings"] == []
+
+
 def test_with_presentation_filters_small_density_table_candidate_from_findings():
     service = ResearchUnderstandingService(structured_extractor=_FakeSemanticExtractor())
     stored = ResearchUnderstanding.from_mapping(

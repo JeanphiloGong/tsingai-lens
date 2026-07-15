@@ -7107,6 +7107,14 @@ class ResearchUnderstandingService:
             return False
         if self._finding_is_low_magnitude_prediction_comparison(finding, statement):
             return True
+        mechanical_strength_delta = self._finding_mechanical_strength_relative_delta(
+            finding
+        )
+        if (
+            mechanical_strength_delta is not None
+            and mechanical_strength_delta < 0.5
+        ):
+            return True
         density_delta = self._finding_density_percentage_delta(
             finding,
             evidence_by_id=evidence_by_id,
@@ -7179,6 +7187,40 @@ class ResearchUnderstandingService:
             return abs(float(observed_match.group(1)) - float(baseline_match.group(1)))
         except ValueError:
             return None
+
+    def _finding_mechanical_strength_relative_delta(
+        self,
+        finding: Mapping[str, Any],
+    ) -> float | None:
+        comparison = _mapping(finding.get("comparison_summary"))
+        outcome_values = [
+            *_strings(finding.get("outcomes")),
+            _text(comparison.get("outcome")) or "",
+        ]
+        if not any(
+            self._axis_key(value)
+            in {"yield strength", "ultimate tensile strength", "tensile strength"}
+            for value in outcome_values
+        ):
+            return None
+        baseline = _float_text(_mapping(comparison.get("baseline")).get("value"))
+        observed = _float_text(_mapping(comparison.get("observed")).get("value"))
+        if baseline is None or observed is None:
+            matches = list(
+                re.finditer(
+                    r"\bfrom\s+(-?\d+(?:\.\d+)?)\s*mpa\b.*?"
+                    r"\bto\s+(-?\d+(?:\.\d+)?)\s*mpa\b",
+                    self._finding_statement_text(finding),
+                    flags=re.IGNORECASE,
+                )
+            )
+            if not matches:
+                return None
+            baseline = float(matches[-1].group(1))
+            observed = float(matches[-1].group(2))
+        if baseline == 0:
+            return None
+        return abs(observed - baseline) / abs(baseline) * 100
 
     def _finding_is_low_magnitude_prediction_comparison(
         self,
@@ -9680,8 +9722,23 @@ class ResearchUnderstandingService:
     def _finding_statement_outcome_terms(self, outcomes: list[str]) -> set[str]:
         terms: set[str] = set()
         for value in outcomes:
-            terms.update(_quote_hint_terms(value))
             normalized = _normalize_match_text(value)
+            if re.fullmatch(r"ultimate tensile strength(?: mpa)?", normalized):
+                terms.update(
+                    {
+                        "tensile strength",
+                        "ultimate tensile strength",
+                        "uts",
+                    }
+                )
+                continue
+            if re.fullmatch(r"yield strength(?: mpa)?", normalized):
+                terms.update({"yield", "yield strength", "ys"})
+                continue
+            if re.fullmatch(r"tensile strength(?: mpa)?", normalized):
+                terms.update({"tensile strength", "uts"})
+                continue
+            terms.update(_quote_hint_terms(value))
             if normalized == "microstructure":
                 terms.update(
                     {
@@ -9696,17 +9753,6 @@ class ResearchUnderstandingService:
                 )
             elif normalized == "mechanical properties":
                 terms.update({"ductility", "elongation", "strength", "tensile", "yield"})
-            elif "yield strength" in normalized:
-                terms.update({"yield", "strength", "yield strength"})
-            elif "ultimate tensile strength" in normalized:
-                terms.update(
-                    {
-                        "strength",
-                        "tensile",
-                        "tensile strength",
-                        "ultimate tensile strength",
-                    }
-                )
             elif normalized in {"corrosion behavior", "pitting corrosion behavior"}:
                 terms.update(
                     {
@@ -10590,6 +10636,14 @@ class ResearchUnderstandingService:
         target_texts = outcomes or [_text(effect.get("target_property")) or ""]
         terms: set[str] = set()
         for text in target_texts:
+            normalized = _normalize_match_text(text)
+            if re.fullmatch(
+                r"(?:ultimate )?tensile strength(?: mpa)?|"
+                r"yield strength(?: mpa)?",
+                normalized,
+            ):
+                terms.update(self._finding_statement_outcome_terms([text]))
+                continue
             tokens = _meaningful_match_tokens(text)
             if not tokens:
                 continue

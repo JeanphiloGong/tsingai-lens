@@ -3244,6 +3244,19 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
             ],
             blocks=[
                 SourceBlock(
+                    block_id="blk-angle-definitions",
+                    document_id="paper-texture",
+                    block_type="paragraph",
+                    text=(
+                        "The process involved three angles: θ, the rotation "
+                        "angle of the laser scan lines; α, rotation about the "
+                        "global X-axis; and β, rotation about the global Y-axis."
+                    ),
+                    block_order=35,
+                    page=2,
+                    heading_path="2.1. Experiment",
+                ),
+                SourceBlock(
                     block_id="blk-yield-setup",
                     document_id="paper-texture",
                     block_type="paragraph",
@@ -3261,6 +3274,45 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
                     page=8,
                     heading_path="3.4. Yield strength prediction and validation",
                 ),
+            ],
+            tables=[
+                SourceTable(
+                    table_id="tbl-yield-validation",
+                    document_id="paper-texture",
+                    table_order=3,
+                    caption_text=(
+                        "Table 3 The prediction and average experimental yield "
+                        "strength results of samples built in different scanning "
+                        "strategies and building orientations."
+                    ),
+                    caption_block_id=None,
+                    page=8,
+                    bbox=None,
+                    heading_path="3.4. Yield strength prediction and validation",
+                    column_headers=(
+                        "α (°)",
+                        "β (°)",
+                        "θ (°)",
+                        "Yield Strength Prediction (MPa)",
+                        "Yield Strength Experiment (MPa)",
+                    ),
+                    table_matrix=(
+                        (
+                            "α (°)",
+                            "β (°)",
+                            "θ (°)",
+                            "Yield Strength Prediction (MPa)",
+                            "Yield Strength Experiment (MPa)",
+                        ),
+                        ("0", "0", "0", "310.48", "334.2"),
+                        ("0", "0", "30", "322.84", "342.5"),
+                        ("0", "0", "45", "328.67", "351.9"),
+                        ("0", "22.5", "0", "314.37", "295.1"),
+                        ("45", "22.5", "0", "341.85", "363.1"),
+                        ("45", "22.5", "30", "345.64", "356.9"),
+                        ("45", "22.5", "45", "347.14", "365.6"),
+                    ),
+                )
             ],
         ),
     )
@@ -3313,30 +3365,54 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
 
     primary = understanding["presentation"]["primary_findings"]
     review_queue = understanding["presentation"]["review_queue_findings"]
-    assert primary[0]["title"] == (
-        "scan strategy rotation angle and build orientation -> yield strength"
+    assert len(primary) == 2
+    build_orientation = _presentation_finding_by_title(
+        understanding,
+        "α and β build orientation angles -> yield strength",
     )
-    assert "yield strength increased from the 0-0-0 configuration" in primary[0][
+    scan_rotation = _presentation_finding_by_title(
+        understanding,
+        "scan strategy rotation angle -> yield strength",
+    )
+    assert "fixed scan strategy rotation angle θ=0°" in build_orientation[
         "statement"
     ]
-    assert "deviations generally below 5%" in primary[0]["statement"]
-    assert primary[0]["review_status"] == "needs_review"
-    assert primary[0]["expert_use_status"] == "paper_level_finding"
-    assert primary[0]["generalization_status"] == "paper_level_only"
-    assert primary[0]["comparison_summary"] == {
-        "variable": "scan strategy rotation angle and build orientation",
+    assert "334.2 MPa to 363.1 MPa" in build_orientation["statement"]
+    assert "do not uniformly satisfy" in build_orientation["statement"]
+    assert "fixed build orientation α=0° and β=0°" in scan_rotation["statement"]
+    assert "334.2 MPa to 351.9 MPa" in scan_rotation["statement"]
+    assert build_orientation["review_status"] == "needs_review"
+    assert build_orientation["expert_use_status"] == "paper_level_finding"
+    assert build_orientation["generalization_status"] == "paper_level_only"
+    assert build_orientation["comparison_summary"] == {
+        "variable": "α and β build orientation angles",
         "direction": "increases",
         "outcome": "yield strength",
-        "baseline": {"label": "", "value": "0-0-0 configuration"},
-        "observed": {
-            "label": "scan strategy rotation angle and build orientation",
-            "value": "45-22.5-0 condition",
-        },
-        "controlled_conditions": [],
+        "baseline": {"label": "α=0°, β=0°", "value": "334.2 MPa"},
+        "observed": {"label": "α=45°, β=22.5°", "value": "363.1 MPa"},
+        "controlled_conditions": [
+            {"axis": "scan strategy rotation angle (θ)", "value": "0°"}
+        ],
     }
-    assert "model_validation_finding" in primary[0]["warnings"]
-    assert primary[0]["evidence_bundle"]["direct_result"] == [
-        "evref_recovered_texture_yield_prediction_blk-yield-validation"
+    assert scan_rotation["comparison_summary"] == {
+        "variable": "scan strategy rotation angle (θ)",
+        "direction": "increases",
+        "outcome": "yield strength",
+        "baseline": {"label": "θ=0°", "value": "334.2 MPa"},
+        "observed": {"label": "θ=45°", "value": "351.9 MPa"},
+        "controlled_conditions": [
+            {"axis": "α build orientation angle", "value": "0°"},
+            {"axis": "β build orientation angle", "value": "0°"},
+        ],
+    }
+    assert "model_validation_finding" in build_orientation["warnings"]
+    assert "author_summary_table_mismatch" in build_orientation["warnings"]
+    assert build_orientation["evidence_bundle"]["direct_result"] == [
+        "evref_recovered_texture_yield_build_orientation_blk-yield-validation",
+        "evref_recovered_texture_yield_build_orientation_table_tbl-yield-validation",
+    ]
+    assert build_orientation["evidence_bundle"]["condition_context"] == [
+        "evref_recovered_texture_yield_build_orientation_condition_blk-angle-definitions"
     ]
     assert review_queue == []
     evidence_by_id = {
@@ -3344,8 +3420,201 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
         for item in understanding["presentation"]["evidence_items"]
     }
     assert "deviations generally less than 5%" in evidence_by_id[
-        "evref_recovered_texture_yield_prediction_blk-yield-validation"
+        "evref_recovered_texture_yield_build_orientation_blk-yield-validation"
     ]["quote"]
+    assert "363.1" in evidence_by_id[
+        "evref_recovered_texture_yield_build_orientation_table_tbl-yield-validation"
+    ]["quote"]
+
+    persisted = ResearchUnderstanding.from_mapping(
+        {
+            "state": "limited",
+            "scope": {
+                "scope_type": "goal",
+                "collection_id": "col-texture",
+                "goal_id": "goal-texture",
+                "title": (
+                    "How do scan strategy rotation angle and build orientation "
+                    "angle affect crystallographic texture and yield strength?"
+                ),
+            },
+            "claims": [
+                {
+                    "claim_id": (
+                        "claim_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ),
+                    "claim_type": "finding",
+                    "statement": (
+                        "Yield strength increased from the 0-0-0 configuration "
+                        "to the 45-22.5-0 condition."
+                    ),
+                    "status": "limited",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": [
+                        "evref_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ],
+                    "context_ids": [
+                        "ctx_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ],
+                    "source_object_ids": ["blk-yield-validation"],
+                }
+            ],
+            "relations": [
+                {
+                    "relation_id": (
+                        "rel_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ),
+                    "relation_type": "predict",
+                    "subject": "scan strategy rotation angle and build orientation",
+                    "predicate": "predict",
+                    "object": "crystallographic texture -> yield strength",
+                    "statement": (
+                        "Yield strength increased from the 0-0-0 configuration "
+                        "to the 45-22.5-0 condition."
+                    ),
+                    "status": "limited",
+                    "confidence": 0.86,
+                    "evidence_ref_ids": [
+                        "evref_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ],
+                    "context_ids": [
+                        "ctx_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ],
+                    "source_object_ids": ["blk-yield-validation"],
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": (
+                        "evref_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ),
+                    "source_kind": "paragraph",
+                    "document_id": "paper-texture",
+                    "label": "3.4. Yield strength prediction and validation",
+                    "locator": {
+                        "source_ref": "blk-yield-validation",
+                        "source_kind": "paragraph",
+                        "page": 8,
+                    },
+                    "traceability_status": "resolved",
+                    "evidence_role": "direct_support",
+                    "quote": validation_text,
+                }
+            ],
+            "contexts": [
+                {
+                    "context_id": "ctx_objective_scope",
+                    "label": "Goal scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "scan strategy rotation angle",
+                            "build orientation angle",
+                        ]
+                    },
+                    "property_scope": [
+                        "crystallographic texture",
+                        "yield strength",
+                    ],
+                },
+                {
+                    "context_id": (
+                        "ctx_recovered_texture_yield_prediction_"
+                        "blk-yield-validation"
+                    ),
+                    "label": "Recovered source scope",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": {
+                        "variable_process_axes": [
+                            "scan strategy rotation angle",
+                            "build orientation angle",
+                        ]
+                    },
+                    "property_scope": [
+                        "crystallographic texture",
+                        "yield strength",
+                    ],
+                },
+            ],
+        }
+    )
+
+    refreshed = service.with_presentation(persisted)
+
+    refreshed_claim_ids = {claim["claim_id"] for claim in refreshed["claims"]}
+    assert (
+        "claim_recovered_texture_yield_prediction_blk-yield-validation"
+        not in refreshed_claim_ids
+    )
+    assert {
+        "claim_recovered_texture_yield_build_orientation_blk-yield-validation",
+        "claim_recovered_texture_yield_scan_rotation_blk-yield-validation",
+    } <= refreshed_claim_ids
+    assert {
+        finding["title"] for finding in refreshed["presentation"]["primary_findings"]
+    } == {
+        "α and β build orientation angles -> yield strength",
+        "scan strategy rotation angle -> yield strength",
+    }
+
+
+def test_recovered_finding_alignment_combines_result_and_condition_evidence():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor()
+    )
+    finding = {
+        "claim_id": "claim_recovered_texture_yield_build_orientation_blk-result",
+        "variables": ["α and β build orientation angles"],
+        "outcomes": ["yield strength"],
+        "statement": (
+            "Yield strength increased from the 0-0-0 configuration to the "
+            "45-22.5-0 condition."
+        ),
+        "evidence_bundle": {
+            "direct_result": ["ev-result"],
+            "condition_context": ["ev-condition"],
+        },
+    }
+    evidence_by_id = {
+        "ev-result": {
+            "source_kind": "paragraph",
+            "quote": (
+                "Experimental findings show that yield strength increased from "
+                "the 0-0-0 configuration to the 45-22.5-0 condition."
+            ),
+        },
+        "ev-condition": {
+            "source_kind": "paragraph",
+            "quote": (
+                "The process used a scan rotation angle θ and build orientation "
+                "angles α and β."
+            ),
+        },
+    }
+
+    assert service._finding_has_quote_aligned_direct_result(
+        finding,
+        evidence_by_id=evidence_by_id,
+        blocks_by_id={},
+    )
+    assert not service._finding_has_quote_aligned_direct_result(
+        {
+            **finding,
+            "evidence_bundle": {
+                "direct_result": ["ev-result"],
+                "condition_context": [],
+            },
+        },
+        evidence_by_id=evidence_by_id,
+        blocks_by_id={},
+    )
 
 
 def test_with_presentation_excludes_unreferenced_evidence_items():
@@ -10407,6 +10676,34 @@ def test_with_presentation_axis_coverage_marks_platform_process_as_context():
                     heading_path="3.4. Yield strength prediction and validation",
                 )
             ],
+            tables=[
+                SourceTable(
+                    table_id="tbl-yield-validation",
+                    document_id="paper-lpbf",
+                    table_order=3,
+                    caption_text=(
+                        "Table 3 The prediction and average experimental yield "
+                        "strength results of samples built in different scanning "
+                        "strategies and building orientations."
+                    ),
+                    caption_block_id=None,
+                    page=8,
+                    bbox=None,
+                    heading_path="3.4. Yield strength prediction and validation",
+                    column_headers=(
+                        "α (°)",
+                        "β (°)",
+                        "θ (°)",
+                        "Yield Strength Prediction (MPa)",
+                        "Yield Strength Experiment (MPa)",
+                    ),
+                    table_matrix=(
+                        ("0", "0", "0", "310.48", "334.2"),
+                        ("0", "0", "45", "328.67", "351.9"),
+                        ("45", "22.5", "0", "341.85", "363.1"),
+                    ),
+                )
+            ],
         ),
     )
     stored = ResearchUnderstanding.from_mapping(
@@ -10441,12 +10738,18 @@ def test_with_presentation_axis_coverage_marks_platform_process_as_context():
     assert {
         "axis": "laser beam powder bed fusion",
         "status": "context",
-        "finding_id": "finding_claim_recovered_texture_yield_prediction_blk-yield-validation",
+        "finding_id": (
+            "finding_claim_recovered_texture_yield_build_orientation_"
+            "blk-yield-validation"
+        ),
     } in coverage["variables"]
     assert {
         "axis": "yield strength",
         "status": "review_queue",
-        "finding_id": "finding_claim_recovered_texture_yield_prediction_blk-yield-validation",
+        "finding_id": (
+            "finding_claim_recovered_texture_yield_build_orientation_"
+            "blk-yield-validation"
+        ),
     } in coverage["properties"]
 
 

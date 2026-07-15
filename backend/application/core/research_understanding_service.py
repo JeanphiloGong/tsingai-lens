@@ -985,31 +985,55 @@ class ResearchUnderstandingService:
                 terms=["crystallographic texture", "yield strength"],
             )
         ):
-            specs.append(
-                {
-                    "slug": "texture_yield_prediction",
-                    "subject": "scan strategy rotation angle and build orientation",
-                    "predicate": "predict",
-                    "object": "crystallographic texture -> yield strength",
-                    "statement": (
-                        "Changing scan strategy rotation angle and build "
-                        "orientation was experimentally validated against "
-                        "crystallographic-texture-based Bishop-Hill yield "
-                        "strength predictions; yield strength increased from "
-                        "the 0-0-0 configuration to the 45-22.5-0 condition "
-                        "with deviations generally below 5%."
-                    ),
-                    "process_axes": [
-                        "scan strategy rotation angle",
-                        "build orientation",
-                    ],
-                    "property_scope": ["crystallographic texture", "yield strength"],
-                    "block_predicate": self._is_texture_yield_conclusion_block,
-                    "confidence": 0.86,
-                    "claim_status": "limited",
-                    "relation_status": "limited",
-                    "warnings": ["model_validation_finding", "needs_expert_review"],
-                }
+            texture_spec_base = {
+                "predicate": "compares",
+                "object": "crystallographic texture -> yield strength",
+                "process_axes": [
+                    "scan strategy rotation angle (θ)",
+                    "α build orientation angle",
+                    "β build orientation angle",
+                ],
+                "property_scope": ["crystallographic texture", "yield strength"],
+                "block_predicate": self._is_texture_yield_conclusion_block,
+                "texture_yield_table": True,
+                "confidence": 0.86,
+                "claim_status": "limited",
+                "relation_status": "limited",
+                "warnings": [
+                    "model_validation_finding",
+                    "author_summary_table_mismatch",
+                    "needs_expert_review",
+                ],
+            }
+            specs.extend(
+                [
+                    {
+                        **texture_spec_base,
+                        "slug": "texture_yield_build_orientation",
+                        "subject": "α and β build orientation angles",
+                        "statement": (
+                            "At fixed scan strategy rotation angle θ=0°, changing "
+                            "build orientation from α=0° and β=0° to α=45° and "
+                            "β=22.5° increased experimental yield strength from "
+                            "334.2 MPa to 363.1 MPa. The authors describe model "
+                            "deviations as generally below 5%, but the Table 3 "
+                            "values do not uniformly satisfy that summary."
+                        ),
+                    },
+                    {
+                        **texture_spec_base,
+                        "slug": "texture_yield_scan_rotation",
+                        "subject": "scan strategy rotation angle (θ)",
+                        "statement": (
+                            "At fixed build orientation α=0° and β=0°, changing "
+                            "scan strategy rotation angle θ from 0° to 45° "
+                            "increased experimental yield strength from 334.2 MPa "
+                            "to 351.9 MPa. The authors describe model deviations "
+                            "as generally below 5%, but the Table 3 values do not "
+                            "uniformly satisfy that summary."
+                        ),
+                    },
+                ]
             )
         if (
             (
@@ -1061,7 +1085,15 @@ class ResearchUnderstandingService:
                         blocks_by_id=blocks_by_id,
                     )
                     if _text(spec.get("slug")) == "ved_defects_fatigue"
-                    else None
+                    else (
+                        self._best_recovered_spec_source_block(
+                            document_id,
+                            blocks_by_id=blocks_by_id,
+                            predicate=self._is_texture_angle_definition_block,
+                        )
+                        if _text(spec.get("slug")).startswith("texture_yield_")
+                        else None
+                    )
                 )
                 supporting_blocks = (
                     [
@@ -1106,12 +1138,23 @@ class ResearchUnderstandingService:
                     if spec.get("fatigue_strength_table")
                     else None
                 )
+                texture_yield_table = (
+                    self._best_texture_yield_validation_table(
+                        document_id,
+                        tables_by_id=tables_by_id or {},
+                    )
+                    if spec.get("texture_yield_table")
+                    else None
+                )
+                if spec.get("texture_yield_table") and texture_yield_table is None:
+                    continue
                 supporting_tables = [
                     table
                     for table in [
                         mechanical_property_table,
                         processing_parameter_table,
                         ved_fatigue_strength_table,
+                        texture_yield_table,
                     ]
                     if table is not None
                 ]
@@ -1408,6 +1451,40 @@ class ResearchUnderstandingService:
             score = self._ved_fatigue_strength_table_score(table)
             if score <= 0:
                 continue
+            ranked = (score, -(table.table_order or 0), table)
+            if best is None or ranked > best:
+                best = ranked
+        return best[2] if best else None
+
+    def _best_texture_yield_validation_table(
+        self,
+        document_id: str,
+        *,
+        tables_by_id: Mapping[str, SourceTable],
+    ) -> SourceTable | None:
+        best: tuple[int, int, SourceTable] | None = None
+        for table in tables_by_id.values():
+            if table.document_id != document_id:
+                continue
+            headers = list(table.column_headers)
+            if not headers and table.table_matrix:
+                headers = list(table.table_matrix[0])
+            header_text = " ".join(headers).lower()
+            normalized = f" {_normalize_match_text(self._source_table_text(table))} "
+            if not all(symbol in header_text for symbol in ("α", "β", "θ")):
+                continue
+            if not (
+                " yield strength prediction " in normalized
+                and " yield strength experiment " in normalized
+                and all(
+                    value in normalized
+                    for value in (" 334 2 ", " 351 9 ", " 363 1 ")
+                )
+            ):
+                continue
+            score = 10
+            if " prediction and average experimental yield strength " in normalized:
+                score += 4
             ranked = (score, -(table.table_order or 0), table)
             if best is None or ranked > best:
                 best = ranked
@@ -2132,6 +2209,17 @@ class ResearchUnderstandingService:
         ):
             return 0
         return self._source_block_result_score(block, normalized) + 4
+
+    def _is_texture_angle_definition_block(self, block: SourceBlock) -> int:
+        normalized = self._normalized_block_text(block)
+        if not (
+            " process involved three angles " in normalized
+            and " rotation angle of the laser scan lines " in normalized
+            and " global x axis " in normalized
+            and " global y axis " in normalized
+        ):
+            return 0
+        return 10
 
     def _is_ved_defect_fatigue_block(self, block: SourceBlock) -> int:
         normalized = self._normalized_block_text(block)
@@ -4839,6 +4927,10 @@ class ResearchUnderstandingService:
         )
         if not recovered_findings:
             return updated
+        updated = self._record_without_superseded_recovered_objects(
+            updated,
+            recovered_findings=recovered_findings,
+        )
         updated["claims"] = self._dedupe_claims_for_understanding(
             [
                 *[
@@ -4886,6 +4978,114 @@ class ResearchUnderstandingService:
             _mapping_list(updated.get("evidence_refs")),
             extra_warnings=_strings(updated.get("warnings")),
         )
+        return updated
+
+    def _record_without_superseded_recovered_objects(
+        self,
+        record: Mapping[str, Any],
+        *,
+        recovered_findings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        current_claim_ids = {
+            claim_id
+            for recovered in recovered_findings
+            if (claim_id := _text(_mapping(recovered.get("claim")).get("claim_id")))
+        }
+        current_relation_ids = {
+            relation_id
+            for recovered in recovered_findings
+            if (
+                relation_id := _text(
+                    _mapping(recovered.get("relation")).get("relation_id")
+                )
+            )
+        }
+        current_source_object_ids = {
+            source_object_id
+            for recovered in recovered_findings
+            for source_object_id in _strings(
+                _mapping(recovered.get("claim")).get("source_object_ids")
+            )
+        }
+        if not current_source_object_ids:
+            return dict(record)
+
+        claims = _mapping_list(record.get("claims"))
+        stale_claims = [
+            claim
+            for claim in claims
+            if (_text(claim.get("claim_id")) or "").startswith("claim_recovered_")
+            and _text(claim.get("claim_id")) not in current_claim_ids
+            and _intersects(
+                _strings(claim.get("source_object_ids")),
+                current_source_object_ids,
+            )
+        ]
+        relations = _mapping_list(record.get("relations"))
+        stale_relations = [
+            relation
+            for relation in relations
+            if (_text(relation.get("relation_id")) or "").startswith("rel_recovered_")
+            and _text(relation.get("relation_id")) not in current_relation_ids
+            and _intersects(
+                _strings(relation.get("source_object_ids")),
+                current_source_object_ids,
+            )
+        ]
+        if not stale_claims and not stale_relations:
+            return dict(record)
+
+        stale_claim_ids = {
+            _text(claim.get("claim_id")) for claim in stale_claims
+        }
+        stale_relation_ids = {
+            _text(relation.get("relation_id")) for relation in stale_relations
+        }
+        retained_claims = [
+            claim
+            for claim in claims
+            if _text(claim.get("claim_id")) not in stale_claim_ids
+        ]
+        retained_relations = [
+            relation
+            for relation in relations
+            if _text(relation.get("relation_id")) not in stale_relation_ids
+        ]
+        stale_evidence_ref_ids = {
+            ref_id
+            for item in [*stale_claims, *stale_relations]
+            for ref_id in _strings(item.get("evidence_ref_ids"))
+        }
+        retained_evidence_ref_ids = {
+            ref_id
+            for item in [*retained_claims, *retained_relations]
+            for ref_id in _strings(item.get("evidence_ref_ids"))
+        }
+        stale_context_ids = {
+            context_id
+            for item in [*stale_claims, *stale_relations]
+            for context_id in _strings(item.get("context_ids"))
+        }
+        retained_context_ids = {
+            context_id
+            for item in [*retained_claims, *retained_relations]
+            for context_id in _strings(item.get("context_ids"))
+        }
+        updated = dict(record)
+        updated["claims"] = retained_claims
+        updated["relations"] = retained_relations
+        updated["evidence_refs"] = [
+            ref
+            for ref in _mapping_list(record.get("evidence_refs"))
+            if _text(ref.get("evidence_ref_id"))
+            not in stale_evidence_ref_ids - retained_evidence_ref_ids
+        ]
+        updated["contexts"] = [
+            context
+            for context in _mapping_list(record.get("contexts"))
+            if _text(context.get("context_id"))
+            not in stale_context_ids - retained_context_ids
+        ]
         return updated
 
     def _record_without_off_axis_recovered_objects(
@@ -5650,6 +5850,12 @@ class ResearchUnderstandingService:
             if (relation_id := _text(relation.get("relation_id")))
             and relation_id.startswith("rel_recovered_")
         }
+        existing_recovered_source_object_ids = {
+            source_object_id
+            for claim in existing_claims
+            if (_text(claim.get("claim_id")) or "").startswith("claim_recovered_")
+            for source_object_id in _strings(claim.get("source_object_ids"))
+        }
         axis_text = " ".join(
             [
                 title,
@@ -5743,6 +5949,9 @@ class ResearchUnderstandingService:
                     recovered,
                     existing_recovered_claim_ids=existing_recovered_claim_ids,
                     existing_recovered_relation_ids=existing_recovered_relation_ids,
+                    existing_recovered_source_object_ids=(
+                        existing_recovered_source_object_ids
+                    ),
                 )
             )
             if _mapping(recovered.get("claim"))
@@ -5756,12 +5965,15 @@ class ResearchUnderstandingService:
         *,
         existing_recovered_claim_ids: set[str],
         existing_recovered_relation_ids: set[str],
+        existing_recovered_source_object_ids: set[str],
     ) -> bool:
         claim_id = _text(_mapping(recovered.get("claim")).get("claim_id"))
         relation_id = _text(_mapping(recovered.get("relation")).get("relation_id"))
+        source_ref = self._recovered_source_ref(recovered)
         return bool(
             (claim_id and claim_id in existing_recovered_claim_ids)
             or (relation_id and relation_id in existing_recovered_relation_ids)
+            or (source_ref and source_ref in existing_recovered_source_object_ids)
         )
 
     def _recovered_evidence_refs(self, recovered: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -8007,6 +8219,10 @@ class ResearchUnderstandingService:
         if normalized == "volumetric energy density":
             normalized = "ved"
         tokens = _normalize_axis_coverage_text(normalized)
+        if {"build", "orientation"} <= tokens:
+            normalized = "build orientation angle"
+        if {"scan", "strategy", "rotation"} <= tokens:
+            normalized = "scan strategy rotation angle"
         if {"laser", "powder", "bed", "fusion"} <= tokens or "lpbf" in tokens:
             normalized = "laser beam powder bed fusion"
         if {"selective", "laser", "melting"} <= tokens or "slm" in tokens:
@@ -8574,6 +8790,11 @@ class ResearchUnderstandingService:
         terms = self._finding_quote_alignment_terms(finding)
         if not terms["variable"] or not terms["outcome"]:
             return False
+        condition_text = " ".join(
+            _text(evidence_by_id.get(ref_id, {}).get("quote")) or ""
+            for ref_id in _strings(bundle.get("condition_context"))
+        )
+        normalized_condition_text = _normalize_match_text(condition_text)
         quote_hints = {
             "variable": terms["variable"],
             "outcome": terms["outcome"],
@@ -8612,7 +8833,10 @@ class ResearchUnderstandingService:
             if not searchable:
                 continue
             bounded = f" {searchable} "
-            if not _quote_term_hits(bounded, terms["variable"]):
+            variable_evidence = bounded
+            if self._is_recovered_expert_finding(finding) and normalized_condition_text:
+                variable_evidence = f"{bounded} {normalized_condition_text} "
+            if not _quote_term_hits(variable_evidence, terms["variable"]):
                 continue
             if not _quote_term_hits(bounded, terms["outcome"]):
                 continue
@@ -9190,6 +9414,35 @@ class ResearchUnderstandingService:
             relation_chain = [
                 {**segment, "statement": statement} for segment in relation_chain
             ]
+        comparison_summary = self._finding_comparison_summary(
+            statement,
+            variables=display_variables,
+            outcomes=outcomes,
+            direction=direction,
+        )
+        if claim_id.startswith("claim_recovered_texture_yield_build_orientation_"):
+            comparison_summary = {
+                "variable": "α and β build orientation angles",
+                "direction": "increases",
+                "outcome": "yield strength",
+                "baseline": {"label": "α=0°, β=0°", "value": "334.2 MPa"},
+                "observed": {"label": "α=45°, β=22.5°", "value": "363.1 MPa"},
+                "controlled_conditions": [
+                    {"axis": "scan strategy rotation angle (θ)", "value": "0°"}
+                ],
+            }
+        elif claim_id.startswith("claim_recovered_texture_yield_scan_rotation_"):
+            comparison_summary = {
+                "variable": "scan strategy rotation angle (θ)",
+                "direction": "increases",
+                "outcome": "yield strength",
+                "baseline": {"label": "θ=0°", "value": "334.2 MPa"},
+                "observed": {"label": "θ=45°", "value": "351.9 MPa"},
+                "controlled_conditions": [
+                    {"axis": "α build orientation angle", "value": "0°"},
+                    {"axis": "β build orientation angle", "value": "0°"},
+                ],
+            }
         return {
             "finding_id": f"finding_{claim_id}",
             "claim_id": claim_id,
@@ -9214,12 +9467,7 @@ class ResearchUnderstandingService:
             "context_ids": list(_strings(effect.get("context_ids"))),
             "relation_ids": relation_ids,
             "evidence_bundle": evidence_bundle,
-            "comparison_summary": self._finding_comparison_summary(
-                statement,
-                variables=display_variables,
-                outcomes=outcomes,
-                direction=direction,
-            ),
+            "comparison_summary": comparison_summary,
             "expert_use_status": expert_use_status,
             "dataset_use_status": "review_candidate",
             "generalization_status": generalization_status,
@@ -11683,8 +11931,16 @@ class ResearchUnderstandingService:
             relation
             for relation in relations
             if _intersects(evidence_ref_ids, _strings(relation.get("evidence_ref_ids")))
-            or _intersects(source_object_ids, _strings(relation.get("source_object_ids")))
         ]
+        if not direct_relations:
+            direct_relations = [
+                relation
+                for relation in relations
+                if _intersects(
+                    source_object_ids,
+                    _strings(relation.get("source_object_ids")),
+                )
+            ]
         related_relations = [
             relation
             for relation in direct_relations

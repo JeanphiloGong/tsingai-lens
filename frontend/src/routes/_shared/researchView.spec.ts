@@ -125,6 +125,34 @@ describe('research view shared helpers', () => {
 		);
 	});
 
+	it('builds review decision board TSV export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'decision_board_tsv'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=decision_board_tsv'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'decision_board_tsv'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=decision_board_tsv'
+		);
+	});
+
 	it('builds agent review prompt dataset export urls', () => {
 		expect(
 			researchUnderstandingDatasetUrl(

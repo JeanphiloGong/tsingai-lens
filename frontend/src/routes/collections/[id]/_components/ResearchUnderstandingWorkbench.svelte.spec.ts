@@ -3499,7 +3499,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const reviewPacketUrl = new URL(
 			browserPage
-				.getByRole('link', { name: 'Review packet' })
+				.getByRole('link', { name: 'Review packet', exact: true })
 				.element()
 				.getAttribute('href') ?? '',
 			'http://localhost'
@@ -3514,7 +3514,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 
 		const decisionTemplateUrl = new URL(
 			browserPage
-				.getByRole('link', { name: 'Decision template' })
+				.getByRole('link', { name: 'Decision template', exact: true })
 				.element()
 				.getAttribute('href') ?? '',
 			'http://localhost'
@@ -3528,6 +3528,23 @@ describe('ResearchUnderstandingWorkbench', () => {
 			'review_candidate'
 		);
 		expect(decisionTemplateUrl.searchParams.get('format')).toBe('decision_template');
+
+		const decisionBoardUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Decision board TSV' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(decisionBoardUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
+		);
+		expect(decisionBoardUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(decisionBoardUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(decisionBoardUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(decisionBoardUrl.searchParams.get('format')).toBe('decision_board_tsv');
 
 		const agentReviewPromptUrl = new URL(
 			browserPage
@@ -3764,6 +3781,24 @@ describe('ResearchUnderstandingWorkbench', () => {
 			'decision_template'
 		);
 
+		const collectionDecisionBoardUrl = new URL(
+			browserPage
+				.getByRole('link', { name: 'Collection decision board TSV' })
+				.element()
+				.getAttribute('href') ?? '',
+			'http://localhost'
+		);
+		expect(collectionDecisionBoardUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		);
+		expect(collectionDecisionBoardUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(collectionDecisionBoardUrl.searchParams.get('dataset_use_status')).toBe(
+			'review_candidate'
+		);
+		expect(collectionDecisionBoardUrl.searchParams.get('format')).toBe(
+			'decision_board_tsv'
+		);
+
 		const collectionAgentReviewPromptUrl = new URL(
 			browserPage
 				.getByRole('link', { name: 'Collection agent review prompts' })
@@ -3882,6 +3917,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetRegion).toBeTruthy();
 		datasetRegion?.setAttribute('open', '');
 		await expect.element(browserPage.getByText('Import reviewed decisions')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Paste reviewed JSONL rows from the decision template, or merge a filled decision-board TSV into JSONL before pasting. Raw TSV cannot be imported here. Dry-run checks the rows first; import writes only explicit accept, reject, or correct actions.'
+				)
+			)
+			.toBeInTheDocument();
 
 		const row = {
 			sample_id: 'sample_1',

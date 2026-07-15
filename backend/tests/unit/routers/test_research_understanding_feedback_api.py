@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+from io import StringIO
 import json
 from types import SimpleNamespace
 
@@ -1182,6 +1184,60 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
     }
 
 
+def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="decision_board_tsv",
+        )
+    )
+
+    assert response.media_type == "text/tab-separated-values"
+    body = response.body.decode("utf-8")
+    rows = list(csv.DictReader(StringIO(body), delimiter="\t"))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["expert_action"] == ""
+    assert row["issue_type"] == ""
+    assert row["corrected_statement"] == ""
+    assert row["collection_id"] == "col-1"
+    assert row["goal_id"] == "goal-1"
+    assert row["finding_id"] == "finding-1"
+    assert row["claim_id"] == "claim-1"
+    assert row["statement"] == "Preheating improves ductility."
+    assert row["variables"] == "build platform preheating"
+    assert row["outcomes"] == "ductility"
+    assert row["direction"] == "increases"
+    assert row["support_grade"] == "partial"
+    assert row["recommended_action"] == "Accept as paper-level evidence"
+    assert row["recommended_action_code"] == "accept_as_paper_level"
+    assert row["accept_allowed"] == "yes"
+    assert "accept" in row["allowed_actions"]
+    assert "Confirm the finding is only paper-level" in row["required_checks"]
+    assert row["evidence_ref_ids"] == "ev-1"
+    assert row["quote"] == "Preheating increased ductility by 14%."
+    assert row["source_open"] == "/collections/col-1/documents/doc-1?source_ref=blk_1"
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
 def test_research_understanding_dataset_route_exports_agent_review_prompt(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
     monkeypatch.setattr(
@@ -1556,6 +1612,42 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     }
     assert line["suggested_target"]["evidence_ref_ids"] == ["ev-1"]
     assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_decision_board_tsv(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            format="decision_board_tsv",
+        )
+    )
+
+    assert response.media_type == "text/tab-separated-values"
+    rows = list(csv.DictReader(StringIO(response.body.decode("utf-8")), delimiter="\t"))
+    assert len(rows) == 1
+    assert rows[0]["collection_id"] == "col-1"
+    assert rows[0]["goal_id"] == "goal-1"
+    assert rows[0]["finding_id"] == "finding-1"
+    assert rows[0]["expert_action"] == ""
+    assert rows[0]["quote"] == "Preheating increased ductility by 14%."
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
         "scope_type": "goal",

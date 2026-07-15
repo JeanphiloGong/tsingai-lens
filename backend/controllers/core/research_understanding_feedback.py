@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+from io import StringIO
 import json
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -52,6 +54,40 @@ REVIEW_INSTRUCTIONS = (
     "evidence match. Set action=reject with issue_type when the evidence does "
     "not support the finding. Set action=correct with suggested_target when "
     "the finding is partly right. Leave action=skip for unchecked rows."
+)
+DECISION_BOARD_COLUMNS = (
+    "expert_action",
+    "issue_type",
+    "expert_note",
+    "corrected_statement",
+    "corrected_variables",
+    "corrected_mediators",
+    "corrected_outcomes",
+    "corrected_direction",
+    "corrected_scope_summary",
+    "corrected_support_grade",
+    "corrected_evidence_ref_ids",
+    "collection_id",
+    "goal_id",
+    "finding_id",
+    "claim_id",
+    "statement",
+    "variables",
+    "outcomes",
+    "direction",
+    "scope_summary",
+    "support_grade",
+    "recommended_action",
+    "recommended_action_code",
+    "accept_allowed",
+    "allowed_actions",
+    "blocked_actions",
+    "required_checks",
+    "protocol_blocking_missing",
+    "evidence_ref_ids",
+    "evidence",
+    "quote",
+    "source_open",
 )
 REVIEW_RISK_FLAGS = {
     "accept_as_paper_level": "Paper-level evidence; do not treat as cross-paper conclusion without confirmation.",
@@ -175,6 +211,28 @@ def _dataset_decision_template_response(
     if body:
         body += "\n"
     return Response(content=body, media_type="application/x-ndjson")
+
+
+def _dataset_decision_board_tsv_response(
+    response: ResearchUnderstandingDatasetResponse,
+) -> Response:
+    rows = [
+        _review_jsonl_row(response.collection_id, item)
+        for item in response.items
+        if item.dataset_use_status == "review_candidate"
+    ]
+    handle = StringIO()
+    writer = csv.DictWriter(
+        handle,
+        fieldnames=list(DECISION_BOARD_COLUMNS),
+        delimiter="\t",
+        lineterminator="\n",
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(_decision_board_tsv_row(row))
+    return Response(content=handle.getvalue(), media_type="text/tab-separated-values")
 
 
 def _dataset_agent_review_prompt_response(
@@ -386,6 +444,73 @@ def _dataset_review_packet_response(
     if not rows:
         lines.extend(["", "No review candidates found."])
     return Response(content="\n".join(lines) + "\n", media_type="text/plain")
+
+
+def _decision_board_tsv_row(row: dict[str, Any]) -> dict[str, str]:
+    acceptance_gate = row["acceptance_gate"]
+    decision_hint = row["review_decision_hint"]
+    protocol_readiness = row["protocol_readiness"]
+    evidence_records = row["evidence"]
+    evidence_ref_ids = [
+        ref_id
+        for record in evidence_records
+        if (ref_id := _text(record.get("evidence_ref_id")))
+    ]
+    first_evidence = evidence_records[0] if evidence_records else {}
+    blocked_actions = _strings(decision_hint.get("blocked_actions"))
+    required_checks = _strings(decision_hint.get("required_checks")) or _strings(
+        acceptance_gate.get("review_checks")
+    )
+    return {
+        "expert_action": "",
+        "issue_type": "",
+        "expert_note": "",
+        "corrected_statement": "",
+        "corrected_variables": "",
+        "corrected_mediators": "",
+        "corrected_outcomes": "",
+        "corrected_direction": "",
+        "corrected_scope_summary": "",
+        "corrected_support_grade": "",
+        "corrected_evidence_ref_ids": "",
+        "collection_id": row["collection_id"],
+        "goal_id": row["goal_id"],
+        "finding_id": row["finding_id"],
+        "claim_id": row["claim_id"],
+        "statement": row["statement"],
+        "variables": _join(row["variables"]),
+        "outcomes": _join(row["outcomes"]),
+        "direction": row["direction"],
+        "scope_summary": row["scope_summary"],
+        "support_grade": row["support_grade"],
+        "recommended_action": row["recommended_action"],
+        "recommended_action_code": row["recommended_action_code"],
+        "accept_allowed": "yes" if bool(acceptance_gate.get("accept_allowed")) else "no",
+        "allowed_actions": _join(row["allowed_actions"]),
+        "blocked_actions": _join(blocked_actions),
+        "required_checks": _join(required_checks),
+        "protocol_blocking_missing": _join(
+            _strings(protocol_readiness.get("blocking_missing"))
+        ),
+        "evidence_ref_ids": _join(evidence_ref_ids),
+        "evidence": _join(_decision_board_evidence_labels(evidence_records)),
+        "quote": _text(first_evidence.get("quote")),
+        "source_open": _short_review_href(first_evidence.get("href")),
+    }
+
+
+def _decision_board_evidence_labels(records: list[dict[str, Any]]) -> list[str]:
+    labels: list[str] = []
+    for record in records:
+        label = _text(record.get("label") or record.get("source_ref") or "source")
+        page = _text(record.get("page"))
+        if page:
+            label = f"{label} p.{page}"
+        ref_id = _text(record.get("evidence_ref_id"))
+        if ref_id:
+            label = f"{ref_id}: {label}"
+        labels.append(label)
+    return labels
 
 
 def _review_jsonl_row(
@@ -946,6 +1071,8 @@ async def export_research_understanding_dataset(
         return _dataset_review_jsonl_response(response)
     if format == "decision_template":
         return _dataset_decision_template_response(response)
+    if format == "decision_board_tsv":
+        return _dataset_decision_board_tsv_response(response)
     if format == "agent_review_prompt_jsonl":
         return _dataset_agent_review_prompt_response(response)
     if format == "review_packet":
@@ -987,6 +1114,8 @@ async def export_collection_research_understanding_dataset(
         return _dataset_review_jsonl_response(response)
     if format == "decision_template":
         return _dataset_decision_template_response(response)
+    if format == "decision_board_tsv":
+        return _dataset_decision_board_tsv_response(response)
     if format == "agent_review_prompt_jsonl":
         return _dataset_agent_review_prompt_response(response)
     if format == "review_packet":

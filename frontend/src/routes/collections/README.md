@@ -67,7 +67,9 @@ This node owns the collection workspace route family in the frontend.
   prioritizes the next review action for table-row checks, conflict resolution,
   mechanism-evidence decisions, paper-level scope limits, and continuous
   accept/reject/correct review; the review loop exposes the decision template
-  and review packet download actions whenever review candidates remain; when
+  decision board TSV, and review packet download actions whenever review
+  candidates remain; the in-browser batch import accepts reviewed JSONL rows,
+  so spreadsheet-filled TSV boards must be merged into JSONL before import; when
   the backend dataset sample provides an acceptance gate, the detail view also
   shows whether direct accept is allowed, whether correction is required first,
   and the expert checks that must be completed before the finding becomes

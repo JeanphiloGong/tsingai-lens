@@ -40,6 +40,7 @@ ResearchUnderstandingDatasetExportFormat = Literal[
     "training_jsonl",
     "review_jsonl",
     "decision_template",
+    "decision_board_tsv",
     "agent_review_prompt_jsonl",
     "review_packet",
 ]

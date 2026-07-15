@@ -3387,7 +3387,7 @@
 	function reviewImportHasReadinessSummary(
 		summary: ResearchUnderstandingReviewDecisionImportResponse
 	) {
-		return Object.keys(summary.readiness_summary).length > 0;
+		return Object.keys(summary.readiness_summary ?? {}).length > 0;
 	}
 
 	function reviewImportReadinessCountsText(
@@ -3419,7 +3419,7 @@
 	}
 
 	function reviewImportHasScopeGate(summary: ResearchUnderstandingReviewDecisionImportResponse) {
-		return Object.keys(summary.review_scope_gate).length > 0;
+		return Object.keys(summary.review_scope_gate ?? {}).length > 0;
 	}
 
 	function reviewImportScopeGateStatusText(
@@ -4245,6 +4245,9 @@
 										<a href={datasetDownloadUrl('decision_template', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadDecisionTemplate')}
 										</a>
+										<a href={datasetDownloadUrl('decision_board_tsv', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadDecisionBoard')}
+										</a>
 										<a href={datasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadAgentReviewPrompt')}
 										</a>
@@ -4261,6 +4264,9 @@
 										</a>
 										<a href={collectionDatasetDownloadUrl('decision_template', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadCollectionDecisionTemplate')}
+										</a>
+										<a href={collectionDatasetDownloadUrl('decision_board_tsv', 'review_candidate')} download>
+											{$t('research.understanding.datasetDownloadCollectionDecisionBoard')}
 										</a>
 										<a href={collectionDatasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')} download>
 											{$t('research.understanding.datasetDownloadCollectionAgentReviewPrompt')}

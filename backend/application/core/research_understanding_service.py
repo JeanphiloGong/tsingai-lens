@@ -3646,8 +3646,49 @@ class ResearchUnderstandingService:
         *,
         spec: Mapping[str, Any],
     ) -> str:
-        if _text(spec.get("slug")) == "heat_treatment_microstructure_mechanics":
+        slug = _text(spec.get("slug"))
+        if slug == "heat_treatment_microstructure_mechanics":
             return _short_text(_text(block.text), limit=900)
+        if slug in {
+            "texture_yield_build_orientation",
+            "texture_yield_scan_rotation",
+        }:
+            sentences = _quote_sentences(_text(block.text))
+            validation_sentence = next(
+                (
+                    sentence
+                    for sentence in sentences
+                    if "deviations generally less than 5"
+                    in _normalize_match_text(sentence)
+                ),
+                "",
+            )
+            target_markers = (
+                ("0 0 0", "45 22 5 0")
+                if slug == "texture_yield_build_orientation"
+                else (
+                    "adjusting the scan strategy angle",
+                    "without altering the build orientation",
+                )
+            )
+            target_sentence = next(
+                (
+                    sentence
+                    for sentence in sentences
+                    if all(
+                        marker in _normalize_match_text(sentence)
+                        for marker in target_markers
+                    )
+                ),
+                "",
+            )
+            if target_sentence:
+                return _short_text(
+                    " ".join(
+                        _dedupe_strings([validation_sentence, target_sentence])
+                    ),
+                    limit=900,
+                )
         return self._recovered_spec_quote(block, spec=spec)
 
     def _recovered_spec_quote(
@@ -11885,17 +11926,27 @@ class ResearchUnderstandingService:
             or " validation results " in normalized
         ):
             return False
-        if not (
-            " yield strength " in normalized
-            and re.search(r"\byield strengths?\s+increased\s+from\b", normalized)
-            and " to " in normalized
-        ):
+        if " yield strength " not in normalized:
             return False
+        if "build orientation" in variables:
+            return bool(
+                re.search(r"\byield strengths?\s+increased\s+from\b", normalized)
+                and " to " in normalized
+                and (
+                    " configuration " in normalized
+                    or " condition " in normalized
+                )
+            )
         return bool(
-            " scan strategy " in normalized
-            or " build orientation " in normalized
-            or " configuration " in normalized
-            or " condition " in normalized
+            (
+                re.search(r"\byield strengths?\s+increased\s+from\b", normalized)
+                and " to " in normalized
+            )
+            or (
+                " improved yield strengths " in normalized
+                and " adjusting the scan strategy angle " in normalized
+                and " without altering the build orientation " in normalized
+            )
         )
 
     def _finding_has_same_document_source_context(
@@ -16401,12 +16452,8 @@ class ResearchUnderstandingService:
                     (_text(ref.get("evidence_ref_id")) or "").startswith(
                         "evref_recovered_heat_treatment_microstructure_mechanics_"
                     )
-                    or (
-                        (_text(ref.get("evidence_ref_id")) or "").startswith(
-                            "evref_recovered_texture_yield_"
-                        )
-                        and "_mechanics_"
-                        in (_text(ref.get("evidence_ref_id")) or "")
+                    or (_text(ref.get("evidence_ref_id")) or "").startswith(
+                        "evref_recovered_texture_yield_"
                     )
                 )
                 and quote

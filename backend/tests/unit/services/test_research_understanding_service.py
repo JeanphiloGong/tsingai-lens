@@ -4396,9 +4396,19 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
         item["evidence_ref_id"]: item
         for item in understanding["presentation"]["evidence_items"]
     }
-    assert "deviations generally less than 5%" in evidence_by_id[
+    build_orientation_quote = evidence_by_id[
         "evref_recovered_texture_yield_build_orientation_blk-yield-validation"
     ]["quote"]
+    scan_rotation_quote = evidence_by_id[
+        "evref_recovered_texture_yield_scan_rotation_blk-yield-validation"
+    ]["quote"]
+    assert "deviations generally less than 5%" in build_orientation_quote
+    assert "0-0-0 configuration to the 45-22.5-0 condition" in build_orientation_quote
+    assert "adjusting the scan strategy angle" not in build_orientation_quote
+    assert "deviations generally less than 5%" in scan_rotation_quote
+    assert "adjusting the scan strategy angle" in scan_rotation_quote
+    assert "without altering the build orientation" in scan_rotation_quote
+    assert "45-22.5-0" not in scan_rotation_quote
     assert "363.1" in evidence_by_id[
         "evref_recovered_texture_yield_build_orientation_table_tbl-yield-validation"
     ]["quote"]

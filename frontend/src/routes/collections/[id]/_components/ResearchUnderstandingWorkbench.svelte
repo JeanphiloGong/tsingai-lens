@@ -148,6 +148,8 @@
 	let selectedEffectId = '';
 	let selectedFindingId = '';
 	let detailMode = false;
+	let detailView: HTMLElement | null = null;
+	let detailBackButton: HTMLButtonElement | null = null;
 	let activeReviewPanel: 'feedback' | 'curation' | '' = '';
 	let datasetReviewCandidatesOnly = false;
 	let curationClaimType = 'finding';
@@ -2015,12 +2017,20 @@
 		selectedFindingId = '';
 		selectedEffectId = effectId;
 		detailMode = true;
+		void revealDetailView();
 	}
 
 	function openFindingDetail(findingId: string) {
 		selectedEffectId = '';
 		selectedFindingId = findingId;
 		detailMode = true;
+		void revealDetailView();
+	}
+
+	async function revealDetailView() {
+		await tick();
+		detailView?.scrollIntoView({ block: 'start' });
+		detailBackButton?.focus({ preventScroll: true });
 	}
 
 	async function openFindingFeedback(findingId: string) {
@@ -2959,9 +2969,7 @@
 		datasetReviewCandidatesOnly = true;
 		reviewQueueOnly = false;
 		await tick();
-		selectedEffectId = '';
-		selectedFindingId = finding.finding_id;
-		detailMode = true;
+		openFindingDetail(finding.finding_id);
 	}
 
 	function showTrainingReady() {
@@ -4933,6 +4941,7 @@
 			{#if detailMode}
 				<section
 					class="research-understanding-workbench__detail-view"
+					bind:this={detailView}
 					aria-label={selectedFinding
 						? $t('research.understanding.findingDetail')
 						: $t('research.understanding.claimDetail')}
@@ -4941,6 +4950,7 @@
 						<button
 							type="button"
 							class="research-understanding-workbench__back"
+							bind:this={detailBackButton}
 							on:click={closeClaimDetail}
 						>
 							{selectedFinding

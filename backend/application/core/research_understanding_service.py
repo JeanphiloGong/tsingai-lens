@@ -14574,16 +14574,73 @@ class ResearchUnderstandingService:
         )[:4]
         if not relevant_rows:
             relevant_rows = row_records[:4]
-        return {
-            "columns": columns,
-            "relevant_rows": [
+        visible_column_indexes = list(range(len(columns)))
+        semantic_terms: set[str] = set()
+        for terms in quote_hints.values():
+            semantic_terms.update(terms)
+        sample_axis_terms = {"sample", "samples", "specimen", "specimens"}
+        rows_are_aligned = all(
+            len(row["cells"]) == len(columns) for row in relevant_rows
+        )
+        explicit_columns = [
+            column
+            for column in columns
+            if _normalize_match_text(column) not in sample_axis_terms
+        ]
+        normalized_explicit_columns = (
+            f" {_normalize_match_text(' | '.join(explicit_columns))} "
+        )
+        explicit_variable_and_outcome = bool(
+            _quote_term_hits(
+                normalized_explicit_columns,
+                quote_hints.get("variable", set()),
+            )
+            and _quote_term_hits(
+                normalized_explicit_columns,
+                quote_hints.get("outcome", set()),
+            )
+        )
+        if (
+            rows_are_aligned
+            and explicit_variable_and_outcome
+            and not sample_axis_terms.intersection(semantic_terms)
+        ):
+            visible_column_indexes = [
+                index
+                for index, column in enumerate(columns)
+                if not (
+                    _normalize_match_text(column) in sample_axis_terms
+                    and any(
+                        re.search(
+                            r"(?:as|ht|hip)[-\s]?slm\s*\(\s*\d+\s*/\s*$",
+                            row["cells"][index],
+                            flags=re.IGNORECASE,
+                        )
+                        for row in relevant_rows
+                    )
+                )
+            ]
+        visible_columns = [columns[index] for index in visible_column_indexes]
+        audit_rows: list[dict[str, Any]] = []
+        for row in relevant_rows:
+            cells = (
+                [row["cells"][index] for index in visible_column_indexes]
+                if rows_are_aligned
+                else list(row["cells"])
+            )
+            audit_rows.append(
                 {
                     "row_index": int(row["row_index"]),
-                    "cells": [cell if cell else "-" for cell in row["cells"]],
-                    "aligned": _table_row_cells_are_aligned(row["cells"], columns),
+                    "cells": [cell if cell else "-" for cell in cells],
+                    "aligned": _table_row_cells_are_aligned(
+                        cells,
+                        visible_columns,
+                    ),
                 }
-                for row in relevant_rows
-            ],
+            )
+        return {
+            "columns": visible_columns,
+            "relevant_rows": audit_rows,
         }
 
     def _presentation_table_source_text(self, table: SourceTable | None) -> str:

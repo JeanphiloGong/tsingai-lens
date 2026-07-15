@@ -14414,20 +14414,31 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     bbox=None,
                     heading_path="Results",
                     column_headers=[
-                        "Laser power",
-                        "Scan speed",
-                        "Heat treatment type",
+                        "Specimens",
+                        "Type of heat treatment",
+                        "Laser power (W)",
+                        "Scan speed (mm/s)",
+                        "Laser energy density (J/mm3)",
                         "Density (%)",
                     ],
                     table_matrix=[
                         [
-                            "Laser power",
-                            "Scan speed",
-                            "Heat treatment type",
+                            "Specimens",
+                            "Type of heat treatment",
+                            "Laser power (W)",
+                            "Scan speed (mm/s)",
+                            "Laser energy density (J/mm3)",
                             "Density (%)",
                         ],
-                        ["140", "100", "HIP", "98.16"],
-                            ["140", "100", "Furnace HT", "99.33"],
+                        ["200) as-SLM (120/", "-", "120", "280", "119", "90.04"],
+                        [
+                            "280) HT-SLM (120/",
+                            "Furnace HT",
+                            "120",
+                            "280",
+                            "119",
+                            "93.58",
+                        ],
                     ],
                 )
             ],
@@ -14450,9 +14461,9 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     "claim_id": "claim_heat_density",
                     "claim_type": "comparison",
                     "statement": (
-                        "Under laser power 140 and scan speed 100, heat "
+                        "Under laser power 120 and scan speed 280, heat "
                         "treatment type Furnace HT increased density from "
-                        "98.16 % (heat treatment type HIP) to 99.33 %."
+                        "90.04 % (heat treatment type -) to 93.58 %."
                     ),
                     "status": "supported",
                     "confidence": 0.95,
@@ -14470,9 +14481,9 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     "predicate": "increases",
                     "object": "density",
                     "statement": (
-                        "Under laser power 140 and scan speed 100, heat "
+                        "Under laser power 120 and scan speed 280, heat "
                         "treatment type Furnace HT increased density from "
-                        "98.16 % (heat treatment type HIP) to 99.33 %."
+                        "90.04 % (heat treatment type -) to 93.58 %."
                     ),
                     "status": "supported",
                     "confidence": 0.95,
@@ -14525,16 +14536,16 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
         "direction": "increases",
         "outcome": "density",
         "baseline": {
-            "label": "heat treatment type HIP",
-            "value": "98.16 %",
+            "label": "heat treatment type -",
+            "value": "90.04 %",
         },
         "observed": {
             "label": "heat treatment type Furnace HT",
-            "value": "99.33 %",
+            "value": "93.58 %",
         },
         "controlled_conditions": [
-            {"axis": "laser power", "value": "140"},
-            {"axis": "scan speed", "value": "100"},
+            {"axis": "laser power", "value": "120"},
+            {"axis": "scan speed", "value": "280"},
         ],
     }
     assert understanding["presentation"]["primary_findings"] == []
@@ -14548,20 +14559,31 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
     ]
     assert review_finding["dataset_use_status"] == "review_candidate"
     evidence_item = understanding["presentation"]["evidence_items"][0]
-    assert "Heat treatment type: HIP; Density (%): 98.16" in evidence_item["quote"]
+    assert "Specimens:" not in evidence_item["quote"]
+    assert "200) as-SLM (120/" not in evidence_item["quote"]
+    assert "Type of heat treatment: -" in evidence_item["quote"]
+    assert "Density (%): 90.04" in evidence_item["quote"]
     assert (
-        "Heat treatment type: Furnace HT; Density (%): 99.33"
-        in evidence_item["quote"]
+        "Type of heat treatment: Furnace HT" in evidence_item["quote"]
     )
+    assert "Density (%): 93.58" in evidence_item["quote"]
+    assert "200) as-SLM (120/" in evidence_item["source_text"]
+    assert evidence_item["table_audit"]["columns"] == [
+        "Type of heat treatment",
+        "Laser power (W)",
+        "Scan speed (mm/s)",
+        "Laser energy density (J/mm3)",
+        "Density (%)",
+    ]
     assert evidence_item["table_audit"]["relevant_rows"] == [
         {
-            "row_index": 1,
-            "cells": ["140", "100", "HIP", "98.16"],
+            "row_index": 2,
+            "cells": ["Furnace HT", "120", "280", "119", "93.58"],
             "aligned": True,
         },
         {
-            "row_index": 2,
-            "cells": ["140", "100", "Furnace HT", "99.33"],
+            "row_index": 1,
+            "cells": ["-", "120", "280", "119", "90.04"],
             "aligned": True,
         },
     ]

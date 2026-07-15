@@ -1038,7 +1038,7 @@ class ResearchUnderstandingService:
         ):
             texture_spec_base = {
                 "predicate": "compares",
-                "object": "crystallographic texture -> yield strength",
+                "object": "model-derived crystallographic texture -> yield strength",
                 "process_axes": [
                     "scan strategy rotation angle (θ)",
                     "α build orientation angle",
@@ -1052,6 +1052,7 @@ class ResearchUnderstandingService:
                 "relation_status": "limited",
                 "warnings": [
                     "model_validation_finding",
+                    "model_derived_mechanism_not_experimental_mediation",
                     "author_summary_table_mismatch",
                     "needs_expert_review",
                 ],
@@ -1068,7 +1069,10 @@ class ResearchUnderstandingService:
                             "β=22.5° increased experimental yield strength from "
                             "334.2 MPa to 363.1 MPa. The authors describe model "
                             "deviations as generally below 5%, but the Table 3 "
-                            "values do not uniformly satisfy that summary."
+                            "values do not uniformly satisfy that summary. "
+                            "Crystallographic texture is a model-derived "
+                            "explanatory path, not an experimentally isolated "
+                            "mediator."
                         ),
                     },
                     {
@@ -1081,7 +1085,9 @@ class ResearchUnderstandingService:
                             "increased experimental yield strength from 334.2 MPa "
                             "to 351.9 MPa. The authors describe model deviations "
                             "as generally below 5%, but the Table 3 values do not "
-                            "uniformly satisfy that summary."
+                            "uniformly satisfy that summary. Crystallographic "
+                            "texture is a model-derived explanatory path, not an "
+                            "experimentally isolated mediator."
                         ),
                     },
                 ]
@@ -3071,7 +3077,11 @@ class ResearchUnderstandingService:
                     "anchor_ids": [],
                     "confidence": confidence,
                     "traceability_status": "resolved",
-                    "evidence_role": "direct_support",
+                    "evidence_role": (
+                        "mechanism"
+                        if slug.startswith("texture_yield_")
+                        else "direct_support"
+                    ),
                     "quote": supporting_quote,
                     "href": _presentation_evidence_href(
                         collection_id=collection_id,
@@ -10488,8 +10498,7 @@ class ResearchUnderstandingService:
         text_refs = (
             [
                 ref_id
-                for role in ("mechanism", "uncategorized")
-                for ref_id in _strings(updated.get(role))
+                for ref_id in _strings(updated.get("uncategorized"))
                 if "table"
                 not in (
                     _text(evidence_by_id.get(ref_id, {}).get("source_kind")) or ""

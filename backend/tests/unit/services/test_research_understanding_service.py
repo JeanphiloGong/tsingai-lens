@@ -3929,6 +3929,16 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
     assert "do not uniformly satisfy" in build_orientation["statement"]
     assert "fixed build orientation α=0° and β=0°" in scan_rotation["statement"]
     assert "334.2 MPa to 351.9 MPa" in scan_rotation["statement"]
+    assert (
+        "model-derived explanatory path, not an experimentally isolated mediator"
+        in build_orientation["statement"]
+    )
+    assert build_orientation["mediators"] == [
+        "model-derived crystallographic texture"
+    ]
+    assert scan_rotation["mediators"] == [
+        "model-derived crystallographic texture"
+    ]
     assert build_orientation["review_status"] == "needs_review"
     assert build_orientation["expert_use_status"] == "paper_level_finding"
     assert build_orientation["generalization_status"] == "paper_level_only"
@@ -3955,9 +3965,12 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
     }
     assert "model_validation_finding" in build_orientation["warnings"]
     assert "author_summary_table_mismatch" in build_orientation["warnings"]
+    assert (
+        "model_derived_mechanism_not_experimental_mediation"
+        in build_orientation["warnings"]
+    )
     assert build_orientation["evidence_bundle"]["direct_result"] == [
         "evref_recovered_texture_yield_build_orientation_blk-yield-validation",
-        "evref_recovered_texture_yield_build_orientation_mechanics_blk-yield-setup",
         "evref_recovered_texture_yield_build_orientation_table_tbl-yield-validation",
     ]
     assert build_orientation["evidence_bundle"]["mechanism"] == [
@@ -3980,6 +3993,9 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
     assert "crystallographic texture serving as the primary input" in evidence_by_id[
         "evref_recovered_texture_yield_build_orientation_mechanics_blk-yield-setup"
     ]["quote"]
+    assert evidence_by_id[
+        "evref_recovered_texture_yield_build_orientation_mechanics_blk-yield-setup"
+    ]["evidence_role"] == "mechanism"
 
     persisted = ResearchUnderstanding.from_mapping(
         {

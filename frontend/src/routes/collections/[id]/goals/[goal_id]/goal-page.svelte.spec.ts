@@ -911,6 +911,30 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).not.toBeDisabled();
 	});
 
+	it('identifies scientifically inconsistent historical protocol drafts', async () => {
+		defaultPlanSourceValidity = 'stale';
+		defaultPlanSourceValidityReasons = ['protocol_design_inconsistent'];
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Protocol design is scientifically inconsistent', { exact: true }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This draft violates the experiment design contract. Review the variable matrix and causal boundary, or rebuild it in Copilot.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Source Findings or evidence changed', { exact: true }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
+			.toBeDisabled();
+	});
+
 	it('shows legacy copilot sources as unverified', async () => {
 		defaultPlanSourceValidity = 'unverified';
 		defaultPlanSourceValidityReasons = ['source_finding_snapshot_missing'];

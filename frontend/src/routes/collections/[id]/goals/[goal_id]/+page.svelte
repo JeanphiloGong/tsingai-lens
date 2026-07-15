@@ -236,12 +236,19 @@
 		return value === 'current' || value === 'stale' ? value : 'unverified';
 	}
 
+	function hasSourceValidityReason(plan: ExperimentPlan | null, reason: string) {
+		return metadataList(plan, 'source_validity_reasons').includes(reason);
+	}
+
 	function sourceValidityLabel(plan: ExperimentPlan | null) {
 		const value = sourceValidity(plan);
 		if (value === 'current') {
 			return $t('research.goalWorkspace.experimentPlanSourceCurrent');
 		}
 		if (value === 'stale') {
+			if (hasSourceValidityReason(plan, 'protocol_design_inconsistent')) {
+				return $t('research.goalWorkspace.experimentPlanDesignInvalid');
+			}
 			return $t('research.goalWorkspace.experimentPlanSourceStale');
 		}
 		return $t('research.goalWorkspace.experimentPlanSourceUnverified');
@@ -250,6 +257,9 @@
 	function experimentPlanSourceWarning(plan: ExperimentPlan | null) {
 		const value = sourceValidity(plan);
 		if (value === 'stale') {
+			if (hasSourceValidityReason(plan, 'protocol_design_inconsistent')) {
+				return $t('research.goalWorkspace.experimentPlanDesignInvalidWarning');
+			}
 			return $t('research.goalWorkspace.experimentPlanSourceStaleWarning');
 		}
 		if (value === 'unverified') {

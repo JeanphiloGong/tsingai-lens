@@ -1636,9 +1636,12 @@ const translations: Record<Language, Translations> = {
 				experimentPlanProtocolReadyGate: 'Created under the protocol-ready review gate',
 				experimentPlanSourceCurrent: 'Current Finding and evidence version',
 				experimentPlanSourceStale: 'Source Findings or evidence changed',
+				experimentPlanDesignInvalid: 'Protocol design is scientifically inconsistent',
 				experimentPlanSourceUnverified: 'Source version unverified',
 				experimentPlanSourceStaleWarning:
 					'This draft uses an older Finding or evidence version. Rebuild it in Copilot before marking it ready for review.',
+				experimentPlanDesignInvalidWarning:
+					'This draft violates the experiment design contract. Review the variable matrix and causal boundary, or rebuild it in Copilot.',
 				experimentPlanSourceUnverifiedWarning:
 					'This legacy draft has no exact Finding and evidence version. Rebuild it in Copilot before marking it ready for review.',
 				experimentPlanCollectionGrounded: 'Collection evidence answer',
@@ -4962,9 +4965,12 @@ const translations: Record<Language, Translations> = {
 				experimentPlanProtocolReadyGate: '创建时通过了可生成方案复核门槛',
 				experimentPlanSourceCurrent: '当前 Finding 与证据版本',
 				experimentPlanSourceStale: '来源 Finding 或证据已变化',
+				experimentPlanDesignInvalid: '实验设计存在科学不一致',
 				experimentPlanSourceUnverified: '来源版本无法验证',
 				experimentPlanSourceStaleWarning:
 					'该草稿使用了旧版 Finding 或证据。请先在目标助手中重新生成，再将其标记为待复核。',
+				experimentPlanDesignInvalidWarning:
+					'该草稿违反实验设计约束。请检查变量矩阵和因果边界，或在目标助手中重新生成。',
 				experimentPlanSourceUnverifiedWarning:
 					'该历史草稿没有精确的 Finding 与证据版本。请先在目标助手中重新生成，再将其标记为待复核。',
 				experimentPlanCollectionGrounded: '基于集合证据的回答',

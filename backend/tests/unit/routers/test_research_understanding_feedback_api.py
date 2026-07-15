@@ -297,6 +297,7 @@ class FakeResearchUnderstandingFeedbackService:
             "items": [
                 {
                     "sample_id": "rus-1",
+                    "finding_fingerprint": "finding.v1:test",
                     "task_type": "research_understanding_finding",
                     "collection_id": kwargs["collection_id"],
                     "scope_type": kwargs["scope_type"],

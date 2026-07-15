@@ -177,6 +177,7 @@ def test_sqlite_evaluation_repository_records_research_understanding_feedback(tm
             "scope_id": "obj-1",
             "finding_id": "finding-1",
             "claim_id": "claim-1",
+            "finding_fingerprint": "finding.v1:feedback-test",
             "review_status": "incorrect",
             "issue_type": "evidence_not_grounded",
             "note": "The claim cites a tensile table but makes a mechanism conclusion.",
@@ -207,6 +208,7 @@ def test_sqlite_evaluation_repository_upserts_research_understanding_curation(tm
             "scope_id": "obj-1",
             "finding_id": "finding-1",
             "claim_id": "claim-1",
+            "finding_fingerprint": "finding.v1:curation-test",
             "curated_claim_type": "mechanism",
             "curated_status": "limited",
             "curated_statement": (

@@ -454,19 +454,21 @@ class SqliteEvaluationRepository:
                     scope_id,
                     finding_id,
                     claim_id,
+                    finding_fingerprint,
                     review_status,
                     issue_type,
                     note,
                     reviewer,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(feedback_id) DO UPDATE SET
                     collection_id = excluded.collection_id,
                     scope_type = excluded.scope_type,
                     scope_id = excluded.scope_id,
                     finding_id = excluded.finding_id,
                     claim_id = excluded.claim_id,
+                    finding_fingerprint = excluded.finding_fingerprint,
                     review_status = excluded.review_status,
                     issue_type = excluded.issue_type,
                     note = excluded.note,
@@ -480,6 +482,7 @@ class SqliteEvaluationRepository:
                     feedback.scope_id,
                     feedback.finding_id,
                     feedback.claim_id,
+                    feedback.finding_fingerprint,
                     feedback.review_status,
                     feedback.issue_type,
                     feedback.note,
@@ -523,6 +526,7 @@ class SqliteEvaluationRepository:
                     scope_id,
                     finding_id,
                     claim_id,
+                    finding_fingerprint,
                     review_status,
                     issue_type,
                     note,
@@ -551,6 +555,7 @@ class SqliteEvaluationRepository:
                     scope_id,
                     finding_id,
                     claim_id,
+                    finding_fingerprint,
                     curated_claim_type,
                     curated_status,
                     curated_statement,
@@ -567,13 +572,14 @@ class SqliteEvaluationRepository:
                     reviewer,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(curation_id) DO UPDATE SET
                     collection_id = excluded.collection_id,
                     scope_type = excluded.scope_type,
                     scope_id = excluded.scope_id,
                     finding_id = excluded.finding_id,
                     claim_id = excluded.claim_id,
+                    finding_fingerprint = excluded.finding_fingerprint,
                     curated_claim_type = excluded.curated_claim_type,
                     curated_status = excluded.curated_status,
                     curated_statement = excluded.curated_statement,
@@ -597,6 +603,7 @@ class SqliteEvaluationRepository:
                     curation.scope_id,
                     curation.finding_id,
                     curation.claim_id,
+                    curation.finding_fingerprint,
                     curation.curated_claim_type,
                     curation.curated_status,
                     curation.curated_statement,
@@ -650,6 +657,7 @@ class SqliteEvaluationRepository:
                     scope_id,
                     finding_id,
                     claim_id,
+                    finding_fingerprint,
                     curated_claim_type,
                     curated_status,
                     curated_statement,
@@ -808,6 +816,7 @@ class SqliteEvaluationRepository:
                     scope_id TEXT NOT NULL,
                     finding_id TEXT,
                     claim_id TEXT,
+                    finding_fingerprint TEXT,
                     review_status TEXT NOT NULL,
                     issue_type TEXT NOT NULL,
                     note TEXT,
@@ -832,6 +841,7 @@ class SqliteEvaluationRepository:
                     scope_id TEXT NOT NULL,
                     finding_id TEXT,
                     claim_id TEXT,
+                    finding_fingerprint TEXT,
                     curated_claim_type TEXT NOT NULL,
                     curated_status TEXT NOT NULL,
                     curated_statement TEXT NOT NULL,
@@ -868,8 +878,20 @@ class SqliteEvaluationRepository:
             )
             self._ensure_column(
                 connection,
+                "research_understanding_feedback",
+                "finding_fingerprint",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
                 "research_understanding_curations",
                 "finding_id",
+                "TEXT",
+            )
+            self._ensure_column(
+                connection,
+                "research_understanding_curations",
+                "finding_fingerprint",
                 "TEXT",
             )
             self._ensure_column(
@@ -1063,6 +1085,7 @@ class SqliteEvaluationRepository:
                 "scope_id": row["scope_id"],
                 "finding_id": row["finding_id"],
                 "claim_id": row["claim_id"],
+                "finding_fingerprint": row["finding_fingerprint"],
                 "review_status": row["review_status"],
                 "issue_type": row["issue_type"],
                 "note": row["note"],
@@ -1080,6 +1103,7 @@ class SqliteEvaluationRepository:
                 "scope_id": row["scope_id"],
                 "finding_id": row["finding_id"],
                 "claim_id": row["claim_id"],
+                "finding_fingerprint": row["finding_fingerprint"],
                 "curated_claim_type": row["curated_claim_type"],
                 "curated_status": row["curated_status"],
                 "curated_statement": row["curated_statement"],

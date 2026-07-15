@@ -374,6 +374,7 @@ class ResearchUnderstandingFeedbackResponse(BaseModel):
     scope_id: str
     finding_id: str
     claim_id: str | None = None
+    finding_fingerprint: str | None = None
     review_status: ResearchUnderstandingFeedbackStatus
     issue_type: ResearchUnderstandingFeedbackIssueType
     note: str | None = None
@@ -422,6 +423,7 @@ class ResearchUnderstandingCurationResponse(BaseModel):
     scope_id: str
     finding_id: str
     claim_id: str | None = None
+    finding_fingerprint: str | None = None
     curated_claim_type: ClaimType
     curated_status: ClaimStatus
     curated_statement: str
@@ -563,6 +565,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     scope_id: str
     finding_id: str
     claim_id: str | None = None
+    finding_fingerprint: str
     label_status: ResearchUnderstandingDatasetLabelStatus
     dataset_use_status: ResearchUnderstandingDatasetUseStatus = Field(
         default="review_candidate"

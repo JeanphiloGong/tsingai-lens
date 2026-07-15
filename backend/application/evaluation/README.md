@@ -45,7 +45,10 @@ artifacts.
   `training_ready` samples. Quality summaries include sorted top diagnostics
   for error categories, issue types, review reasons, and system warnings so
   expert labels can directly guide evaluation, prompt repair, or fine-tuning
-  data selection.
+  data selection. Feedback and curation records bind to the exact reviewed
+  Finding fingerprint; when statement, research axes, evidence binding, or
+  review risks change, the historical record remains auditable but no longer
+  contributes gold, training-ready, or protocol-ready state.
 - `research_understanding_review_import_service.py`
   Validates and imports expert review decision rows into feedback or curation
   records. CLI and future API entry points should call this service so

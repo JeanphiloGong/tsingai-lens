@@ -367,6 +367,7 @@ class ResearchUnderstandingFeedback:
     scope_id: str
     finding_id: str
     claim_id: str | None
+    finding_fingerprint: str | None
     review_status: str
     issue_type: str
     note: str | None
@@ -382,6 +383,7 @@ class ResearchUnderstandingFeedback:
             scope_id=_normalize_text(payload.get("scope_id")) or "",
             finding_id=_normalize_text(payload.get("finding_id")) or "",
             claim_id=_normalize_text(payload.get("claim_id")),
+            finding_fingerprint=_normalize_text(payload.get("finding_fingerprint")),
             review_status=_normalize_choice(
                 payload.get("review_status"),
                 allowed=RESEARCH_UNDERSTANDING_REVIEW_STATUSES,
@@ -405,6 +407,7 @@ class ResearchUnderstandingFeedback:
             "scope_id": self.scope_id,
             "finding_id": self.finding_id,
             "claim_id": self.claim_id,
+            "finding_fingerprint": self.finding_fingerprint,
             "review_status": self.review_status,
             "issue_type": self.issue_type,
             "note": self.note,
@@ -421,6 +424,7 @@ class ResearchUnderstandingCuration:
     scope_id: str
     finding_id: str
     claim_id: str | None
+    finding_fingerprint: str | None
     curated_claim_type: str
     curated_status: str
     curated_statement: str
@@ -446,6 +450,7 @@ class ResearchUnderstandingCuration:
             scope_id=_normalize_text(payload.get("scope_id")) or "",
             finding_id=_normalize_text(payload.get("finding_id")) or "",
             claim_id=_normalize_text(payload.get("claim_id")),
+            finding_fingerprint=_normalize_text(payload.get("finding_fingerprint")),
             curated_claim_type=_normalize_choice(
                 payload.get("curated_claim_type"),
                 allowed=RESEARCH_UNDERSTANDING_CLAIM_TYPES,
@@ -481,6 +486,7 @@ class ResearchUnderstandingCuration:
             "scope_id": self.scope_id,
             "finding_id": self.finding_id,
             "claim_id": self.claim_id,
+            "finding_fingerprint": self.finding_fingerprint,
             "curated_claim_type": self.curated_claim_type,
             "curated_status": self.curated_status,
             "curated_statement": self.curated_statement,

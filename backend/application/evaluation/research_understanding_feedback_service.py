@@ -108,6 +108,13 @@ class ResearchUnderstandingFeedbackService:
         note: str | None = None,
         reviewer: str | None = None,
     ) -> ResearchUnderstandingFeedback:
+        finding = self._current_finding(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            finding_id=finding_id,
+            claim_id=claim_id,
+        )
         created_at = _now_iso()
         feedback = ResearchUnderstandingFeedback.from_mapping(
             {
@@ -127,6 +134,7 @@ class ResearchUnderstandingFeedbackService:
                 "scope_id": scope_id,
                 "finding_id": finding_id,
                 "claim_id": claim_id,
+                "finding_fingerprint": _finding_fingerprint(finding),
                 "review_status": review_status,
                 "issue_type": issue_type,
                 "note": note,
@@ -178,6 +186,13 @@ class ResearchUnderstandingFeedbackService:
         note: str | None = None,
         reviewer: str | None = None,
     ) -> ResearchUnderstandingCuration:
+        finding = self._current_finding(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            finding_id=finding_id,
+            claim_id=claim_id,
+        )
         updated_at = _now_iso()
         curation = ResearchUnderstandingCuration.from_mapping(
             {
@@ -192,6 +207,7 @@ class ResearchUnderstandingFeedbackService:
                 "scope_id": scope_id,
                 "finding_id": finding_id,
                 "claim_id": claim_id,
+                "finding_fingerprint": _finding_fingerprint(finding),
                 "curated_claim_type": curated_claim_type,
                 "curated_status": curated_status,
                 "curated_statement": curated_statement,
@@ -237,10 +253,22 @@ class ResearchUnderstandingFeedbackService:
         scope_type: str,
         scope_id: str,
     ) -> dict[str, object]:
-        curations = self.list_curations(
+        raw_curations = self.list_curations(
             collection_id=collection_id,
             scope_type=scope_type,
             scope_id=scope_id,
+        )
+        current_fingerprints = self._current_finding_fingerprints(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        curations = tuple(
+            curation
+            for curation in raw_curations
+            if curation.finding_fingerprint
+            and curation.finding_fingerprint
+            == current_fingerprints.get(curation.finding_id)
         )
         items = [
             {
@@ -253,6 +281,7 @@ class ResearchUnderstandingFeedbackService:
                 "payload": {
                     "finding_id": curation.finding_id,
                     "claim_id": curation.claim_id,
+                    "finding_fingerprint": curation.finding_fingerprint,
                     "claim_type": curation.curated_claim_type,
                     "status": curation.curated_status,
                     "statement": curation.curated_statement,
@@ -275,6 +304,7 @@ class ResearchUnderstandingFeedbackService:
                     "reviewer": curation.reviewer,
                     "note": curation.note,
                     "updated_at": curation.updated_at,
+                    "finding_fingerprint": curation.finding_fingerprint,
                 },
             }
             for curation in curations
@@ -552,6 +582,66 @@ class ResearchUnderstandingFeedbackService:
             for finding in self._finding_records(understanding_record)
         ]
 
+    def _current_finding(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+        finding_id: str,
+        claim_id: str | None,
+    ) -> Mapping[str, Any]:
+        findings = self._current_findings(
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        for finding in findings:
+            if _text(finding.get("finding_id")) != finding_id:
+                continue
+            current_claim_id = _text(finding.get("claim_id"))
+            if claim_id and current_claim_id and claim_id != current_claim_id:
+                raise ValueError("claim_id does not match the current finding")
+            return finding
+        raise ValueError("finding_id is not present in the current research understanding")
+
+    def _current_findings(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> tuple[Mapping[str, Any], ...]:
+        understanding = self.core_fact_repository.read_research_understanding(
+            collection_id,
+            scope_type,
+            scope_id,
+        )
+        if understanding is None:
+            return ()
+        understanding_record = (
+            self.research_understanding_service.with_presentation(understanding)
+            or understanding.to_record()
+        )
+        return self._finding_records(understanding_record)
+
+    def _current_finding_fingerprints(
+        self,
+        *,
+        collection_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> dict[str, str]:
+        return {
+            finding_id: _finding_fingerprint(finding)
+            for finding in self._current_findings(
+                collection_id=collection_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
+            if (finding_id := _text(finding.get("finding_id")))
+        }
+
     def _dataset_sample(
         self,
         *,
@@ -571,17 +661,16 @@ class ResearchUnderstandingFeedbackService:
     ) -> dict[str, object]:
         finding_id = _text(finding.get("finding_id")) or _sample_id("finding", finding)
         claim_id = _text(finding.get("claim_id"))
+        finding_fingerprint = _finding_fingerprint(finding)
         raw_feedback = _feedback_for(feedback_index, finding_id, claim_id)
         raw_curations = _curations_for(curation_index, finding_id, claim_id)
         feedback = _aligned_feedback_for_current_finding(
             raw_feedback,
-            finding=finding,
-            finding_id=finding_id,
+            finding_fingerprint=finding_fingerprint,
         )
         curations = _aligned_curations_for_current_finding(
             raw_curations,
-            finding=finding,
-            finding_id=finding_id,
+            finding_fingerprint=finding_fingerprint,
         )
         curation = curations[0] if curations else None
         label_status = _label_status(feedback, curation)
@@ -722,6 +811,7 @@ class ResearchUnderstandingFeedbackService:
             "scope_id": scope_id,
             "finding_id": finding_id,
             "claim_id": claim_id,
+            "finding_fingerprint": finding_fingerprint,
             "label_status": label_status,
             "dataset_use_status": dataset_use_status,
             "presentation_bucket": presentation_bucket,
@@ -943,97 +1033,83 @@ def _presentation_bucket_for_finding(
 def _aligned_feedback_for_current_finding(
     records: tuple[ResearchUnderstandingFeedback, ...],
     *,
-    finding: Mapping[str, Any],
-    finding_id: str,
+    finding_fingerprint: str,
 ) -> tuple[ResearchUnderstandingFeedback, ...]:
-    aligned: list[ResearchUnderstandingFeedback] = []
-    has_exact_rejecting_feedback = any(
-        record.finding_id == finding_id
-        and (
-            record.review_status == "incorrect"
-            or record.issue_type in _REJECTING_ISSUE_TYPES
-        )
+    return tuple(
+        record
         for record in records
+        if record.finding_fingerprint == finding_fingerprint
     )
-    for record in records:
-        if record.finding_id == finding_id:
-            aligned.append(record)
-            continue
-        if record.finding_id:
-            continue
-        if has_exact_rejecting_feedback:
-            continue
-        if _claim_record_matches_current_finding(
-            finding,
-            review_status=record.review_status,
-            issue_type=record.issue_type,
-            evidence_ref_ids=(),
-            statement=None,
-        ):
-            aligned.append(record)
-    return tuple(aligned)
 
 
 def _aligned_curations_for_current_finding(
     records: tuple[ResearchUnderstandingCuration, ...],
     *,
-    finding: Mapping[str, Any],
-    finding_id: str,
+    finding_fingerprint: str,
 ) -> tuple[ResearchUnderstandingCuration, ...]:
-    aligned: list[ResearchUnderstandingCuration] = []
-    for record in records:
-        if record.finding_id == finding_id:
-            aligned.append(record)
-            continue
-        if record.finding_id:
-            continue
-        if _claim_record_matches_current_finding(
-            finding,
-            review_status=record.curated_review_status,
-            issue_type=None,
-            evidence_ref_ids=record.curated_evidence_ref_ids,
-            statement=record.curated_statement,
-        ):
-            aligned.append(record)
-    return tuple(aligned)
-
-
-def _claim_record_matches_current_finding(
-    finding: Mapping[str, Any],
-    *,
-    review_status: str | None,
-    issue_type: str | None,
-    evidence_ref_ids: tuple[str, ...] | list[str],
-    statement: str | None,
-) -> bool:
-    current_refs = set(_strings(finding.get("evidence_ref_ids")))
-    for refs in _mapping(finding.get("evidence_bundle")).values():
-        current_refs.update(_strings(refs))
-    if current_refs and current_refs & set(_strings(evidence_ref_ids)):
-        return True
-    statement_terms = set(_meaningful_label_terms(statement))
-    current_terms = set(
-        _meaningful_label_terms(
-            " ".join(
-                value
-                for value in (
-                    _text(finding.get("title")),
-                    _text(finding.get("statement")),
-                    *_strings(finding.get("variables")),
-                    *_strings(finding.get("outcomes")),
-                )
-                if value
-            )
-        )
+    return tuple(
+        record
+        for record in records
+        if record.finding_fingerprint == finding_fingerprint
     )
-    if statement_terms and current_terms and len(statement_terms & current_terms) >= 2:
-        return True
-    current_grade = _text(finding.get("support_grade")) or ""
-    if current_grade == "insufficient":
-        return False
-    if (_text(issue_type) or "none") in _REJECTING_ISSUE_TYPES:
-        return True
-    return _text(review_status) in {"correct", "partial", "unclear", "incorrect"}
+
+
+def _finding_fingerprint(finding: Mapping[str, Any]) -> str:
+    semantic_fields = {
+        key: finding.get(key)
+        for key in (
+            "finding_id",
+            "claim_id",
+            "title",
+            "statement",
+            "variables",
+            "mediators",
+            "outcomes",
+            "direction",
+            "scope_summary",
+            "support_grade",
+            "review_status",
+            "paper_count",
+            "evidence_ref_ids",
+            "context_ids",
+            "relation_ids",
+            "evidence_bundle",
+            "comparison_summary",
+            "generalization_status",
+            "generalization_note",
+            "review_reasons",
+            "warnings",
+        )
+    }
+    payload = json.dumps(
+        _canonical_fingerprint_value(semantic_fields),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return "finding.v1:" + sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _canonical_fingerprint_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_fingerprint_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, list | tuple | set | frozenset):
+        items = [_canonical_fingerprint_value(item) for item in value]
+        return sorted(
+            items,
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", value).strip()
+    return value
 
 
 _LABEL_TERM_STOPWORDS = frozenset(
@@ -1066,22 +1142,6 @@ _LABEL_TERM_STOPWORDS = frozenset(
         "with",
     }
 )
-
-
-def _meaningful_label_terms(value: str | None) -> tuple[str, ...]:
-    text = _text(value)
-    if not text:
-        return ()
-    terms: list[str] = []
-    seen: set[str] = set()
-    for raw_term in re.split(r"[^a-z0-9]+", text.lower()):
-        if len(raw_term) < 3 or raw_term in _LABEL_TERM_STOPWORDS:
-            continue
-        if raw_term in seen:
-            continue
-        seen.add(raw_term)
-        terms.append(raw_term)
-    return tuple(terms)
 
 
 def _dataset_quality_summary(items: list[dict[str, object]]) -> dict[str, object]:

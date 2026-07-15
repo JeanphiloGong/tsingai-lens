@@ -97,6 +97,28 @@ class FakeEvaluationRepository:
     def upsert_evaluation_run(self, run) -> None:
         self.run = run
 
+    def upsert_research_understanding_feedback(self, feedback):
+        self.feedback = (
+            feedback,
+            *(
+                item
+                for item in getattr(self, "feedback", ())
+                if item.feedback_id != feedback.feedback_id
+            ),
+        )
+        return feedback
+
+    def upsert_research_understanding_curation(self, curation):
+        self.curations = (
+            curation,
+            *(
+                item
+                for item in getattr(self, "curations", ())
+                if item.curation_id != curation.curation_id
+            ),
+        )
+        return curation
+
     def list_research_understanding_curations(
         self,
         collection_id: str,
@@ -438,6 +460,39 @@ def _sample_understanding() -> ResearchUnderstanding:
     )
 
 
+def _finding_fingerprint_for(record: dict, finding_id: str) -> str | None:
+    findings = record.get("presentation", {}).get("findings", [])
+    finding = next(
+        (item for item in findings if item.get("finding_id") == finding_id),
+        None,
+    )
+    return ruf_service._finding_fingerprint(finding) if finding else None
+
+
+def _feedback_record(payload: dict) -> ResearchUnderstandingFeedback:
+    current = dict(payload)
+    if "finding_fingerprint" not in current:
+        fingerprint = _finding_fingerprint_for(
+            _sample_understanding().to_record(),
+            str(current.get("finding_id") or ""),
+        )
+        if fingerprint:
+            current["finding_fingerprint"] = fingerprint
+    return ResearchUnderstandingFeedback.from_mapping(current)
+
+
+def _curation_record(payload: dict) -> ResearchUnderstandingCuration:
+    current = dict(payload)
+    if "finding_fingerprint" not in current:
+        fingerprint = _finding_fingerprint_for(
+            _sample_understanding().to_record(),
+            str(current.get("finding_id") or ""),
+        )
+        if fingerprint:
+            current["finding_fingerprint"] = fingerprint
+    return ResearchUnderstandingCuration.from_mapping(current)
+
+
 def test_evaluation_gold_service_registers_gold_set_for_collection():
     repository = FakeEvaluationRepository()
     service = EvaluationGoldService(
@@ -507,7 +562,7 @@ def test_evaluation_gold_service_rejects_gold_item_outside_collection():
 def test_research_understanding_feedback_service_exports_curation_gold_draft():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-abc123",
                 "collection_id": "col-gold",
@@ -533,7 +588,11 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
             }
         ),
     )
-    service = ResearchUnderstandingFeedbackService(evaluation_repository=repository)
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
 
     draft = service.export_gold_draft(
         collection_id="col-gold",
@@ -550,6 +609,10 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
     assert item["payload"] == {
         "finding_id": "finding-1",
         "claim_id": "claim-1",
+        "finding_fingerprint": _finding_fingerprint_for(
+            _sample_understanding().to_record(),
+            "finding-1",
+        ),
         "claim_type": "mechanism",
         "status": "limited",
         "statement": "Annealing mechanism evidence remains limited.",
@@ -568,12 +631,50 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
         {"evidence_ref_id": "ev-2"},
     ]
     assert item["metadata"]["curation_id"] == "ruc-abc123"
+    assert item["payload"]["finding_fingerprint"].startswith("finding.v1:")
+
+
+def test_research_understanding_feedback_service_excludes_unversioned_gold_draft_curation():
+    repository = FakeEvaluationRepository()
+    repository.curations = (
+        ResearchUnderstandingCuration.from_mapping(
+            {
+                "curation_id": "ruc-unversioned",
+                "collection_id": "col-gold",
+                "scope_type": "goal",
+                "scope_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "curated_claim_type": "finding",
+                "curated_status": "supported",
+                "curated_statement": "Preheating improves ductility.",
+                "curated_evidence_ref_ids": ["ev-1"],
+                "curated_context_ids": ["ctx-1"],
+                "reviewer": "materials-expert",
+                "updated_at": "2026-06-18T09:00:00+00:00",
+            }
+        ),
+    )
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    draft = service.export_gold_draft(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+
+    assert draft["item_count"] == 0
+    assert draft["items"] == []
 
 
 def test_research_understanding_feedback_service_exports_dataset_samples():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
@@ -600,7 +701,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         ),
     )
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-partial",
                 "collection_id": "col-gold",
@@ -615,7 +716,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
                 "created_at": "2026-06-18T10:00:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-wrong",
                 "collection_id": "col-gold",
@@ -1329,7 +1430,7 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
     }
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-corrosion",
                 "collection_id": "col-gold",
@@ -1337,6 +1438,10 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
                 "scope_id": "goal-1",
                 "finding_id": "finding-corrosion",
                 "claim_id": "claim-corrosion",
+                "finding_fingerprint": _finding_fingerprint_for(
+                    projected,
+                    "finding-corrosion",
+                ),
                 "curated_claim_type": "finding",
                 "curated_status": "supported",
                 "curated_statement": (
@@ -1505,7 +1610,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
     }
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-corrosion",
                 "collection_id": "col-gold",
@@ -1513,6 +1618,10 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
                 "scope_id": "goal-1",
                 "finding_id": "finding-corrosion",
                 "claim_id": "claim-corrosion",
+                "finding_fingerprint": _finding_fingerprint_for(
+                    projected,
+                    "finding-corrosion",
+                ),
                 "curated_claim_type": "finding",
                 "curated_status": "supported",
                 "curated_statement": (
@@ -1570,7 +1679,7 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
     projected["presentation"]["findings"][1]["support_grade"] = "insufficient"
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-stale-correct",
                 "collection_id": "col-gold",
@@ -1610,13 +1719,74 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
     assert dataset["quality_summary"]["accepted_system_sample_count"] == 0
 
 
-def test_research_understanding_feedback_service_current_label_alignment_keeps_exact_finding_rejection():
+def test_research_understanding_feedback_service_invalidates_review_when_finding_content_changes():
+    stored = _sample_understanding()
+    projected = stored.to_record()
+    repository = FakeEvaluationRepository()
+    projection_service = FakeResearchUnderstandingProjectionService(projected)
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=repository,
+        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_service=projection_service,
+    )
+
+    feedback = service.record_feedback(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        finding_id="finding-2",
+        claim_id="claim-2",
+        review_status="correct",
+        issue_type="none",
+        reviewer="materials-expert",
+    )
+    reviewed = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+    reviewed_sample = next(
+        item for item in reviewed["items"] if item["finding_id"] == "finding-2"
+    )
+
+    projected["presentation"]["findings"][1]["statement"] = (
+        "Laser power and scan speed changed together across the VED groups, so the "
+        "comparison does not isolate a VED-only effect."
+    )
+    projected["presentation"]["findings"][1]["variables"] = [
+        "coupled PBF-LB parameter sets"
+    ]
+    projected["presentation"]["findings"][1]["warnings"] = [
+        "single_variable_effect_not_isolated"
+    ]
+    current = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+    )
+    current_sample = next(
+        item for item in current["items"] if item["finding_id"] == "finding-2"
+    )
+
+    assert feedback.finding_fingerprint == reviewed_sample["finding_fingerprint"]
+    assert reviewed_sample["label_status"] == "gold"
+    assert reviewed_sample["dataset_use_status"] == "training_ready"
+    assert current_sample["finding_fingerprint"] != feedback.finding_fingerprint
+    assert current_sample["label_status"] == "candidate"
+    assert current_sample["dataset_use_status"] == "review_candidate"
+    assert current_sample["feedback_refs"] == []
+    assert current_sample["metadata"]["ignored_feedback_refs"] == [
+        feedback.to_record()
+    ]
+
+
+def test_research_understanding_feedback_service_invalidates_rejection_when_finding_content_changes():
     stored = _sample_understanding()
     projected = stored.to_record()
     projected["presentation"]["findings"][1]["support_grade"] = "insufficient"
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-stale-correct",
                 "collection_id": "col-gold",
@@ -1629,7 +1799,7 @@ def test_research_understanding_feedback_service_current_label_alignment_keeps_e
                 "created_at": "2026-06-18T10:00:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-exact-wrong-context",
                 "collection_id": "col-gold",
@@ -1659,24 +1829,20 @@ def test_research_understanding_feedback_service_current_label_alignment_keeps_e
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     rejected_sample = by_finding["finding-2"]
-    assert rejected_sample["label_status"] == "rejected"
-    assert [item["feedback_id"] for item in rejected_sample["feedback_refs"]] == [
-        "ruf-exact-wrong-context"
-    ]
-    assert rejected_sample["metadata"]["ignored_feedback_refs"][0]["feedback_id"] == (
-        "ruf-stale-correct"
-    )
-    assert dataset["quality_summary"]["by_quality_decision"] == {
-        "candidate": 3,
-        "rejected_system": 1,
-    }
-    assert dataset["quality_summary"]["system_error_count"] == 1
+    assert rejected_sample["label_status"] == "candidate"
+    assert rejected_sample["feedback_refs"] == []
+    assert {
+        item["feedback_id"]
+        for item in rejected_sample["metadata"]["ignored_feedback_refs"]
+    } == {"ruf-stale-correct", "ruf-exact-wrong-context"}
+    assert dataset["quality_summary"]["by_quality_decision"] == {"candidate": 4}
+    assert dataset["quality_summary"]["system_error_count"] == 0
 
 
-def test_research_understanding_feedback_service_current_label_alignment_aligns_claim_curation_by_evidence_overlap():
+def test_research_understanding_feedback_service_ignores_unversioned_claim_curation():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-claim-evidence-overlap",
                 "collection_id": "col-gold",
@@ -1718,24 +1884,20 @@ def test_research_understanding_feedback_service_current_label_alignment_aligns_
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     curated_sample = by_finding["finding-3"]
-    assert curated_sample["label_status"] == "gold"
-    assert curated_sample["expert_target"]["source"] == "curation"
-    assert curated_sample["expert_target"]["curation_id"] == (
+    assert curated_sample["label_status"] == "candidate"
+    assert curated_sample["expert_target"] is None
+    assert curated_sample["metadata"]["ignored_curation_refs"][0]["curation_id"] == (
         "ruc-claim-evidence-overlap"
     )
-    assert curated_sample["metadata"]["ignored_curation_refs"] == []
-    assert dataset["quality_summary"]["by_quality_decision"] == {
-        "candidate": 3,
-        "accepted_after_curation_match": 1,
-    }
-    assert dataset["quality_summary"]["accepted_after_curation_match_count"] == 1
+    assert dataset["quality_summary"]["by_quality_decision"] == {"candidate": 4}
+    assert dataset["quality_summary"]["accepted_after_curation_match_count"] == 0
     assert dataset["quality_summary"]["curated_correction_count"] == 0
 
 
 def test_research_understanding_feedback_service_resolved_feedback_does_not_count_as_current_system_error():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-resolved",
                 "collection_id": "col-gold",
@@ -1762,7 +1924,7 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
         ),
     )
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-old-overclaim",
                 "collection_id": "col-gold",
@@ -1808,7 +1970,7 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
 def test_research_understanding_feedback_service_curation_match_keeps_unmatched_curation_as_correction():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-unmatched",
                 "collection_id": "col-gold",
@@ -1864,7 +2026,7 @@ def test_research_understanding_feedback_service_curation_match_keeps_unmatched_
 def test_research_understanding_feedback_service_filters_dataset_by_label():
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-wrong",
                 "collection_id": "col-gold",
@@ -1917,7 +2079,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
 def test_research_understanding_feedback_service_counts_material_error_issue_types():
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-wrong-variable",
                 "collection_id": "col-gold",
@@ -1932,7 +2094,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
                 "created_at": "2026-06-18T10:30:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-wrong-outcome",
                 "collection_id": "col-gold",
@@ -1947,7 +2109,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
                 "created_at": "2026-06-18T10:31:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-wrong-direction",
                 "collection_id": "col-gold",
@@ -1962,7 +2124,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
                 "created_at": "2026-06-18T10:32:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-insufficient-evidence",
                 "collection_id": "col-gold",
@@ -2027,7 +2189,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
 def test_research_understanding_feedback_service_filters_dataset_by_use_status():
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-partial",
                 "collection_id": "col-gold",
@@ -2041,7 +2203,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
                 "created_at": "2026-06-18T10:00:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-wrong",
                 "collection_id": "col-gold",
@@ -2056,7 +2218,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
         ),
     )
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
@@ -2125,7 +2287,7 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
 ):
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
@@ -2186,7 +2348,7 @@ def test_research_understanding_feedback_service_requires_training_message_scope
 ):
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
@@ -2250,7 +2412,7 @@ def test_research_understanding_feedback_service_requires_training_message_scope
 def test_research_understanding_feedback_service_requires_actionable_protocol_inputs():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
@@ -2313,7 +2475,7 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
     goal_two = ResearchUnderstanding.from_mapping(goal_two_record)
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-goal-1",
                 "collection_id": "col-gold",
@@ -2327,7 +2489,7 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
                 "created_at": "2026-06-18T10:00:00+00:00",
             }
         ),
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-goal-2",
                 "collection_id": "col-gold",
@@ -2377,7 +2539,7 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
 def test_research_understanding_feedback_service_keeps_anonymous_correct_feedback_silver():
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-anonymous-correct",
                 "collection_id": "col-gold",
@@ -2423,7 +2585,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
 def test_research_understanding_feedback_service_keeps_ai_partial_feedback_reviewable():
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-ai-partial",
                 "collection_id": "col-gold",
@@ -2465,7 +2627,7 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
 def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silver():
     repository = FakeEvaluationRepository()
     repository.feedback = (
-        ResearchUnderstandingFeedback.from_mapping(
+        _feedback_record(
             {
                 "feedback_id": "ruf-ai-correct",
                 "collection_id": "col-gold",
@@ -2512,7 +2674,7 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
 def test_research_understanding_feedback_service_keeps_ai_curation_silver():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-ai-1",
                 "collection_id": "col-gold",
@@ -2567,7 +2729,7 @@ def test_research_understanding_feedback_service_keeps_ai_curation_silver():
 def test_research_understanding_feedback_service_keeps_anonymous_curation_silver():
     repository = FakeEvaluationRepository()
     repository.curations = (
-        ResearchUnderstandingCuration.from_mapping(
+        _curation_record(
             {
                 "curation_id": "ruc-anonymous-1",
                 "collection_id": "col-gold",

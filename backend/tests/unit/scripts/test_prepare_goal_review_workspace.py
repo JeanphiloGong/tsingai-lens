@@ -220,6 +220,9 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "expert_action",
         "issue_type",
         "expert_note",
+        "fill_instruction",
+        "accept_rule",
+        "reject_issue_options",
         "corrected_statement",
         "corrected_variables",
         "corrected_mediators",
@@ -250,6 +253,16 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "",
         "",
         "",
+        (
+            "Fill expert_action with accept, reject, correct, or skip. "
+            "Use correct when statement fields or evidence ids need edits."
+        ),
+        "Do not accept directly; correct or reject: table row alignment.",
+        (
+            "evidence_not_grounded; missing_evidence; insufficient_evidence; "
+            "wrong_variable; wrong_outcome; wrong_direction; wrong_context; "
+            "wrong_relation; overclaim; unclear_statement; other"
+        ),
         "",
         "",
         "",
@@ -520,9 +533,9 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
         "expert_action",
         "issue_type",
         "expert_note",
-        "corrected_statement",
+        "fill_instruction",
     ]
-    assert header[11:16] == [
+    assert header[14:19] == [
         "collection_id",
         "priority",
         "goal_id",
@@ -532,6 +545,11 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
     values = rows[1].split("\t")
     row = dict(zip(header, values, strict=True))
     assert row["expert_action"] == ""
+    assert "Fill expert_action with accept, reject, correct, or skip" in row[
+        "fill_instruction"
+    ]
+    assert row["accept_rule"] == "Do not accept directly; correct or reject: table row alignment."
+    assert "wrong_variable" in row["reject_issue_options"]
     assert row["collection_id"] == "col-1"
     assert row["priority"] == "P1 correct/reject: accept blocked"
     assert row["goal_id"] == "goal-1"

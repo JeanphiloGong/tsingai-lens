@@ -29,6 +29,23 @@ EXPERT_NOTE_PROMPTS = {
     "check_mechanism_requirement": "Required: explain mechanism requirement.",
     "resolve_conflict": "Required: explain conflict resolution.",
 }
+REJECT_ISSUE_OPTIONS = (
+    "evidence_not_grounded",
+    "missing_evidence",
+    "insufficient_evidence",
+    "wrong_variable",
+    "wrong_outcome",
+    "wrong_direction",
+    "wrong_context",
+    "wrong_relation",
+    "overclaim",
+    "unclear_statement",
+    "other",
+)
+DECISION_BOARD_FILL_INSTRUCTION = (
+    "Fill expert_action with accept, reject, correct, or skip. "
+    "Use correct when statement fields or evidence ids need edits."
+)
 REVIEW_LABELS = {
     "accept_blockers": "accept blockers",
     "direction_or_scope": "direction or scope",
@@ -535,6 +552,9 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
         "expert_action",
         "issue_type",
         "expert_note",
+        "fill_instruction",
+        "accept_rule",
+        "reject_issue_options",
         "corrected_statement",
         "corrected_variables",
         "corrected_mediators",
@@ -604,6 +624,13 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
                     "",
                     "",
                     "",
+                    DECISION_BOARD_FILL_INSTRUCTION,
+                    _decision_board_accept_rule(
+                        gate,
+                        _mapping(candidate.get("protocol_readiness")),
+                        hint,
+                    ),
+                    "; ".join(REJECT_ISSUE_OPTIONS),
                     "",
                     "",
                     "",
@@ -1424,6 +1451,27 @@ def _unlock_import_note(hint: dict[str, Any], accept_allowed: bool) -> str:
     if not accept_allowed:
         return "accept is rejected while acceptance_gate.accept_allowed=false"
     return "accept imports only after the reviewer changes action from skip"
+
+
+def _decision_board_accept_rule(
+    gate: dict[str, Any],
+    readiness: dict[str, Any],
+    hint: dict[str, Any],
+) -> str:
+    if not bool(gate.get("accept_allowed")):
+        blockers = (
+            _text_list(gate.get("accept_blockers"))
+            or _text_list(gate.get("blocking_missing"))
+            or _text_list(hint.get("why_accept_blocked"))
+            or _text_list(readiness.get("blocking_missing"))
+        )
+        if blockers:
+            return f"Do not accept directly; correct or reject: {_join_values(blockers)}."
+        return "Do not accept directly; use correct or reject."
+    blocking_missing = _text_list(readiness.get("blocking_missing"))
+    if blocking_missing:
+        return f"Accept is unsafe until corrected: {_join_values(blocking_missing)}."
+    return "Accept only if the statement, direction, scope, and cited evidence match."
 
 
 def _table_row_text(row: dict[str, Any], columns: list[str]) -> str:

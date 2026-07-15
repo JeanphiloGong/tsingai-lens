@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from application.goal.experiment_plan_service import ExperimentPlanService
+from domain.goal import ExperimentPlanRecord
 from infra.persistence.sqlite import (
     SqliteExperimentPlanRepository,
     SqliteGoalSessionRepository,
@@ -17,6 +18,35 @@ def _structured_protocol(source_label: str = "Source 1") -> str:
         "Controls: same LPBF parameters except preheating.\n"
         "Risks or limits: single-alloy validation."
     )
+
+
+def _protocol_source_item(
+    *,
+    protocol_source_fingerprint: str = "protocol-source.v1:def",
+    dataset_use_status: str = "training_ready",
+    protocol_status: str = "protocol_ready",
+) -> dict:
+    return {
+        "finding_id": "finding-1",
+        "finding_fingerprint": "finding.v1:abc",
+        "protocol_source_fingerprint": protocol_source_fingerprint,
+        "dataset_use_status": dataset_use_status,
+        "protocol_readiness": {"status": protocol_status},
+        "training_evidence_refs": [{"evidence_ref_id": "ev_1"}],
+    }
+
+
+class _ResearchUnderstandingFeedbackService:
+    def __init__(self, items: list[dict] | None = None) -> None:
+        self.items = list(items if items is not None else [_protocol_source_item()])
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "items": self.items,
+        }
 
 
 def _write_goal_message(
@@ -101,6 +131,9 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
     )
 
     draft = service.create_plan(
@@ -143,7 +176,116 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
             "evidence_ref_ids": ["ev_1"],
         }
     ]
+    assert draft.metadata["source_validity"] == "current"
+    assert draft.metadata["source_validity_reasons"] == []
     assert [plan.plan_id for plan in plans] == [draft.plan_id]
+
+
+def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
+    tmp_path,
+):
+    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    _write_goal_message(
+        goal_session_repository,
+        review_gate="protocol_ready_findings",
+        content=_structured_protocol(),
+    )
+    feedback_service = _ResearchUnderstandingFeedbackService()
+    service = ExperimentPlanService(
+        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=feedback_service,
+    )
+    draft = service.create_plan(
+        collection_id="col_1",
+        goal_id="goal_1",
+        title="Preheating validation matrix",
+        content=_structured_protocol(),
+        source_message_id="msg_1",
+        created_by="expert-a",
+    )
+
+    feedback_service.items = [
+        _protocol_source_item(
+            protocol_source_fingerprint="protocol-source.v1:changed"
+        )
+    ]
+    stale = service.list_plans("col_1", "goal_1")[0]
+
+    assert stale.plan_id == draft.plan_id
+    assert stale.metadata["source_validity"] == "stale"
+    assert stale.metadata["source_validity_reasons"] == ["source_finding_changed"]
+    feedback_service.items = [
+        _protocol_source_item(
+            dataset_use_status="review_candidate",
+            protocol_status="ready_after_review",
+        )
+    ]
+    no_longer_ready = service.list_plans("col_1", "goal_1")[0]
+    assert no_longer_ready.metadata["source_validity"] == "stale"
+    assert no_longer_ready.metadata["source_validity_reasons"] == [
+        "source_finding_no_longer_protocol_ready"
+    ]
+    with pytest.raises(ValueError, match="source Findings are stale or unverified"):
+        service.update_plan(
+            collection_id="col_1",
+            goal_id="goal_1",
+            plan_id=draft.plan_id,
+            title=draft.title,
+            content=draft.content,
+            status="ready_for_review",
+        )
+
+
+def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified(
+    tmp_path,
+):
+    repository = SqliteExperimentPlanRepository(tmp_path / "lens.sqlite")
+    legacy = repository.upsert_plan(
+        ExperimentPlanRecord.from_mapping(
+            {
+                "plan_id": "exp_legacy",
+                "collection_id": "col_1",
+                "goal_id": "goal_1",
+                "title": "Legacy protocol",
+                "content": _structured_protocol(),
+                "status": "draft",
+                "source_message_id": "msg_legacy",
+                "source_links": [
+                    {
+                        "kind": "evidence",
+                        "label": "Source 1",
+                        "href": (
+                            "/collections/col_1/documents/"
+                            "paper-a?evidence_id=ev_1"
+                        ),
+                    }
+                ],
+                "metadata": {
+                    "source": "goal_copilot",
+                    "review_gate": "protocol_ready_findings",
+                    "used_evidence_ids": ["ev_1"],
+                },
+                "created_by": "expert-a",
+                "created_at": "2026-07-01T00:00:00+00:00",
+                "updated_at": "2026-07-01T00:00:00+00:00",
+            }
+        )
+    )
+    service = ExperimentPlanService(
+        repository=repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+    listed = service.list_plans("col_1", "goal_1")[0]
+
+    assert listed.plan_id == legacy.plan_id
+    assert listed.metadata["source_validity"] == "unverified"
+    assert listed.metadata["source_validity_reasons"] == [
+        "source_finding_snapshot_missing"
+    ]
 
 
 def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path):
@@ -156,6 +298,9 @@ def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
     )
 
     with pytest.raises(ValueError, match="structured protocol draft"):
@@ -469,6 +614,9 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
     )
     draft = service.create_plan(
         collection_id="col_1",

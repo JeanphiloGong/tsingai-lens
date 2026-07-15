@@ -30,6 +30,25 @@ def _request(user_id: str = "expert-a"):
     return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
 
+class _ResearchUnderstandingFeedbackService:
+    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
+        return {
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "items": [
+                {
+                    "finding_id": "finding-1",
+                    "finding_fingerprint": "finding.v1:abc",
+                    "protocol_source_fingerprint": "protocol-source.v1:def",
+                    "dataset_use_status": "training_ready",
+                    "protocol_readiness": {"status": "protocol_ready"},
+                    "training_evidence_refs": [{"evidence_ref_id": "ev_1"}],
+                }
+            ],
+        }
+
+
 def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
     repository.write_session(
         {
@@ -93,6 +112,9 @@ def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
     service = ExperimentPlanService(
         repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
         goal_session_repository=goal_session_repository,
+        research_understanding_feedback_service=(
+            _ResearchUnderstandingFeedbackService()
+        ),
     )
     monkeypatch.setattr(
         experiment_plans_controller,
@@ -141,6 +163,8 @@ def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
     assert created.status == "draft"
     assert created.created_by == "expert-a"
     assert created.source_links[0].label == "Source 1"
+    assert created.metadata["source_validity"] == "current"
     assert listed.items[0].plan_id == created.plan_id
+    assert listed.items[0].metadata["source_validity_reasons"] == []
     assert updated.title == "Edited validation matrix"
     assert updated.status == "ready_for_review"

@@ -5,6 +5,7 @@ from hashlib import sha1
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
+from application.evaluation import ResearchUnderstandingFeedbackService
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
 from domain.ports import ExperimentPlanRepository, GoalSessionRepository
 from infra.persistence.factory import (
@@ -36,10 +37,17 @@ class ExperimentPlanService:
         self,
         repository: ExperimentPlanRepository | None = None,
         goal_session_repository: GoalSessionRepository | None = None,
+        research_understanding_feedback_service: (
+            ResearchUnderstandingFeedbackService | None
+        ) = None,
     ) -> None:
         self.repository = repository or build_experiment_plan_repository()
         self.goal_session_repository = (
             goal_session_repository or build_goal_session_repository()
+        )
+        self.research_understanding_feedback_service = (
+            research_understanding_feedback_service
+            or ResearchUnderstandingFeedbackService()
         )
 
     def create_plan(
@@ -66,8 +74,11 @@ class ExperimentPlanService:
         if validated_source is not None:
             source_session, source_message = validated_source
             source_links = [link.to_record() for link in source_message.source_links]
+            source_metadata = dict(metadata or {})
+            source_metadata.pop("source_validity", None)
+            source_metadata.pop("source_validity_reasons", None)
             metadata = {
-                **dict(metadata or {}),
+                **source_metadata,
                 "source": "goal_copilot",
                 "source_session_id": source_session.session_id,
                 "source_mode": source_message.source_mode,
@@ -102,7 +113,13 @@ class ExperimentPlanService:
                 "updated_at": now,
             }
         )
-        return self.repository.upsert_plan(plan)
+        stored = self.repository.upsert_plan(plan)
+        if validated_source is None:
+            return stored
+        return self._with_source_validity(
+            stored,
+            self._current_dataset_items(collection_id, goal_id),
+        )
 
     def _validate_goal_copilot_source(
         self,
@@ -199,7 +216,13 @@ class ExperimentPlanService:
         collection_id: str,
         goal_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]:
-        return self.repository.list_plans(collection_id, goal_id)
+        plans = self.repository.list_plans(collection_id, goal_id)
+        if not any(_is_goal_copilot_plan(plan) for plan in plans):
+            return plans
+        dataset_items = self._current_dataset_items(collection_id, goal_id)
+        return tuple(
+            self._with_source_validity(plan, dataset_items) for plan in plans
+        )
 
     def update_plan(
         self,
@@ -214,15 +237,64 @@ class ExperimentPlanService:
         plan = self.repository.read_plan(collection_id, goal_id, plan_id)
         if plan is None:
             raise ExperimentPlanNotFoundError(collection_id, goal_id, plan_id)
-        if _is_goal_copilot_plan(plan):
+        is_goal_copilot_plan = _is_goal_copilot_plan(plan)
+        dataset_items = None
+        if is_goal_copilot_plan:
             _validate_goal_copilot_plan_edit(plan, content)
+            dataset_items = self._current_dataset_items(collection_id, goal_id)
+            if status == "ready_for_review":
+                checked = self._with_source_validity(
+                    plan,
+                    dataset_items,
+                )
+                if checked.metadata.get("source_validity") != "current":
+                    raise ValueError(
+                        "goal copilot source Findings are stale or unverified"
+                    )
         updated = plan.with_updates(
             title=title,
             content=content,
             status=status,
             updated_at=_now_iso(),
         )
-        return self.repository.upsert_plan(updated)
+        stored = self.repository.upsert_plan(updated)
+        if not is_goal_copilot_plan:
+            return stored
+        return self._with_source_validity(stored, dataset_items)
+
+    def _current_dataset_items(
+        self,
+        collection_id: str,
+        goal_id: str,
+    ) -> tuple[Mapping[str, Any], ...] | None:
+        try:
+            dataset = self.research_understanding_feedback_service.export_dataset(
+                collection_id=collection_id,
+                scope_type="goal",
+                scope_id=goal_id,
+            )
+        except (FileNotFoundError, ValueError):
+            return None
+        items = dataset.get("items") if isinstance(dataset, Mapping) else None
+        if not isinstance(items, list):
+            return None
+        return tuple(item for item in items if isinstance(item, Mapping))
+
+    def _with_source_validity(
+        self,
+        plan: ExperimentPlanRecord,
+        dataset_items: tuple[Mapping[str, Any], ...] | None,
+    ) -> ExperimentPlanRecord:
+        if not _is_goal_copilot_plan(plan):
+            return plan
+        validity, reasons = _source_validity(plan, dataset_items)
+        payload = plan.to_record()
+        payload["metadata"] = {
+            **dict(plan.metadata),
+            "source_validity": validity,
+            "source_validity_reasons": reasons,
+        }
+        return ExperimentPlanRecord.from_mapping(payload)
 
 
 def _now_iso() -> str:
@@ -246,6 +318,79 @@ def _is_goal_copilot_plan(plan: ExperimentPlanRecord) -> bool:
         or plan.metadata.get("source") == "goal_copilot"
         or plan.metadata.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
     )
+
+
+def _source_validity(
+    plan: ExperimentPlanRecord,
+    dataset_items: tuple[Mapping[str, Any], ...] | None,
+) -> tuple[str, list[str]]:
+    if dataset_items is None:
+        return "unverified", ["source_dataset_unavailable"]
+    current_by_finding_id = {
+        finding_id: item
+        for item in dataset_items
+        if (finding_id := _text(item.get("finding_id")))
+    }
+    source_findings = [
+        item
+        for item in plan.metadata.get("source_findings", [])
+        if isinstance(item, Mapping)
+        and _text(item.get("finding_id"))
+        and _text(item.get("protocol_source_fingerprint"))
+    ]
+    if not source_findings:
+        used_evidence_ids = {
+            evidence_id
+            for raw_evidence_id in plan.metadata.get("used_evidence_ids", [])
+            if (evidence_id := _text(raw_evidence_id))
+        }
+        current_protocol_evidence_ids = {
+            evidence_id
+            for item in dataset_items
+            if _is_protocol_ready_item(item)
+            for evidence in item.get("training_evidence_refs", [])
+            if isinstance(evidence, Mapping)
+            if (evidence_id := _text(evidence.get("evidence_ref_id")))
+        }
+        if used_evidence_ids and not used_evidence_ids.issubset(
+            current_protocol_evidence_ids
+        ):
+            return "stale", ["source_findings_no_longer_protocol_ready"]
+        return "unverified", ["source_finding_snapshot_missing"]
+
+    reasons: list[str] = []
+    for source_finding in source_findings:
+        finding_id = _text(source_finding.get("finding_id"))
+        current = current_by_finding_id.get(finding_id)
+        if current is None:
+            reasons.append("source_finding_missing")
+            continue
+        if not _is_protocol_ready_item(current):
+            reasons.append("source_finding_no_longer_protocol_ready")
+            continue
+        if (
+            _text(current.get("finding_fingerprint"))
+            != _text(source_finding.get("finding_fingerprint"))
+            or _text(current.get("protocol_source_fingerprint"))
+            != _text(source_finding.get("protocol_source_fingerprint"))
+        ):
+            reasons.append("source_finding_changed")
+    if reasons:
+        return "stale", list(dict.fromkeys(reasons))
+    return "current", []
+
+
+def _is_protocol_ready_item(item: Mapping[str, Any]) -> bool:
+    readiness = item.get("protocol_readiness")
+    return (
+        item.get("dataset_use_status") == "training_ready"
+        and isinstance(readiness, Mapping)
+        and readiness.get("status") == "protocol_ready"
+    )
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _validate_goal_copilot_plan_edit(

@@ -234,6 +234,13 @@ assistant message。该 message 必须是 `collection_grounded`，包含 evidenc
 `metadata.source_findings`。保存的 `content` 必须保留可见 source label
 （例如 `[Source 1]`）和结构化实验方案小节；不带 `source_message_id` 的请求视为专家手写草稿，可以直接保存。
 
+读取或更新 Goal Copilot 方案时，后端会将 `metadata.source_findings` 与当前 goal
+dataset 比较，并在响应 metadata 中附加 `source_validity=current | stale | unverified`
+和 `source_validity_reasons`。Finding/专家目标/训练证据版本变化、Finding 不再
+`protocol_ready` 或已删除时为 `stale`；旧方案缺少来源快照或当前 dataset 无法读取时为
+`unverified`。这些方案仍返回供审计和降级为草稿编辑，但只有 `current` 方案可以更新为
+`ready_for_review`。
+
 `source_mode` 可选值：
 
 - `collection_grounded`

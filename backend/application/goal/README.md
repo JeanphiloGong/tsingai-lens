@@ -39,7 +39,9 @@ own database connections, SQL, schema initialization, or row encoding.
   a draft references a chat message, the service verifies that the message is a
   same-user, same-goal, collection-grounded assistant answer with auditable
   evidence links, exact protocol-source Finding fingerprints, and no
-  review-blocking warnings. These drafts are
+  review-blocking warnings. Plan reads compare those fingerprints with the
+  current goal dataset; stale or unverified Copilot drafts remain auditable but
+  cannot enter `ready_for_review`. These drafts are
   human-editable Goal Consumer outputs, not replacements for the conditional
   Protocol browsing branch.
 - `brief_service.py`

@@ -187,6 +187,7 @@
 	let datasetError = '';
 	let datasetRequestSequence = 0;
 	let datasetPanelOpen = false;
+	let reviewImportPanel: HTMLDivElement | null = null;
 	let collectionDatasetSummary: ResearchUnderstandingDataset | null = null;
 	let collectionDatasetScopeKey = '';
 	let collectionDatasetLoading = false;
@@ -2918,6 +2919,7 @@
 		if (currentCollectionDatasetScopeKey && currentCollectionDatasetScopeKey !== collectionDatasetScopeKey) {
 			void loadCollectionDatasetSummary(currentCollectionDatasetScopeKey);
 		}
+		void tick().then(() => reviewImportPanel?.scrollIntoView({ block: 'start' }));
 	}
 
 	function axisCoverageStatusLabel(status: ResearchUnderstandingAxisCoverageItem['status']) {
@@ -4297,7 +4299,10 @@
 										</a>
 									{/if}
 								</div>
-								<div class="research-understanding-workbench__review-import">
+								<div
+									class="research-understanding-workbench__review-import"
+									bind:this={reviewImportPanel}
+								>
 									<div class="research-understanding-workbench__review-import-heading">
 										<div>
 											<strong>{$t('research.understanding.reviewImportTitle')}</strong>

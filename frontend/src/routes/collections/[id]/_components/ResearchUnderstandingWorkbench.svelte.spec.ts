@@ -2549,6 +2549,20 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
+	it('opens the review import panel from the review loop dataset action', async () => {
+		render(ResearchUnderstandingWorkbench, {
+			understanding: understandingFixture(),
+			collectionId: 'col_123'
+		});
+
+		await expect.element(browserPage.getByText('Import reviewed decisions')).not.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'Open dataset export' }).click();
+
+		await expect.element(browserPage.getByText('Import reviewed decisions')).toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Reviewed decisions')).toBeInTheDocument();
+	});
+
 	it('shows an expert acceptance checklist for the goal review loop', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),

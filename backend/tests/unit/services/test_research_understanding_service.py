@@ -13328,8 +13328,9 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
                     "predicate": "decreases",
                     "object": "density",
                     "statement": (
-                        "Under laser power 100, scan speed 200 decreased density "
-                        "from 97.83 % (scan speed 100) to 91.84 %."
+                        "Under heat treatment type - and laser power 100, scan "
+                        "speed 200 decreased density from 97.83 % (scan speed "
+                        "100) to 91.84 %."
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_scan_density"],
@@ -13408,7 +13409,8 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
     assert scan_finding["direction"] == "condition-dependent"
     expected_scan_statement = (
         "Selected source table rows show: "
-        "under laser power 100, scan speed changed from 100 mm/s to 200 mm/s "
+        "under as-SLM and laser power 100, scan speed changed from 100 mm/s to "
+        "200 mm/s "
         "while the derived energy density changed from 278 J/mm3 to 139 J/mm3; "
         "density changed from 97.83 % to 91.84 %. This is a condition-specific "
         "table association; the rows do not isolate a causal mechanism."
@@ -13436,19 +13438,29 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
             "label": "scan speed 200 mm/s; derived energy density 139 J/mm3",
             "value": "91.84 %",
         },
-        "controlled_conditions": [{"axis": "laser power", "value": "100"}],
+        "controlled_conditions": [
+            {"axis": "heat treatment condition", "value": "as-SLM"},
+            {"axis": "laser power", "value": "100"},
+        ],
     }
     assert "derived_energy_density_context" in scan_finding["review_reasons"]
     assert "single_variable_effect_not_isolated" not in scan_finding["review_reasons"]
     power_finding = review_by_title["laser power -> density"]
     assert power_finding["variables"] == ["laser power"]
     assert power_finding["direction"] == "condition-dependent"
+    assert "under HIP treatment bundle and scan speed 200" in power_finding[
+        "statement"
+    ]
     assert "laser power changed from 100 W to 120 W" in power_finding["statement"]
     assert (
         "derived energy density changed from 139 J/mm3 to 167 J/mm3"
         in power_finding["statement"]
     )
     assert "derived_energy_density_context" in power_finding["review_reasons"]
+    assert power_finding["comparison_summary"]["controlled_conditions"] == [
+        {"axis": "heat treatment condition", "value": "HIP treatment bundle"},
+        {"axis": "scan speed", "value": "200"},
+    ]
     assert "single_variable_effect_not_isolated" not in power_finding[
         "review_reasons"
     ]

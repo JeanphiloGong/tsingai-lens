@@ -9264,9 +9264,26 @@ class ResearchUnderstandingService:
         baseline = _mapping(summary.get("baseline"))
         observed = _mapping(summary.get("observed"))
         outcome = self._display_axis_label(_text(summary.get("outcome")))
-        controlled_conditions = _mapping_list(summary.get("controlled_conditions"))
+        controlled_conditions = []
+        for item in _mapping_list(summary.get("controlled_conditions")):
+            axis = self._display_axis_label(_text(item.get("axis")))
+            value = _text(item.get("value")) or ""
+            if self._axis_key(axis) == "heat treatment type":
+                controlled_conditions.append(
+                    {
+                        "axis": "heat treatment condition",
+                        "value": self._heat_treatment_bundle_label(value),
+                    }
+                )
+            elif axis and value:
+                controlled_conditions.append({"axis": axis, "value": value})
         condition_text = " and ".join(
-            f"{_text(item.get('axis'))} {_text(item.get('value'))}"
+            (
+                _text(item.get("value")) or ""
+                if self._axis_key(_text(item.get("axis")))
+                == "heat treatment condition"
+                else f"{_text(item.get('axis'))} {_text(item.get('value'))}"
+            )
             for item in controlled_conditions
             if _text(item.get("axis")) and _text(item.get("value"))
         )

@@ -166,6 +166,7 @@ class FakeResearchUnderstandingFeedbackService:
             "metric_profile": "research_understanding_v1",
             "label_status_filter": kwargs["label_status"],
             "dataset_use_status_filter": kwargs["dataset_use_status"],
+            "task_type_filter": kwargs["task_type"],
             "item_count": 1,
             "label_counts": {
                 "candidate": 0,
@@ -460,6 +461,7 @@ class FakeResearchUnderstandingFeedbackService:
             scope_id="goal-1",
             label_status=kwargs["label_status"],
             dataset_use_status=kwargs["dataset_use_status"],
+            task_type=kwargs["task_type"],
         )
         dataset["dataset_id"] = "dataset_col-1_collection_goal_research_understanding"
         dataset["scope_type"] = "collection"
@@ -949,6 +951,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
             scope_id="goal-1",
             label_status="gold",
             dataset_use_status="training_ready",
+            task_type="research_understanding_finding",
             format="json",
         )
     )
@@ -958,6 +961,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.scope_id == "goal-1"
     assert response.label_status_filter == "gold"
     assert response.dataset_use_status_filter == "training_ready"
+    assert response.task_type_filter == "research_understanding_finding"
     assert response.item_count == 1
     assert response.quality_summary.total_samples == 1
     assert response.quality_summary.by_label_status["gold"] == 1
@@ -1007,6 +1011,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
         "scope_id": "goal-1",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+        "task_type": "research_understanding_finding",
     }
 
 
@@ -1025,6 +1030,7 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
             scope_id="goal-1",
             label_status=None,
             dataset_use_status=None,
+            task_type=None,
             format="jsonl",
         )
     )
@@ -1041,6 +1047,7 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": None,
+        "task_type": None,
     }
 
 
@@ -1059,6 +1066,7 @@ def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch
             scope_id="goal-1",
             label_status="gold",
             dataset_use_status="training_ready",
+            task_type=None,
             format="messages_jsonl",
         )
     )
@@ -1078,6 +1086,7 @@ def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch
         "scope_id": "goal-1",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+        "task_type": None,
     }
 
 
@@ -1096,6 +1105,7 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
             scope_id="goal-1",
             label_status="gold",
             dataset_use_status="training_ready",
+            task_type=None,
             format="training_jsonl",
         )
     )
@@ -1130,6 +1140,7 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
         "scope_id": "goal-1",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+        "task_type": None,
     }
 
 
@@ -1148,6 +1159,7 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
             scope_id="goal-1",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="review_jsonl",
         )
     )
@@ -1222,6 +1234,7 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1240,6 +1253,7 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
             scope_id="goal-1",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="decision_template",
         )
     )
@@ -1325,6 +1339,7 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1369,6 +1384,7 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
             scope_id="goal-1",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="decision_board_tsv",
         )
     )
@@ -1417,6 +1433,7 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1435,6 +1452,7 @@ def test_research_understanding_dataset_route_exports_agent_review_prompt(monkey
             scope_id="goal-1",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="agent_review_prompt_jsonl",
         )
     )
@@ -1465,6 +1483,7 @@ def test_research_understanding_dataset_route_exports_agent_review_prompt(monkey
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1483,6 +1502,7 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
             scope_id="goal-1",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="review_packet",
         )
     )
@@ -1515,6 +1535,7 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
         "scope_id": "goal-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1586,6 +1607,7 @@ def test_research_understanding_collection_dataset_route_exports_json(monkeypatc
             scope_type="goal",
             label_status="gold",
             dataset_use_status="training_ready",
+            task_type="research_understanding_finding",
             format="json",
         )
     )
@@ -1595,6 +1617,7 @@ def test_research_understanding_collection_dataset_route_exports_json(monkeypatc
     assert response.scope_id == "goal"
     assert response.label_status_filter == "gold"
     assert response.dataset_use_status_filter == "training_ready"
+    assert response.task_type_filter == "research_understanding_finding"
     assert response.item_count == 1
     assert response.items[0].scope_type == "goal"
     assert response.items[0].scope_id == "goal-1"
@@ -1603,6 +1626,7 @@ def test_research_understanding_collection_dataset_route_exports_json(monkeypatc
         "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+        "task_type": "research_understanding_finding",
     }
 
 
@@ -1620,6 +1644,7 @@ def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypat
             scope_type="goal",
             label_status=None,
             dataset_use_status=None,
+            task_type=None,
             format="jsonl",
         )
     )
@@ -1636,6 +1661,7 @@ def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypat
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": None,
+        "task_type": None,
     }
 
 
@@ -1655,6 +1681,7 @@ def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
             scope_type="goal",
             label_status="gold",
             dataset_use_status="training_ready",
+            task_type=None,
             format="messages_jsonl",
         )
     )
@@ -1671,6 +1698,7 @@ def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
         "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+        "task_type": None,
     }
 
 
@@ -1690,6 +1718,7 @@ def test_research_understanding_collection_dataset_route_exports_training_jsonl(
             scope_type="goal",
             label_status="gold",
             dataset_use_status="training_ready",
+            task_type=None,
             format="training_jsonl",
         )
     )
@@ -1710,6 +1739,7 @@ def test_research_understanding_collection_dataset_route_exports_training_jsonl(
         "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
+        "task_type": None,
     }
 
 
@@ -1729,6 +1759,7 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
             scope_type="goal",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="review_jsonl",
         )
     )
@@ -1748,6 +1779,7 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1767,6 +1799,7 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
             scope_type="goal",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="decision_template",
         )
     )
@@ -1801,6 +1834,7 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1820,6 +1854,7 @@ def test_research_understanding_collection_dataset_route_exports_decision_board_
             scope_type="goal",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="decision_board_tsv",
         )
     )
@@ -1837,6 +1872,7 @@ def test_research_understanding_collection_dataset_route_exports_decision_board_
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1856,6 +1892,7 @@ def test_research_understanding_collection_dataset_route_exports_agent_review_pr
             scope_type="goal",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="agent_review_prompt_jsonl",
         )
     )
@@ -1874,6 +1911,7 @@ def test_research_understanding_collection_dataset_route_exports_agent_review_pr
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }
 
 
@@ -1893,6 +1931,7 @@ def test_research_understanding_collection_dataset_route_exports_review_packet(
             scope_type="goal",
             label_status=None,
             dataset_use_status="review_candidate",
+            task_type=None,
             format="review_packet",
         )
     )
@@ -1910,4 +1949,5 @@ def test_research_understanding_collection_dataset_route_exports_review_packet(
         "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
+        "task_type": None,
     }

@@ -2232,6 +2232,33 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     assert dataset["quality_summary"]["warning_counts"]["rejected_feedback"] == 1
 
 
+def test_research_understanding_feedback_service_filters_dataset_by_task_type():
+    service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=FakeEvaluationRepository(),
+        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
+    )
+
+    matching = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        task_type=ruf_service.DATASET_TASK_TYPE,
+    )
+    non_matching = service.export_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        scope_id="goal-1",
+        task_type="relation_extraction",
+    )
+
+    assert matching["task_type_filter"] == ruf_service.DATASET_TASK_TYPE
+    assert matching["item_count"] == 4
+    assert non_matching["task_type_filter"] == "relation_extraction"
+    assert non_matching["item_count"] == 0
+    assert non_matching["quality_summary"]["total_samples"] == 0
+
+
 def test_research_understanding_feedback_service_counts_material_error_issue_types():
     repository = FakeEvaluationRepository()
     repository.feedback = (
@@ -2673,12 +2700,20 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
         collection_id="col-gold",
         scope_type="goal",
         dataset_use_status="training_ready",
+        task_type=ruf_service.DATASET_TASK_TYPE,
+    )
+    non_matching = service.export_collection_dataset(
+        collection_id="col-gold",
+        scope_type="goal",
+        dataset_use_status="training_ready",
+        task_type="relation_extraction",
     )
 
     assert dataset["collection_id"] == "col-gold"
     assert dataset["scope_type"] == "collection"
     assert dataset["scope_id"] == "goal"
     assert dataset["dataset_use_status_filter"] == "training_ready"
+    assert dataset["task_type_filter"] == ruf_service.DATASET_TASK_TYPE
     assert dataset["item_count"] == 2
     assert {(item["scope_id"], item["finding_id"]) for item in dataset["items"]} == {
         ("goal-1", "finding-1"),
@@ -2690,6 +2725,9 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
         "review_candidate": 0,
         "rejected": 0,
     }
+    assert non_matching["task_type_filter"] == "relation_extraction"
+    assert non_matching["item_count"] == 0
+    assert non_matching["quality_summary"]["total_samples"] == 0
 
 
 def test_research_understanding_feedback_service_keeps_anonymous_correct_feedback_silver():

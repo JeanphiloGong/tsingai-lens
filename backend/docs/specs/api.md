@@ -778,7 +778,9 @@ gold set，只用于把专家校正数据导出给评价流程或人工审查。
 `GET /dataset` 需要 query：`scope_type` 和 `scope_id`；可选
 `label_status=candidate | silver | gold | rejected` 过滤标签状态；可选
 `dataset_use_status=training_ready | review_candidate | rejected` 过滤用途状态；
-可选
+可选 `task_type` 过滤样本任务类型；当前可产出的任务类型只有
+`research_understanding_finding`，传入其他值时返回空数据集 envelope，并在
+`task_type_filter` 中回显请求值；可选
 `format=json | jsonl | messages_jsonl | training_jsonl | review_jsonl |
 decision_template | decision_board_tsv | agent_review_prompt_jsonl | review_packet`，默认 `json`。`json` 返回完整数据集
 envelope，`jsonl` 返回 newline-delimited 完整 sample，
@@ -841,7 +843,7 @@ review candidates。`review_progress.ready_to_write=false` 表示模板仍没有
 
 `GET /dataset/collection` 用于按 collection 聚合导出多个 research-understanding
 scope 的样本。它不需要 `scope_id`，query 中的 `scope_type` 表示要聚合的 artifact
-类型，默认 `goal`；同样支持 `label_status`、`dataset_use_status` 和
+类型，默认 `goal`；同样支持 `label_status`、`dataset_use_status`、`task_type` 和
 `format=json | jsonl | messages_jsonl | training_jsonl | review_jsonl |
 decision_template | decision_board_tsv | agent_review_prompt_jsonl | review_packet`。返回 envelope 使用 `scope_type=collection`，
 `scope_id=<聚合的 scope_type>`，但每个 sample 仍保留自己的原始
@@ -859,6 +861,7 @@ chat-style 训练行。
 - `metric_profile`，当前为 `research_understanding_v1`
 - `label_status_filter`
 - `dataset_use_status_filter`
+- `task_type_filter`
 - `item_count`
 - `label_counts`
 - `quality_summary`

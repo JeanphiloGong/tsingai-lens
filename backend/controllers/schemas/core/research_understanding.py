@@ -615,6 +615,7 @@ class ResearchUnderstandingDatasetResponse(BaseModel):
     metric_profile: str
     label_status_filter: ResearchUnderstandingDatasetLabelStatus | None = None
     dataset_use_status_filter: ResearchUnderstandingDatasetUseStatus | None = None
+    task_type_filter: str | None = None
     item_count: int
     label_counts: dict[str, int] = Field(default_factory=dict)
     quality_summary: ResearchUnderstandingDatasetQualitySummaryResponse = Field(

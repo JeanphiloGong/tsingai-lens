@@ -328,6 +328,7 @@ class ResearchUnderstandingFeedbackService:
         scope_id: str,
         label_status: str | None = None,
         dataset_use_status: str | None = None,
+        task_type: str | None = None,
     ) -> dict[str, object]:
         if label_status and label_status not in DATASET_LABEL_STATUSES:
             raise ValueError(f"unsupported label_status: {label_status}")
@@ -346,6 +347,7 @@ class ResearchUnderstandingFeedbackService:
                 scope_id=scope_id,
                 label_status_filter=label_status,
                 dataset_use_status_filter=dataset_use_status,
+                task_type_filter=task_type,
                 items=[],
                 warnings=["research understanding artifact is not available"],
             )
@@ -364,6 +366,8 @@ class ResearchUnderstandingFeedbackService:
                 and sample["dataset_use_status"] != dataset_use_status
             ):
                 continue
+            if task_type and sample["task_type"] != task_type:
+                continue
             items.append(sample)
 
         return self._dataset_payload(
@@ -372,6 +376,7 @@ class ResearchUnderstandingFeedbackService:
             scope_id=scope_id,
             label_status_filter=label_status,
             dataset_use_status_filter=dataset_use_status,
+            task_type_filter=task_type,
             items=items,
             warnings=[],
         )
@@ -383,6 +388,7 @@ class ResearchUnderstandingFeedbackService:
         scope_type: str = "goal",
         label_status: str | None = None,
         dataset_use_status: str | None = None,
+        task_type: str | None = None,
     ) -> dict[str, object]:
         if label_status and label_status not in DATASET_LABEL_STATUSES:
             raise ValueError(f"unsupported label_status: {label_status}")
@@ -411,6 +417,8 @@ class ResearchUnderstandingFeedbackService:
                     and sample["dataset_use_status"] != dataset_use_status
                 ):
                     continue
+                if task_type and sample["task_type"] != task_type:
+                    continue
                 items.append(sample)
         if not understandings:
             warnings.append("research understanding artifacts are not available")
@@ -421,6 +429,7 @@ class ResearchUnderstandingFeedbackService:
             scope_id=scope_type,
             label_status_filter=label_status,
             dataset_use_status_filter=dataset_use_status,
+            task_type_filter=task_type,
             items=items,
             warnings=warnings,
         )
@@ -433,6 +442,7 @@ class ResearchUnderstandingFeedbackService:
         scope_id: str,
         label_status_filter: str | None,
         dataset_use_status_filter: str | None,
+        task_type_filter: str | None,
         items: list[dict[str, object]],
         warnings: list[str],
     ) -> dict[str, object]:
@@ -451,6 +461,7 @@ class ResearchUnderstandingFeedbackService:
             "metric_profile": "research_understanding_v1",
             "label_status_filter": label_status_filter,
             "dataset_use_status_filter": dataset_use_status_filter,
+            "task_type_filter": task_type_filter,
             "item_count": len(items),
             "label_counts": label_counts,
             "quality_summary": _dataset_quality_summary(items),

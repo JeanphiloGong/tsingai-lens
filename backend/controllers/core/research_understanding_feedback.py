@@ -1116,6 +1116,7 @@ async def export_research_understanding_dataset(
     scope_id: str = Query(..., min_length=1, max_length=160),
     label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
     dataset_use_status: ResearchUnderstandingDatasetUseStatus | None = Query(default=None),
+    task_type: str | None = Query(default=None, min_length=1, max_length=80),
     format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
 ) -> ResearchUnderstandingDatasetResponse | Response:
     dataset = await run_in_threadpool(
@@ -1125,6 +1126,7 @@ async def export_research_understanding_dataset(
         scope_id=scope_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
+        task_type=task_type,
     )
     response = ResearchUnderstandingDatasetResponse(**dataset)
     if format == "jsonl":
@@ -1160,6 +1162,7 @@ async def export_collection_research_understanding_dataset(
     scope_type: str = Query(default="goal", max_length=32),
     label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
     dataset_use_status: ResearchUnderstandingDatasetUseStatus | None = Query(default=None),
+    task_type: str | None = Query(default=None, min_length=1, max_length=80),
     format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
 ) -> ResearchUnderstandingDatasetResponse | Response:
     dataset = await run_in_threadpool(
@@ -1168,6 +1171,7 @@ async def export_collection_research_understanding_dataset(
         scope_type=scope_type,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
+        task_type=task_type,
     )
     response = ResearchUnderstandingDatasetResponse(**dataset)
     if format == "jsonl":

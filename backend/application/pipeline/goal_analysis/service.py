@@ -278,3 +278,6 @@ class GoalAnalysisPipelineService:
         if understanding is None:
             return None
         return self.research_understanding_service.with_presentation(understanding)
+
+
+goal_analysis_service = GoalAnalysisPipelineService()

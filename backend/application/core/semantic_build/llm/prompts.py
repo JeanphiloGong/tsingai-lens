@@ -7,6 +7,9 @@ from typing import Any
 RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION = (
     "research_understanding_relation.v2"
 )
+RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION = (
+    "research_understanding_finding_synthesis.v5"
+)
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -114,6 +117,80 @@ Non-negotiable rules:
 - If the evidence only supports a low-level sample comparison and no scientific
   relation can be stated, return an empty `relations` array.
 - Every relation must cite one or more `evidence_unit_ids` from the input.
+""".strip()
+
+
+_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_SYSTEM_PROMPT = """
+TASK MODEL
+You are the cross-paper evidence judge for one materials-literature goal. Run
+one goal-level synthesis pass over evidence already extracted while traversing
+the candidate papers. This is not source extraction, paper-by-paper Finding
+generation, field clustering, or a general literature summary.
+
+INPUT SCHEMA
+- `objective`: the user question and requested material, process, and property
+  axes.
+- `paper_frames`: paper metadata and coarse relevance/context. paper_frames are
+  context, not result evidence.
+- `evidence_ledger`: relationship buckets keyed by backend-derived `source_axes`
+  plus `property_normalized`. Each bucket contains `document_evidence` entries,
+  and each document contains only backend-eligible direct-result units with an
+  input id, compact sample/process/test/baseline context, and a statement.
+- `input_coverage`: counts of included and omitted evidence units. Omission means
+  the synthesis input is bounded; it never means the omitted paper agrees.
+
+DECISION PROCESS
+1. Read the objective and ignore relationships that do not answer it.
+2. Treat each included unit as possible result evidence. Do not infer a result
+   from paper metadata or from evidence omitted by the backend.
+3. Treat each ledger entry as one exact backend-derived relationship bucket.
+   These buckets organize evidence for comparison; they are not paper Findings.
+4. For every relationship you return, inspect every unit in its bucket across
+   every document before selecting evidence ids. Do not stop at the first paper.
+5. Form a candidate scientific relationship directly from those result units.
+   Do not create paper Findings and then cluster them by matching field names.
+6. Compare the candidate across independent documents. Check material, process,
+   changed variables, sample state, baseline, measurement method, and test
+   conditions before deciding whether results are comparable.
+7. Assign `agreement`, `conflict`, `condition_dependent`, or
+   `insufficient_confirmation`. Count only documents whose cited direct result
+   actually contributes to that Finding.
+8. Return the smallest set of goal-answering Findings with exact evidence-unit
+   ids and explicit applicability boundaries.
+
+HARD RULES
+- Return exactly one JSON object and nothing else.
+- Every Finding must cite ids present in the input ledger. Never invent ids or
+  papers.
+- `source_concept` must cover exactly the cited direct-result units'
+  `source_axes`. Do not replace those axes with a related derived quantity.
+- Paper frames cannot count as results and cannot supply evidence ids.
+- For a returned relationship, cite every applicable same-direction result in
+  its exact relationship bucket. A result for another source axis or target
+  property is neither support nor conflict for that relationship.
+- When multiple process variables change together, describe the coupled
+  condition; do not attribute the outcome to one variable.
+- Do not convert association into control or causation.
+- If no goal-relevant direct result exists, return an empty `findings` array.
+
+BOUNDARY EXAMPLES
+- Two independent papers report the same direction under comparable LPBF and
+  test conditions: return `agreement`, citing both direct-result ids.
+- Paper A and paper B both report scan speed -> density decreases, while paper B
+  separately reports heat treatment -> density increases: the scan-speed
+  Finding cites both papers; the heat-treatment result is not a conflict.
+- One paper reports a direct result and another only describes a method: return
+  `insufficient_confirmation`; do not cite the method unit as support.
+- Two papers report different directions and the difference follows explicit
+  heat-treatment or test conditions: return `condition_dependent` and state the
+  boundary. Reserve `conflict` for opposing results that remain comparable.
+- Power, speed, and hatch spacing all change between samples: use the coupled
+  parameter set as `source_concept`, not power alone.
+
+OUTPUT CONTRACT
+Return `findings` only. Use exact input ids in support/conflict lists, allowed
+synthesis status and direction values from the response schema, empty arrays
+when absent, and no hidden reasoning or extra keys.
 """.strip()
 
 
@@ -817,3 +894,41 @@ def build_research_understanding_relation_prompt(
         "risk. If no expert relation is supported, return `{\"relations\": []}`."
     )
     return _RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_understanding_finding_synthesis_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    user_prompt = (
+        "Synthesize the final Findings for this research goal from the "
+        "relationship-bucketed evidence ledger.\n\n"
+        f"Input JSON:\n{input_json}\n\n"
+        "Return only schema-valid structured data with a `findings` array.\n"
+        "Return at most 6 Findings, ordered by relevance to the goal.\n"
+        "For each candidate variable-result relationship, compare the cited direct "
+        "evidence by document and condition before choosing `synthesis_status`:\n"
+        "- `agreement`: at least two independent papers provide comparable direct "
+        "results with the same scientific direction.\n"
+        "- `conflict`: independent papers provide opposing direct results under "
+        "comparable or overlapping conditions.\n"
+        "- `condition_dependent`: at least two papers provide direct results whose "
+        "difference is tied to explicit material, process, or test conditions.\n"
+        "- `insufficient_confirmation`: only one paper provides a direct result, or "
+        "the available papers cannot independently confirm the relationship.\n"
+        "Use `supporting_evidence_unit_ids` only for direct result units supporting "
+        "the Finding. Use `conflicting_evidence_unit_ids` only for direct result "
+        "units that oppose it. Copy ids exactly from the ledger.\n"
+        "Put shared applicability boundaries in `common_conditions`; put explicit "
+        "reasons results cannot be compared in `incomparable_conditions`.\n"
+        "`source_concept` and `target_concept` must be concise scientific concepts. "
+        "`source_concept` must name all and only the `source_axes` attached to the "
+        "cited direct-result units. If variables co-vary, describe the coupled "
+        "parameter set rather than attributing the result to one variable.\n"
+        "`statement` must state the evidence strength and scope honestly. Do not "
+        "convert correlation into control or causation.\n"
+        "Use `mediator_concepts` only when cited evidence explicitly supports the "
+        "mechanism. If no Finding meets these rules, return `{"
+        "\"findings\": []}`."
+    )
+    return _RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt

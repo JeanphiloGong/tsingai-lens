@@ -19,6 +19,7 @@ from .schemas import (
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchUnderstandingRelations,
+    StructuredResearchUnderstandingFindings,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableMatrixRepair,
@@ -26,6 +27,7 @@ from .schemas import (
 )
 from .prompts import (
     RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION,
+    RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION,
     build_document_profile_prompt,
     build_objective_evidence_unit_prompt,
     build_objective_evidence_route_prompt,
@@ -35,6 +37,7 @@ from .prompts import (
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
     build_research_understanding_relation_prompt,
+    build_research_understanding_finding_synthesis_prompt,
     build_table_batch_mentions_prompt,
     build_table_matrix_repair_prompt,
     build_text_window_extraction_prompt,
@@ -236,6 +239,24 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredResearchUnderstandingRelations):
             raise TypeError("unexpected research understanding relations response type")
+        return response
+
+    def synthesize_research_understanding_findings(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchUnderstandingFindings:
+        system_prompt, user_prompt = (
+            build_research_understanding_finding_synthesis_prompt(payload)
+        )
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredResearchUnderstandingFindings,
+            task_type="research_understanding_finding_synthesis",
+            prompt_version=RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION,
+        )
+        if not isinstance(response, StructuredResearchUnderstandingFindings):
+            raise TypeError("unexpected research understanding Findings response type")
         return response
 
     def _parse_structured_response(

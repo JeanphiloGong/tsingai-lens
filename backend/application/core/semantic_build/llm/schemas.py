@@ -116,6 +116,12 @@ _RESEARCH_UNDERSTANDING_DIRECTIONS = {
     "conditional",
     "unknown",
 }
+_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_STATUSES = {
+    "agreement",
+    "conflict",
+    "condition_dependent",
+    "insufficient_confirmation",
+}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -1029,6 +1035,65 @@ class StructuredResearchUnderstandingRelations(_StrictModel):
     @field_validator("relations", mode="before")
     @classmethod
     def _normalize_relations(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredResearchUnderstandingFinding(_StrictModel):
+    source_concept: str
+    target_concept: str
+    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
+    direction: Literal[
+        "increases",
+        "decreases",
+        "improves",
+        "reduces",
+        "changes",
+        "mixed",
+        "conditional",
+        "unknown",
+    ] = "unknown"
+    statement: str
+    synthesis_status: Literal[
+        "agreement",
+        "conflict",
+        "condition_dependent",
+        "insufficient_confirmation",
+    ] = "insufficient_confirmation"
+    supporting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=24)
+    conflicting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
+    common_conditions: list[str] = Field(default_factory=list, max_length=10)
+    incomparable_conditions: list[str] = Field(default_factory=list, max_length=10)
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_RESEARCH_UNDERSTANDING_DIRECTIONS,
+            default="unknown",
+        )
+
+    @field_validator("synthesis_status", mode="before")
+    @classmethod
+    def _normalize_synthesis_status(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_STATUSES,
+            default="insufficient_confirmation",
+        )
+
+
+class StructuredResearchUnderstandingFindings(_StrictModel):
+    findings: list[StructuredResearchUnderstandingFinding] = Field(
+        default_factory=list,
+        max_length=6,
+    )
+
+    @field_validator("findings", mode="before")
+    @classmethod
+    def _normalize_findings(cls, value: object) -> object:
         return _normalize_list_container(value)
 
 

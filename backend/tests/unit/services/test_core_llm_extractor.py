@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.prompts import (
     build_objective_evidence_unit_prompt,
+    build_research_understanding_finding_synthesis_prompt,
     build_research_understanding_relation_prompt,
 )
 from application.core.semantic_build.llm.schemas import (
@@ -20,6 +21,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjectives,
+    StructuredResearchUnderstandingFindings,
     StructuredResearchUnderstandingRelations,
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
@@ -204,6 +206,74 @@ def test_core_llm_extractor_captures_provider_parse_trace_for_relations():
     assert trace["raw_output"] is None
     assert "api_key" not in str(trace).lower()
     assert "authorization" not in str(trace).lower()
+
+
+def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
+    parsed = StructuredResearchUnderstandingFindings(findings=[])
+    client = _FakeOpenAIClient("unused", parsed=parsed)
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    payload = {
+        "objective": {"question": "How does energy density affect density?"},
+        "evidence_ledger": [
+            {
+                "source_axes": ["energy density"],
+                "property_normalized": "density",
+                "document_evidence": [
+                    {
+                        "document_id": "paper-1",
+                        "evidence_units": [
+                            {
+                                "evidence_unit_id": "oeu-1",
+                                "direct_result": True,
+                                "statement": (
+                                    "Higher energy density increased density."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = extractor.synthesize_research_understanding_findings(payload)
+
+    assert result == parsed
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"] is StructuredResearchUnderstandingFindings
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["task_type"] == "research_understanding_finding_synthesis"
+    assert trace["prompt_version"] == "research_understanding_finding_synthesis.v5"
+    assert trace["parsed_output"] == {"findings": []}
+
+
+def test_research_understanding_finding_synthesis_prompt_uses_goal_level_contract():
+    payload = {
+        "objective": {"question": "How does energy density affect density?"},
+        "evidence_ledger": [],
+    }
+
+    system_prompt, user_prompt = build_research_understanding_finding_synthesis_prompt(
+        payload
+    )
+
+    assert "Do not create paper Findings and then cluster" in system_prompt
+    assert "INPUT SCHEMA" in system_prompt
+    assert "DECISION PROCESS" in system_prompt
+    assert "one goal-level synthesis pass" in system_prompt
+    assert "paper_frames are" in system_prompt
+    assert "context, not result evidence" in system_prompt
+    normalized_system_prompt = " ".join(system_prompt.split())
+    assert "only backend-eligible direct-result units" in normalized_system_prompt
+    assert (
+        "inspect every unit in its bucket across every document"
+        in normalized_system_prompt
+    )
+    assert "the heat-treatment result is not a conflict" in normalized_system_prompt
+    assert "`agreement`: at least two independent papers" in user_prompt
+    assert "`insufficient_confirmation`" in user_prompt
+    assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt
 
 
 def test_research_understanding_relation_prompt_compacts_input_json():

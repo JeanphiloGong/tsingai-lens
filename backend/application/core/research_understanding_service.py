@@ -22,7 +22,7 @@ _RELATION_EVIDENCE_UNIT_LIMIT = 24
 _RELATION_TRACE_TASK_TYPE = "research_understanding_relation"
 _FINDING_SYNTHESIS_TRACE_TASK_TYPE = "research_understanding_finding_synthesis"
 _FINDING_SYNTHESIS_EVIDENCE_CHAR_LIMIT = 4_500
-_FINDING_SYNTHESIS_CONTEXT_CHAR_LIMIT = 4_500
+_FINDING_SYNTHESIS_CONTEXT_CHAR_LIMIT = 2_400
 _FINDING_SYNTHESIS_RESULT_VALUE_PATTERN = re.compile(
     r"\b\d+(?:\.\d+)?\s*(?:%|mpa|gpa|hv|(?:μ\s*m)|um|mm/s|j/mm)",
     re.IGNORECASE,
@@ -30,6 +30,7 @@ _FINDING_SYNTHESIS_RESULT_VALUE_PATTERN = re.compile(
 _FINDING_SYNTHESIS_NUMBER_PATTERN = re.compile(
     r"(?<![A-Za-z])\d+(?:\.\d+)?(?![A-Za-z])"
 )
+_FINDING_SYNTHESIS_AXIS_SCALE_MISMATCH_RATIO = 100
 _DIRECT_RESULT_CONTEXT_UNIT_KINDS = {
     "process_context",
     "sample_context",
@@ -818,9 +819,14 @@ class ResearchUnderstandingService:
             trace_status="available",
             default_task_type=_FINDING_SYNTHESIS_TRACE_TASK_TYPE,
         )
+        result_sets_by_id = {
+            result_set_id: result_set
+            for result_set in _mapping_list(synthesis_payload.get("result_sets"))
+            if (result_set_id := _text(result_set.get("result_set_id")))
+        }
         eligible_direct_units_by_id = {
             unit_id: unit
-            for result_set in _mapping_list(synthesis_payload.get("result_sets"))
+            for result_set in result_sets_by_id.values()
             for paper in _mapping_list(result_set.get("document_evidence"))
             for unit in _mapping_list(paper.get("result_units"))
             if unit.get("direct_result") is True
@@ -849,7 +855,7 @@ class ResearchUnderstandingService:
         relations: list[dict[str, Any]] = []
         paper_metadata_by_document_id = {
             document_id: frame
-            for frame in _mapping_list(synthesis_payload.get("paper_frames"))
+            for frame in _mapping_list(payload.get("paper_frames"))
             if (document_id := _text(frame.get("document_id")))
         }
         process_axes = _strings(
@@ -859,6 +865,7 @@ class ResearchUnderstandingService:
             [item.model_dump() for item in getattr(extracted, "findings", [])],
             eligible_direct_units_by_id=eligible_direct_units_by_id,
             eligible_context_unit_ids=eligible_context_unit_ids,
+            result_sets_by_id=result_sets_by_id,
         )
         for item in model_items:
             synthesized = self._finding_synthesis_from_model(
@@ -949,15 +956,8 @@ class ResearchUnderstandingService:
             "paper_frames": [
                 {
                     "document_id": _text(frame.get("document_id")),
-                    "title": _text(frame.get("title")),
-                    "source_filename": _text(frame.get("source_filename")),
-                    "relevance": _text(frame.get("relevance")),
-                    "paper_role": _text(frame.get("paper_role")),
                     "material_match": _strings(frame.get("material_match")),
                     "changed_variables": _strings(frame.get("changed_variables")),
-                    "measured_properties": _strings(
-                        frame.get("measured_property_scope")
-                    ),
                     "test_conditions": _strings(
                         frame.get("test_environment_scope")
                     ),
@@ -1005,7 +1005,8 @@ class ResearchUnderstandingService:
             if not document_id:
                 continue
             if not self._finding_synthesis_frame_allows_direct_result(
-                frame_by_document_id.get(document_id, {})
+                frame_by_document_id.get(document_id, {}),
+                unit=unit,
             ):
                 continue
             units_by_document.setdefault(document_id, []).append(unit)
@@ -1238,7 +1239,83 @@ class ResearchUnderstandingService:
             *kept_comparisons,
             *[group for group in groups.values() if group["kind"] == "relationship"],
         ]
-        return [self._finding_synthesis_result_set(group) for group in ordered_groups], omitted_count
+        result_sets = [
+            self._finding_synthesis_result_set(group) for group in ordered_groups
+        ]
+        merged_result_sets: list[dict[str, Any]] = []
+        for result_set in result_sets:
+            outcomes = _strings(result_set.get("outcome_properties"))
+            if len(outcomes) != 1:
+                merged_result_sets.append(result_set)
+                continue
+            source_axes = _strings(result_set.get("source_axes"))
+            existing = next(
+                (
+                    candidate
+                    for candidate in merged_result_sets
+                    if _strings(candidate.get("outcome_properties")) == outcomes
+                    and any(
+                        self._axis_labels_match(left_axis, right_axis)
+                        for left_axis in _strings(candidate.get("source_axes"))
+                        for right_axis in source_axes
+                    )
+                ),
+                None,
+            )
+            if existing is None:
+                merged_result_sets.append(result_set)
+                continue
+            existing_axes = _strings(existing.get("source_axes"))
+            same_axes = len(existing_axes) == len(source_axes) and all(
+                any(
+                    self._axis_labels_match(existing_axis, source_axis)
+                    for source_axis in source_axes
+                )
+                for existing_axis in existing_axes
+            )
+            existing["source_axes"] = self._dedupe_axis_labels(
+                [*existing_axes, *source_axes]
+            )
+            existing["alignment"] = (
+                "same source-axis and outcome relationship across condition contrasts"
+                if same_axes
+                and existing.get("alignment")
+                != (
+                    "overlapping source-axis and outcome relationship across "
+                    "condition contrasts"
+                )
+                else (
+                    "overlapping source-axis and outcome relationship across "
+                    "condition contrasts"
+                )
+            )
+            for document in _mapping_list(result_set.get("document_evidence")):
+                document_id = _text(document.get("document_id"))
+                existing_document = next(
+                    (
+                        candidate
+                        for candidate in _mapping_list(
+                            existing.get("document_evidence")
+                        )
+                        if _text(candidate.get("document_id")) == document_id
+                    ),
+                    None,
+                )
+                if existing_document is None:
+                    existing["document_evidence"].append(document)
+                    continue
+                existing_document["source_axes"] = self._dedupe_axis_labels(
+                    [
+                        *_strings(existing_document.get("source_axes")),
+                        *_strings(document.get("source_axes")),
+                    ]
+                )
+                existing_document["result_units"].extend(
+                    _mapping_list(document.get("result_units"))
+                )
+        for index, result_set in enumerate(merged_result_sets, start=1):
+            result_set["result_set_id"] = f"result_set_{index}"
+        return merged_result_sets, omitted_count
 
     def _finding_synthesis_result_set(
         self,
@@ -1256,18 +1333,7 @@ class ResearchUnderstandingService:
             "document_evidence": [
                 {
                     "document_id": document_id,
-                    **(
-                        {
-                            "baseline_condition": self._finding_synthesis_condition_text(
-                                _mapping(group.get("baseline"))
-                            ),
-                            "current_condition": self._finding_synthesis_condition_text(
-                                _mapping(group.get("current"))
-                            ),
-                        }
-                        if is_comparison
-                        else {}
-                    ),
+                    "source_axes": _strings(group.get("source_axes")),
                     "result_units": units,
                 }
                 for document_id, units in _mapping(group.get("documents")).items()
@@ -1347,56 +1413,11 @@ class ResearchUnderstandingService:
                 f"{self._comparison_direction_verb(reversed_direction)} "
                 f"{property_name} from {current_value} to {baseline_value}."
             )
-        compact_value_payload = dict(_mapping(reoriented.get("value_payload")))
-        compact_value_payload.update(
-            {
-                "source_value_text": _text(
-                    baseline_context.get("source_value_text")
-                )
-                or _text(baseline_context.get("value")),
-                "value": _text(baseline_context.get("value")),
-                "direction": reversed_direction,
-            }
-        )
-        reoriented["value_payload"] = {
-            key: value
-            for key, value in compact_value_payload.items()
-            if value not in (None, "")
-        }
-        reoriented["sample_summary"] = self._semantic_relation_mapping_summary(
-            _mapping(baseline_context.get("sample_context"))
-        )
-        reoriented["process_summary"] = self._semantic_relation_mapping_summary(
-            _mapping(baseline_context.get("process_context"))
-        )
-        reoriented["baseline_summary"] = self._semantic_relation_mapping_summary(
-            {
-                **_mapping(unit.get("sample_context")),
-                **_mapping(unit.get("process_context")),
-                "value": _text(value_payload.get("current_value"))
-                or _text(value_payload.get("value")),
-            }
-        )
         return {
             key: value
             for key, value in reoriented.items()
             if value not in (None, "", [], {})
         }
-
-    def _finding_synthesis_condition_text(
-        self,
-        condition: Mapping[str, Any],
-    ) -> str:
-        return _short_text(
-            json.dumps(
-                dict(condition),
-                ensure_ascii=False,
-                sort_keys=True,
-                default=str,
-                separators=(",", ":"),
-            ),
-            limit=600,
-        )
 
     def _finding_synthesis_document_context(
         self,
@@ -1969,6 +1990,18 @@ class ResearchUnderstandingService:
     ) -> bool:
         concept_key = _normalize_match_text(concept)
         text_key = _normalize_match_text(text)
+        if concept_key in {"density", "relative density"}:
+            material_density_text = re.sub(
+                r"\b(?:(?:laser|volumetric)\s+)?energy\s+density\b",
+                "",
+                text_key,
+            )
+            return bool(
+                re.search(
+                    r"\b(?:relative\s+)?density\b|\bdensification\b",
+                    material_density_text,
+                )
+            )
         if concept_key and concept_key in text_key:
             return True
         if "fatigue limit" in concept_key and re.search(
@@ -2033,11 +2066,11 @@ class ResearchUnderstandingService:
         for source_ref in _mapping_list(unit.get("source_refs")):
             quote_text = normalize_display_text(source_ref.get("quote"))
             if quote_text:
-                return _short_text(quote_text, limit=1_500)
+                return _short_text(quote_text, limit=420)
             block = blocks_by_id.get(_text(source_ref.get("source_ref")) or "")
             block_text = normalize_display_text(block.text if block else None)
             if block_text:
-                return _short_text(block_text, limit=1_500)
+                return _short_text(block_text, limit=420)
         return None
 
     def _finding_synthesis_unit_priority(
@@ -2092,17 +2125,10 @@ class ResearchUnderstandingService:
     ) -> dict[str, Any]:
         source = self._semantic_relation_evidence_unit(unit)
         statement = self._finding_synthesis_statement_from_unit(unit)
-        value_payload = dict(_mapping(source.get("value_payload")))
-        if statement:
-            for key in ("statement", "summary"):
-                duplicate = _text(value_payload.get(key))
-                if duplicate and duplicate in statement:
-                    value_payload.pop(key, None)
         compact = {
             "evidence_unit_id": source.get("evidence_unit_id"),
             "unit_kind": source.get("unit_kind"),
             "property_normalized": source.get("property_normalized"),
-            "evidence_role": self._objective_unit_evidence_role(unit),
             "source_axes": self._finding_synthesis_source_axes(
                 unit,
                 process_axes=process_axes,
@@ -2113,12 +2139,7 @@ class ResearchUnderstandingService:
                 else direct_result
             ),
             "statement": _short_text(statement, limit=260) if statement else None,
-            "sample_summary": source.get("sample_summary"),
-            "process_summary": source.get("process_summary"),
-            "test_summary": source.get("test_summary"),
-            "value_payload": value_payload,
             "unit": source.get("unit"),
-            "baseline_summary": source.get("baseline_summary"),
         }
         return {
             key: value
@@ -2129,13 +2150,20 @@ class ResearchUnderstandingService:
     def _finding_synthesis_frame_allows_direct_result(
         self,
         frame: Mapping[str, Any],
+        *,
+        unit: Mapping[str, Any],
     ) -> bool:
         relevance = (_text(frame.get("relevance")) or "").lower()
-        paper_role = (_text(frame.get("paper_role")) or "").lower()
-        return relevance in {"high", "medium"} and paper_role in {
-            "primary_experiment",
-            "mixed",
-        }
+        if relevance in {"high", "medium"}:
+            return True
+        if relevance != "low":
+            return False
+        return any(
+            (_text(source_ref.get("source_kind")) or "").lower() == "table"
+            and (_text(source_ref.get("evidence_role")) or "").lower()
+            == "direct_support"
+            for source_ref in _mapping_list(unit.get("source_refs"))
+        )
 
     def _finding_synthesis_direct_unit(self, unit: Mapping[str, Any]) -> bool:
         if self._objective_unit_evidence_role(unit) != "direct_support":
@@ -2387,11 +2415,18 @@ class ResearchUnderstandingService:
             concept = _text(outcome.get("concept"))
             if not concept or not _looks_user_facing(concept):
                 continue
-            outcome_supporting_ids = self._valid_finding_synthesis_unit_ids(
-                outcome.get("supporting_evidence_unit_ids"),
-                units_by_id=units_by_id,
-                eligible_direct_unit_ids=eligible_direct_unit_ids,
-            )
+            outcome_supporting_ids = [
+                unit_id
+                for unit_id in self._valid_finding_synthesis_unit_ids(
+                    outcome.get("supporting_evidence_unit_ids"),
+                    units_by_id=units_by_id,
+                    eligible_direct_unit_ids=eligible_direct_unit_ids,
+                )
+                if self._finding_synthesis_outcome_matches_text(
+                    concept,
+                    _text(units_by_id[unit_id].get("property_normalized")) or "",
+                )
+            ]
             if not outcome_supporting_ids:
                 continue
             outcome_conflicting_ids = [
@@ -2402,6 +2437,10 @@ class ResearchUnderstandingService:
                     eligible_direct_unit_ids=eligible_direct_unit_ids,
                 )
                 if unit_id not in outcome_supporting_ids
+                and self._finding_synthesis_outcome_matches_text(
+                    concept,
+                    _text(units_by_id[unit_id].get("property_normalized")) or "",
+                )
             ]
             valid_outcomes.append(
                 {
@@ -2537,7 +2576,13 @@ class ResearchUnderstandingService:
         ) or context_ids[:1]
         common_conditions = _dedupe_strings(_strings(item.get("common_conditions")))
         incomparable_conditions = _dedupe_strings(
-            _strings(item.get("incomparable_conditions"))
+            [
+                *_strings(item.get("incomparable_conditions")),
+                *self._finding_synthesis_axis_scale_boundaries(
+                    direct_unit_ids,
+                    units_by_id=units_by_id,
+                ),
+            ]
         )
         paper_contributions = self._finding_synthesis_paper_contributions(
             supporting_unit_ids=supporting_unit_ids,
@@ -2578,6 +2623,9 @@ class ResearchUnderstandingService:
             ):
                 statement = evidence_statement
                 statement_was_calibrated = True
+        elif calibrated_evidence_statements and not conflicting_unit_ids:
+            statement = " ".join(calibrated_evidence_statements)
+            statement_was_calibrated = True
         elif calibrated_evidence_statements:
             selected_context_texts = _dedupe_strings(
                 [
@@ -2649,7 +2697,9 @@ class ResearchUnderstandingService:
             "condition_dependent": "limited",
             "insufficient_confirmation": "limited",
         }[synthesis_status]
-        mediators = calibrated_mediators or _strings(item.get("mediator_concepts"))
+        mediators = calibrated_mediators or (
+            _strings(item.get("mediator_concepts")) if mechanism_unit_ids else []
+        )
         relation_type = self._presentation_relation_type(
             "conflicting" if synthesis_status == "conflict" else "correlational",
             direction,
@@ -2715,32 +2765,128 @@ class ResearchUnderstandingService:
         *,
         eligible_direct_units_by_id: Mapping[str, dict[str, Any]],
         eligible_context_unit_ids: set[str],
+        result_sets_by_id: Mapping[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
         selected: dict[
             tuple[Any, ...],
             tuple[tuple[int, int, int, float], dict[str, Any]],
         ] = {}
-        invalid_items: list[dict[str, Any]] = []
         for item in items:
+            result_set_id = _text(item.get("result_set_id"))
+            result_set = result_sets_by_id.get(result_set_id or "")
+            if not result_set:
+                continue
+            expected_outcomes = _strings(result_set.get("outcome_properties"))
+            allowed_direct_units = [
+                (unit_id, unit)
+                for document in _mapping_list(result_set.get("document_evidence"))
+                for unit in _mapping_list(document.get("result_units"))
+                if unit.get("direct_result") is True
+                if (unit_id := _text(unit.get("evidence_unit_id")))
+            ]
+            allowed_direct_ids = {unit_id for unit_id, _unit in allowed_direct_units}
             outcomes = _mapping_list(item.get("outcomes"))
-            direct_ids = _dedupe_strings(
-                [
-                    unit_id
-                    for outcome in outcomes
-                    for unit_id in [
-                        *_strings(outcome.get("supporting_evidence_unit_ids")),
-                        *_strings(outcome.get("conflicting_evidence_unit_ids")),
-                    ]
-                    if unit_id in eligible_direct_units_by_id
-                ]
-            )
+            submitted_conflicting_ids = [
+                unit_id
+                for outcome in outcomes
+                for unit_id in _strings(outcome.get("conflicting_evidence_unit_ids"))
+            ]
             concepts = _dedupe_strings(
                 [_text(outcome.get("concept")) for outcome in outcomes]
             )
             source = _text(item.get("source_concept"))
-            if not direct_ids or not concepts or not source:
-                invalid_items.append(item)
+            if (
+                not allowed_direct_ids
+                or not concepts
+                or not source
+                or len(submitted_conflicting_ids)
+                != len(_dedupe_strings(submitted_conflicting_ids))
+                or not set(submitted_conflicting_ids) <= allowed_direct_ids
+                or len(outcomes) != len(expected_outcomes)
+                or not all(
+                    any(
+                        self._axis_labels_match(concept, expected)
+                        for expected in expected_outcomes
+                    )
+                    for concept in concepts
+                )
+                or not all(
+                    any(
+                        self._axis_labels_match(expected, concept)
+                        for concept in concepts
+                    )
+                    for expected in expected_outcomes
+                )
+            ):
                 continue
+            invalid_assignment = False
+            normalized_outcomes: list[dict[str, Any]] = []
+            for outcome in outcomes:
+                concept = _text(outcome.get("concept")) or ""
+                conflicting_ids = _strings(
+                    outcome.get("conflicting_evidence_unit_ids")
+                )
+                for unit_id in conflicting_ids:
+                    unit_property = _text(
+                        eligible_direct_units_by_id.get(unit_id, {}).get(
+                            "property_normalized"
+                        )
+                    )
+                    if not unit_property or not self._axis_labels_match(
+                        concept,
+                        unit_property,
+                    ):
+                        invalid_assignment = True
+                        break
+                if invalid_assignment:
+                    break
+                matching_ids = [
+                    unit_id
+                    for unit_id, unit in allowed_direct_units
+                    if self._axis_labels_match(
+                        concept,
+                        _text(unit.get("property_normalized")) or "",
+                    )
+                ]
+                supporting_ids = [
+                    unit_id for unit_id in matching_ids if unit_id not in conflicting_ids
+                ]
+                if not supporting_ids:
+                    invalid_assignment = True
+                    break
+                normalized_outcomes.append(
+                    {
+                        **outcome,
+                        "supporting_evidence_unit_ids": supporting_ids,
+                        "conflicting_evidence_unit_ids": conflicting_ids,
+                    }
+                )
+            if invalid_assignment:
+                continue
+            result_source_axes = _strings(result_set.get("source_axes"))
+            if not result_source_axes:
+                continue
+            if all(
+                self._axis_labels_match(source, axis)
+                for axis in result_source_axes
+            ):
+                normalized_source = source
+            else:
+                source_parts = self._finding_synthesis_axis_parts(source)
+                if not source_parts or not all(
+                    any(
+                        self._axis_labels_match(part, axis)
+                        for axis in result_source_axes
+                    )
+                    for part in source_parts
+                ):
+                    continue
+                normalized_source = ", ".join(result_source_axes)
+            normalized_item = {
+                **item,
+                "source_concept": normalized_source,
+                "outcomes": normalized_outcomes,
+            }
             context_ids = {
                 unit_id
                 for unit_id in [
@@ -2751,7 +2897,7 @@ class ResearchUnderstandingService:
             }
             exact_outcome_matches = sum(
                 1
-                for outcome in outcomes
+                for outcome in normalized_outcomes
                 if (concept := _text(outcome.get("concept")))
                 if any(
                     self._axis_labels_match(
@@ -2775,11 +2921,11 @@ class ResearchUnderstandingService:
                 len(context_ids),
                 float(item.get("confidence") or 0.0),
             )
-            signature = (tuple(sorted(direct_ids)),)
+            signature = (result_set_id,)
             current = selected.get(signature)
             if current is None or score > current[0]:
-                selected[signature] = (score, item)
-        return [value[1] for value in selected.values()] + invalid_items
+                selected[signature] = (score, normalized_item)
+        return [value[1] for value in selected.values()]
 
     def _finding_synthesis_context_unit_ids_for_outcomes(
         self,
@@ -2790,7 +2936,7 @@ class ResearchUnderstandingService:
         units_by_id: Mapping[str, dict[str, Any]],
         eligible_context_units_by_id: Mapping[str, dict[str, Any]],
     ) -> list[str]:
-        selected = list(requested_unit_ids)
+        selected: list[str] = []
         direct_document_ids = set(
             self._finding_synthesis_document_ids(
                 direct_unit_ids,
@@ -2805,9 +2951,16 @@ class ResearchUnderstandingService:
             r"remain(?:ed|s)?|unchanged|no significant)\b",
             re.I,
         )
-        for unit_id, compact in eligible_context_units_by_id.items():
-            if unit_id in selected:
-                continue
+        mechanism_pattern = re.compile(
+            r"\b(?:mechanisms?|related to|attribut(?:e|ed|ion)|due to|because|"
+            r"explain(?:s|ed)?|result(?:s|ed)? from|owing to|caus(?:e|es|ed))\b",
+            re.I,
+        )
+        candidate_unit_ids = _dedupe_strings(
+            [*requested_unit_ids, *eligible_context_units_by_id]
+        )
+        for unit_id in candidate_unit_ids:
+            compact = eligible_context_units_by_id.get(unit_id, {})
             full_unit = units_by_id.get(unit_id, {})
             if _text(full_unit.get("document_id")) not in direct_document_ids:
                 continue
@@ -2818,36 +2971,145 @@ class ResearchUnderstandingService:
                 continue
             context_role = _text(compact.get("context_role"))
             if context_role == "interpretation":
-                if not qualification_pattern.search(source_text):
-                    continue
-                if not _FINDING_SYNTHESIS_RESULT_VALUE_PATTERN.search(source_text):
-                    continue
-                if not any(
-                    self._finding_synthesis_outcome_matches_text(concept, source_text)
-                    for concept in outcome_concepts
-                ):
+                relevant_sentence = any(
+                    qualification_pattern.search(sentence)
+                    and _FINDING_SYNTHESIS_RESULT_VALUE_PATTERN.search(sentence)
+                    and any(
+                        self._finding_synthesis_outcome_matches_text(
+                            concept,
+                            sentence,
+                        )
+                        for concept in outcome_concepts
+                    )
+                    for sentence in _quote_sentences(source_text)
+                )
+                if not relevant_sentence:
                     continue
                 selected.append(unit_id)
                 continue
             if context_role != "mechanism":
                 continue
-            text_tokens = self._axis_match_tokens(source_text)
             relevant = any(
-                self._finding_synthesis_outcome_matches_text(concept, source_text)
-                or (
-                    "fatigue" in self._axis_match_tokens(concept)
-                    and bool(text_tokens & {"fatigue", "lcf", "hcf"})
+                mechanism_pattern.search(sentence)
+                and any(
+                    self._finding_synthesis_outcome_matches_text(concept, sentence)
+                    or (
+                        "fatigue" in self._axis_match_tokens(concept)
+                        and bool(
+                            self._axis_match_tokens(sentence)
+                            & {"fatigue", "lcf", "hcf"}
+                        )
+                    )
+                    or (
+                        self._axis_match_tokens(concept)
+                        & {"defect", "pore", "porosity"}
+                        and bool(
+                            self._axis_match_tokens(sentence)
+                            & {"defect", "pore", "porosity"}
+                        )
+                    )
+                    for concept in outcome_concepts
                 )
-                or (
-                    self._axis_match_tokens(concept)
-                    & {"defect", "pore", "porosity"}
-                    and bool(text_tokens & {"defect", "pore", "porosity"})
-                )
-                for concept in outcome_concepts
+                for sentence in _quote_sentences(source_text)
             )
             if relevant:
                 selected.append(unit_id)
         return _dedupe_strings(selected)
+
+    def _finding_synthesis_axis_scale_boundaries(
+        self,
+        unit_ids: list[str],
+        *,
+        units_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[str]:
+        ranges_by_axis: dict[str, dict[str, dict[str, Any]]] = {}
+        for unit_id in unit_ids:
+            unit = units_by_id.get(unit_id, {})
+            document_id = _text(unit.get("document_id"))
+            if not document_id:
+                continue
+            process_context = _mapping(unit.get("process_context"))
+            baseline_process_context = _mapping(
+                _mapping(unit.get("baseline_context")).get("process_context")
+            )
+            for axis, baseline_text, current_text in (
+                self._comparison_axis_transitions(unit)
+            ):
+                values = [
+                    (number, text)
+                    for text in (baseline_text, current_text)
+                    if (number := _float_text(text)) is not None and number > 0
+                ]
+                if len(values) != 2:
+                    continue
+                axis_key = _normalize_match_text(axis)
+                record = ranges_by_axis.setdefault(axis_key, {}).setdefault(
+                    document_id,
+                    {
+                        "axis": self._display_axis_label(axis),
+                        "values": {},
+                        "units": set(),
+                    },
+                )
+                for number, text in values:
+                    record["values"][number] = text
+                for context in (baseline_process_context, process_context):
+                    unit_label = self._axis_unit_from_context(axis, context)
+                    if unit_label:
+                        record["units"].add(unit_label)
+
+        boundaries: list[str] = []
+        for documents in ranges_by_axis.values():
+            ranges = []
+            for record in documents.values():
+                values = sorted(record["values"].items())
+                units = sorted(record["units"])
+                if not values or len(units) != 1:
+                    continue
+                ranges.append(
+                    {
+                        "axis": record["axis"],
+                        "minimum": values[0][0],
+                        "maximum": values[-1][0],
+                        "display": (
+                            values[0][1]
+                            if len(values) == 1
+                            else f"{values[0][1]}-{values[-1][1]}"
+                        ),
+                        "unit": units[0],
+                    }
+                )
+            if len(ranges) < 2 or len({item["unit"] for item in ranges}) != 1:
+                continue
+            low = min(ranges, key=lambda item: item["maximum"])
+            high = max(ranges, key=lambda item: item["minimum"])
+            if (
+                high["minimum"]
+                <= low["maximum"] * _FINDING_SYNTHESIS_AXIS_SCALE_MISMATCH_RATIO
+            ):
+                continue
+            boundaries.append(
+                f"Reported {low['axis']} ranges differ by more than "
+                f"{_FINDING_SYNTHESIS_AXIS_SCALE_MISMATCH_RATIO}x across papers "
+                f"({low['display']} {low['unit']} versus "
+                f"{high['display']} {high['unit']}); verify source unit "
+                "normalization before direct comparison."
+            )
+        return boundaries
+
+    def _axis_unit_from_context(
+        self,
+        axis: str,
+        context: Mapping[str, Any],
+    ) -> str:
+        axis_tokens = self._axis_match_tokens(axis)
+        for key in context:
+            if not axis_tokens <= self._axis_match_tokens(_text(key)):
+                continue
+            match = re.search(r"\(([^()]*)\)\s*$", _text(key) or "")
+            if match:
+                return match.group(1).strip()
+        return ""
 
     def _valid_finding_synthesis_unit_ids(
         self,
@@ -2924,17 +3186,81 @@ class ResearchUnderstandingService:
                 conflict_documents = conflicting_relationships.get(relationship, set())
                 if len(support_documents | conflict_documents) >= 2:
                     return "conflict"
+            combined_relationships = {
+                relationship: set(document_ids)
+                for relationship, document_ids in supporting_relationships.items()
+            }
+            for relationship, document_ids in conflicting_relationships.items():
+                combined_relationships.setdefault(relationship, set()).update(
+                    document_ids
+                )
+            if self._finding_synthesis_has_cross_paper_axis_overlap(
+                combined_relationships
+            ):
+                return "condition_dependent"
+        exact_cross_paper_confirmation = bool(supporting_relationships) and all(
+            len(document_ids) >= 2
+            for document_ids in supporting_relationships.values()
+        )
+        if (
+            requested == "agreement"
+            and len(supporting_document_ids) >= 2
+            and exact_cross_paper_confirmation
+        ):
+            return "agreement"
         if (
             requested in {"agreement", "condition_dependent"}
             and len(supporting_document_ids) >= 2
-            and supporting_relationships
-            and all(
-                len(document_ids) >= 2
-                for document_ids in supporting_relationships.values()
+            and self._finding_synthesis_has_cross_paper_axis_overlap(
+                supporting_relationships
             )
         ):
-            return requested
+            return "condition_dependent"
         return "insufficient_confirmation"
+
+    def _finding_synthesis_has_cross_paper_axis_overlap(
+        self,
+        relationships: Mapping[tuple[tuple[str, ...], str], set[str]],
+    ) -> bool:
+        relationships_by_property: dict[
+            str,
+            list[tuple[tuple[str, ...], set[str]]],
+        ] = {}
+        for (source_axes, property_name), document_ids in relationships.items():
+            relationships_by_property.setdefault(property_name, []).append(
+                (source_axes, document_ids)
+            )
+        if not relationships_by_property:
+            return False
+        for property_relationships in relationships_by_property.values():
+            if len(
+                {
+                    document_id
+                    for _source_axes, document_ids in property_relationships
+                    for document_id in document_ids
+                }
+            ) < 2:
+                return False
+            connected = {0}
+            while True:
+                expanded = {
+                    candidate_index
+                    for candidate_index, (candidate_axes, _document_ids) in enumerate(
+                        property_relationships
+                    )
+                    if any(
+                        self._axis_labels_match(candidate_axis, connected_axis)
+                        for connected_index in connected
+                        for connected_axis in property_relationships[connected_index][0]
+                        for candidate_axis in candidate_axes
+                    )
+                }
+                if expanded <= connected:
+                    break
+                connected.update(expanded)
+            if len(connected) != len(property_relationships):
+                return False
+        return True
 
     def _finding_synthesis_relationship_documents(
         self,

@@ -218,6 +218,7 @@ def _model_finding(
         "mixed" if synthesis_status == "conflict" else "increases"
     )
     return {
+        "result_set_id": "result_set_1",
         "source_concept": "energy density",
         "outcomes": outcomes
         or [
@@ -647,7 +648,46 @@ def test_goal_synthesis_context_excerpt_does_not_repeat_compact_statement():
     assert "omitted_by_document" not in extractor.payloads[0]["input_coverage"]
 
 
-def test_goal_synthesis_requires_each_composite_relationship_to_be_cross_paper():
+def test_goal_synthesis_model_payload_omits_redundant_evidence_fields():
+    direct = _evidence_unit(
+        "unit-direct",
+        "paper-direct",
+        statement="Increasing energy density increased relative density.",
+        direction="increases",
+    )
+    context = _context_unit(
+        "unit-context",
+        "paper-direct",
+        unit_kind="interpretation",
+        statement=" ".join(["Lower porosity improves load transfer."] * 40),
+    )
+    service, extractor = _service([])
+
+    service.build_goal_understanding(_payload([direct, context]))
+
+    model_payload = extractor.payloads[0]
+    assert set(model_payload["paper_frames"][0]) == {
+        "document_id",
+        "material_match",
+        "changed_variables",
+        "test_conditions",
+    }
+    assert set(_result_units(model_payload)[0]) == {
+        "evidence_unit_id",
+        "unit_kind",
+        "property_normalized",
+        "source_axes",
+        "direct_result",
+        "statement",
+        "unit",
+    }
+    context_excerpt = model_payload["document_context"][0]["context_units"][0][
+        "source_excerpt"
+    ]
+    assert len(context_excerpt) <= 421
+
+
+def test_goal_synthesis_does_not_combine_different_properties_across_papers():
     defect = _evidence_unit(
         "unit-defect-paper-one",
         "paper-one",
@@ -704,10 +744,7 @@ def test_goal_synthesis_requires_each_composite_relationship_to_be_cross_paper()
 
     understanding = service.build_goal_understanding(_payload([defect, fatigue]))
 
-    finding = understanding["presentation"]["findings"][0]
-    assert finding["paper_count"] == 2
-    assert finding["synthesis_status"] == "insufficient_confirmation"
-    assert finding["generalization_status"] != "scoped_cross_paper"
+    assert understanding["presentation"]["findings"] == []
 
 
 def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
@@ -772,6 +809,36 @@ def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
     ] == ["paper-1", "paper-2"]
 
 
+def test_goal_synthesis_backend_binds_all_result_set_evidence():
+    units = [
+        _evidence_unit(
+            "unit-paper-1",
+            "paper-1",
+            statement="Increasing energy density increased density to 99.1%.",
+            direction="increases",
+        ),
+        _evidence_unit(
+            "unit-paper-2",
+            "paper-2",
+            statement="Increasing energy density increased density to 99.6%.",
+            direction="increases",
+        ),
+    ]
+    model_finding = _model_finding(
+        synthesis_status="agreement",
+        supporting_ids=["unit-paper-1"],
+    )
+    service, _ = _service([model_finding])
+
+    understanding = service.build_goal_understanding(_payload(units))
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["paper_count"] == 2
+    assert {
+        item["document_id"] for item in finding["paper_contributions"]
+    } == {"paper-1", "paper-2"}
+
+
 def test_goal_synthesis_groups_matching_relationships_across_documents():
     paper_one_speed = _evidence_unit(
         "unit-paper-1-speed",
@@ -814,6 +881,531 @@ def test_goal_synthesis_groups_matching_relationships_across_documents():
         paper["document_id"] for paper in speed_results["document_evidence"]
     ] == ["paper-1", "paper-2"]
     assert ("laser power",) in by_source_axes
+
+
+def test_goal_synthesis_groups_comparison_contrasts_across_documents():
+    comparisons = [
+        (
+            _evidence_unit(
+                "unit-paper-1-strategy-b",
+                "paper-1",
+                statement=(
+                    "Changing scan speed from 0.167 to 0.239 decreased relative "
+                    "density from 96.1% to 92.4%."
+                ),
+                direction="decreases",
+            ),
+            "B",
+            "0.167",
+            "0.239",
+            "96.1",
+            "92.4",
+        ),
+        (
+            _evidence_unit(
+                "unit-paper-1-strategy-c",
+                "paper-1",
+                statement=(
+                    "Changing scan speed from 0.167 to 0.239 decreased relative "
+                    "density from 98% to 93.8%."
+                ),
+                direction="decreases",
+            ),
+            "C",
+            "0.167",
+            "0.239",
+            "98",
+            "93.8",
+        ),
+        (
+            _evidence_unit(
+                "unit-paper-2-as-built",
+                "paper-2",
+                statement=(
+                    "Changing scan speed from 100 to 200 decreased relative "
+                    "density from 97.83% to 91.84%."
+                ),
+                direction="decreases",
+            ),
+            "as-built",
+            "100",
+            "200",
+            "97.83",
+            "91.84",
+        ),
+    ]
+    for unit, condition, baseline_speed, current_speed, baseline, current in comparisons:
+        unit["process_context"] = {
+            "scan speed": current_speed,
+            "condition": condition,
+        }
+        unit["baseline_context"] = {
+            "process_context": {
+                "scan speed": baseline_speed,
+                "condition": condition,
+            },
+            "source_value_text": baseline,
+            "value": baseline,
+        }
+        unit["value_payload"].update(
+            {
+                "comparison_axis": "scan speed",
+                "source_value_text": current,
+                "value": current,
+            }
+        )
+
+    payload = _payload([item[0] for item in comparisons])
+    payload["objective"]["process_axes"] = ["scan speed"]
+    payload["objective_context"]["variable_process_axes"] = ["scan speed"]
+    service, extractor = _service([])
+
+    service.build_goal_understanding(payload)
+
+    result_sets = extractor.payloads[0]["result_sets"]
+    assert len(result_sets) == 1
+    assert result_sets[0]["alignment"] == (
+        "same source-axis and outcome relationship across condition contrasts"
+    )
+    assert result_sets[0]["source_axes"] == ["scan speed"]
+    assert result_sets[0]["outcome_properties"] == ["relative density"]
+    assert {
+        item["document_id"] for item in result_sets[0]["document_evidence"]
+    } == {"paper-1", "paper-2"}
+    assert {
+        unit["evidence_unit_id"]
+        for item in result_sets[0]["document_evidence"]
+        for unit in item["result_units"]
+    } == {
+        "unit-paper-1-strategy-b",
+        "unit-paper-1-strategy-c",
+        "unit-paper-2-as-built",
+    }
+
+
+def test_goal_synthesis_groups_overlapping_coupled_axes_as_condition_dependent():
+    coupled = _evidence_unit(
+        "unit-coupled-density",
+        "paper-coupled",
+        statement=(
+            "Changing laser power, scanning speed, and hatch spacing increased "
+            "relative density from 91.9% to 99.6%."
+        ),
+        direction="increases",
+    )
+    coupled["process_context"] = {
+        "laser power": "220",
+        "scanning speed": "725",
+        "hatch spacing": "120",
+    }
+    coupled["baseline_context"] = {
+        "process_context": {
+            "laser power": "160",
+            "scanning speed": "875",
+            "hatch spacing": "120",
+        },
+        "source_value_text": "91.9",
+        "value": "91.9",
+    }
+    coupled["value_payload"].update(
+        {
+            "comparison_axis": "laser power, scanning speed, hatch spacing",
+            "source_value_text": "99.6",
+            "value": "99.6",
+        }
+    )
+    scan_speed = _evidence_unit(
+        "unit-speed-density",
+        "paper-speed",
+        statement=(
+            "Changing scanning speed from 100 to 280 decreased relative "
+            "density from 98.11% to 90.04%."
+        ),
+        direction="decreases",
+    )
+    scan_speed["process_context"] = {
+        "laser power": "120",
+        "scanning speed": "280",
+    }
+    scan_speed["baseline_context"] = {
+        "process_context": {
+            "laser power": "120",
+            "scanning speed": "100",
+        },
+        "source_value_text": "98.11",
+        "value": "98.11",
+    }
+    scan_speed["value_payload"].update(
+        {
+            "comparison_axis": "scanning speed",
+            "source_value_text": "90.04",
+            "value": "90.04",
+        }
+    )
+    payload = _payload([coupled, scan_speed])
+    payload["objective"]["process_axes"] = [
+        "laser power",
+        "scanning speed",
+        "hatch spacing",
+    ]
+    payload["objective_context"]["variable_process_axes"] = [
+        "laser power",
+        "scanning speed",
+        "hatch spacing",
+    ]
+    model_finding = _model_finding(
+        synthesis_status="agreement",
+        supporting_ids=["unit-coupled-density", "unit-speed-density"],
+        direction="mixed",
+    )
+    model_finding.update(
+        {
+            "source_concept": "scanning speed",
+            "statement": (
+                "Density depends on the tested coupled LPBF process conditions."
+            ),
+        }
+    )
+    service, extractor = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    result_sets = extractor.payloads[0]["result_sets"]
+    assert len(result_sets) == 1
+    assert result_sets[0]["alignment"] == (
+        "overlapping source-axis and outcome relationship across condition contrasts"
+    )
+    assert result_sets[0]["source_axes"] == [
+        "laser power",
+        "scanning speed",
+        "hatch spacing",
+    ]
+    assert {
+        item["document_id"]: item["source_axes"]
+        for item in result_sets[0]["document_evidence"]
+    } == {
+        "paper-coupled": ["laser power", "scanning speed", "hatch spacing"],
+        "paper-speed": ["scanning speed"],
+    }
+    relation = understanding["relations"][0]
+    assert relation["subject"] == "laser power, scanning speed, hatch spacing"
+    assert relation["synthesis_status"] == "condition_dependent"
+    assert "condition_dependent" in relation["warnings"]
+
+
+def test_goal_synthesis_rejects_finding_that_mixes_result_sets():
+    density = _evidence_unit(
+        "unit-density",
+        "paper-density",
+        statement="Increasing scan speed decreased relative density.",
+        direction="decreases",
+    )
+    density["value_payload"]["comparison_axis"] = "scan speed"
+    microstructure = _evidence_unit(
+        "unit-microstructure",
+        "paper-microstructure",
+        statement="Heat treatment coarsened the grain structure.",
+        direction="increases",
+    )
+    microstructure["property_normalized"] = "microstructure"
+    microstructure["value_payload"]["comparison_axis"] = "heat treatment"
+    payload = _payload([density, microstructure])
+    payload["objective"]["process_axes"] = ["scan speed", "heat treatment"]
+    payload["objective"]["property_axes"] = ["relative density", "microstructure"]
+    payload["objective_context"]["variable_process_axes"] = [
+        "scan speed",
+        "heat treatment",
+    ]
+    payload["objective_context"]["target_property_axes"] = [
+        "relative density",
+        "microstructure",
+    ]
+    payload["paper_frames"][0]["changed_variables"] = ["scan speed"]
+    payload["paper_frames"][1]["changed_variables"] = ["heat treatment"]
+    model_finding = {
+        **_model_finding(
+            synthesis_status="agreement",
+            supporting_ids=["unit-density"],
+            outcomes=[
+                {
+                    "concept": "relative density",
+                    "direction": "decreases",
+                    "statement": "Scan speed decreased relative density.",
+                    "supporting_evidence_unit_ids": ["unit-density"],
+                    "conflicting_evidence_unit_ids": [],
+                },
+                {
+                    "concept": "microstructure",
+                    "direction": "changes",
+                    "statement": "Heat treatment changed microstructure.",
+                    "supporting_evidence_unit_ids": ["unit-microstructure"],
+                    "conflicting_evidence_unit_ids": [],
+                },
+            ],
+        ),
+        "result_set_id": "result_set_1",
+        "source_concept": "scan speed and heat treatment",
+    }
+    service, extractor = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    assert [item["result_set_id"] for item in extractor.payloads[0]["result_sets"]] == [
+        "result_set_1",
+        "result_set_2",
+    ]
+    assert understanding["presentation"]["findings"] == []
+
+
+def test_goal_synthesis_rejects_energy_density_context_for_density_outcome():
+    direct = _evidence_unit(
+        "unit-density",
+        "paper-1",
+        statement=(
+            "Changing scan speed from 100 to 200 decreased relative density "
+            "from 97.83% to 91.84%."
+        ),
+        direction="decreases",
+    )
+    direct["value_payload"]["comparison_axis"] = "scan speed"
+    context = _context_unit(
+        "unit-grain-context",
+        "paper-1",
+        unit_kind="mechanism",
+        statement="Increasing energy density resulted in coarser grains.",
+        evidence_role="mediator_context",
+    )
+    context["property_normalized"] = "microstructure"
+    payload = _payload([direct, context])
+    payload["objective"]["process_axes"] = ["scan speed"]
+    payload["objective_context"]["variable_process_axes"] = ["scan speed"]
+    model_finding = _model_finding(
+        synthesis_status="insufficient_confirmation",
+        supporting_ids=["unit-density"],
+        mechanism_ids=["unit-grain-context"],
+        direction="decreases",
+    )
+    model_finding.update(
+        {
+            "source_concept": "scan speed",
+            "mediator_concepts": ["coarser grains"],
+            "statement": (
+                "Changing scan speed from 100 to 200 decreased relative density "
+                "from 97.83% to 91.84%. Increasing energy density resulted in "
+                "coarser grains."
+            ),
+        }
+    )
+    service, _ = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    relation = understanding["relations"][0]
+    assert relation["statement"] == direct["value_payload"]["statement"]
+    assert relation["mechanism_evidence_ref_ids"] == []
+    assert relation["object"] == "relative density"
+
+
+def test_goal_synthesis_rebuilds_cross_paper_statement_from_direct_evidence():
+    paper_one = _evidence_unit(
+        "unit-paper-1-density",
+        "paper-1",
+        statement=(
+            "Higher scan speed decreased relative density from 98% to 93.8%."
+        ),
+        direction="decreases",
+    )
+    paper_two = _evidence_unit(
+        "unit-paper-2-density",
+        "paper-2",
+        statement=(
+            "Higher scan speed decreased relative density from 97.83% to 91.84%."
+        ),
+        direction="decreases",
+    )
+    for unit in (paper_one, paper_two):
+        unit["value_payload"]["comparison_axis"] = "scan speed"
+    context = _context_unit(
+        "unit-unrelated-grain-context",
+        "paper-1",
+        unit_kind="mechanism",
+        statement="Increasing energy density resulted in coarser grains.",
+        evidence_role="mediator_context",
+    )
+    context["property_normalized"] = "microstructure"
+    payload = _payload([paper_one, paper_two, context])
+    payload["objective"]["process_axes"] = ["scan speed"]
+    payload["objective_context"]["variable_process_axes"] = ["scan speed"]
+    model_finding = _model_finding(
+        synthesis_status="agreement",
+        supporting_ids=["unit-paper-1-density", "unit-paper-2-density"],
+        mechanism_ids=["unit-unrelated-grain-context"],
+        direction="decreases",
+    )
+    model_finding.update(
+        {
+            "source_concept": "scan speed",
+            "mediator_concepts": ["coarser grains"],
+            "statement": (
+                "Higher scan speed decreased relative density from 98% to "
+                "93.8%, and from 97.83% to 91.84%. Increasing energy density "
+                "resulted in coarser grains."
+            ),
+        }
+    )
+    service, _ = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    relation = understanding["relations"][0]
+    assert relation["synthesis_status"] == "agreement"
+    assert relation["statement"] == (
+        "Higher scan speed decreased relative density from 98% to 93.8%. "
+        "Higher scan speed decreased relative density from 97.83% to 91.84%."
+    )
+    assert relation["mechanism_evidence_ref_ids"] == []
+    assert relation["object"] == "relative density"
+
+
+def test_goal_synthesis_rejects_finding_with_outcomes_bound_to_another_property():
+    paper_one = _evidence_unit(
+        "unit-paper-1-density",
+        "paper-1",
+        statement=(
+            "Changing scan speed from 0.167 to 0.239 decreased density "
+            "from 98% to 93.8%."
+        ),
+        direction="decreases",
+    )
+    paper_two = _evidence_unit(
+        "unit-paper-2-density",
+        "paper-2",
+        statement=(
+            "Changing scan speed from 100 to 200 decreased density "
+            "from 97.83% to 91.84%."
+        ),
+        direction="decreases",
+    )
+    for unit in (paper_one, paper_two):
+        unit["property_normalized"] = "density"
+        unit["value_payload"]["comparison_axis"] = "scan speed"
+    payload = _payload([paper_one, paper_two])
+    payload["objective"]["process_axes"] = ["scan speed"]
+    payload["objective_context"]["variable_process_axes"] = ["scan speed"]
+    model_finding = _model_finding(
+        synthesis_status="insufficient_confirmation",
+        supporting_ids=[],
+        outcomes=[
+            {
+                "concept": "density",
+                "direction": "decreases",
+                "statement": "Increasing scan speed decreases density.",
+                "supporting_evidence_unit_ids": [
+                    "unit-paper-1-density",
+                    "unit-paper-2-density",
+                ],
+                "conflicting_evidence_unit_ids": [],
+            },
+            {
+                "concept": "microstructure",
+                "direction": "changes",
+                "statement": "Increasing scan speed changes microstructure.",
+                "supporting_evidence_unit_ids": [
+                    "unit-paper-1-density",
+                    "unit-paper-2-density",
+                ],
+                "conflicting_evidence_unit_ids": [],
+            },
+            {
+                "concept": "grain size",
+                "direction": "increases",
+                "statement": "Increasing scan speed increases grain size.",
+                "supporting_evidence_unit_ids": ["unit-paper-2-density"],
+                "conflicting_evidence_unit_ids": [],
+            },
+        ],
+    )
+    model_finding.update(
+        {
+            "source_concept": "scan speed",
+            "statement": (
+                "Increasing scan speed decreases density, changes microstructure, "
+                "and increases grain size."
+            ),
+        }
+    )
+    service, _ = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    assert understanding["relations"] == []
+
+
+def test_goal_synthesis_flags_cross_paper_axis_scale_mismatch():
+    paper_one = _evidence_unit(
+        "unit-paper-1-density",
+        "paper-1",
+        statement=(
+            "Changing scan speed from 0.167 to 0.239 decreased density "
+            "from 98% to 93.8%."
+        ),
+        direction="decreases",
+    )
+    paper_two = _evidence_unit(
+        "unit-paper-2-density",
+        "paper-2",
+        statement=(
+            "Changing scan speed from 100 to 200 decreased density "
+            "from 97.83% to 91.84%."
+        ),
+        direction="decreases",
+    )
+    for unit, baseline_speed, current_speed in (
+        (paper_one, "0.167", "0.239"),
+        (paper_two, "100", "200"),
+    ):
+        unit["property_normalized"] = "density"
+        unit["process_context"] = {"Scan speed (mm/s)": current_speed}
+        unit["baseline_context"] = {
+            "process_context": {"Scan speed (mm/s)": baseline_speed},
+            "source_value_text": "98",
+            "value": "98",
+        }
+        unit["value_payload"].update(
+            {
+                "comparison_axis": "scan speed",
+                "current_value": "93.8",
+                "source_value_text": "93.8",
+                "value": "93.8",
+            }
+        )
+    payload = _payload([paper_one, paper_two])
+    payload["objective"]["process_axes"] = ["scan speed"]
+    payload["objective_context"]["variable_process_axes"] = ["scan speed"]
+    model_finding = _model_finding(
+        synthesis_status="insufficient_confirmation",
+        supporting_ids=["unit-paper-1-density", "unit-paper-2-density"],
+        target_concept="density",
+        direction="decreases",
+    )
+    model_finding.update(
+        {
+            "source_concept": "scan speed",
+            "statement": "Increasing scan speed decreases density.",
+            "common_conditions": [],
+            "incomparable_conditions": [],
+        }
+    )
+    service, _ = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    relation = understanding["relations"][0]
+    assert relation["incomparable_conditions"] == [
+        "Reported scan speed ranges differ by more than 100x across papers "
+        "(0.167-0.239 mm/s versus 100-200 mm/s); verify source unit "
+        "normalization before direct comparison."
+    ]
 
 
 def test_goal_synthesis_downgrades_model_agreement_with_one_direct_paper():
@@ -937,6 +1529,44 @@ def test_goal_synthesis_excludes_low_relevance_background_evidence_from_ledger()
 
     assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
+
+
+def test_goal_synthesis_keeps_low_relevance_direct_result_table_in_ledger():
+    unit = _evidence_unit(
+        "unit-result-table",
+        "paper-result-table",
+        statement=(
+            "Changing scan speed from 100 to 280 decreased relative density "
+            "from 98.11% to 90.04%."
+        ),
+        direction="decreases",
+    )
+    unit["value_payload"]["comparison_axis"] = "scan speed"
+    unit["source_refs"][0]["source_kind"] = "table"
+    payload = _payload([unit])
+    payload["objective"]["process_axes"] = ["scan speed"]
+    payload["objective_context"]["variable_process_axes"] = ["scan speed"]
+    payload["paper_frames"][0].update(
+        {
+            "relevance": "low",
+            "paper_role": "supporting_background",
+        }
+    )
+    model_finding = _model_finding(
+        synthesis_status="insufficient_confirmation",
+        supporting_ids=["unit-result-table"],
+    )
+    model_finding["source_concept"] = "scan speed"
+    service, extractor = _service([model_finding])
+
+    understanding = service.build_goal_understanding(payload)
+
+    assert extractor.payloads[0]["result_sets"][0]["document_evidence"][0][
+        "document_id"
+    ] == "paper-result-table"
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["paper_count"] == 1
+    assert finding["evidence_bundle"]["direct_result"]
 
 
 def test_goal_synthesis_keeps_supporting_and_conflicting_evidence_separate():

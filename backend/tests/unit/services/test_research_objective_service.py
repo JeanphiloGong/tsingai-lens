@@ -4180,6 +4180,64 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
     ]
 
 
+def test_research_objective_service_expands_mapped_density_interpretation(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-density",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.72,
+        }
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How do laser power and scan speed affect density?",
+            "target_property_axes": ["density"],
+        }
+    )
+
+    records = service._objective_evidence_unit_records_from_extracted(
+        route=route,
+        source={"page": 3},
+        objective_context=objective_context,
+        extracted_record={
+            "unit_kind": "interpretation",
+            "property_normalized": "density",
+            "value_payload": {
+                "375W-2100mm/s": "97.83%",
+                "255W-1400mm/s": "99.5%",
+                "135W-750mm/s": "99.26%",
+            },
+            "resolution_status": "resolved",
+        },
+    )
+
+    assert [record["unit_kind"] for record in records] == [
+        "measurement",
+        "measurement",
+        "measurement",
+    ]
+    assert [record["property_normalized"] for record in records] == [
+        "density",
+        "density",
+        "density",
+    ]
+    assert [record["value_payload"]["value"] for record in records] == [
+        97.83,
+        99.5,
+        99.26,
+    ]
+
+
 def test_research_objective_service_expands_mapped_numeric_text_measurements(
     tmp_path,
 ):
@@ -4313,7 +4371,7 @@ def test_research_objective_service_expands_mapped_residual_stress_text_measurem
     ]
 
 
-def test_research_objective_service_expands_source_text_density_measurements(
+def test_research_objective_service_expands_source_text_density_measurements_when_model_misclassifies_unit(
     tmp_path,
 ):
     service = ResearchObjectiveService(
@@ -4343,8 +4401,8 @@ def test_research_objective_service_expands_source_text_density_measurements(
         },
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
-            "property_normalized": "relative density",
+            "unit_kind": "process_context",
+            "property_normalized": "microstructure",
             "sample_context": {
                 "density": "97.83%",
                 "sample_id": "375 W-2100 mm·s -1",
@@ -5167,6 +5225,315 @@ def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
     assert lens["excluded_axes"] == ["yield strength"]
     assert any("target_outcome_axis" in rule for rule in lens["direct_support_rules"])
     assert any("Mediator axes" in rule for rule in lens["direct_support_rules"])
+
+
+def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How does volumetric energy density affect density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["volumetric energy density"],
+            "property_axes": ["density"],
+            "seed_document_ids": ["paper-seed"],
+        }
+    )
+
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(
+            SimpleNamespace(
+                table_id="tbl-seed-density",
+                document_id="paper-seed",
+                caption_text="Density results for the seed paper.",
+                column_headers=("VED [J/mm3]", "Density [%]"),
+                table_matrix=(("L-VED", "91.9"),),
+            ),
+            SimpleNamespace(
+                table_id="tbl-independent-density",
+                document_id="paper-independent",
+                caption_text="Independent density results at different VEDs.",
+                column_headers=("VED [J/mm3]", "Density [%]"),
+                table_matrix=(("L-VED", "91.90"), ("H-VED", "99.60")),
+            ),
+        ),
+        target_property_axes=["density"],
+        variable_process_axes=["volumetric energy density"],
+    )
+
+    assert {
+        (hint["document_id"], hint["table_id"], hint["role"])
+        for hint in hints
+    } == {
+        ("paper-seed", "tbl-seed-density", "result_table"),
+        (
+            "paper-independent",
+            "tbl-independent-density",
+            "result_table",
+        ),
+    }
+
+
+def test_research_objective_service_does_not_route_single_letter_acronym_tables(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How does scan speed affect density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["scan speed"],
+            "property_axes": ["density"],
+        }
+    )
+
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(
+            SimpleNamespace(
+                table_id="tbl-composition",
+                document_id="paper-1",
+                caption_text="Chemical composition of SS316L powder.",
+                column_headers=("C", "Cr", "Ni", "P", "S", "Fe"),
+                table_matrix=(("0.02", "16.7", "11.9", "0.01", "0.02", "Bal."),),
+            ),
+            SimpleNamespace(
+                table_id="tbl-polarization",
+                document_id="paper-1",
+                caption_text="Electrochemical polarization parameters.",
+                column_headers=("Sample", "E corr", "E d", "E p"),
+                table_matrix=(("sample-1", "-312.9", "-208.0", "124.7"),),
+            ),
+        ),
+        target_property_axes=["density"],
+        variable_process_axes=["scan speed"],
+    )
+
+    assert hints == []
+
+
+def test_research_objective_service_treats_energy_density_only_table_as_condition(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How do laser power and scan speed affect density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["laser power", "scan speed"],
+            "property_axes": ["density"],
+        }
+    )
+
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(
+            SimpleNamespace(
+                table_id="tbl-process",
+                document_id="paper-1",
+                caption_text="SLM process parameters.",
+                column_headers=(
+                    "Laser power [W]",
+                    "Scan speed [mm/s]",
+                    "Energy density [J/mm3]",
+                ),
+                table_matrix=(("375", "2100", "100"),),
+            ),
+        ),
+        target_property_axes=["density"],
+        variable_process_axes=["laser power", "scan speed"],
+    )
+
+    assert len(hints) == 1
+    assert hints[0]["role"] == "condition_context"
+    assert hints[0]["matched_property_axes"] == []
+
+
+def test_research_objective_service_normalizes_archimedes_density_column(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How does volumetric energy density affect density?",
+            "target_property_axes": ["density"],
+        }
+    )
+
+    normalized = service._normalize_objective_unit_property(
+        "Density [%] > Archimedes ' method",
+        objective_context=objective_context,
+    )
+
+    assert normalized == "density"
+
+
+def test_research_objective_service_ignores_analysis_purpose_as_table_result(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-microstructure",
+            "question": "How does heat treatment affect microstructure?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["heat treatment"],
+            "property_axes": ["microstructure"],
+        }
+    )
+
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(
+            SimpleNamespace(
+                table_id="tbl-sample-angles",
+                document_id="paper-1",
+                caption_text=(
+                    "Scan strategy and build orientation of cubes for "
+                    "microstructure analysis."
+                ),
+                column_headers=("Sample", "rotation angle", "build orientation"),
+                table_matrix=(("1", "0", "0"), ("2", "15", "0")),
+            ),
+        ),
+        target_property_axes=["microstructure"],
+        variable_process_axes=["heat treatment"],
+    )
+
+    assert hints == []
+
+
+def test_research_objective_service_recovers_non_seed_condition_and_result_routes(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "question": "How do LPBF parameters affect tensile properties?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+            ],
+            "property_axes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+            ],
+            "seed_document_ids": ["paper-seed"],
+        }
+    )
+    condition_table = SimpleNamespace(
+        table_id="table-conditions",
+        document_id="paper-independent",
+        caption_text="Fabrication parameters for samples with varying VED.",
+        heading_path="Materials and methods",
+        column_headers=(
+            "ID",
+            "Volumetric energy density [J/mm3]",
+            "Laser power [W]",
+            "Scanning speed [mm/s]",
+            "Hatch spacing [um]",
+        ),
+        row_count=3,
+        col_count=5,
+        table_matrix=(
+            ("L-VED", "50.8", "160", "875", "120"),
+            ("H-VED", "84.3", "220", "725", "120"),
+        ),
+    )
+    result_table = SimpleNamespace(
+        table_id="table-results",
+        document_id="paper-independent",
+        caption_text="Tensile properties for samples printed at different VEDs.",
+        heading_path="Results",
+        column_headers=(
+            "Printed 316L",
+            "Yield strength [MPa]",
+            "Ultimate tensile strength [MPa]",
+            "Total elongation [%]",
+        ),
+        row_count=3,
+        col_count=4,
+        table_matrix=(
+            ("L-VED", "462", "610", "33.2"),
+            ("H-VED", "437", "560", "48.3"),
+        ),
+    )
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(condition_table, result_table),
+        target_property_axes=list(objective.property_axes),
+        variable_process_axes=list(objective.process_axes),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "question": objective.question,
+            "material_scope": list(objective.material_scope),
+            "variable_process_axes": list(objective.process_axes),
+            "target_property_axes": list(objective.property_axes),
+            "routing_hints": hints,
+            "confidence": 0.9,
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-independent",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": list(objective.process_axes),
+            "measured_property_scope": list(objective.property_axes),
+            "relevant_tables": [],
+            "excluded_tables": ["table-conditions", "table-results"],
+        }
+    )
+
+    routes = service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=_ObjectiveExtractor(),
+        objectives=(objective,),
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-independent": []},
+        tables_by_document_id={
+            "paper-independent": [condition_table, result_table]
+        },
+        document_trees_by_document_id={},
+    )
+
+    active_routes = {
+        (route.source_ref, route.role)
+        for route in routes
+        if route.extractable
+    }
+    assert active_routes == {
+        ("table-conditions", "process_or_treatment"),
+        ("table-results", "current_experimental_evidence"),
+    }
 
 
 def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_results(

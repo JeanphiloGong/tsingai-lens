@@ -7122,24 +7122,41 @@ class ResearchObjectiveService:
         *,
         source_text: str = "",
     ) -> tuple[dict[str, Any], ...]:
-        if record.get("unit_kind") != "characterization":
+        source_respective_items = (
+            self._source_text_respective_density_measurement_items(source_text)
+        )
+        if source_respective_items:
+            source_record = dict(record)
+            source_record["evidence_unit_id"] = (
+                self._source_text_density_record_base_id(record)
+            )
+            source_record["process_context"] = {}
+            return tuple(
+                self._numeric_text_characterization_measurement_record_from_value(
+                    record=source_record,
+                    property_normalized="relative density",
+                    raw_value=raw_value,
+                    sample_context={"sample_id": sample_label},
+                    unit="%",
+                    item_index=index,
+                )
+                for index, (sample_label, raw_value) in enumerate(
+                    source_respective_items,
+                    start=1,
+                )
+            )
+        unit_kind = record.get("unit_kind")
+        if unit_kind not in {"characterization", "interpretation"}:
+            return ()
+        if unit_kind == "interpretation" and self._normalize_property_label(
+            record.get("property_normalized")
+        ) not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
             return ()
         respective_items = self._respective_density_measurement_items(record)
-        respective_record = record
-        if not respective_items:
-            respective_items = self._source_text_respective_density_measurement_items(
-                source_text
-            )
-            if respective_items:
-                respective_record = dict(record)
-                respective_record["evidence_unit_id"] = (
-                    self._source_text_density_record_base_id(record)
-                )
-                respective_record["process_context"] = {}
         if respective_items:
             return tuple(
                 self._numeric_text_characterization_measurement_record_from_value(
-                    record=respective_record,
+                    record=record,
                     property_normalized="relative density",
                     raw_value=raw_value,
                     sample_context={"sample_id": sample_label},
@@ -7675,7 +7692,9 @@ class ResearchObjectiveService:
             if len(target_tokens) >= 2:
                 return target_key, extra_tokens
             if target_tokens == {"density"}:
-                if extra_tokens.issubset({"material", "relative"}):
+                if extra_tokens.issubset(
+                    {"archimede", "archimedes", "material", "method", "relative"}
+                ):
                     return target_key, extra_tokens
                 continue
             if extra_tokens and extra_tokens.issubset(
@@ -10168,19 +10187,30 @@ class ResearchObjectiveService:
         variable_process_axes: list[str],
     ) -> list[dict[str, Any]]:
         hints: list[dict[str, Any]] = []
-        selected_document_ids = set(objective.seed_document_ids)
         excluded_document_ids = set(objective.excluded_document_ids)
         for table in tables:
             document_id = str(getattr(table, "document_id", "") or "")
             if document_id in excluded_document_ids:
                 continue
-            if selected_document_ids and document_id not in selected_document_ids:
-                continue
             table_text = self._objective_table_search_text(table)
+            property_search_pieces = [
+                " ".join(
+                    str(value)
+                    for value in getattr(table, "column_headers", ()) or ()
+                )
+            ]
+            for row in tuple(getattr(table, "table_matrix", ()) or ())[:6]:
+                if isinstance(row, (list, tuple)):
+                    property_search_pieces.append(
+                        " ".join(str(cell) for cell in row)
+                    )
+            property_table_text = " ".join(
+                piece for piece in property_search_pieces if piece.strip()
+            )
             matched_property_axes = [
                 axis
                 for axis in target_property_axes
-                if self._source_text_mentions_axis(table_text, axis)
+                if self._source_text_mentions_axis(property_table_text, axis)
             ]
             matched_variable_axes = [
                 axis
@@ -10239,11 +10269,18 @@ class ResearchObjectiveService:
         )
 
     def _source_text_mentions_single_axis(self, text: str, axis: str) -> bool:
+        normalized_axis = self._normalize_property_label(axis)
+        if normalized_axis in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
+            text = re.sub(
+                r"\b(?:(?:laser|volumetric)\s+)?energy\s+densit(?:y|ies)\b",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            )
         text_tokens = self._axis_token_set(self._axis_key(text))
         axis_tokens = self._axis_token_set(self._axis_key(axis))
         if not axis_tokens or not text_tokens:
             return False
-        normalized_axis = self._normalize_property_label(axis)
         if normalized_axis:
             for alias, canonical in _OBJECTIVE_PROPERTY_ALIASES.items():
                 if canonical != normalized_axis:
@@ -11410,7 +11447,7 @@ class ResearchObjectiveService:
 
     def _is_acronym_match(self, left: str, right: str) -> bool:
         for short, long in ((left, right), (right, left)):
-            if len(short) > 8 or not short.isalpha():
+            if len(short) < 2 or len(short) > 8 or not short.isalpha():
                 continue
             acronym = "".join(token[0] for token in long.split() if token)
             if acronym and short == acronym:

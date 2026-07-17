@@ -1051,7 +1051,6 @@ class StructuredResearchUnderstandingFindingOutcome(_StrictModel):
         "unknown",
     ] = "unknown"
     statement: str
-    supporting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=24)
     conflicting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
 
     @field_validator("direction", mode="before")
@@ -1065,6 +1064,7 @@ class StructuredResearchUnderstandingFindingOutcome(_StrictModel):
 
 
 class StructuredResearchUnderstandingFinding(_StrictModel):
+    result_set_id: str = Field(min_length=1)
     source_concept: str
     outcomes: list[StructuredResearchUnderstandingFindingOutcome] = Field(
         min_length=1,

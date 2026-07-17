@@ -73,7 +73,6 @@ class CoreLLMStructuredExtractor:
         self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
         self.last_trace: dict[str, Any] | None = None
-        self._provider_parse_unavailable = False
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
@@ -272,15 +271,13 @@ class CoreLLMStructuredExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=response_model,
+            include_schema=self.extraction_mode != _EXTRACTION_MODE_PROVIDER_PARSE,
         )
         self.last_trace = None
         started_at = perf_counter()
         trace_extraction_mode = self.extraction_mode
         try:
-            if (
-                self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
-                and not self._provider_parse_unavailable
-            ):
+            if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
                 try:
                     parsed, raw_content = self._parse_provider_structured_response(
                         messages=messages,
@@ -294,7 +291,12 @@ class CoreLLMStructuredExtractor:
                         response_model.__name__,
                         exc_info=True,
                     )
-                    self._provider_parse_unavailable = True
+                    messages = self._build_messages(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        include_schema=True,
+                    )
                     parsed, raw_content = self._parse_json_text_response(
                         messages=messages,
                         response_model=response_model,
@@ -360,23 +362,24 @@ class CoreLLMStructuredExtractor:
         system_prompt: str,
         user_prompt: str,
         response_model: type[BaseModel],
+        include_schema: bool,
     ) -> list[dict[str, str]]:
-        schema = json.dumps(
-            response_model.model_json_schema(),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
+        user_content = user_prompt
+        if include_schema:
+            schema = json.dumps(
+                response_model.model_json_schema(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            user_content = (
+                f"{user_prompt}\n\n"
+                "Return exactly one JSON object that matches this schema. "
+                "Do not include markdown fences or commentary.\n"
+                f"JSON schema:\n{schema}"
+            )
         return [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": (
-                    f"{user_prompt}\n\n"
-                    "Return exactly one JSON object that matches this schema. "
-                    "Do not include markdown fences or commentary.\n"
-                    f"JSON schema:\n{schema}"
-                ),
-            },
+            {"role": "user", "content": user_content},
         ]
 
     def _parse_json_text_response(

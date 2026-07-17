@@ -1,8 +1,8 @@
 # Persistence Adapters
 
-This node owns repository construction and persistence backend implementations
-for app-layer collection, task, artifact, Goal session, Source artifact, Core
-semantic fact state, and evaluation state.
+This node owns storage-specific repository construction and implementation.
+The stable data ownership and identity contract lives in
+[`../../docs/architecture/persistence-model.md`](../../docs/architecture/persistence-model.md).
 
 ## Scope
 
@@ -14,24 +14,45 @@ semantic fact state, and evaluation state.
 
 ## Responsibilities
 
-- choose the active repository backend
-- define the boundary between app-layer services and persistence
-- keep storage-specific details out of higher-level orchestration code
-- keep database engine details, SQL, schema creation, and row encoding inside
-  infra-owned repositories
+- construct the concrete repository used by direct application callers
+- keep file layout, database access, SQL, and row encoding inside infra
+- map explicitly between persistence rows and domain records
+- keep runtime composition visible and small
 
-## Current Implementations
+## Current Runtime
 
 - `file/`
-  Primary file-backed persistence used by the app layer
+  Owns collection `meta.json`, `files.json`, `import_manifest.json`, uploaded
+  input bytes, task JSON, and `artifacts.json`.
 - `memory/`
-  In-memory implementations for tests and isolated runs
+  Test and isolated-run implementations for collection, task, and artifact
+  state.
 - `sqlite/`
-  SQLite-backed Goal conversation session persistence, Source artifact
-  persistence, Core semantic fact persistence, and collection-bound evaluation
-  persistence. Core fact storage includes collection-level readiness metadata
-  so empty-but-completed fact families do not require file artifact probes. The
-  application layer depends on repository ports and does not import SQLite
-  table names, SQL, or connection details.
+  Six handwritten repositories share `backend/data/lens.sqlite` for auth, Goal
+  sessions and plans, Source records, Core and Goal workflow records, and
+  evaluation/review state. These repositories currently create schema at
+  runtime.
 - `mysql/`
-  Placeholder for future relational persistence work
+  Unimplemented placeholder selected only by the legacy collection/task/artifact
+  backend switch.
+
+`factory.py` currently selects file, memory, or the unimplemented MySQL path
+only for collection, task, and artifact repositories. It constructs SQLite
+directly for every other family. Source pipeline JSON and Parquet outputs live
+under `infra/source/` runtime storage and are rebuildable intermediates, not a
+second persistence authority.
+
+## Target Boundary
+
+Approved cutover slices replace the current owners directly:
+
+- PostgreSQL repositories own structured mutable state.
+- A single approved local object-store implementation owns immutable binary
+  bytes by storage key.
+- Alembic owns schema changes; repository reads never create or alter schema.
+- Application services receive only the concrete aggregate repositories they
+  use.
+
+Do not add a generic repository, persistence facade, compatibility wrapper,
+service locator, or runtime fallback. Update the real repository and its direct
+callers in the same cutover slice.

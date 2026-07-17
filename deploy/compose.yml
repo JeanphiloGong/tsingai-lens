@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:-v0.4.0}
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     env_file:
       - ./backend.env
     volumes:
@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:-v0.4.0}
+    image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     ports:
       - "${LENS_HTTP_PORT:-8080}:80"
     depends_on:

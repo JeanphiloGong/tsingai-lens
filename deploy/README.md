@@ -3,6 +3,11 @@
 This directory is the minimal self-hosted runtime bundle for Lens. It uses
 published Docker images instead of building from the source tree.
 
+This is the repository's only Docker Compose entrypoint. For source-tree
+development, use the module-local instructions in
+[`backend/README.md`](../backend/README.md) and
+[`frontend/README.md`](../frontend/README.md).
+
 ## Prerequisites
 
 - Docker Engine with the Docker Compose plugin (`docker compose`) is the

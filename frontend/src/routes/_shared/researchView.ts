@@ -73,6 +73,14 @@ export type ResearchUnderstandingClaim = {
 	source_object_ids: string[];
 	warnings: string[];
 };
+export type ResearchUnderstandingPaperContribution = {
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	role: string;
+	statement: string;
+	evidence_ref_ids: string[];
+};
 export type ResearchUnderstandingRelation = {
 	relation_id: string;
 	relation_type: string;
@@ -87,6 +95,12 @@ export type ResearchUnderstandingRelation = {
 	context_ids: string[];
 	source_object_ids: string[];
 	warnings: string[];
+	synthesis_status: string | null;
+	supporting_evidence_ref_ids: string[];
+	conflicting_evidence_ref_ids: string[];
+	common_conditions: string[];
+	incomparable_conditions: string[];
+	paper_contributions: ResearchUnderstandingPaperContribution[];
 };
 export type ResearchUnderstandingPresentationSummary = {
 	title: string;
@@ -179,6 +193,10 @@ export type ResearchUnderstandingPresentationFinding = {
 	related_review_finding_ids: string[];
 	review_reasons: string[];
 	warnings: string[];
+	synthesis_status: string;
+	common_conditions: string[];
+	incomparable_conditions: string[];
+	paper_contributions: ResearchUnderstandingPaperContribution[];
 };
 export type ResearchUnderstandingPresentationComparisonValue = {
 	label: string;
@@ -1644,7 +1662,15 @@ function normalizeResearchUnderstandingRelation(
 		evidence_ref_ids: toStringList(record.evidence_ref_ids),
 		context_ids: toStringList(record.context_ids),
 		source_object_ids: toStringList(record.source_object_ids),
-		warnings: toStringList(record.warnings)
+		warnings: toStringList(record.warnings),
+		synthesis_status: nonEmptyText(record.synthesis_status),
+		supporting_evidence_ref_ids: toStringList(record.supporting_evidence_ref_ids),
+		conflicting_evidence_ref_ids: toStringList(record.conflicting_evidence_ref_ids),
+		common_conditions: toStringList(record.common_conditions),
+		incomparable_conditions: toStringList(record.incomparable_conditions),
+		paper_contributions: normalizeResearchUnderstandingPaperContributions(
+			record.paper_contributions
+		)
 	};
 }
 
@@ -1844,8 +1870,35 @@ function normalizeResearchUnderstandingPresentationFinding(
 		upgrade_actions: toStringList(record.upgrade_actions),
 		related_review_finding_ids: toStringList(record.related_review_finding_ids),
 		review_reasons: toStringList(record.review_reasons),
-		warnings: toStringList(record.warnings)
+		warnings: toStringList(record.warnings),
+		synthesis_status: toText(record.synthesis_status),
+		common_conditions: toStringList(record.common_conditions),
+		incomparable_conditions: toStringList(record.incomparable_conditions),
+		paper_contributions: normalizeResearchUnderstandingPaperContributions(
+			record.paper_contributions
+		)
 	};
+}
+
+function normalizeResearchUnderstandingPaperContributions(
+	value: unknown
+): ResearchUnderstandingPaperContribution[] {
+	return asArray(value)
+		.map((item) => {
+			const record = asRecord(item);
+			if (!record) return null;
+			const documentId = toText(record.document_id);
+			if (!documentId) return null;
+			return {
+				document_id: documentId,
+				title: nonEmptyText(record.title),
+				source_filename: nonEmptyText(record.source_filename),
+				role: toText(record.role, 'supporting'),
+				statement: toText(record.statement),
+				evidence_ref_ids: toStringList(record.evidence_ref_ids)
+			};
+		})
+		.filter((item): item is ResearchUnderstandingPaperContribution => item !== null);
 }
 
 function normalizeResearchUnderstandingPresentationRelationSegment(

@@ -268,6 +268,10 @@ function presentationFinding(
 		| 'related_review_finding_ids'
 		| 'comparison_summary'
 		| 'relation_chain'
+		| 'synthesis_status'
+		| 'common_conditions'
+		| 'incomparable_conditions'
+		| 'paper_contributions'
 	> & {
 		expert_use_status?: string;
 		dataset_use_status?: string;
@@ -278,6 +282,10 @@ function presentationFinding(
 		related_review_finding_ids?: string[];
 		comparison_summary?: ResearchUnderstandingPresentationFinding['comparison_summary'];
 		relation_chain?: ResearchUnderstandingPresentationFinding['relation_chain'];
+		synthesis_status?: string;
+		common_conditions?: string[];
+		incomparable_conditions?: string[];
+		paper_contributions?: ResearchUnderstandingPresentationFinding['paper_contributions'];
 	}
 ): ResearchUnderstandingPresentationFinding {
 	return {
@@ -290,6 +298,10 @@ function presentationFinding(
 		related_review_finding_ids: [],
 		comparison_summary: null,
 		relation_chain: [],
+		synthesis_status: '',
+		common_conditions: [],
+		incomparable_conditions: [],
+		paper_contributions: [],
 		...finding
 	};
 }
@@ -358,7 +370,13 @@ function understandingFixture(): ResearchUnderstanding {
 				evidence_ref_ids: ['ev_section_3'],
 				context_ids: ['ctx_heat_treatment'],
 				source_object_ids: ['unit_interpretation'],
-				warnings: []
+				warnings: [],
+				synthesis_status: null,
+				supporting_evidence_ref_ids: [],
+				conflicting_evidence_ref_ids: [],
+				common_conditions: [],
+				incomparable_conditions: [],
+				paper_contributions: []
 			},
 			{
 				relation_id: 'rel_internal_sample',
@@ -373,7 +391,13 @@ function understandingFixture(): ResearchUnderstanding {
 				evidence_ref_ids: ['ev_section_3'],
 				context_ids: ['ctx_heat_treatment'],
 				source_object_ids: ['unit_interpretation'],
-				warnings: []
+				warnings: [],
+				synthesis_status: null,
+				supporting_evidence_ref_ids: [],
+				conflicting_evidence_ref_ids: [],
+				common_conditions: [],
+				incomparable_conditions: [],
+				paper_contributions: []
 			}
 		],
 		evidence_refs: [
@@ -5255,6 +5279,51 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(findingDetail.getByRole('button', { name: 'Expert curation' }))
 			.toBeInTheDocument();
+	});
+
+	it('shows goal-level synthesis and paper contributions in the existing finding detail', async () => {
+		const understanding = findingOnlyUnderstandingFixture();
+		const finding = understanding.presentation.primary_findings[0];
+		finding.paper_count = 2;
+		finding.synthesis_status = 'condition_dependent';
+		finding.common_conditions = ['LPBF 316L'];
+		finding.incomparable_conditions = ['different density test methods'];
+		finding.paper_contributions = [
+			{
+				document_id: 'doc_1',
+				title: 'Density study A',
+				source_filename: 'density-a.pdf',
+				role: 'supporting',
+				statement: 'Higher VED increased Archimedes density.',
+				evidence_ref_ids: ['ev_density_quote']
+			},
+			{
+				document_id: 'doc_internal_2',
+				title: 'Density study B',
+				source_filename: 'density-b.pdf',
+				role: 'supporting',
+				statement: 'The direction depended on the density test method.',
+				evidence_ref_ids: []
+			}
+		];
+		understanding.presentation.findings = [finding];
+
+		render(ResearchUnderstandingWorkbench, {
+			understanding,
+			collectionId: 'col_123'
+		});
+
+		await browserPage.getByText('VED -> density').click();
+		const findingDetail = browserPage.getByLabelText('Finding detail');
+		await expect.element(findingDetail.getByText('Cross-paper synthesis')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Condition-dependent')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('LPBF 316L', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(findingDetail.getByText('different density test methods'))
+			.toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Density study A')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('Density study B')).toBeInTheDocument();
+		await expect.element(findingDetail.getByText('doc_internal_2')).not.toBeInTheDocument();
 	});
 
 	it('opens primary-finding detail even when the backend omits the combined findings list', async () => {

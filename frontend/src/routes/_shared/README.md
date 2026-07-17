@@ -32,7 +32,10 @@ This node owns browser-side helpers that are shared across frontend routes.
   corrections after refresh. The same helper also reads curation-derived gold
   drafts and finding-centered dataset exports for evaluation handoff, including
   review-decision hints that tell the workbench which accept/reject/correct
-  actions are allowed or blocked for a review candidate.
+  actions are allowed or blocked for a review candidate. Goal Findings retain
+  their synthesis status, shared and incomparable conditions, and per-paper
+  contributions so the existing detail view can explain cross-paper support
+  without adding a separate frontend resource.
 - `goalSessions.ts`
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references

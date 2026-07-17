@@ -498,6 +498,19 @@ describe('research view shared helpers', () => {
 							outcomes: ['tensile strength'],
 							support_grade: 'partial',
 							review_status: 'pending_review',
+							synthesis_status: 'condition_dependent',
+							common_conditions: ['LPBF 316L'],
+							incomparable_conditions: ['different tensile temperatures'],
+							paper_contributions: [
+								{
+									document_id: 'doc_1',
+									title: 'Heat treatment study',
+									source_filename: 'heat-treatment.pdf',
+									role: 'supporting',
+									statement: 'The paper reports a condition-specific strength change.',
+									evidence_ref_ids: ['ev_1']
+								}
+							],
 							evidence_ref_ids: ['ev_1'],
 							relation_chain: [
 								{
@@ -597,6 +610,19 @@ describe('research view shared helpers', () => {
 			review_status: 'pending_review'
 		});
 		expect(finding?.evidence_bundle.direct_result).toEqual(['ev_1']);
+		expect(finding?.synthesis_status).toBe('condition_dependent');
+		expect(finding?.common_conditions).toEqual(['LPBF 316L']);
+		expect(finding?.incomparable_conditions).toEqual(['different tensile temperatures']);
+		expect(finding?.paper_contributions).toEqual([
+			{
+				document_id: 'doc_1',
+				title: 'Heat treatment study',
+				source_filename: 'heat-treatment.pdf',
+				role: 'supporting',
+				statement: 'The paper reports a condition-specific strength change.',
+				evidence_ref_ids: ['ev_1']
+			}
+		]);
 		expect(finding?.relation_chain).toEqual([
 			{
 				relation_id: 'rel_1',

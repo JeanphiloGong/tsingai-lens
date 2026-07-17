@@ -1185,6 +1185,47 @@
 		return $t('research.understanding.crossPaperFinding', { count: finding.paper_count });
 	}
 
+	function findingSynthesisStatusLabel(status: string) {
+		if (status === 'agreement') return $t('research.understanding.synthesisAgreement');
+		if (status === 'conflict') return $t('research.understanding.synthesisConflict');
+		if (status === 'condition_dependent') {
+			return $t('research.understanding.synthesisConditionDependent');
+		}
+		return $t('research.understanding.synthesisInsufficientConfirmation');
+	}
+
+	function findingSynthesisStatusBody(status: string) {
+		if (status === 'agreement') return $t('research.understanding.synthesisAgreementBody');
+		if (status === 'conflict') return $t('research.understanding.synthesisConflictBody');
+		if (status === 'condition_dependent') {
+			return $t('research.understanding.synthesisConditionDependentBody');
+		}
+		return $t('research.understanding.synthesisInsufficientConfirmationBody');
+	}
+
+	function paperContributionRoleLabel(role: string) {
+		if (role === 'conflicting') return $t('research.understanding.paperContributionConflicting');
+		if (role === 'mixed') return $t('research.understanding.paperContributionMixed');
+		return $t('research.understanding.paperContributionSupporting');
+	}
+
+	function paperContributionEvidence(
+		contribution: ResearchUnderstandingPresentationFinding['paper_contributions'][number]
+	) {
+		return uniquePresentationEvidenceForIds(contribution.evidence_ref_ids);
+	}
+
+	function paperContributionLabel(
+		contribution: ResearchUnderstandingPresentationFinding['paper_contributions'][number],
+		index: number
+	) {
+		if (contribution.title) return compactText(contribution.title, 140);
+		if (contribution.source_filename) return readableEvidenceTitle(contribution.source_filename, 140);
+		const evidence = paperContributionEvidence(contribution)[0];
+		if (evidence) return readableEvidenceTitle(evidence.source_label || evidence.title, 140);
+		return $t('research.understanding.paperContributionFallback', { count: index + 1 });
+	}
+
 	function findingComparisonTitle(finding: ResearchUnderstandingPresentationFinding) {
 		const summary = finding.comparison_summary;
 		if (!summary) return '';
@@ -5586,6 +5627,67 @@
 										</div>
 									{/if}
 								</div>
+								{#if selectedFinding.synthesis_status}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--synthesis"
+										aria-label={$t('research.understanding.crossPaperSynthesis')}
+									>
+										<div class="research-understanding-workbench__synthesis-heading">
+											<strong>{$t('research.understanding.crossPaperSynthesis')}</strong>
+											<span>{findingSynthesisStatusLabel(selectedFinding.synthesis_status)}</span>
+										</div>
+										<p>{findingSynthesisStatusBody(selectedFinding.synthesis_status)}</p>
+										{#if selectedFinding.common_conditions.length}
+											<div class="research-understanding-workbench__synthesis-conditions">
+												<span>{$t('research.understanding.commonConditions')}</span>
+												<ul>
+													{#each selectedFinding.common_conditions as condition (condition)}
+														<li>{condition}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFinding.incomparable_conditions.length}
+											<div class="research-understanding-workbench__synthesis-conditions">
+												<span>{$t('research.understanding.incomparableConditions')}</span>
+												<ul>
+													{#each selectedFinding.incomparable_conditions as condition (condition)}
+														<li>{condition}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFinding.paper_contributions.length}
+											<div class="research-understanding-workbench__paper-contributions">
+												<span>{$t('research.understanding.paperContributions')}</span>
+												<ol>
+													{#each selectedFinding.paper_contributions as contribution, index (contribution.document_id)}
+														<li>
+															<div>
+																<strong>{paperContributionLabel(contribution, index)}</strong>
+																<span>{paperContributionRoleLabel(contribution.role)}</span>
+															</div>
+															{#if contribution.statement}
+																<p>{contribution.statement}</p>
+															{/if}
+															{#if paperContributionEvidence(contribution).length}
+																<div class="research-understanding-workbench__contribution-links">
+																	{#each paperContributionEvidence(contribution) as ref (ref.evidence_ref_id)}
+																		{#if evidenceHref(ref)}
+																			<a href={evidenceHref(ref)}>
+																				{readableEvidenceTitle(ref.source_label || ref.title)}
+																			</a>
+																		{/if}
+																	{/each}
+																</div>
+															{/if}
+														</li>
+													{/each}
+												</ol>
+											</div>
+										{/if}
+									</section>
+								{/if}
 								{#if selectedFinding.comparison_summary}
 									<section
 										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--comparison"
@@ -7812,6 +7914,76 @@
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--synthesis {
+		border-color: var(--accent-border);
+	}
+
+	.research-understanding-workbench__basis-panel--synthesis > p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__synthesis-heading,
+	.research-understanding-workbench__paper-contributions li > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 5px 12px;
+	}
+
+	.research-understanding-workbench__synthesis-heading span,
+	.research-understanding-workbench__synthesis-conditions > span,
+	.research-understanding-workbench__paper-contributions > span,
+	.research-understanding-workbench__paper-contributions li > div:first-child span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__synthesis-conditions,
+	.research-understanding-workbench__paper-contributions {
+		display: grid;
+		gap: 5px;
+	}
+
+	.research-understanding-workbench__paper-contributions ol {
+		display: grid;
+		gap: 0;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__paper-contributions li {
+		display: grid;
+		gap: 4px;
+		border-top: 1px solid var(--border-default);
+		padding: 8px 0;
+	}
+
+	.research-understanding-workbench__paper-contributions li p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__contribution-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+	}
+
+	.research-understanding-workbench__contribution-links a {
+		color: var(--color-accent);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__review-audit {

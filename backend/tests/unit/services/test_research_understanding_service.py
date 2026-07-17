@@ -1914,7 +1914,7 @@ def test_objective_understanding_keeps_scan_speed_tensile_finding_in_review_queu
     )
 
 
-def test_with_presentation_uses_goal_title_as_recovered_finding_boundary():
+def test_with_presentation_uses_objective_title_as_recovered_finding_boundary():
     preheat_text = (
         "Preheating the build platform to 150 C increased the ductility of "
         "material by 14%. This is attributed to the more homogenized "
@@ -2017,9 +2017,9 @@ def test_with_presentation_uses_goal_title_as_recovered_finding_boundary():
         {
             "state": "limited",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-heat",
-                "goal_id": "goal-heat",
+                "objective_id": "objective-heat",
                 "title": (
                     "How do laser power, scan speed, heat treatment type, "
                     "heat treatment parameters, selective laser melting, and "
@@ -3984,9 +3984,9 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-fatigue",
-                "goal_id": "goal-fatigue",
+                "objective_id": "objective-fatigue",
                 "title": (
                     "How do volumetric energy density, laser power, scanning speed, "
                     "hatch spacing, and layer thickness affect defect structure "
@@ -4423,9 +4423,9 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
         {
             "state": "limited",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-texture",
-                "goal_id": "goal-texture",
+                "objective_id": "objective-texture",
                 "title": (
                     "How do scan strategy rotation angle and build orientation "
                     "angle affect crystallographic texture and yield strength?"
@@ -6805,9 +6805,9 @@ def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How does build platform preheating affect mechanical "
                     "properties?"
@@ -11470,7 +11470,7 @@ def test_with_presentation_projects_empty_findings_without_claims():
     assert understanding["presentation"]["findings"] == []
 
 
-def test_with_presentation_recovers_empty_goal_finding_from_source_blocks():
+def test_with_presentation_does_not_recover_empty_goal_from_source_blocks():
     source_text = (
         "As pointed out, the defects in PBF-LB materials results in low fatigue "
         "resistance compared to their static properties. The present results "
@@ -11527,35 +11527,11 @@ def test_with_presentation_recovers_empty_goal_finding_from_source_blocks():
     understanding = service.with_presentation(stored)
 
     assert understanding is not None
-    assert understanding["state"] == "limited"
-    primary = understanding["presentation"]["primary_findings"]
-    assert len(primary) == 1
-    assert primary[0]["title"] == "VED -> fatigue strength"
-    assert primary[0]["direction"] != "reduces"
-    assert primary[0]["relation_chain"][0]["direction"] != "reduces"
-    assert primary[0]["evidence_bundle"]["direct_result"] == [
-        "evref_recovered_ved_defects_fatigue_blk-fatigue-result"
-    ]
-    evidence_by_id = {
-        ref["evidence_ref_id"]: ref for ref in understanding["evidence_refs"]
-    }
-    claim_by_id = {claim["claim_id"]: claim for claim in understanding["claims"]}
-    relation_by_id = {
-        relation["relation_id"]: relation
-        for relation in understanding["relations"]
-    }
-    context_by_id = {
-        context["context_id"]: context for context in understanding["contexts"]
-    }
-    assert primary[0]["claim_id"] in claim_by_id
-    assert primary[0]["relation_ids"][0] in relation_by_id
-    assert primary[0]["context_ids"][0] in context_by_id
-    assert primary[0]["evidence_ref_ids"][0] in evidence_by_id
-    evidence_item = understanding["presentation"]["evidence_items"][0]
-    assert evidence_item["source_ref"] == "blk-fatigue-result"
-    assert evidence_item["page"] == "10"
-    assert "lower fraction of defects" in evidence_item["quote"]
-    assert "LoF defects" in evidence_item["quote"]
+    assert understanding["state"] == "empty"
+    assert understanding["claims"] == []
+    assert understanding["relations"] == []
+    assert understanding["evidence_refs"] == []
+    assert understanding["presentation"]["findings"] == []
 
 
 def test_with_presentation_axis_coverage_distinguishes_mechanism_from_missing():
@@ -11592,9 +11568,9 @@ def test_with_presentation_axis_coverage_distinguishes_mechanism_from_missing():
         {
             "state": "empty",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-fatigue",
-                "goal_id": "goal-fatigue",
+                "objective_id": "objective-fatigue",
                 "title": (
                     "How do volumetric energy density, laser power, scanning "
                     "speed, hatch spacing, and layer thickness affect defect "
@@ -11793,9 +11769,9 @@ def test_with_presentation_axis_coverage_excludes_platform_process_from_variable
         {
             "state": "empty",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-texture",
-                "goal_id": "goal-texture",
+                "objective_id": "objective-texture",
                 "title": (
                     "How do scan strategy rotation angle, build orientation "
                     "angle, and Laser Powder Bed Fusion affect crystallographic "
@@ -16239,9 +16215,9 @@ def test_with_presentation_projects_property_axis_relation_as_finding():
         {
             "state": "limited",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-corrosion",
-                "goal_id": "goal-corrosion",
+                "objective_id": "objective-corrosion",
                 "title": (
                     "How do porosity level and pore size affect pitting "
                     "corrosion behavior of 316L stainless steel?"
@@ -16756,9 +16732,9 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-slm",
-                "goal_id": "goal-scan-speed",
+                "objective_id": "objective-scan-speed",
                 "title": (
                     "How do scanning strategy, scanning speed, and energy "
                     "density affect yield strength, ultimate tensile strength, "

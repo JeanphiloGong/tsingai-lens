@@ -91,9 +91,12 @@ Every unit should carry:
 - `join_keys`
 - `resolution_status`
 
-`ObjectiveLogicChain` then assembles paper-level and cross-paper reasoning over
-these units. Comparison rows, evidence cards, report sections, and workspace
-payloads are projections from units and chains.
+`ObjectiveLogicChain` preserves the ordered, traceable evidence inventory over
+these units. Once candidate-paper traversal is complete, one goal-level
+research-understanding synthesis compares units grouped by document and
+directly emits final Findings. It must not build paper Findings and cluster
+them afterward. Comparison rows, evidence cards, and workspace payloads remain
+projections from the resolved units, chain, and synthesized Findings.
 
 ## Delivery Slices
 

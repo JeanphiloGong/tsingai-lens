@@ -513,10 +513,11 @@ Objective research-view 最小返回结构：
 - `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
 - `evidence_routes`、`evidence_units`、`logic_chain`
   在下游 builder 未完成时可以为空，但字段必须保留
-- `understanding` 是 collection build 持久化的 Core research understanding
-  artifact，由 objective evidence units、logic chain、evidence refs 和 context
-  直接确定性投影，用于前端展示 Claim / Relation / Evidence / Context
-  工作区；GET 请求只读取已持久化 artifact，不触发新的 LLM 调用或重建
+- `understanding` 是 confirmed-goal analysis 持久化的 Core research
+  understanding artifact。系统先遍历候选文献并按文献积累 objective evidence
+  units，再用一次 goal-level synthesis 直接生成 Findings；不会先生成单篇
+  Finding 再按字段聚类。GET 请求只读取已持久化 artifact，不触发新的 LLM
+  调用或重建
 - `understanding.presentation` 是面向材料专家默认界面的展示投影，包含
   `summary`、`effects`、`evidence_items` 和 `context_summaries`；前端应优先用
   `effects` 展示变量轴、目标性能、证据数量、文献数量和待复核状态，内部
@@ -660,7 +661,10 @@ empty | processing | partial | ready | failed
   `context_ids` 和 `source_object_ids`
 - `relations`：claim 或条件之间的关系；每条至少包含
   `relation_id`、`relation_type`、`subject`、`predicate`、`object`、
-  `status`、`evidence_ref_ids` 和 `context_ids`
+  `status`、`evidence_ref_ids` 和 `context_ids`；goal-level synthesis relation
+  还可包含 `synthesis_status`、`supporting_evidence_ref_ids`、
+  `conflicting_evidence_ref_ids`、`common_conditions`、
+  `incomparable_conditions` 和 `paper_contributions`
 - `evidence_refs`：可跳回来源文献、表格、文本窗口或 fact 的证据引用；每条至少包含
   `evidence_ref_id`、`source_kind`、`document_id`、`label`、`locator`、
   `fact_ids`、`anchor_ids`、`traceability_status` 和可选的
@@ -681,8 +685,10 @@ empty | processing | partial | ready | failed
     `outcomes`、`direction`、`scope_summary`、`support_grade`、
     `review_status`、`paper_count`、`evidence_count`、`evidence_ref_ids`、
     `context_ids`、`relation_ids`、`relation_chain`、`expert_use_status`、
-    `generalization_status`、`generalization_note`、`evidence_gap_summary` 和
-    `related_review_finding_ids`、`evidence_bundle`；`related_review_finding_ids`
+    `generalization_status`、`generalization_note`、`evidence_gap_summary`、
+    `related_review_finding_ids`、`evidence_bundle`、`synthesis_status`、
+    `common_conditions`、`incomparable_conditions` 和 `paper_contributions`；
+    `related_review_finding_ids`
     指向同一 presentation 中可用于确认、反驳或扩展当前 finding 的 review-queue
     finding，不复制或升级其 evidence 归属；`generalization_status`
     用于说明该 finding 当前只能作为单篇文献发现、
@@ -690,6 +696,11 @@ empty | processing | partial | ready | failed
     `generalization_note` 和 `evidence_gap_summary` 面向专家解释使用边界和剩余证据缺口；
     `relation_chain` 是经过当前 Finding 条件边界和方向修正后的展示链路，专家界面应优先
     使用它；`relation_ids` 只保留到底层 relation 的审计绑定，不能覆盖投影后的语义；
+    `synthesis_status` 使用 `agreement | conflict | condition_dependent |
+    insufficient_confirmation`；`paper_count` 只统计被该 Finding 引用且提供
+    直接结果证据的独立文献，不等于遍历过的候选文献数；
+    `paper_contributions` 按文献保留标题、来源文件、支持/反驳角色、贡献表述和
+    evidence refs；
     `evidence_bundle`
     按 `evidence_role` 分到 `direct_result`、`mechanism`、
     `condition_context`、`background`、`conflict`、`noise`，没有显式角色的证据保留在

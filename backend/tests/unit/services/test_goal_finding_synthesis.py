@@ -1,0 +1,1163 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import application.core.research_understanding_service as research_understanding_module
+from application.core.research_understanding_service import (
+    ResearchUnderstandingService,
+)
+
+
+class _EmptySourceArtifactRepository:
+    def list_blocks(self, collection_id: str) -> list[Any]:
+        return []
+
+    def list_documents(self, collection_id: str) -> list[Any]:
+        return []
+
+    def list_tables(self, collection_id: str) -> list[Any]:
+        return []
+
+
+class _ModelItem:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+
+    def model_dump(self) -> dict[str, Any]:
+        return dict(self.payload)
+
+
+class _ModelFindings:
+    def __init__(self, findings: list[dict[str, Any]]) -> None:
+        self.findings = [_ModelItem(item) for item in findings]
+
+
+class _FindingSynthesisExtractor:
+    def __init__(self, findings: list[dict[str, Any]]) -> None:
+        self.findings = findings
+        self.payloads: list[dict[str, Any]] = []
+
+    def synthesize_research_understanding_findings(
+        self,
+        payload: dict[str, Any],
+    ) -> _ModelFindings:
+        self.payloads.append(payload)
+        return _ModelFindings(self.findings)
+
+    def extract_research_understanding_relations(self, payload: dict[str, Any]):
+        raise AssertionError("goal Finding synthesis must not use relation extraction")
+
+    def consume_last_trace(self):
+        return None
+
+
+def _evidence_unit(
+    unit_id: str,
+    document_id: str,
+    *,
+    statement: str,
+    direction: str,
+    process: str = "LPBF",
+) -> dict[str, Any]:
+    return {
+        "evidence_unit_id": unit_id,
+        "objective_id": "obj-density",
+        "document_id": document_id,
+        "unit_kind": "comparison",
+        "property_normalized": "relative density",
+        "material_system": {"name": "316L stainless steel"},
+        "sample_context": {},
+        "process_context": {"process": process, "variable": "energy density"},
+        "resolved_condition": {},
+        "test_condition": {"method": "Archimedes"},
+        "value_payload": {
+            "statement": statement,
+            "direction": direction,
+        },
+        "unit": "%",
+        "baseline_context": {},
+        "interpretation": statement,
+        "source_refs": [
+            {
+                "source_kind": "text_window",
+                "source_ref": f"block-{unit_id}",
+                "document_id": document_id,
+                "display_label": f"{document_id} Results",
+                "quote": statement,
+                "evidence_role": "direct_support",
+            }
+        ],
+        "evidence_anchor_ids": [],
+        "join_keys": {},
+        "resolution_status": "resolved",
+        "confidence": 0.9,
+    }
+
+
+def _payload(evidence_units: list[dict[str, Any]]) -> dict[str, Any]:
+    document_ids = list(dict.fromkeys(unit["document_id"] for unit in evidence_units))
+    return {
+        "collection_id": "col-1",
+        "goal_id": "goal-density",
+        "objective": {
+            "objective_id": "obj-density",
+            "question": "How does energy density affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "process_axes": ["energy density"],
+            "property_axes": ["relative density"],
+        },
+        "objective_context": {
+            "objective_id": "obj-density",
+            "question": "How does energy density affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variable_process_axes": ["energy density"],
+            "target_property_axes": ["relative density"],
+        },
+        "paper_frames": [
+            {
+                "document_id": document_id,
+                "title": f"Study {document_id}",
+                "source_filename": f"{document_id}.pdf",
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "material_match": ["316L stainless steel"],
+                "changed_variables": ["energy density"],
+                "measured_property_scope": ["relative density"],
+                "test_environment_scope": ["Archimedes"],
+            }
+            for document_id in document_ids
+        ],
+        "evidence_routes": [],
+        "evidence_units": evidence_units,
+        "logic_chain": {
+            "evidence_unit_ids": [
+                unit["evidence_unit_id"] for unit in evidence_units
+            ]
+        },
+    }
+
+
+def _service(findings: list[dict[str, Any]]) -> tuple[
+    ResearchUnderstandingService,
+    _FindingSynthesisExtractor,
+]:
+    extractor = _FindingSynthesisExtractor(findings)
+    return (
+        ResearchUnderstandingService(
+            source_artifact_repository=_EmptySourceArtifactRepository(),
+            structured_extractor=extractor,
+        ),
+        extractor,
+    )
+
+
+def _ledger_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        unit
+        for bucket in payload["evidence_ledger"]
+        for paper in bucket["document_evidence"]
+        for unit in paper["evidence_units"]
+    ]
+
+
+def _model_finding(
+    *,
+    synthesis_status: str,
+    supporting_ids: list[str],
+    conflicting_ids: list[str] | None = None,
+    common_conditions: list[str] | None = None,
+    incomparable_conditions: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_concept": "energy density",
+        "target_concept": "relative density",
+        "mediator_concepts": ["melt-pool stability"],
+        "direction": "increases" if synthesis_status != "conflict" else "mixed",
+        "statement": (
+            "Within comparable LPBF 316L conditions, higher energy density "
+            "generally increased relative density."
+        ),
+        "synthesis_status": synthesis_status,
+        "supporting_evidence_unit_ids": supporting_ids,
+        "conflicting_evidence_unit_ids": conflicting_ids or [],
+        "common_conditions": common_conditions or ["LPBF 316L", "Archimedes density"],
+        "incomparable_conditions": incomparable_conditions or [],
+        "confidence": 0.88,
+        "warnings": [],
+    }
+
+
+def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
+    units = [
+        _evidence_unit(
+            "unit-paper-1",
+            "paper-1",
+            statement="Increasing energy density increased relative density to 99.1%.",
+            direction="increases",
+        ),
+        _evidence_unit(
+            "unit-paper-2",
+            "paper-2",
+            statement="The higher-energy condition reached 99.6% relative density.",
+            direction="increases",
+        ),
+    ]
+    service, extractor = _service(
+        [
+            _model_finding(
+                synthesis_status="agreement",
+                supporting_ids=["unit-paper-1", "unit-paper-2"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload(units))
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["synthesis_status"] == "agreement"
+    assert finding["paper_count"] == 2
+    assert finding["generalization_status"] == "scoped_cross_paper"
+    assert {item["document_id"] for item in finding["paper_contributions"]} == {
+        "paper-1",
+        "paper-2",
+    }
+    assert finding["paper_contributions"][0]["title"] == "Study paper-1"
+    assert finding["paper_contributions"][0]["source_filename"] == "paper-1.pdf"
+    assert finding["paper_contributions"][0]["evidence_unit_ids"] == [
+        "unit-paper-1"
+    ]
+    assert isinstance(
+        finding["paper_contributions"][0]["evidence_ref_ids"],
+        list,
+    )
+    assert len(finding["evidence_bundle"]["direct_result"]) == 2
+    assert finding["evidence_bundle"]["conflict"] == []
+    assert finding["common_conditions"] == ["LPBF 316L", "Archimedes density"]
+    bucket = extractor.payloads[0]["evidence_ledger"][0]
+    assert bucket["source_axes"] == ["energy density"]
+    assert bucket["property_normalized"] == "relative density"
+    assert [
+        paper["document_id"] for paper in bucket["document_evidence"]
+    ] == ["paper-1", "paper-2"]
+
+
+def test_goal_synthesis_groups_matching_relationships_across_documents():
+    paper_one_speed = _evidence_unit(
+        "unit-paper-1-speed",
+        "paper-1",
+        statement="Higher scan speed decreased density.",
+        direction="decreases",
+    )
+    paper_one_speed["value_payload"]["comparison_axis"] = "scan speed"
+    paper_two_laser = _evidence_unit(
+        "unit-paper-2-laser",
+        "paper-2",
+        statement="Higher laser power increased density.",
+        direction="increases",
+    )
+    paper_two_laser["value_payload"]["comparison_axis"] = "laser power"
+    paper_two_speed = _evidence_unit(
+        "unit-paper-2-speed",
+        "paper-2",
+        statement="Higher scan speed decreased density.",
+        direction="decreases",
+    )
+    paper_two_speed["value_payload"]["comparison_axis"] = "scan speed"
+    payload = _payload([paper_one_speed, paper_two_laser, paper_two_speed])
+    payload["objective"]["process_axes"] = ["scan speed", "laser power"]
+    payload["objective_context"]["variable_process_axes"] = [
+        "scan speed",
+        "laser power",
+    ]
+    service, extractor = _service([])
+
+    service.build_goal_understanding(payload)
+
+    ledger = extractor.payloads[0]["evidence_ledger"]
+    assert ledger[0]["source_axes"] == ["scan speed"]
+    assert ledger[0]["property_normalized"] == "relative density"
+    assert [
+        paper["document_id"] for paper in ledger[0]["document_evidence"]
+    ] == ["paper-1", "paper-2"]
+    assert ledger[1]["source_axes"] == ["laser power"]
+
+
+def test_goal_synthesis_downgrades_model_agreement_with_one_direct_paper():
+    units = [
+        _evidence_unit(
+            "unit-paper-1",
+            "paper-1",
+            statement="Increasing energy density increased relative density to 99.1%.",
+            direction="increases",
+        )
+    ]
+    service, _ = _service(
+        [
+            _model_finding(
+                synthesis_status="agreement",
+                supporting_ids=["unit-paper-1"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload(units))
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["synthesis_status"] == "insufficient_confirmation"
+    assert finding["paper_count"] == 1
+    assert finding["generalization_status"] == "paper_level_only"
+    assert "needs_cross_paper_confirmation" in finding["review_reasons"]
+
+
+def test_goal_synthesis_projects_single_paper_microstructure_finding_for_review():
+    unit = _evidence_unit(
+        "unit-preheating-microstructure",
+        "paper-preheating",
+        statement=(
+            "Grain coarsening and shape change with increasing build platform "
+            "preheating temperature during laser beam powder bed fusion of "
+            "316L stainless steel."
+        ),
+        direction="increases",
+    )
+    unit["property_normalized"] = "microstructure"
+    unit["process_context"] = {
+        "process": "laser beam powder bed fusion",
+        "variable": "build platform preheating temperature",
+    }
+    payload = _payload([unit])
+    payload["objective"].update(
+        {
+            "question": "How does build platform preheating affect microstructure?",
+            "process_axes": ["build platform preheating temperature"],
+            "property_axes": ["microstructure"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": "How does build platform preheating affect microstructure?",
+            "variable_process_axes": ["build platform preheating temperature"],
+            "target_property_axes": ["microstructure"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": ["build platform preheating temperature"],
+            "measured_property_scope": ["microstructure"],
+        }
+    )
+    service, _ = _service(
+        [
+            {
+                "source_concept": "build platform preheating temperature",
+                "target_concept": "microstructure",
+                "mediator_concepts": [],
+                "direction": "increases",
+                "statement": (
+                    "Build platform preheating temperature increases grain size "
+                    "and changes grain shape."
+                ),
+                "synthesis_status": "insufficient_confirmation",
+                "supporting_evidence_unit_ids": [
+                    "unit-preheating-microstructure"
+                ],
+                "conflicting_evidence_unit_ids": [],
+                "common_conditions": ["LPBF 316L"],
+                "incomparable_conditions": [],
+                "confidence": 0.82,
+                "warnings": [],
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    assert understanding["presentation"]["primary_findings"] == []
+    finding = understanding["presentation"]["review_queue_findings"][0]
+    assert finding["synthesis_status"] == "insufficient_confirmation"
+    assert finding["paper_count"] == 1
+    assert finding["evidence_bundle"]["direct_result"]
+
+
+def test_goal_synthesis_excludes_low_relevance_background_evidence_from_ledger():
+    unit = _evidence_unit(
+        "unit-background",
+        "paper-background",
+        statement="Increasing VED coarsened grains in the background paper.",
+        direction="increases",
+    )
+    payload = _payload([unit])
+    payload["paper_frames"][0].update(
+        {
+            "relevance": "low",
+            "paper_role": "supporting_background",
+        }
+    )
+    service, extractor = _service(
+        [
+            _model_finding(
+                synthesis_status="insufficient_confirmation",
+                supporting_ids=["unit-background"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    ledger = extractor.payloads[0]["evidence_ledger"]
+    assert ledger == []
+    assert understanding["presentation"]["findings"] == []
+
+
+def test_goal_synthesis_keeps_supporting_and_conflicting_evidence_separate():
+    units = [
+        _evidence_unit(
+            "unit-support",
+            "paper-support",
+            statement="Increasing energy density increased relative density.",
+            direction="increases",
+        ),
+        _evidence_unit(
+            "unit-conflict",
+            "paper-conflict",
+            statement="Increasing energy density reduced relative density.",
+            direction="decreases",
+        ),
+    ]
+    service, _ = _service(
+        [
+            _model_finding(
+                synthesis_status="conflict",
+                supporting_ids=["unit-support"],
+                conflicting_ids=["unit-conflict"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload(units))
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["synthesis_status"] == "conflict"
+    assert finding["paper_count"] == 2
+    assert len(finding["evidence_bundle"]["direct_result"]) == 1
+    assert len(finding["evidence_bundle"]["conflict"]) == 1
+    assert finding["generalization_status"] == "conflict_review_needed"
+    assert {item["role"] for item in finding["paper_contributions"]} == {
+        "supporting",
+        "conflicting",
+    }
+
+
+def test_goal_synthesis_preserves_condition_dependent_boundaries():
+    units = [
+        _evidence_unit(
+            "unit-lpbf",
+            "paper-lpbf",
+            statement="Higher energy density increased relative density in LPBF.",
+            direction="increases",
+            process="LPBF",
+        ),
+        _evidence_unit(
+            "unit-hip",
+            "paper-hip",
+            statement="After HIP, relative density no longer tracked energy density.",
+            direction="changes",
+            process="LPBF + HIP",
+        ),
+    ]
+    service, _ = _service(
+        [
+            _model_finding(
+                synthesis_status="condition_dependent",
+                supporting_ids=["unit-lpbf", "unit-hip"],
+                common_conditions=["316L feedstock"],
+                incomparable_conditions=["as-built LPBF versus post-HIP material"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload(units))
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["synthesis_status"] == "condition_dependent"
+    assert finding["paper_count"] == 2
+    assert finding["common_conditions"] == ["316L feedstock"]
+    assert finding["incomparable_conditions"] == [
+        "as-built LPBF versus post-HIP material"
+    ]
+    assert finding["generalization_status"] == "cross_paper_candidate"
+
+
+def test_goal_synthesis_rejects_raw_measurement_as_relationship_support():
+    unit = _evidence_unit(
+        "unit-measurement",
+        "paper-1",
+        statement="Relative density is reported as 99.6%.",
+        direction="unknown",
+    )
+    unit["unit_kind"] = "measurement"
+    service, extractor = _service(
+        [
+            _model_finding(
+                synthesis_status="insufficient_confirmation",
+                supporting_ids=["unit-measurement"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload([unit]))
+
+    assert extractor.payloads[0]["evidence_ledger"] == []
+    assert understanding["presentation"]["findings"] == []
+
+
+def test_goal_synthesis_rejects_characterization_built_from_isolated_number():
+    unit = _evidence_unit(
+        "unit-characterization-fragment",
+        "paper-1",
+        statement="10",
+        direction="unknown",
+    )
+    unit.update(
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "microstructure",
+            "process_context": {},
+            "value_payload": {"value": "10"},
+            "interpretation": None,
+        }
+    )
+    service, extractor = _service(
+        [
+            _model_finding(
+                synthesis_status="insufficient_confirmation",
+                supporting_ids=["unit-characterization-fragment"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload([unit]))
+
+    assert extractor.payloads[0]["evidence_ledger"] == []
+    assert understanding["presentation"]["findings"] == []
+
+
+def test_goal_synthesis_excludes_direct_units_without_relation_axes_or_target():
+    missing_source_axis = _evidence_unit(
+        "unit-missing-source-axis",
+        "paper-1",
+        statement="A direct result was observed under the tested condition.",
+        direction="increases",
+    )
+    missing_target = _evidence_unit(
+        "unit-missing-target",
+        "paper-1",
+        statement="Higher energy density changed the measured response.",
+        direction="increases",
+    )
+    missing_target["property_normalized"] = None
+    service, extractor = _service([])
+
+    service.build_goal_understanding(_payload([missing_source_axis, missing_target]))
+
+    assert extractor.payloads[0]["evidence_ledger"] == []
+
+
+def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
+    long_statement = "Higher energy density increased relative density. " * 24
+    units = [
+        _evidence_unit(
+            f"unit-{paper_index}-{unit_index}",
+            f"paper-{paper_index}",
+            statement=long_statement,
+            direction="increases",
+        )
+        for paper_index in range(1, 4)
+        for unit_index in range(1, 7)
+    ]
+    service, extractor = _service([])
+
+    service.build_goal_understanding(_payload(units))
+
+    payload = extractor.payloads[0]
+    included = _ledger_units(payload)
+    serialized_length = sum(
+        len(json.dumps(unit, ensure_ascii=False, separators=(",", ":")))
+        for unit in included
+    )
+    assert serialized_length <= 4_500
+    assert payload["input_coverage"]["omitted_evidence_unit_count"] > 0
+    assert all(
+        paper["evidence_units"]
+        for bucket in payload["evidence_ledger"]
+        for paper in bucket["document_evidence"]
+    )
+
+
+def test_goal_synthesis_prioritizes_direct_results_before_measurements(monkeypatch):
+    measurement = _evidence_unit(
+        "unit-measurement",
+        "paper-measurements",
+        statement="Yield strength is reported as 456 MPa.",
+        direction="unknown",
+    )
+    measurement["unit_kind"] = "measurement"
+    direct_units = [
+        _evidence_unit(
+            "unit-direct-energy",
+            "paper-direct-results",
+            statement="Higher energy density increased relative density.",
+            direction="increases",
+        ),
+        _evidence_unit(
+            "unit-direct-speed",
+            "paper-direct-results",
+            statement="Higher scan speed reduced relative density.",
+            direction="decreases",
+        ),
+    ]
+    direct_units[1]["value_payload"]["comparison_axis"] = "scan speed"
+    payload = _payload([measurement, *direct_units])
+    payload["objective"]["process_axes"] = ["energy density", "scan speed"]
+    payload["objective_context"]["variable_process_axes"] = [
+        "energy density",
+        "scan speed",
+    ]
+    service, extractor = _service([])
+    direct_result_budget = sum(
+        len(
+            json.dumps(
+                service._finding_synthesis_evidence_unit(
+                    unit,
+                    direct_result=True,
+                    process_axes=["energy density", "scan speed"],
+                ),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        for unit in direct_units
+    )
+    monkeypatch.setattr(
+        research_understanding_module,
+        "_FINDING_SYNTHESIS_EVIDENCE_CHAR_LIMIT",
+        direct_result_budget,
+    )
+
+    service.build_goal_understanding(payload)
+
+    included_units = _ledger_units(extractor.payloads[0])
+    assert {
+        unit["evidence_unit_id"]
+        for unit in included_units
+        if unit.get("direct_result") is True
+    } == {"unit-direct-energy", "unit-direct-speed"}
+    assert "unit-measurement" not in {
+        unit["evidence_unit_id"] for unit in included_units
+    }
+
+
+def test_goal_synthesis_balances_bounded_ledger_across_source_axes():
+    laser_units = []
+    for index in range(20):
+        unit = _evidence_unit(
+            f"unit-laser-{index}",
+            "paper-density",
+            statement=("Laser power changed density under fixed conditions. " * 20),
+            direction="increases",
+        )
+        unit["value_payload"].update(
+            {
+                "comparison_axis": "laser power",
+                "current_value": 98.11 if index == 0 else 99.5,
+                "value": 98.11 if index == 0 else 99.5,
+            }
+        )
+        unit["baseline_context"] = {
+            "value": 97.83,
+            "source_value_text": "97.83",
+        }
+        laser_units.append(unit)
+
+    scan_speed_unit = _evidence_unit(
+        "unit-scan-speed",
+        "paper-density",
+        statement=("Scan speed changed density under fixed conditions. " * 20),
+        direction="decreases",
+    )
+    scan_speed_unit["value_payload"]["comparison_axis"] = "scan speed"
+    heat_treatment_unit = _evidence_unit(
+        "unit-heat-treatment",
+        "paper-density",
+        statement=("Heat treatment type changed density under fixed conditions. " * 20),
+        direction="increases",
+    )
+    heat_treatment_unit["value_payload"]["comparison_axis"] = "heat treatment type"
+    payload = _payload([*laser_units, scan_speed_unit, heat_treatment_unit])
+    payload["objective"]["process_axes"] = [
+        "laser power",
+        "scan speed",
+        "heat treatment type",
+    ]
+    payload["objective_context"]["variable_process_axes"] = [
+        "laser power",
+        "scan speed",
+        "heat treatment type",
+    ]
+    service, extractor = _service([])
+
+    service.build_goal_understanding(payload)
+
+    included_units = _ledger_units(extractor.payloads[0])
+    included_axes = {
+        tuple(unit.get("source_axes", []))
+        for unit in included_units
+        if unit.get("direct_result") is True
+    }
+    assert included_axes >= {
+        ("laser power",),
+        ("scan speed",),
+        ("heat treatment type",),
+    }
+    assert next(
+        unit
+        for unit in included_units
+        if unit.get("source_axes") == ["laser power"]
+    )["evidence_unit_id"] == "unit-laser-1"
+
+
+def test_goal_synthesis_calibrates_numeric_axis_direction_from_direct_comparison():
+    unit = _evidence_unit(
+        "unit-scan-speed-density",
+        "paper-density",
+        statement="Density changed between the two scan-speed conditions.",
+        direction="decreases",
+    )
+    unit.update(
+        {
+            "property_normalized": "density",
+            "process_context": {
+                "Laser power (W)": "100",
+                "Scan speed (mm/s)": "200",
+                "Type of heat treatment": "-",
+            },
+            "value_payload": {
+                "comparison_axis": "scan speed",
+                "controlled_axes": [
+                    {"axis": "laser power", "value": "100"},
+                    {"axis": "heat treatment type", "value": "-"},
+                ],
+                "current_value": 91.84,
+                "direction": "decrease",
+                "source_value_text": "91.84",
+                "value": 91.84,
+            },
+            "baseline_context": {
+                "process_context": {
+                    "Laser power (W)": "100",
+                    "Scan speed (mm/s)": "100",
+                    "Type of heat treatment": "-",
+                },
+                "source_value_text": "97.83",
+                "value": 97.83,
+            },
+        }
+    )
+    payload = _payload([unit])
+    payload["objective"].update(
+        {
+            "question": "How does scan speed affect density?",
+            "process_axes": ["scan speed"],
+            "property_axes": ["density"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": "How does scan speed affect density?",
+            "variable_process_axes": ["scan speed"],
+            "target_property_axes": ["density"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": ["scan speed"],
+            "measured_property_scope": ["density"],
+        }
+    )
+    service, _ = _service(
+        [
+            {
+                **_model_finding(
+                    synthesis_status="insufficient_confirmation",
+                    supporting_ids=["unit-scan-speed-density"],
+                ),
+                "source_concept": "scan speed",
+                "target_concept": "density",
+                "direction": "increases",
+                "statement": "Increasing scan speed increases density.",
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["direction"] == "decreases"
+    assert (
+        "changing scan speed from 100 to 200 decreased density from "
+        "97.83 % to 91.84 %."
+    ) in finding["statement"].lower()
+
+
+def test_goal_synthesis_preserves_coupled_axis_and_transition_direction():
+    unit = _evidence_unit(
+        "unit-coupled-corrosion",
+        "paper-corrosion",
+        statement="Pitting potential changed across coupled process conditions.",
+        direction="increases",
+    )
+    unit.update(
+        {
+            "property_normalized": "pitting potential",
+            "process_context": {
+                "Energy density (J mm-3)": "100",
+                "Laser power (W)": "255",
+                "Scan speed (mm/s)": "1400",
+            },
+            "value_payload": {
+                "comparison_axis": "laser power, scanning speed",
+                "controlled_axes": [
+                    {"axis": "energy density", "value": "100"},
+                ],
+                "current_value": 199.7,
+                "direction": "increase",
+                "source_value_text": "199.7",
+                "value": 199.7,
+            },
+            "baseline_context": {
+                "process_context": {
+                    "Energy density (J mm-3)": "100",
+                    "Laser power (W)": "375",
+                    "Scan speed (mm/s)": "2100",
+                },
+                "source_value_text": "124.7",
+                "value": 124.7,
+            },
+            "unit": "mV",
+        }
+    )
+    payload = _payload([unit])
+    payload["objective"].update(
+        {
+            "question": "How do laser power and scanning speed affect pitting potential?",
+            "process_axes": ["laser power", "scanning speed", "energy density"],
+            "property_axes": ["pitting potential"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": "How do laser power and scanning speed affect pitting potential?",
+            "variable_process_axes": [
+                "laser power",
+                "scanning speed",
+                "energy density",
+            ],
+            "target_property_axes": ["pitting potential"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": ["laser power", "scanning speed"],
+            "measured_property_scope": ["pitting potential"],
+        }
+    )
+    service, extractor = _service(
+        [
+            {
+                **_model_finding(
+                    synthesis_status="insufficient_confirmation",
+                    supporting_ids=["unit-coupled-corrosion"],
+                ),
+                "source_concept": "laser power and scanning speed",
+                "target_concept": "pitting potential",
+                "direction": "increases",
+                "statement": (
+                    "Increasing laser power and scanning speed increases "
+                    "pitting potential."
+                ),
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    ledger_unit = _ledger_units(extractor.payloads[0])[0]
+    assert ledger_unit["source_axes"] == ["laser power", "scanning speed"]
+    assert (
+        "changing laser power from 375 to 255 and scanning speed from 2100 "
+        "to 1400 increased pitting potential from 124.7 mv to 199.7 mv."
+    ) in ledger_unit["statement"].lower()
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["laser power and scanning speed"]
+    assert finding["direction"] == "decreases"
+
+
+def test_goal_synthesis_rejects_source_concept_not_supported_by_cited_unit_axis():
+    unit = _evidence_unit(
+        "unit-defect-characterization",
+        "paper-defects",
+        statement=(
+            "Lower laser power and scanning speed reduce porosity and pore size."
+        ),
+        direction="reduces",
+    )
+    unit.update(
+        {
+            "unit_kind": "characterization",
+            "property_normalized": "defect structure",
+            "process_context": {
+                "parameters": {
+                    "laser_power": "135 W",
+                    "scanning_speed": "750 mm/s",
+                },
+                "process": "laser beam powder bed fusion",
+            },
+            "value_payload": {
+                "porosity_cause": "reduced laser power and scanning speed",
+                "porosity_observation": "few tiny pores",
+            },
+            "interpretation": (
+                "Lower laser power and scanning speed reduce porosity and pore "
+                "size."
+            ),
+        }
+    )
+    payload = _payload([unit])
+    payload["objective"].update(
+        {
+            "question": "How do process parameters affect defect structure?",
+            "process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+            ],
+            "property_axes": ["defect structure"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": "How do process parameters affect defect structure?",
+            "variable_process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+            ],
+            "target_property_axes": ["defect structure"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": ["laser power", "scanning speed"],
+            "measured_property_scope": ["defect structure"],
+        }
+    )
+    service, extractor = _service(
+        [
+            {
+                **_model_finding(
+                    synthesis_status="insufficient_confirmation",
+                    supporting_ids=["unit-defect-characterization"],
+                ),
+                "source_concept": "volumetric energy density",
+                "target_concept": "defect structure",
+                "direction": "reduces",
+                "statement": (
+                    "Higher volumetric energy density reduces defect structure."
+                ),
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    ledger_unit = _ledger_units(extractor.payloads[0])[0]
+    assert ledger_unit["source_axes"] == ["laser power", "scanning speed"]
+    assert understanding["presentation"]["findings"] == []
+
+
+def test_goal_synthesis_matches_qualified_axis_to_source_statement():
+    unit = _evidence_unit(
+        "unit-porosity-corrosion",
+        "paper-corrosion",
+        statement=(
+            "Lower porosity stabilizes the passive film and improves corrosion "
+            "properties."
+        ),
+        direction="improves",
+    )
+    unit.update(
+        {
+            "unit_kind": "interpretation",
+            "property_normalized": "pitting corrosion behavior",
+            "process_context": {},
+            "value_payload": {
+                "source_value_text": (
+                    "pitting potential gradually increases with decreased porosity"
+                ),
+                "value": "pitting potential increases with lower porosity",
+            },
+            "interpretation": (
+                "Lower porosity stabilizes the passive film and improves "
+                "corrosion properties."
+            ),
+        }
+    )
+    payload = _payload([unit])
+    payload["objective"].update(
+        {
+            "question": "How do process parameters affect pitting corrosion?",
+            "process_axes": [
+                "laser power",
+                "scanning speed",
+                "porosity level",
+            ],
+            "property_axes": ["pitting corrosion behavior"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": "How do process parameters affect pitting corrosion?",
+            "variable_process_axes": [
+                "laser power",
+                "scanning speed",
+                "porosity level",
+            ],
+            "target_property_axes": ["pitting corrosion behavior"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": [
+                "laser power",
+                "scanning speed",
+                "porosity level",
+            ],
+            "measured_property_scope": ["pitting corrosion behavior"],
+        }
+    )
+    service, extractor = _service(
+        [
+            {
+                **_model_finding(
+                    synthesis_status="insufficient_confirmation",
+                    supporting_ids=["unit-porosity-corrosion"],
+                ),
+                "source_concept": "laser power, scanning speed",
+                "target_concept": "pitting corrosion behavior",
+                "direction": "improves",
+                "statement": (
+                    "Lower laser power and scanning speed improve pitting "
+                    "corrosion behavior."
+                ),
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    ledger_unit = _ledger_units(extractor.payloads[0])[0]
+    assert ledger_unit["source_axes"] == ["porosity level"]
+    assert understanding["claims"] == []
+
+
+def test_goal_synthesis_presentation_does_not_reinfer_source_axis_from_table_quote():
+    unit = _evidence_unit(
+        "unit-scan-strategy-yield",
+        "paper-strategy",
+        statement="Scanning strategy A increased yield strength relative to B.",
+        direction="increases",
+    )
+    unit.update(
+        {
+            "property_normalized": "yield strength",
+            "process_context": {
+                "Energy density (J/mm3)": "70",
+                "Scan strategy": "A",
+                "Scanning speed (mm/s)": "0.25",
+            },
+            "value_payload": {
+                "comparison_axis": "scanning strategy",
+                "controlled_axes": [
+                    {"axis": "energy density", "value": "70"},
+                    {"axis": "scanning speed", "value": "0.25"},
+                ],
+                "current_value": 236.65,
+                "direction": "increase",
+                "source_value_text": "236.65",
+                "value": 236.65,
+            },
+            "baseline_context": {
+                "process_context": {
+                    "Energy density (J/mm3)": "70",
+                    "Scan strategy": "B",
+                    "Scanning speed (mm/s)": "0.25",
+                },
+                "source_value_text": "159.97",
+                "value": 159.97,
+            },
+            "unit": "MPa",
+        }
+    )
+    unit["source_refs"][0]["quote"] = (
+        "Table columns include laser power, scan speed, and yield strength; "
+        "the observed yield strength is 236.65 MPa."
+    )
+    payload = _payload([unit])
+    payload["objective"].update(
+        {
+            "question": "How does scanning strategy affect yield strength?",
+            "process_axes": ["scanning strategy", "scanning speed", "energy density"],
+            "property_axes": ["yield strength"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": "How does scanning strategy affect yield strength?",
+            "variable_process_axes": [
+                "scanning strategy",
+                "scanning speed",
+                "energy density",
+            ],
+            "target_property_axes": ["yield strength"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": ["scanning strategy"],
+            "measured_property_scope": ["yield strength"],
+        }
+    )
+    service, _ = _service(
+        [
+            {
+                **_model_finding(
+                    synthesis_status="insufficient_confirmation",
+                    supporting_ids=["unit-scan-strategy-yield"],
+                ),
+                "source_concept": "scanning strategy",
+                "target_concept": "yield strength",
+                "direction": "changes",
+                "statement": (
+                    "Scanning strategy changes yield strength under constant "
+                    "energy density and scanning speed."
+                ),
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["variables"] == ["scanning strategy"]
+    assert "changing scanning strategy from b to a" in finding["statement"].lower()

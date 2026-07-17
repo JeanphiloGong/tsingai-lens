@@ -476,18 +476,23 @@ The objective field should be provenance and organization context. It should
 not replace material, sample, process, property, condition, baseline, or
 evidence identity.
 
-### Evidence Resolution And Logic-Chain Assembly
+### Evidence Resolution, Logic Chain, And Finding Synthesis
 
 Core should resolve fragments before presenting them as the objective answer.
 Resolution includes joining preparation and result tables, binding text
 interpretations to measured results, and keeping source traceback for every
 resolved claim.
 
-The assembled chain should exist at two levels:
+The objective logic chain preserves the ordered evidence-unit inventory,
+measurement ranges, source documents, and context needed for downstream
+reasoning. It does not by itself upgrade paper-local observations into a
+cross-paper conclusion.
 
-- paper-level logic chain: what one paper contributes to the objective
-- cross-paper logic chain: where papers agree, conflict, leave gaps, or support
-  a shared variable-result relationship
+After all candidate papers have been traversed, Core performs one goal-level
+Finding synthesis over evidence units grouped by document. That pass directly
+decides whether cited direct results show agreement, conflict, a
+condition-dependent relationship, or insufficient confirmation. Core must not
+create paper Findings and then cluster them by normalized fields.
 
 ### Objective-Scoped Comparison
 
@@ -633,8 +638,8 @@ The cutover is complete when:
 - material-first pages are no longer the main product entry
 - Core extraction produces objective-scoped facts, controlled comparisons, and
   logic chains from resolved evidence units
-- Core assembles paper-level and cross-paper research logic chains from
-  resolved evidence units
+- Core preserves resolved evidence units in the objective logic chain and
+  directly synthesizes goal-level Findings across their per-paper provenance
 - graph, material, research-view, workspace, and report surfaces no longer use
   collection-wide `ComparisonRowRecord` as their semantic source
 - Core facts still normalize into a reusable material fact substrate

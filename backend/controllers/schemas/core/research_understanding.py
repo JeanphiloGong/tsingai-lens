@@ -122,6 +122,16 @@ class ResearchClaimResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ResearchUnderstandingPaperContributionResponse(BaseModel):
+    document_id: str
+    title: str | None = None
+    source_filename: str | None = None
+    role: str
+    statement: str = ""
+    evidence_unit_ids: list[str] = Field(default_factory=list)
+    evidence_ref_ids: list[str] = Field(default_factory=list)
+
+
 class ResearchRelationResponse(BaseModel):
     """Evidence-backed relation between research objects."""
 
@@ -138,6 +148,14 @@ class ResearchRelationResponse(BaseModel):
     context_ids: list[str] = Field(default_factory=list)
     source_object_ids: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    synthesis_status: str | None = Field(default=None)
+    supporting_evidence_ref_ids: list[str] = Field(default_factory=list)
+    conflicting_evidence_ref_ids: list[str] = Field(default_factory=list)
+    common_conditions: list[str] = Field(default_factory=list)
+    incomparable_conditions: list[str] = Field(default_factory=list)
+    paper_contributions: list[ResearchUnderstandingPaperContributionResponse] = Field(
+        default_factory=list
+    )
 
 
 class ResearchUnderstandingSummaryResponse(BaseModel):
@@ -282,6 +300,12 @@ class ResearchUnderstandingPresentationFindingResponse(BaseModel):
     related_review_finding_ids: list[str] = Field(default_factory=list)
     review_reasons: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    synthesis_status: str = Field(default="")
+    common_conditions: list[str] = Field(default_factory=list)
+    incomparable_conditions: list[str] = Field(default_factory=list)
+    paper_contributions: list[ResearchUnderstandingPaperContributionResponse] = Field(
+        default_factory=list
+    )
 
 
 class ResearchUnderstandingPresentationEvidenceResponse(BaseModel):

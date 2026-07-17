@@ -19,7 +19,11 @@ artifacts.
   blocks and tables can see prior sample, process, test, measurement, and
   open-join context without putting prior raw text back into the prompt.
   Objective logic chains include traceable measurement value ranges assembled
-  from resolved measurement units
+  from resolved measurement units. For a confirmed goal, traversal accumulates
+  these units by document; the downstream research-understanding service groups
+  eligible direct results by exact source axes and target property, performs one
+  goal-level synthesis over that bounded ledger, and directly emits Findings.
+  It does not create paper Findings and cluster them later
 - `paper_facts_service.py`
   objective-aware semantic extraction for evidence anchors, method facts,
   variants, test conditions, baselines, and measurement results

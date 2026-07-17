@@ -19,6 +19,9 @@ CLAIM_TYPES: Final[frozenset[str]] = frozenset(
 RELATION_TYPES: Final[frozenset[str]] = frozenset(
     {"improves", "reduces", "increases", "decreases", "correlates", "explains", "conflicts", "compares"}
 )
+FINDING_SYNTHESIS_STATUSES: Final[frozenset[str]] = frozenset(
+    {"agreement", "conflict", "condition_dependent", "insufficient_confirmation"}
+)
 
 
 @dataclass(frozen=True)
@@ -221,6 +224,12 @@ class ResearchRelation:
     context_ids: tuple[str, ...]
     source_object_ids: tuple[str, ...]
     warnings: tuple[str, ...]
+    synthesis_status: str | None
+    supporting_evidence_ref_ids: tuple[str, ...]
+    conflicting_evidence_ref_ids: tuple[str, ...]
+    common_conditions: tuple[str, ...]
+    incomparable_conditions: tuple[str, ...]
+    paper_contributions: tuple[dict[str, Any], ...]
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchRelation":
@@ -252,6 +261,21 @@ class ResearchRelation:
             context_ids=_strings(payload.get("context_ids")),
             source_object_ids=_strings(payload.get("source_object_ids")),
             warnings=_strings(payload.get("warnings")),
+            synthesis_status=_optional_choice(
+                payload.get("synthesis_status"),
+                FINDING_SYNTHESIS_STATUSES,
+            ),
+            supporting_evidence_ref_ids=_strings(
+                payload.get("supporting_evidence_ref_ids")
+            ),
+            conflicting_evidence_ref_ids=_strings(
+                payload.get("conflicting_evidence_ref_ids")
+            ),
+            common_conditions=_strings(payload.get("common_conditions")),
+            incomparable_conditions=_strings(
+                payload.get("incomparable_conditions")
+            ),
+            paper_contributions=_mapping_list(payload.get("paper_contributions")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -269,6 +293,18 @@ class ResearchRelation:
             "context_ids": list(self.context_ids),
             "source_object_ids": list(self.source_object_ids),
             "warnings": list(self.warnings),
+            "synthesis_status": self.synthesis_status,
+            "supporting_evidence_ref_ids": list(
+                self.supporting_evidence_ref_ids
+            ),
+            "conflicting_evidence_ref_ids": list(
+                self.conflicting_evidence_ref_ids
+            ),
+            "common_conditions": list(self.common_conditions),
+            "incomparable_conditions": list(self.incomparable_conditions),
+            "paper_contributions": [
+                dict(contribution) for contribution in self.paper_contributions
+            ],
         }
 
 
@@ -392,6 +428,11 @@ def _stable_text(value: Any) -> str:
 def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
     normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
     return normalized if normalized in allowed else default
+
+
+def _optional_choice(value: Any, allowed: frozenset[str]) -> str | None:
+    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in allowed else None
 
 
 def _text(value: Any) -> str | None:

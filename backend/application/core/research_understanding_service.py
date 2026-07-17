@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import logging
 import re
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 _RELATION_CONTEXT_LIMIT = 16
 _RELATION_EVIDENCE_UNIT_LIMIT = 24
 _RELATION_TRACE_TASK_TYPE = "research_understanding_relation"
+_FINDING_SYNTHESIS_TRACE_TASK_TYPE = "research_understanding_finding_synthesis"
+_FINDING_SYNTHESIS_EVIDENCE_CHAR_LIMIT = 4_500
 _DIRECT_RESULT_CONTEXT_UNIT_KINDS = {
     "process_context",
     "sample_context",
@@ -108,7 +111,8 @@ class ResearchUnderstandingService:
         )
         record = self._record_with_traceable_evidence_refs(record)
         record = self._record_without_off_axis_recovered_objects(record)
-        record = self._record_with_recovered_presentation_objects(record)
+        if _text(_mapping(record.get("scope")).get("scope_type")) != "goal":
+            record = self._record_with_recovered_presentation_objects(record)
         record = self._record_with_comparison_condition_evidence(record)
         record["presentation"] = self._presentation_for(record)
         record["state"] = self._state_with_presentation(record)
@@ -160,11 +164,15 @@ class ResearchUnderstandingService:
             evidence_refs,
             blocks_by_id=blocks_by_id,
         )
-        recovered_findings = self._recovered_objective_findings_from_source_blocks(
-            payload,
-            evidence_units=evidence_units,
-            blocks_by_id=blocks_by_id,
-            tables_by_id=tables_by_id,
+        recovered_findings = (
+            []
+            if scope_type == "goal"
+            else self._recovered_objective_findings_from_source_blocks(
+                payload,
+                evidence_units=evidence_units,
+                blocks_by_id=blocks_by_id,
+                tables_by_id=tables_by_id,
+            )
         )
         evidence_refs = self._sort_evidence_refs_for_review(
             [
@@ -195,22 +203,33 @@ class ResearchUnderstandingService:
         )
         context_ids = [item["context_id"] for item in contexts]
         context_ids_by_unit = self._objective_context_ids_by_unit(contexts)
-        claims = self._objective_claims(
-            payload,
-            evidence_units=evidence_units,
-            evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
-            context_ids=context_ids,
-            context_ids_by_unit=context_ids_by_unit,
-        )
-        relations, relation_warnings, model_traces = self._objective_relations(
-            payload,
-            evidence_units,
-            claims=claims,
-            evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
-            context_ids=context_ids,
-            context_ids_by_unit=context_ids_by_unit,
-            contexts=contexts,
-        )
+        if scope_type == "goal":
+            claims, relations, relation_warnings, model_traces = (
+                self._goal_finding_syntheses(
+                    payload,
+                    evidence_units=evidence_units,
+                    evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+                    context_ids=context_ids,
+                    context_ids_by_unit=context_ids_by_unit,
+                )
+            )
+        else:
+            claims = self._objective_claims(
+                payload,
+                evidence_units=evidence_units,
+                evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+                context_ids=context_ids,
+                context_ids_by_unit=context_ids_by_unit,
+            )
+            relations, relation_warnings, model_traces = self._objective_relations(
+                payload,
+                evidence_units,
+                claims=claims,
+                evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+                context_ids=context_ids,
+                context_ids_by_unit=context_ids_by_unit,
+                contexts=contexts,
+            )
         recovered_claims = [
             recovered["claim"]
             for recovered in recovered_findings
@@ -744,6 +763,895 @@ class ResearchUnderstandingService:
             [],
             model_traces,
         )
+
+    def _goal_finding_syntheses(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+        evidence_ref_ids_by_unit: dict[str, list[str]],
+        context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[str],
+        list[dict[str, Any]],
+    ]:
+        synthesis_payload = self._finding_synthesis_payload(
+            payload,
+            evidence_units=evidence_units,
+        )
+        try:
+            extracted = (
+                self.structured_extractor.synthesize_research_understanding_findings(
+                    synthesis_payload
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "research understanding Finding synthesis failed",
+                exc_info=True,
+            )
+            failed_trace = self._consume_relation_trace(
+                synthesis_payload,
+                scope_payload=payload,
+                trace_status="failed",
+                default_task_type=_FINDING_SYNTHESIS_TRACE_TASK_TYPE,
+            )
+            return [], [], ["finding_synthesis_failed"], failed_trace
+
+        model_traces = self._consume_relation_trace(
+            synthesis_payload,
+            scope_payload=payload,
+            trace_status="available",
+            default_task_type=_FINDING_SYNTHESIS_TRACE_TASK_TYPE,
+        )
+        eligible_direct_unit_ids = {
+            unit_id
+            for bucket in _mapping_list(synthesis_payload.get("evidence_ledger"))
+            for paper in _mapping_list(bucket.get("document_evidence"))
+            for unit in _mapping_list(paper.get("evidence_units"))
+            if unit.get("direct_result") is True
+            if (unit_id := _text(unit.get("evidence_unit_id")))
+        }
+        units_by_id = {
+            unit_id: unit
+            for unit in evidence_units
+            if (unit_id := _text(unit.get("evidence_unit_id")))
+        }
+        claims: list[dict[str, Any]] = []
+        relations: list[dict[str, Any]] = []
+        paper_metadata_by_document_id = {
+            document_id: frame
+            for frame in _mapping_list(synthesis_payload.get("paper_frames"))
+            if (document_id := _text(frame.get("document_id")))
+        }
+        process_axes = _strings(
+            _mapping(synthesis_payload.get("objective")).get("process_axes")
+        )
+        for item in getattr(extracted, "findings", []):
+            synthesized = self._finding_synthesis_from_model(
+                item.model_dump(),
+                units_by_id=units_by_id,
+                evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+                context_ids=context_ids,
+                context_ids_by_unit=context_ids_by_unit,
+                paper_metadata_by_document_id=paper_metadata_by_document_id,
+                eligible_direct_unit_ids=eligible_direct_unit_ids,
+                process_axes=process_axes,
+            )
+            if not synthesized:
+                continue
+            claims.append(synthesized["claim"])
+            relations.append(synthesized["relation"])
+        return (
+            self._dedupe_claims_for_understanding(claims),
+            _dedupe_by_id(relations, "relation_id"),
+            [],
+            model_traces,
+        )
+
+    def _finding_synthesis_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        evidence_units: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        objective = _mapping(payload.get("objective"))
+        objective_context = _mapping(payload.get("objective_context"))
+        paper_frames = _mapping_list(payload.get("paper_frames"))
+        process_axes = _strings(
+            objective_context.get("variable_process_axes")
+            or objective.get("process_axes")
+        )
+        evidence_ledger, coverage = self._finding_synthesis_evidence_ledger(
+            paper_frames=paper_frames,
+            evidence_units=evidence_units,
+            process_axes=process_axes,
+        )
+        return {
+            "objective": {
+                "question": _text(objective.get("question"))
+                or _text(objective_context.get("question")),
+                "material_scope": _strings(
+                    objective_context.get("material_scope")
+                    or objective.get("material_scope")
+                ),
+                "process_axes": process_axes,
+                "property_axes": _strings(
+                    objective_context.get("target_property_axes")
+                    or objective.get("property_axes")
+                ),
+            },
+            "paper_frames": [
+                {
+                    "document_id": _text(frame.get("document_id")),
+                    "title": _text(frame.get("title")),
+                    "source_filename": _text(frame.get("source_filename")),
+                    "relevance": _text(frame.get("relevance")),
+                    "paper_role": _text(frame.get("paper_role")),
+                    "material_match": _strings(frame.get("material_match")),
+                    "changed_variables": _strings(frame.get("changed_variables")),
+                    "measured_properties": _strings(
+                        frame.get("measured_property_scope")
+                    ),
+                    "test_conditions": _strings(
+                        frame.get("test_environment_scope")
+                    ),
+                }
+                for frame in paper_frames
+                if _text(frame.get("document_id"))
+            ],
+            "evidence_ledger": evidence_ledger,
+            "input_coverage": coverage,
+        }
+
+    def _finding_synthesis_evidence_ledger(
+        self,
+        *,
+        paper_frames: list[dict[str, Any]],
+        evidence_units: list[dict[str, Any]],
+        process_axes: list[str] | tuple[str, ...],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        frame_by_document_id = {
+            document_id: frame
+            for frame in paper_frames
+            if (document_id := _text(frame.get("document_id")))
+        }
+        document_ids = _dedupe_strings(
+            [
+                *[
+                    _text(frame.get("document_id"))
+                    for frame in paper_frames
+                    if (_text(frame.get("relevance")) or "").lower()
+                    not in {"irrelevant", "excluded"}
+                ],
+                *[
+                    _text(unit.get("document_id"))
+                    for unit in evidence_units
+                    if _text(unit.get("document_id"))
+                ],
+            ]
+        )
+        units_by_document: dict[str, list[dict[str, Any]]] = {
+            document_id: [] for document_id in document_ids
+        }
+        for unit in evidence_units:
+            document_id = _text(unit.get("document_id"))
+            if not document_id:
+                continue
+            if not self._finding_synthesis_frame_allows_direct_result(
+                frame_by_document_id.get(document_id, {})
+            ):
+                continue
+            units_by_document.setdefault(document_id, []).append(unit)
+
+        relationship_units: dict[
+            tuple[tuple[str, ...], str],
+            dict[str, list[dict[str, Any]]],
+        ] = {}
+        omitted_by_document = {document_id: 0 for document_id in document_ids}
+        for document_id in document_ids:
+            for unit in units_by_document.get(document_id, []):
+                if not self._finding_synthesis_eligible_direct_unit(
+                    unit,
+                    process_axes=process_axes,
+                ):
+                    omitted_by_document[document_id] += 1
+                    continue
+                relationship_key = (
+                    tuple(
+                        self._finding_synthesis_source_axes(
+                            unit,
+                            process_axes=process_axes,
+                        )
+                    ),
+                    _text(unit.get("property_normalized")) or "",
+                )
+                relationship_units.setdefault(relationship_key, {}).setdefault(
+                    document_id,
+                    [],
+                ).append(unit)
+
+        relationship_keys = sorted(
+            relationship_units,
+            key=lambda key: (
+                -len(relationship_units[key]),
+                key[0],
+                key[1],
+            ),
+        )
+        for documents in relationship_units.values():
+            for units in documents.values():
+                units.sort(key=self._finding_synthesis_unit_priority)
+
+        document_lanes: list[
+            tuple[tuple[tuple[str, ...], str], str]
+        ] = []
+        max_documents_per_relationship = max(
+            (len(documents) for documents in relationship_units.values()),
+            default=0,
+        )
+        for document_position in range(max_documents_per_relationship):
+            for relationship_key in relationship_keys:
+                relationship_document_ids = [
+                    document_id
+                    for document_id in document_ids
+                    if document_id in relationship_units[relationship_key]
+                ]
+                if document_position < len(relationship_document_ids):
+                    document_lanes.append(
+                        (
+                            relationship_key,
+                            relationship_document_ids[document_position],
+                        )
+                    )
+
+        included: dict[
+            tuple[tuple[str, ...], str],
+            dict[str, list[dict[str, Any]]],
+        ] = {}
+        used_chars = 0
+        while any(
+            relationship_units[relationship_key][document_id]
+            for relationship_key, document_id in document_lanes
+        ):
+            for relationship_key, document_id in document_lanes:
+                queue = relationship_units[relationship_key][document_id]
+                if not queue:
+                    continue
+                unit = queue.pop(0)
+                compact = self._finding_synthesis_evidence_unit(
+                    unit,
+                    direct_result=True,
+                    process_axes=process_axes,
+                )
+                serialized_length = len(
+                    json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+                )
+                if (
+                    used_chars + serialized_length
+                    > _FINDING_SYNTHESIS_EVIDENCE_CHAR_LIMIT
+                ):
+                    omitted_by_document[document_id] += 1
+                    continue
+                included.setdefault(relationship_key, {}).setdefault(
+                    document_id,
+                    [],
+                ).append(compact)
+                used_chars += serialized_length
+
+        ledger = [
+            {
+                "source_axes": list(relationship_key[0]),
+                "property_normalized": relationship_key[1],
+                "document_evidence": [
+                    {
+                        "document_id": document_id,
+                        "evidence_units": included[relationship_key][document_id],
+                    }
+                    for document_id in document_ids
+                    if included.get(relationship_key, {}).get(document_id)
+                ],
+            }
+            for relationship_key in relationship_keys
+            if included.get(relationship_key)
+        ]
+        total_count = sum(len(units) for units in units_by_document.values())
+        included_count = sum(
+            len(units)
+            for documents in included.values()
+            for units in documents.values()
+        )
+        return ledger, {
+            "document_count": len(document_ids),
+            "relationship_bucket_count": len(relationship_units),
+            "evidence_unit_count": total_count,
+            "included_evidence_unit_count": included_count,
+            "omitted_evidence_unit_count": total_count - included_count,
+            "omitted_by_document": omitted_by_document,
+        }
+
+    def _finding_synthesis_unit_priority(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        direct_result: bool | None = None,
+    ) -> tuple[int, float, str]:
+        if (
+            self._finding_synthesis_direct_unit(unit)
+            if direct_result is None
+            else direct_result
+        ):
+            priority = 0
+        else:
+            evidence_role = self._objective_unit_evidence_role(unit)
+            unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+            if evidence_role in {"condition_context", "mediator_context"} or unit_kind in {
+                "sample_context",
+                "process_context",
+                "test_condition",
+                "baseline_reference",
+            }:
+                priority = 1
+            elif evidence_role in {"background", "background_context", "noise"}:
+                priority = 3
+            else:
+                priority = 2
+        value_payload = _mapping(unit.get("value_payload"))
+        baseline_context = _mapping(unit.get("baseline_context"))
+        current_value = _float_text(
+            value_payload.get("current_value") or value_payload.get("value")
+        )
+        baseline_value = _float_text(baseline_context.get("value"))
+        result_delta = (
+            abs(current_value - baseline_value)
+            if current_value is not None and baseline_value is not None
+            else 0.0
+        )
+        return (
+            priority,
+            -result_delta,
+            _text(unit.get("evidence_unit_id")) or "",
+        )
+
+    def _finding_synthesis_evidence_unit(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        direct_result: bool | None = None,
+        process_axes: list[str] | tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        source = self._semantic_relation_evidence_unit(unit)
+        statement = self._finding_synthesis_statement_from_unit(unit)
+        value_payload = dict(_mapping(source.get("value_payload")))
+        if statement:
+            for key in ("statement", "summary"):
+                duplicate = _text(value_payload.get(key))
+                if duplicate and duplicate in statement:
+                    value_payload.pop(key, None)
+        compact = {
+            "evidence_unit_id": source.get("evidence_unit_id"),
+            "unit_kind": source.get("unit_kind"),
+            "property_normalized": source.get("property_normalized"),
+            "evidence_role": self._objective_unit_evidence_role(unit),
+            "source_axes": self._finding_synthesis_source_axes(
+                unit,
+                process_axes=process_axes,
+            ),
+            "direct_result": (
+                self._finding_synthesis_direct_unit(unit)
+                if direct_result is None
+                else direct_result
+            ),
+            "statement": _short_text(statement, limit=260) if statement else None,
+            "sample_summary": source.get("sample_summary"),
+            "process_summary": source.get("process_summary"),
+            "test_summary": source.get("test_summary"),
+            "value_payload": value_payload,
+            "unit": source.get("unit"),
+            "baseline_summary": source.get("baseline_summary"),
+        }
+        return {
+            key: value
+            for key, value in compact.items()
+            if value not in (None, "", [], {})
+        }
+
+    def _finding_synthesis_frame_allows_direct_result(
+        self,
+        frame: Mapping[str, Any],
+    ) -> bool:
+        relevance = (_text(frame.get("relevance")) or "").lower()
+        paper_role = (_text(frame.get("paper_role")) or "").lower()
+        return relevance in {"high", "medium"} and paper_role in {
+            "primary_experiment",
+            "mixed",
+        }
+
+    def _finding_synthesis_direct_unit(self, unit: Mapping[str, Any]) -> bool:
+        if self._objective_unit_evidence_role(unit) != "direct_support":
+            return False
+        if not _mapping_list(unit.get("source_refs")):
+            return False
+        unit_kind = (_text(unit.get("unit_kind")) or "").lower()
+        if unit_kind == "measurement":
+            return False
+        if unit_kind == "comparison":
+            return bool(self._statement_from_evidence_unit(unit))
+        return self._objective_unit_has_direct_result_signal(unit)
+
+    def _finding_synthesis_eligible_direct_unit(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        process_axes: list[str] | tuple[str, ...],
+    ) -> bool:
+        return bool(
+            self._finding_synthesis_direct_unit(unit)
+            and _text(unit.get("property_normalized"))
+            and self._finding_synthesis_source_axes(
+                unit,
+                process_axes=process_axes,
+            )
+        )
+
+    def _finding_synthesis_source_axes(
+        self,
+        unit: Mapping[str, Any],
+        *,
+        process_axes: list[str] | tuple[str, ...],
+    ) -> list[str]:
+        variable_axes = [
+            self._display_axis_label(axis)
+            for axis in process_axes
+            if _text(axis) and not self._is_platform_process_context_axis(axis)
+        ]
+        comparison_axis = _text(
+            _mapping(unit.get("value_payload")).get("comparison_axis")
+        )
+        if comparison_axis:
+            matched_axes = [
+                axis
+                for axis in variable_axes
+                if self._axis_labels_match(comparison_axis, axis)
+            ]
+            if matched_axes:
+                return self._dedupe_axis_labels(matched_axes)
+            return self._dedupe_axis_labels(
+                self._finding_synthesis_axis_parts(comparison_axis)
+            )
+
+        statement = self._statement_from_evidence_unit(unit) or ""
+        statement_tokens = self._axis_match_tokens(statement)
+        return self._dedupe_axis_labels(
+            [
+                axis
+                for axis in variable_axes
+                if self._objective_axis_tokens_match(statement, axis)
+                or (
+                    (self._axis_match_tokens(axis) - {"level"})
+                    and (self._axis_match_tokens(axis) - {"level"})
+                    <= statement_tokens
+                )
+            ]
+        )
+
+    def _finding_synthesis_axis_parts(self, value: str | None) -> list[str]:
+        return [
+            self._display_axis_label(part)
+            for part in re.split(r"\s*,\s*|\s+(?:and|&)\s+", _text(value) or "")
+            if self._display_axis_label(part)
+        ]
+
+    def _finding_synthesis_source_matches_units(
+        self,
+        source: str,
+        *,
+        unit_ids: list[str],
+        units_by_id: Mapping[str, dict[str, Any]],
+        process_axes: list[str] | tuple[str, ...],
+    ) -> bool:
+        evidence_axes = self._dedupe_axis_labels(
+            [
+                axis
+                for unit_id in unit_ids
+                if unit_id in units_by_id
+                for axis in self._finding_synthesis_source_axes(
+                    units_by_id[unit_id],
+                    process_axes=process_axes,
+                )
+            ]
+        )
+        if not evidence_axes:
+            return True
+        if not all(
+            self._axis_labels_match(source, evidence_axis)
+            for evidence_axis in evidence_axes
+        ):
+            return False
+        claimed_axes = [
+            axis
+            for axis in process_axes
+            if not self._is_platform_process_context_axis(axis)
+            and self._axis_labels_match(source, axis)
+        ]
+        return all(
+            any(
+                self._axis_labels_match(claimed_axis, evidence_axis)
+                for evidence_axis in evidence_axes
+            )
+            for claimed_axis in claimed_axes
+        )
+
+    def _finding_synthesis_direction(
+        self,
+        requested: str | None,
+        *,
+        synthesis_status: str,
+        supporting_unit_ids: list[str],
+        units_by_id: Mapping[str, dict[str, Any]],
+    ) -> str:
+        if synthesis_status == "conflict":
+            return "mixed"
+        if synthesis_status == "condition_dependent":
+            return "conditional"
+        evidence_directions = _dedupe_strings(
+            [
+                direction
+                for unit_id in supporting_unit_ids
+                if unit_id in units_by_id
+                if (
+                    direction := self._finding_synthesis_comparison_direction(
+                        units_by_id[unit_id]
+                    )
+                )
+            ]
+        )
+        if len(evidence_directions) == 1:
+            return evidence_directions[0]
+        if len(evidence_directions) > 1:
+            return "changes"
+        return _text(requested) or "unknown"
+
+    def _finding_synthesis_comparison_direction(
+        self,
+        unit: Mapping[str, Any],
+    ) -> str:
+        if (_text(unit.get("unit_kind")) or "").lower() != "comparison":
+            return ""
+        if not _text(_mapping(unit.get("value_payload")).get("comparison_axis")):
+            return ""
+        transitions = self._comparison_axis_transitions(unit)
+        if not transitions:
+            return ""
+        movement: list[int] = []
+        for _, baseline_value, current_value in transitions:
+            baseline_number = _float_text(baseline_value)
+            current_number = _float_text(current_value)
+            if baseline_number is None or current_number is None:
+                return "changes"
+            if current_number == baseline_number:
+                return "changes"
+            movement.append(1 if current_number > baseline_number else -1)
+        if len(set(movement)) != 1:
+            return "changes"
+        outcome_direction = self._normalized_relation_predicate(
+            _text(_mapping(unit.get("value_payload")).get("direction"))
+            or _text(_mapping(unit.get("value_payload")).get("trend"))
+        )
+        if outcome_direction not in {"increases", "decreases"}:
+            return "changes"
+        if movement[0] > 0:
+            return outcome_direction
+        return {
+            "increases": "decreases",
+            "decreases": "increases",
+        }[outcome_direction]
+
+    def _finding_synthesis_from_model(
+        self,
+        item: Mapping[str, Any],
+        *,
+        units_by_id: Mapping[str, dict[str, Any]],
+        evidence_ref_ids_by_unit: dict[str, list[str]],
+        context_ids: list[str],
+        context_ids_by_unit: dict[str, list[str]],
+        paper_metadata_by_document_id: Mapping[str, dict[str, Any]],
+        eligible_direct_unit_ids: set[str],
+        process_axes: list[str] | tuple[str, ...],
+    ) -> dict[str, dict[str, Any]]:
+        source = _text(item.get("source_concept"))
+        target = _text(item.get("target_concept"))
+        statement = _text(item.get("statement"))
+        if not source or not target or not statement:
+            return {}
+        if not _looks_user_facing(source) or not _looks_user_facing(target):
+            return {}
+
+        supporting_unit_ids = self._valid_finding_synthesis_unit_ids(
+            item.get("supporting_evidence_unit_ids"),
+            units_by_id=units_by_id,
+            eligible_direct_unit_ids=eligible_direct_unit_ids,
+        )
+        conflicting_unit_ids = [
+            unit_id
+            for unit_id in self._valid_finding_synthesis_unit_ids(
+                item.get("conflicting_evidence_unit_ids"),
+                units_by_id=units_by_id,
+                eligible_direct_unit_ids=eligible_direct_unit_ids,
+            )
+            if unit_id not in supporting_unit_ids
+        ]
+        if not supporting_unit_ids:
+            return {}
+
+        supporting_document_ids = self._finding_synthesis_document_ids(
+            supporting_unit_ids,
+            units_by_id=units_by_id,
+        )
+        conflicting_document_ids = self._finding_synthesis_document_ids(
+            conflicting_unit_ids,
+            units_by_id=units_by_id,
+        )
+        synthesis_status = self._validated_finding_synthesis_status(
+            _text(item.get("synthesis_status")),
+            supporting_document_ids=supporting_document_ids,
+            conflicting_document_ids=conflicting_document_ids,
+        )
+        all_unit_ids = _dedupe_strings(
+            [*supporting_unit_ids, *conflicting_unit_ids]
+        )
+        if not self._finding_synthesis_source_matches_units(
+            source,
+            unit_ids=all_unit_ids,
+            units_by_id=units_by_id,
+            process_axes=process_axes,
+        ):
+            return {}
+        supporting_ref_ids = self._ref_ids_for(
+            supporting_unit_ids,
+            evidence_ref_ids_by_unit,
+        )
+        conflicting_ref_ids = self._ref_ids_for(
+            conflicting_unit_ids,
+            evidence_ref_ids_by_unit,
+        )
+        all_ref_ids = _dedupe_strings([*supporting_ref_ids, *conflicting_ref_ids])
+        relation_context_ids = _dedupe_strings(
+            [
+                context_id
+                for unit_id in all_unit_ids
+                for context_id in context_ids_by_unit.get(unit_id, [])
+            ]
+        ) or context_ids[:1]
+        common_conditions = _dedupe_strings(_strings(item.get("common_conditions")))
+        incomparable_conditions = _dedupe_strings(
+            _strings(item.get("incomparable_conditions"))
+        )
+        paper_contributions = self._finding_synthesis_paper_contributions(
+            supporting_unit_ids=supporting_unit_ids,
+            conflicting_unit_ids=conflicting_unit_ids,
+            units_by_id=units_by_id,
+            evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
+            paper_metadata_by_document_id=paper_metadata_by_document_id,
+        )
+        if len(supporting_document_ids) == 1 and not conflicting_document_ids:
+            evidence_statement = (
+                _text(paper_contributions[0].get("statement"))
+                if paper_contributions
+                else None
+            )
+            if evidence_statement:
+                statement = evidence_statement
+        requested_direction = _text(item.get("direction")) or "unknown"
+        direction = self._finding_synthesis_direction(
+            requested_direction,
+            synthesis_status=synthesis_status,
+            supporting_unit_ids=supporting_unit_ids,
+            units_by_id=units_by_id,
+        )
+        warnings = self._finding_synthesis_warnings(
+            synthesis_status,
+            model_warnings=_dedupe_strings(
+                [
+                    *_strings(item.get("warnings")),
+                    *(
+                        ["direction_calibrated_to_direct_evidence"]
+                        if direction != requested_direction
+                        else []
+                    ),
+                ]
+            ),
+        )
+        status = {
+            "agreement": "supported",
+            "conflict": "conflicted",
+            "condition_dependent": "limited",
+            "insufficient_confirmation": "limited",
+        }[synthesis_status]
+        mediators = _strings(item.get("mediator_concepts"))
+        relation_type = self._presentation_relation_type(
+            "conflicting" if synthesis_status == "conflict" else "correlational",
+            direction,
+        )
+        relation = {
+            "relation_id": _stable_relation_id(
+                relation_type,
+                source,
+                target,
+                statement,
+                all_unit_ids,
+            ),
+            "relation_type": relation_type,
+            "subject": source,
+            "predicate": direction,
+            "object": " -> ".join((*mediators, target)) if mediators else target,
+            "statement": statement,
+            "conditions": _dedupe_strings(
+                [
+                    *common_conditions,
+                    *[
+                        f"Not directly comparable: {condition}"
+                        for condition in incomparable_conditions
+                    ],
+                ]
+            ),
+            "status": status,
+            "confidence": item.get("confidence"),
+            "evidence_ref_ids": all_ref_ids,
+            "context_ids": relation_context_ids,
+            "source_object_ids": all_unit_ids,
+            "warnings": warnings,
+            "synthesis_status": synthesis_status,
+            "supporting_evidence_ref_ids": supporting_ref_ids,
+            "conflicting_evidence_ref_ids": conflicting_ref_ids,
+            "common_conditions": common_conditions,
+            "incomparable_conditions": incomparable_conditions,
+            "paper_contributions": paper_contributions,
+        }
+        claim = {
+            "claim_type": "finding",
+            "statement": statement,
+            "status": status,
+            "confidence": item.get("confidence"),
+            "strength": {
+                "agreement": "strong",
+                "conflict": "conflict",
+                "condition_dependent": "partial",
+                "insufficient_confirmation": "limited",
+            }[synthesis_status],
+            "evidence_ref_ids": all_ref_ids,
+            "context_ids": relation_context_ids,
+            "source_object_ids": all_unit_ids,
+            "warnings": warnings,
+        }
+        return {"claim": claim, "relation": relation}
+
+    def _valid_finding_synthesis_unit_ids(
+        self,
+        value: Any,
+        *,
+        units_by_id: Mapping[str, dict[str, Any]],
+        eligible_direct_unit_ids: set[str],
+    ) -> list[str]:
+        return _dedupe_strings(
+            [
+                unit_id
+                for unit_id in _strings(value)
+                if unit_id in units_by_id
+                and unit_id in eligible_direct_unit_ids
+                and self._finding_synthesis_direct_unit(units_by_id[unit_id])
+            ]
+        )
+
+    def _finding_synthesis_document_ids(
+        self,
+        unit_ids: list[str],
+        *,
+        units_by_id: Mapping[str, dict[str, Any]],
+    ) -> list[str]:
+        return _dedupe_strings(
+            [
+                _text(units_by_id[unit_id].get("document_id"))
+                for unit_id in unit_ids
+                if unit_id in units_by_id
+            ]
+        )
+
+    def _validated_finding_synthesis_status(
+        self,
+        value: str | None,
+        *,
+        supporting_document_ids: list[str],
+        conflicting_document_ids: list[str],
+    ) -> str:
+        requested = (value or "").lower().replace("-", "_").replace(" ", "_")
+        if conflicting_document_ids and len(
+            {*supporting_document_ids, *conflicting_document_ids}
+        ) >= 2:
+            return "conflict"
+        if requested in {"agreement", "condition_dependent"} and len(
+            supporting_document_ids
+        ) >= 2:
+            return requested
+        return "insufficient_confirmation"
+
+    def _finding_synthesis_warnings(
+        self,
+        synthesis_status: str,
+        *,
+        model_warnings: list[str] | tuple[str, ...],
+    ) -> list[str]:
+        status_warnings = {
+            "agreement": [],
+            "conflict": ["conflicting_evidence"],
+            "condition_dependent": ["condition_dependent"],
+            "insufficient_confirmation": ["needs_cross_paper_confirmation"],
+        }[synthesis_status]
+        return _dedupe_strings([*status_warnings, *model_warnings])
+
+    def _finding_synthesis_paper_contributions(
+        self,
+        *,
+        supporting_unit_ids: list[str],
+        conflicting_unit_ids: list[str],
+        units_by_id: Mapping[str, dict[str, Any]],
+        evidence_ref_ids_by_unit: dict[str, list[str]],
+        paper_metadata_by_document_id: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        supporting_set = set(supporting_unit_ids)
+        conflicting_set = set(conflicting_unit_ids)
+        document_ids = self._finding_synthesis_document_ids(
+            [*supporting_unit_ids, *conflicting_unit_ids],
+            units_by_id=units_by_id,
+        )
+        contributions: list[dict[str, Any]] = []
+        for document_id in document_ids:
+            paper_metadata = paper_metadata_by_document_id.get(document_id, {})
+            unit_ids = [
+                unit_id
+                for unit_id in [*supporting_unit_ids, *conflicting_unit_ids]
+                if _text(units_by_id[unit_id].get("document_id")) == document_id
+            ]
+            has_support = bool(supporting_set & set(unit_ids))
+            has_conflict = bool(conflicting_set & set(unit_ids))
+            role = (
+                "mixed"
+                if has_support and has_conflict
+                else "supporting"
+                if has_support
+                else "conflicting"
+            )
+            statements = _dedupe_strings(
+                [
+                    _short_text(statement, limit=260)
+                    for unit_id in unit_ids
+                    if (
+                        statement := self._finding_synthesis_statement_from_unit(
+                            units_by_id[unit_id]
+                        )
+                    )
+                ]
+            )
+            contributions.append(
+                {
+                    "document_id": document_id,
+                    "title": _text(paper_metadata.get("title")),
+                    "source_filename": _text(
+                        paper_metadata.get("source_filename")
+                    ),
+                    "role": role,
+                    "statement": " ".join(statements[:2]),
+                    "evidence_unit_ids": unit_ids,
+                    "evidence_ref_ids": self._ref_ids_for(
+                        unit_ids,
+                        evidence_ref_ids_by_unit,
+                    ),
+                }
+            )
+        return contributions
 
     def _recovered_objective_findings_from_source_blocks(
         self,
@@ -4828,6 +5736,7 @@ class ResearchUnderstandingService:
         *,
         scope_payload: Mapping[str, Any],
         trace_status: str,
+        default_task_type: str = _RELATION_TRACE_TASK_TYPE,
     ) -> list[dict[str, Any]]:
         consumer = getattr(self.structured_extractor, "consume_last_trace", None)
         if not callable(consumer):
@@ -4835,11 +5744,24 @@ class ResearchUnderstandingService:
         trace = consumer()
         if not isinstance(trace, Mapping):
             return []
-        input_source_ids = [
-            unit_id
-            for item in _mapping_list(relation_payload.get("evidence_units"))
-            if (unit_id := _text(item.get("evidence_unit_id")))
-        ]
+        input_source_ids = _dedupe_strings(
+            [
+                *[
+                    unit_id
+                    for item in _mapping_list(relation_payload.get("evidence_units"))
+                    if (unit_id := _text(item.get("evidence_unit_id")))
+                ],
+                *[
+                    unit_id
+                    for bucket in _mapping_list(
+                        relation_payload.get("evidence_ledger")
+                    )
+                    for paper in _mapping_list(bucket.get("document_evidence"))
+                    for item in _mapping_list(paper.get("evidence_units"))
+                    if (unit_id := _text(item.get("evidence_unit_id")))
+                ],
+            ]
+        )
         collection_id = _text(scope_payload.get("collection_id"))
         objective = _mapping(scope_payload.get("objective"))
         context = _mapping(scope_payload.get("objective_context"))
@@ -4855,7 +5777,7 @@ class ResearchUnderstandingService:
             input_source_ids,
         )
         trace_record["task_type"] = _text(trace_record.get("task_type")) or (
-            _RELATION_TRACE_TASK_TYPE
+            default_task_type
         )
         trace_record["trace_status"] = trace_status
         trace_record["collection_id"] = collection_id
@@ -6692,6 +7614,71 @@ class ResearchUnderstandingService:
                 return None
         return self._sentence_case(statement)
 
+    def _finding_synthesis_statement_from_unit(
+        self,
+        unit: Mapping[str, Any],
+    ) -> str | None:
+        if (_text(unit.get("unit_kind")) or "").lower() != "comparison":
+            return self._statement_from_evidence_unit(unit)
+        value_payload = _mapping(unit.get("value_payload"))
+        baseline_context = _mapping(unit.get("baseline_context"))
+        transitions = self._comparison_axis_transitions(unit)
+        current_value = self._comparison_display_value(
+            _text(value_payload.get("current_value"))
+            or _text(value_payload.get("value")),
+            _text(unit.get("unit")),
+        )
+        baseline_value = self._comparison_display_value(
+            _text(baseline_context.get("source_value_text"))
+            or _text(baseline_context.get("value")),
+            _text(unit.get("unit")),
+        )
+        if not transitions or not current_value or not baseline_value:
+            return self._statement_from_evidence_unit(unit)
+        transition_text = " and ".join(
+            f"{axis} from {baseline_axis_value} to {current_axis_value}"
+            for axis, baseline_axis_value, current_axis_value in transitions
+        )
+        controlled_axes = self._comparison_controlled_axes_text(value_payload)
+        prefix = f"Under {controlled_axes}, " if controlled_axes else ""
+        property_name = _text(unit.get("property_normalized")) or "observed response"
+        direction = _text(value_payload.get("direction")) or _text(
+            value_payload.get("trend")
+        )
+        return self._sentence_case(
+            f"{prefix}changing {transition_text} "
+            f"{self._comparison_direction_verb(direction)} {property_name} from "
+            f"{baseline_value} to {current_value}."
+        )
+
+    def _comparison_axis_transitions(
+        self,
+        unit: Mapping[str, Any],
+    ) -> list[tuple[str, str, str]]:
+        value_payload = _mapping(unit.get("value_payload"))
+        raw_axis = _text(value_payload.get("comparison_axis"))
+        if not raw_axis:
+            return []
+        process_context = _mapping(unit.get("process_context"))
+        baseline_process_context = _mapping(
+            _mapping(unit.get("baseline_context")).get("process_context")
+        )
+        transitions: list[tuple[str, str, str]] = []
+        for axis in self._finding_synthesis_axis_parts(raw_axis):
+            current_value = self._axis_value_from_context(axis, process_context)
+            baseline_value = self._axis_value_from_context(
+                axis,
+                baseline_process_context,
+            )
+            if (
+                not current_value
+                or not baseline_value
+                or current_value == baseline_value
+            ):
+                continue
+            transitions.append((axis, baseline_value, current_value))
+        return transitions
+
     def _comparison_source_statement(
         self,
         value_payload: Mapping[str, Any],
@@ -8307,6 +9294,8 @@ class ResearchUnderstandingService:
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
     ) -> tuple[str, str, str, str] | None:
+        if _text(finding.get("synthesis_status")):
+            return None
         variables = [
             _normalize_match_text(value)
             for value in _strings(finding.get("variables"))
@@ -8582,6 +9571,13 @@ class ResearchUnderstandingService:
             paper_count=paper_count,
             evidence_bundle=evidence_bundle,
         )
+        if (
+            _text(refreshed.get("synthesis_status")) == "agreement"
+            and paper_count >= 2
+            and support_grade == "strong"
+            and not evidence_bundle.get("conflict")
+        ):
+            generalization_status = "scoped_cross_paper"
         refreshed["expert_use_status"] = self._finding_expert_use_status(
             support_grade=support_grade,
             review_status=review_status,
@@ -11312,6 +12308,8 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         tables_by_id: Mapping[str, SourceTable],
     ) -> dict[str, Any]:
+        if _text(finding.get("synthesis_status")):
+            return dict(finding)
         updated = dict(finding)
         summary = _mapping(updated.get("comparison_summary"))
         scanning_strategy_density_context = (
@@ -11586,6 +12584,8 @@ class ResearchUnderstandingService:
         self,
         finding: Mapping[str, Any],
     ) -> bool:
+        if _text(finding.get("synthesis_status")) == "insufficient_confirmation":
+            return False
         return (_text(finding.get("expert_use_status")) or "") in {
             "paper_level_finding",
             "scoped_expert_finding",
@@ -12523,13 +13523,49 @@ class ResearchUnderstandingService:
     ) -> dict[str, Any]:
         claim_id = _text(effect.get("claim_id")) or "claim"
         relations = self._finding_relations(effect, relations_by_id)
+        synthesis_relations = [
+            relation
+            for relation in relations
+            if _text(relation.get("synthesis_status"))
+        ]
+        has_synthesis_relation = bool(synthesis_relations)
+        synthesis_status = next(
+            (
+                _text(relation.get("synthesis_status"))
+                for relation in synthesis_relations
+                if _text(relation.get("synthesis_status"))
+            ),
+            None,
+        )
+        common_conditions = _dedupe_strings(
+            [
+                condition
+                for relation in synthesis_relations
+                for condition in _strings(relation.get("common_conditions"))
+            ]
+        )
+        incomparable_conditions = _dedupe_strings(
+            [
+                condition
+                for relation in synthesis_relations
+                for condition in _strings(relation.get("incomparable_conditions"))
+            ]
+        )
+        paper_contributions_by_document_id: dict[str, dict[str, Any]] = {}
+        for relation in synthesis_relations:
+            for contribution in _mapping_list(relation.get("paper_contributions")):
+                document_id = _text(contribution.get("document_id"))
+                if document_id and document_id not in paper_contributions_by_document_id:
+                    paper_contributions_by_document_id[document_id] = dict(contribution)
+        paper_contributions = list(paper_contributions_by_document_id.values())
         fallback_variable = _text(effect.get("variable_axis"))
         statement_axis = self._statement_comparison_axis(
             _text(effect.get("statement")) or "",
             goal_axes=[fallback_variable] if fallback_variable else [],
         )
         if (
-            len(relations) == 1
+            not has_synthesis_relation
+            and len(relations) == 1
             and statement_axis
             and not self._is_recovered_expert_effect(effect)
         ):
@@ -12547,16 +13583,22 @@ class ResearchUnderstandingService:
             relations=relations,
             outcomes=initial_outcomes,
         )
-        initial_display_variables = self._finding_display_variables(
-            self._finding_variables(effect, relations),
-            relations=relations,
-            evidence_by_id=evidence_by_id,
-            evidence_bundle=initial_evidence_bundle,
+        initial_variables = self._finding_variables(effect, relations)
+        initial_display_variables = (
+            initial_variables
+            if has_synthesis_relation
+            else self._finding_display_variables(
+                initial_variables,
+                relations=relations,
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=initial_evidence_bundle,
+            )
         )
         if self._is_recovered_expert_effect(effect):
             initial_display_variables = self._finding_variables(effect, relations)
         if (
-            len(relations) == 1
+            not has_synthesis_relation
+            and len(relations) == 1
             and initial_display_variables
             and not self._is_recovered_expert_effect(effect)
             and initial_display_variables[0]
@@ -12573,7 +13615,8 @@ class ResearchUnderstandingService:
                 )
             ]
         if (
-            len(relations) == 1
+            not has_synthesis_relation
+            and len(relations) == 1
             and fallback_variable
             and fallback_variable
             != self._presentation_relation_side(relations[0].get("subject"))
@@ -12672,11 +13715,15 @@ class ResearchUnderstandingService:
                     *mechanism_ref_ids,
                 ]
             )
-        display_variables = self._finding_display_variables(
-            variables,
-            relations=relations,
-            evidence_by_id=evidence_by_id,
-            evidence_bundle=evidence_bundle,
+        display_variables = (
+            variables
+            if has_synthesis_relation
+            else self._finding_display_variables(
+                variables,
+                relations=relations,
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=evidence_bundle,
+            )
         )
         if self._is_recovered_expert_effect(effect):
             display_variables = variables
@@ -12689,14 +13736,18 @@ class ResearchUnderstandingService:
                     else variable
                     for variable in display_variables
                 ]
-        statement = self._finding_statement(
-            statement=_text(effect.get("statement")) or "",
-            variables=display_variables,
-            relations=relations,
-            outcomes=outcomes,
-            evidence_by_id=evidence_by_id,
-            evidence_bundle=evidence_bundle,
-            blocks_by_id=blocks_by_id,
+        statement = (
+            _text(effect.get("statement")) or ""
+            if has_synthesis_relation
+            else self._finding_statement(
+                statement=_text(effect.get("statement")) or "",
+                variables=display_variables,
+                relations=relations,
+                outcomes=outcomes,
+                evidence_by_id=evidence_by_id,
+                evidence_bundle=evidence_bundle,
+                blocks_by_id=blocks_by_id,
+            )
         )
         narrowed_outcomes = self._specific_mechanical_outcomes(
             outcomes,
@@ -12710,7 +13761,7 @@ class ResearchUnderstandingService:
             evidence_bundle=evidence_bundle,
             blocks_by_id=blocks_by_id,
         )
-        if narrowed_outcomes != outcomes:
+        if narrowed_outcomes != outcomes and not has_synthesis_relation:
             outcomes = narrowed_outcomes
             statement = self._finding_statement(
                 statement=_text(effect.get("statement")) or "",
@@ -12783,6 +13834,11 @@ class ResearchUnderstandingService:
             outcomes=outcomes,
             statement=statement,
         )
+        if common_conditions:
+            scope_summary = _join_display_values(
+                _dedupe_strings([scope_summary, *common_conditions]),
+                limit=7,
+            )
         scope_summary = self._finding_scope_summary_with_direct_conditions(
             scope_summary,
             evidence_by_id=evidence_by_id,
@@ -12810,6 +13866,13 @@ class ResearchUnderstandingService:
             paper_count=paper_count,
             evidence_bundle=evidence_bundle,
         )
+        if (
+            synthesis_status == "agreement"
+            and paper_count >= 2
+            and support_grade == "strong"
+            and not evidence_bundle.get("conflict")
+        ):
+            generalization_status = "scoped_cross_paper"
         relation_chain = self._finding_relation_chain(
             relations,
             variables=display_variables,
@@ -12909,6 +13972,10 @@ class ResearchUnderstandingService:
                 scope_summary=scope_summary,
             ),
             "warnings": list(_strings(effect.get("warnings"))),
+            "synthesis_status": synthesis_status or "",
+            "common_conditions": common_conditions,
+            "incomparable_conditions": incomparable_conditions,
+            "paper_contributions": paper_contributions,
         }
 
     def _finding_comparison_summary(
@@ -14596,21 +15663,36 @@ class ResearchUnderstandingService:
             for relation in relations
             for ref_id in _strings(relation.get("evidence_ref_ids"))
         }
+        supporting_evidence_ref_ids = {
+            ref_id
+            for relation in relations
+            for ref_id in _strings(relation.get("supporting_evidence_ref_ids"))
+        }
+        conflicting_evidence_ref_ids = {
+            ref_id
+            for relation in relations
+            for ref_id in _strings(relation.get("conflicting_evidence_ref_ids"))
+        }
         target_terms = self._finding_target_terms(effect, outcomes)
         for ref_id in _strings(effect.get("evidence_ref_ids")):
             evidence_ref = evidence_by_id.get(ref_id, {})
             role = _text(evidence_ref.get("evidence_role"))
-            bundle_key = self._finding_bundle_key_for_role(
-                role,
-                fallback_direct=(
-                    not role
-                    and ref_id in relation_evidence_ref_ids
-                    and self._evidence_matches_finding_target(
-                        evidence_ref,
-                        target_terms,
-                    )
-                ),
-            )
+            if ref_id in conflicting_evidence_ref_ids:
+                bundle_key = "conflict"
+            elif ref_id in supporting_evidence_ref_ids:
+                bundle_key = "direct_result"
+            else:
+                bundle_key = self._finding_bundle_key_for_role(
+                    role,
+                    fallback_direct=(
+                        not role
+                        and ref_id in relation_evidence_ref_ids
+                        and self._evidence_matches_finding_target(
+                            evidence_ref,
+                            target_terms,
+                        )
+                    ),
+                )
             bundle[bundle_key].append(ref_id)
         return bundle
 

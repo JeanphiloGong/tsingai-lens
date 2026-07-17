@@ -8,6 +8,8 @@ import math
 import re
 from typing import Any, Callable, Iterable, Mapping
 
+from openai import OpenAIError
+
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
@@ -50,7 +52,7 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_CAPTION_LIMIT = 12
-_FRAME_SECTION_SNIPPET_LIMIT = 24
+_FRAME_SECTION_SNIPPET_LIMIT = 12
 _FRAME_SECTION_TEXT_CHARS = 420
 _FRAME_SECTION_OVERVIEW_LIMIT = 4
 _FRAME_TABLE_LIMIT = 10
@@ -2873,10 +2875,10 @@ class ResearchObjectiveService:
             ):
                 try:
                     parsed = extractor.extract_objective_evidence_units(payload)
-                except Exception:
-                    llm_evidence_unit_unavailable = True
+                except Exception as exc:
+                    llm_evidence_unit_unavailable = isinstance(exc, OpenAIError)
                     logger.exception(
-                        "Research objective evidence-unit extraction route failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s",
+                        "Research objective evidence-unit extraction route failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
                         collection_id,
                         route.route_id,
                         route.objective_id,
@@ -2887,6 +2889,7 @@ class ResearchObjectiveService:
                         len(extractable_routes),
                         route_position - 1,
                         max(len(extractable_routes) - route_position, 0),
+                        llm_evidence_unit_unavailable,
                     )
                     if not route_records:
                         continue
@@ -5062,14 +5065,11 @@ class ResearchObjectiveService:
         observed_raw_axes: set[str] = set()
         for sample in samples:
             sample_key = self._objective_sample_identity_key(sample.sample_context)
-            axis_values = self._objective_process_axis_values(
+            axis_values = self._objective_pairwise_process_axis_values(
                 sample,
                 objective_context=objective_context,
             )
-            raw_axis_values = self._objective_raw_process_axis_values(sample)
-            if raw_axis_values:
-                observed_raw_axes.update(raw_axis_values)
-                axis_values = {**axis_values, **raw_axis_values}
+            observed_raw_axes.update(axis_values)
             if sample_key and axis_values:
                 sample_rows.append((sample, sample_key, axis_values))
         axes = (*axes, *tuple(sorted(observed_raw_axes - set(axes))))
@@ -5780,21 +5780,6 @@ class ResearchObjectiveService:
         value_key = self._objective_column_key(value)
         return "preheated" in value_key or "preheat" in value_key
 
-    def _objective_raw_process_axis_values(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> dict[str, str]:
-        axis_values: dict[str, str] = {}
-        for key, value in unit.process_context.items():
-            if not str(key).strip() or not str(value).strip():
-                continue
-            if self._objective_column_key(str(key)):
-                continue
-            axis_key = self._axis_key(key) or str(key).strip().casefold()
-            if axis_key:
-                axis_values[axis_key] = str(value).strip().casefold()
-        return axis_values
-
     def _objective_process_column_axis_keys(self, value: Any) -> set[str]:
         column = self._label_without_unit_suffix(value)
         column = " ".join(column.split()).casefold()
@@ -5954,12 +5939,11 @@ class ResearchObjectiveService:
     ) -> dict[str, dict[str, str]]:
         axis_values: dict[str, dict[str, str]] = {}
         for source in (
-            self._objective_process_axis_values(
+            self._objective_pairwise_process_axis_values(
                 unit,
                 objective_context=objective_context,
             ),
             self._objective_sample_axis_values(unit),
-            self._objective_raw_process_axis_values(unit),
         ):
             for axis, value in source.items():
                 axis_key = self._normalize_property_label(axis) or self._axis_key(axis)
@@ -6630,7 +6614,7 @@ class ResearchObjectiveService:
                     objective_context=objective_context,
                 ):
                     return True
-        return route.role == "process_or_treatment"
+        return route.role == "process_or_treatment" and objective_context is None
 
     def _objective_label_matches_process_axes(
         self,
@@ -6837,6 +6821,9 @@ class ResearchObjectiveService:
         extracted_record: dict[str, Any],
     ) -> tuple[dict[str, Any], ...]:
         record = dict(extracted_record)
+        extracted_join_keys = record.get("join_keys")
+        if not isinstance(extracted_join_keys, Mapping) or not extracted_join_keys:
+            extracted_join_keys = route.join_keys
         record["property_normalized"] = self._normalize_objective_unit_property(
             record.get("property_normalized"),
             objective_context=objective_context,
@@ -6849,7 +6836,9 @@ class ResearchObjectiveService:
                     route=route,
                     source=source,
                 ),
-                "join_keys": record.get("join_keys") or dict(route.join_keys),
+                "join_keys": self._objective_semantic_join_keys(
+                    extracted_join_keys
+                ),
             }
         )
         if not record.get("confidence"):
@@ -6936,6 +6925,36 @@ class ResearchObjectiveService:
             )
             normalized_records.append(normalized)
         return tuple(normalized_records)
+
+    def _objective_semantic_join_keys(
+        self,
+        value: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        internal_keys = {
+            "collection_id",
+            "document_id",
+            "evidence_unit_id",
+            "frame_id",
+            "objective_id",
+            "route_id",
+            "source_id",
+            "source_kind",
+            "source_ref",
+            "tree_position_node_id",
+        }
+        semantic_keys: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key).strip()
+            key_token = self._objective_column_key(key_text)
+            if (
+                not key_text
+                or key_token in internal_keys
+                or key_token.startswith("evidence_route_")
+                or key_token.startswith("tree_position_")
+            ):
+                continue
+            semantic_keys[key_text] = item
+        return semantic_keys
 
     def _normalize_text_evidence_unit_record(
         self,
@@ -9363,7 +9382,26 @@ class ResearchObjectiveService:
             "collection_id": collection_id,
             "objective": objective.to_record(),
             "objective_context": (
-                objective_context.to_record() if objective_context is not None else {}
+                {
+                    "objective_id": objective_context.objective_id,
+                    "question": objective_context.question,
+                    "material_scope": list(objective_context.material_scope),
+                    "variable_process_axes": list(
+                        objective_context.variable_process_axes
+                    ),
+                    "process_context_axes": list(
+                        objective_context.process_context_axes
+                    ),
+                    "target_property_axes": list(
+                        objective_context.target_property_axes
+                    ),
+                    "excluded_property_axes": list(
+                        objective_context.excluded_property_axes
+                    ),
+                    "confidence": objective_context.confidence,
+                }
+                if objective_context is not None
+                else {}
             ),
             "paper_skim": paper_skim.to_record() if paper_skim is not None else {},
             "document": {

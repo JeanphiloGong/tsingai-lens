@@ -1176,7 +1176,7 @@ def test_research_objective_service_forces_extractable_objective_route_roles(
     )
 
 
-def test_research_objective_service_skips_failed_objective_unit_route(
+def test_research_objective_service_continues_after_failed_objective_unit_route(
     tmp_path,
     caplog,
 ):
@@ -1239,6 +1239,17 @@ def test_research_objective_service_skips_failed_objective_unit_route(
             "confidence": 0.75,
         }
     )
+    succeeding_text_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-2",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.82,
+        }
+    )
 
     class FailingUnitExtractor:
         def __init__(self) -> None:
@@ -1249,7 +1260,27 @@ def test_research_objective_service_skips_failed_objective_unit_route(
             payload: dict[str, Any],
         ) -> StructuredObjectiveEvidenceUnits:
             self.unit_payloads.append(payload)
-            raise RuntimeError("malformed objective evidence JSON")
+            if payload["evidence_route"]["source_ref"] == "block-1":
+                raise RuntimeError("malformed objective evidence JSON")
+            return StructuredObjectiveEvidenceUnits(
+                evidence_units=[
+                    StructuredObjectiveEvidenceUnit(
+                        unit_kind="measurement",
+                        property_normalized="relative density",
+                        material_system={"family": "316L stainless steel"},
+                        sample_context={"label": "S2"},
+                        process_context={"laser_power_w": 220},
+                        value_payload={
+                            "value": 98.1,
+                            "source_value_text": "98.1%",
+                        },
+                        unit="%",
+                        join_keys={"sample_key": "S2"},
+                        resolution_status="resolved",
+                        confidence=0.88,
+                    )
+                ]
+            )
 
     extractor = FailingUnitExtractor()
     table = SimpleNamespace(
@@ -1272,6 +1303,14 @@ def test_research_objective_service_skips_failed_objective_unit_route(
         heading_path="Results",
         text="The model response for this text window is malformed.",
     )
+    succeeding_block = SimpleNamespace(
+        block_id="block-2",
+        document_id="paper-1",
+        page=2,
+        block_type="paragraph",
+        heading_path="Results",
+        text="At 220 W, specimen S2 reached a relative density of 98.1%.",
+    )
 
     with caplog.at_level("ERROR"):
         units = service._build_objective_evidence_units(
@@ -1280,18 +1319,23 @@ def test_research_objective_service_skips_failed_objective_unit_route(
             objectives=(objective,),
             objective_contexts=(objective_context,),
             objective_paper_frames=(frame,),
-            objective_evidence_routes=(table_route, failing_text_route),
-            blocks_by_document_id={"paper-1": [block]},
+            objective_evidence_routes=(
+                table_route,
+                failing_text_route,
+                succeeding_text_route,
+            ),
+            blocks_by_document_id={"paper-1": [block, succeeding_block]},
             tables_by_document_id={"paper-1": [table]},
             document_trees_by_document_id={},
         )
 
     measurements = [unit for unit in units if unit.unit_kind == "measurement"]
-    assert len(measurements) == 1
-    assert measurements[0].property_normalized == "relative density"
-    assert measurements[0].value_payload["value"] == 99.5
+    assert len(measurements) == 2
+    assert {unit.property_normalized for unit in measurements} == {"relative density"}
+    assert {unit.value_payload["value"] for unit in measurements} == {98.1, 99.5}
     assert [payload["evidence_route"]["source_ref"] for payload in extractor.unit_payloads] == [
-        "block-1"
+        "block-1",
+        "block-2",
     ]
     assert any(
         "Research objective evidence-unit extraction route failed" in record.message
@@ -1585,7 +1629,20 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
     labels = [item["section_label"] for item in payload["section_snippets"]]
     assert "Results > Texture results" in labels
     assert "Results > Tensile properties" in labels
-    assert len(labels) <= 24
+    assert len(labels) <= 12
+    assert set(payload["objective_context"]) == {
+        "objective_id",
+        "question",
+        "material_scope",
+        "variable_process_axes",
+        "process_context_axes",
+        "target_property_axes",
+        "excluded_property_axes",
+        "confidence",
+    }
+    assert "routing_hints" not in payload["objective_context"]
+    assert "objective_evidence_lens" not in payload["objective_context"]
+    assert "extraction_guidance" not in payload["objective_context"]
 
 
 def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
@@ -1968,7 +2025,14 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
                             sample_context={"sample": "S1"},
                             process_context={"aging_temperature_c": 650},
                             value_payload={"statement": "S1 aged at 650 C"},
-                            join_keys={"sample_key": "S1"},
+                            join_keys={
+                                "sample_key": "S1",
+                                "document_id": "paper-1",
+                                "objective_id": "obj-heat",
+                                "source_ref": "methods",
+                                "evidence_route_document_id": "paper-1",
+                                "tree_position_node_id": "methods-node",
+                            },
                             resolution_status="partial",
                             confidence=0.82,
                         )
@@ -2022,6 +2086,9 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
     assert extractor.unit_payloads[1]["document_state"]["process_contexts"][0]["value"] == {
         "aging_temperature_c": 650,
     }
+    assert extractor.unit_payloads[1]["document_state"]["open_joins"][0][
+        "join_keys"
+    ] == {"sample_key": "S1"}
     assert extractor.unit_payloads[0]["objective"] == {
         "objective_id": "obj-heat",
         "question": "How does heat treatment affect yield strength?",
@@ -6217,6 +6284,117 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     )
 
 
+def test_pairwise_selection_keeps_valid_pairs_when_non_goal_axes_define_groups(
+    tmp_path,
+):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How does scan speed affect density?",
+            "variable_process_axes": ["scan speed"],
+            "target_property_axes": ["density"],
+        }
+    )
+
+    def density_unit(
+        evidence_unit_id: str,
+        *,
+        sample_number: str,
+        hatch_spacing: str,
+        scan_speed: str,
+        density: float,
+    ) -> ObjectiveEvidenceUnit:
+        return ObjectiveEvidenceUnit.from_mapping(
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "objective_id": "obj-density",
+                "document_id": "paper-1",
+                "unit_kind": "measurement",
+                "property_normalized": "density",
+                "sample_context": {"Sample number": sample_number},
+                "process_context": {
+                    "Hatch space (mm)": hatch_spacing,
+                    "Scan strategy": "A",
+                    "Scanning speed (mm/s)": scan_speed,
+                },
+                "value_payload": {
+                    "source_value_text": str(density),
+                    "value": density,
+                },
+                "unit": "%",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-density",
+                        "page": 2,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    comparisons = service._build_objective_pairwise_comparison_units(
+        (
+            density_unit(
+                "oeu-density-1",
+                sample_number="1",
+                hatch_spacing="0.114",
+                scan_speed="0.25",
+                density=95.4,
+            ),
+            density_unit(
+                "oeu-density-4",
+                sample_number="4",
+                hatch_spacing="0.114",
+                scan_speed="0.175",
+                density=93.9,
+            ),
+            density_unit(
+                "oeu-density-8",
+                sample_number="8",
+                hatch_spacing="0.12",
+                scan_speed="0.239",
+                density=96.8,
+            ),
+            density_unit(
+                "oeu-density-11",
+                sample_number="11",
+                hatch_spacing="0.12",
+                scan_speed="0.167",
+                density=96.2,
+            ),
+        ),
+        objective_contexts=(objective_context,),
+    )
+
+    assert {
+        frozenset(
+            {
+                unit.sample_context["Sample number"],
+                unit.baseline_context["sample_context"]["Sample number"],
+            }
+        )
+        for unit in comparisons
+    } == {frozenset({"1", "4"}), frozenset({"8", "11"})}
+    assert {unit.value_payload["comparison_axis"] for unit in comparisons} == {
+        "scan speed"
+    }
+    assert {
+        tuple(
+            (item["axis"], item["value"])
+            for item in unit.value_payload["controlled_axes"]
+        )
+        for unit in comparisons
+    } == {
+        (("hatch space", "0.114"), ("scan strategy", "a")),
+        (("hatch space", "0.12"), ("scan strategy", "a")),
+    }
+
+
 def test_research_objective_service_matches_contextual_property_variants_for_pairwise(
     tmp_path,
 ):
@@ -7921,6 +8099,65 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
         ("laser power, scanning speed, hatch spacing", "fatigue strength"),
         ("laser power, scanning speed, hatch spacing", "max defect length"),
     }
+
+
+def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "variable_process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            ],
+            "target_property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+    misrouted_result_table = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "route_id": "route-misclassified-results",
+            "objective_id": "obj-fatigue",
+            "document_id": "paper-ved",
+            "source_kind": "table",
+            "source_ref": "table-melt-pool-density",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "Grain Size [um] > Eq. diam.": "statistical_measure",
+            },
+            "confidence": 0.84,
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=misrouted_result_table,
+        source={
+            "page": 5,
+            "column_headers": [
+                "ID",
+                "Melt Pool Size [um] > Width",
+                "Grain Size [um] > Eq. diam.",
+                "Density [%] > Archimedes method",
+            ],
+            "table_matrix": [
+                [
+                    "ID",
+                    "Melt Pool Size [um] > Width",
+                    "Grain Size [um] > Eq. diam.",
+                    "Density [%] > Archimedes method",
+                ],
+                ["L-VED", "148", "81", "91.90"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    assert records == ()
 
 
 def test_research_objective_service_adds_context_hint_route_for_condition_table(

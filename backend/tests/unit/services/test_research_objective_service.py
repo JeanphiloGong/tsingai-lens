@@ -8160,6 +8160,66 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
     assert records == ()
 
 
+def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
+    service = ResearchObjectiveService(
+        collection_service=CollectionService(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-fatigue",
+            "variable_process_axes": ["volumetric energy density"],
+            "target_property_axes": ["fatigue strength"],
+        }
+    )
+    mixed_route = ObjectiveEvidenceRoute.from_mapping(
+        {
+            "route_id": "route-mixed-fatigue",
+            "objective_id": "obj-fatigue",
+            "document_id": "paper-ved",
+            "source_kind": "table",
+            "source_ref": "table-mixed-fatigue",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "ID": "sample_id",
+                "VED [J/mm3]": "process_variable",
+                "Fatigue strength [MPa]": "target_property",
+                "Standard deviation [MPa]": "statistical_measure",
+            },
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_table_matrix_evidence_unit_records(
+        route=mixed_route,
+        source={
+            "page": 10,
+            "column_headers": [
+                "ID",
+                "VED [J/mm3]",
+                "Fatigue strength [MPa]",
+                "Standard deviation [MPa]",
+            ],
+            "table_matrix": [
+                ["ID", "VED [J/mm3]", "Fatigue strength [MPa]", "Standard deviation [MPa]"],
+                ["L-VED", "50.8", "340", "8"],
+            ],
+        },
+        objective_context=objective_context,
+    )
+
+    process_record = next(record for record in records if record["unit_kind"] == "process_context")
+    result_record = next(record for record in records if record["unit_kind"] == "measurement")
+    assert process_record["process_context"] == {"VED [J/mm3]": "50.8"}
+    assert "Fatigue strength [MPa]" not in process_record["process_context"]
+    assert "Standard deviation [MPa]" not in process_record["process_context"]
+    assert result_record["property_normalized"] == "fatigue strength"
+    assert result_record["value_payload"] == {
+        "source_value_text": "340",
+        "value": 340.0,
+    }
+
+
 def test_research_objective_service_adds_context_hint_route_for_condition_table(
     tmp_path,
 ):

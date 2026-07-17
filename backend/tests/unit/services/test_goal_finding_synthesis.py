@@ -95,6 +95,46 @@ def _evidence_unit(
     }
 
 
+def _context_unit(
+    unit_id: str,
+    document_id: str,
+    *,
+    unit_kind: str,
+    statement: str,
+    evidence_role: str = "direct_support",
+) -> dict[str, Any]:
+    return {
+        "evidence_unit_id": unit_id,
+        "objective_id": "obj-density",
+        "document_id": document_id,
+        "unit_kind": unit_kind,
+        "property_normalized": "fatigue strength",
+        "material_system": {"name": "316L stainless steel"},
+        "sample_context": {},
+        "process_context": {},
+        "resolved_condition": {},
+        "test_condition": {},
+        "value_payload": {"statement": statement},
+        "unit": None,
+        "baseline_context": {},
+        "interpretation": statement,
+        "source_refs": [
+            {
+                "source_kind": "text_window",
+                "source_ref": f"block-{unit_id}",
+                "document_id": document_id,
+                "display_label": f"{document_id} Discussion",
+                "quote": statement,
+                "evidence_role": evidence_role,
+            }
+        ],
+        "evidence_anchor_ids": [],
+        "join_keys": {},
+        "resolution_status": "resolved",
+        "confidence": 0.9,
+    }
+
+
 def _payload(evidence_units: list[dict[str, Any]]) -> dict[str, Any]:
     document_ids = list(dict.fromkeys(unit["document_id"] for unit in evidence_units))
     return {
@@ -152,12 +192,12 @@ def _service(findings: list[dict[str, Any]]) -> tuple[
     )
 
 
-def _ledger_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _result_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         unit
-        for bucket in payload["evidence_ledger"]
-        for paper in bucket["document_evidence"]
-        for unit in paper["evidence_units"]
+        for result_set in payload["result_sets"]
+        for paper in result_set["document_evidence"]
+        for unit in paper["result_units"]
     ]
 
 
@@ -166,26 +206,508 @@ def _model_finding(
     synthesis_status: str,
     supporting_ids: list[str],
     conflicting_ids: list[str] | None = None,
+    context_ids: list[str] | None = None,
+    mechanism_ids: list[str] | None = None,
     common_conditions: list[str] | None = None,
     incomparable_conditions: list[str] | None = None,
+    target_concept: str = "relative density",
+    direction: str | None = None,
+    outcomes: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    outcome_direction = direction or (
+        "mixed" if synthesis_status == "conflict" else "increases"
+    )
     return {
         "source_concept": "energy density",
-        "target_concept": "relative density",
+        "outcomes": outcomes
+        or [
+            {
+                "concept": target_concept,
+                "direction": outcome_direction,
+                "statement": f"Energy density changes {target_concept}.",
+                "supporting_evidence_unit_ids": supporting_ids,
+                "conflicting_evidence_unit_ids": conflicting_ids or [],
+            }
+        ],
         "mediator_concepts": ["melt-pool stability"],
-        "direction": "increases" if synthesis_status != "conflict" else "mixed",
         "statement": (
             "Within comparable LPBF 316L conditions, higher energy density "
             "generally increased relative density."
         ),
         "synthesis_status": synthesis_status,
-        "supporting_evidence_unit_ids": supporting_ids,
-        "conflicting_evidence_unit_ids": conflicting_ids or [],
+        "context_evidence_unit_ids": context_ids or [],
+        "mechanism_evidence_unit_ids": mechanism_ids or [],
         "common_conditions": common_conditions or ["LPBF 316L", "Archimedes density"],
         "incomparable_conditions": incomparable_conditions or [],
         "confidence": 0.88,
         "warnings": [],
     }
+
+
+def test_goal_synthesis_preserves_one_composite_single_paper_finding():
+    defect = _evidence_unit(
+        "unit-defect",
+        "paper-ved",
+        statement="The maximum defect length decreased from 394 um to 86 um.",
+        direction="decreases",
+    )
+    defect["property_normalized"] = "maximum defect length"
+    defect["value_payload"]["comparison_axis"] = "laser power, scanning speed"
+    fatigue_strength = _evidence_unit(
+        "unit-fatigue-strength",
+        "paper-ved",
+        statement=(
+            "Fatigue strength at 10^4 cycles increased from 340 MPa to 470 MPa."
+        ),
+        direction="increases",
+    )
+    fatigue_strength["property_normalized"] = "fatigue strength at 10^4 cycles"
+    fatigue_strength["value_payload"]["comparison_axis"] = (
+        "laser power, scanning speed"
+    )
+    fatigue_limit = _evidence_unit(
+        "unit-fatigue-limit",
+        "paper-ved",
+        statement="The fatigue limit increased from 93 MPa to 97 MPa.",
+        direction="increases",
+    )
+    fatigue_limit["property_normalized"] = "HCF fatigue limit"
+    fatigue_limit["value_payload"]["comparison_axis"] = "laser power, scanning speed"
+    for unit, baseline_value, current_value, unit_text in (
+        (defect, 394, 86, "um"),
+        (fatigue_strength, 340, 470, "MPa"),
+        (fatigue_limit, 93, 97, "MPa"),
+    ):
+        unit["process_context"] = {
+            "VED [J/mm3]": "84.3",
+            "Laser power [W]": "220",
+            "Scanning speed [mm/s]": "725",
+        }
+        unit["baseline_context"] = {
+            "process_context": {
+                "VED [J/mm3]": "50.8",
+                "Laser power [W]": "160",
+                "Scanning speed [mm/s]": "875",
+            },
+            "source_value_text": str(baseline_value),
+            "value": baseline_value,
+        }
+        unit["value_payload"].update(
+            {
+                "source_value_text": str(current_value),
+                "value": current_value,
+            }
+        )
+        unit["unit"] = unit_text
+    author_interpretation = _context_unit(
+        "unit-author-interpretation",
+        "paper-ved",
+        unit_kind="interpretation",
+        statement=(
+            "The closely clustered 80-100 MPa fatigue limits indicate only a "
+            "small HCF improvement with increasing VED."
+        ),
+    )
+    mechanism = _context_unit(
+        "unit-mechanism",
+        "paper-ved",
+        unit_kind="mechanism",
+        statement=(
+            "The authors attributed the LCF improvement to fewer defects and "
+            "greater ductility."
+        ),
+        evidence_role="mediator_context",
+    )
+    payload = _payload(
+        [
+            defect,
+            fatigue_strength,
+            fatigue_limit,
+            author_interpretation,
+            mechanism,
+        ]
+    )
+    payload["objective"].update(
+        {
+            "question": (
+                "How do coupled LPBF parameters affect defects and fatigue "
+                "performance?"
+            ),
+            "process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            ],
+            "property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "question": payload["objective"]["question"],
+            "variable_process_axes": payload["objective"]["process_axes"],
+            "target_property_axes": payload["objective"]["property_axes"],
+        }
+    )
+    payload["paper_frames"][0].update(
+        {
+            "changed_variables": ["laser power", "scanning speed"],
+            "measured_property_scope": ["defect structure", "fatigue strength"],
+        }
+    )
+    model_statement = (
+        "Changing laser power and scanning speed affects defects and fatigue."
+    )
+    model_outcomes = [
+        {
+            "concept": "maximum defect length",
+            "direction": "decreases",
+            "statement": "Maximum defect length decreased from 394 um to 86 um.",
+            "supporting_evidence_unit_ids": ["unit-defect"],
+            "conflicting_evidence_unit_ids": [],
+        },
+        {
+            "concept": "fatigue strength at 10^4 cycles",
+            "direction": "increases",
+            "statement": (
+                "Fatigue strength at 10^4 cycles increased from 340 MPa to "
+                "470 MPa."
+            ),
+            "supporting_evidence_unit_ids": ["unit-fatigue-strength"],
+            "conflicting_evidence_unit_ids": [],
+        },
+        {
+            "concept": "HCF fatigue limit",
+            "direction": "changes",
+            "statement": "HCF fatigue limits remained at 80-100 MPa.",
+            "supporting_evidence_unit_ids": ["unit-fatigue-limit"],
+            "conflicting_evidence_unit_ids": [],
+        },
+    ]
+    model_finding = {
+        **_model_finding(
+            synthesis_status="agreement",
+            supporting_ids=[
+                "unit-defect",
+                "unit-fatigue-strength",
+                "unit-fatigue-limit",
+            ],
+            context_ids=[],
+            outcomes=model_outcomes,
+        ),
+        "source_concept": (
+            "Changes in laser power and scanning speed under fixed hatch "
+            "spacing and layer thickness"
+        ),
+        "mediator_concepts": [],
+        "statement": model_statement,
+    }
+    service, extractor = _service(
+        [
+            {
+                **model_finding,
+                "outcomes": [
+                    {
+                        **model_outcomes[0],
+                        "concept": "defect structure",
+                    },
+                    *list(reversed(model_outcomes[1:])),
+                ],
+                "statement": "The same result set was returned in another order.",
+            },
+            model_finding,
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    context_payload = extractor.payloads[0]["document_context"]
+    assert {
+        unit["evidence_unit_id"]
+        for document in context_payload
+        for unit in document["context_units"]
+    } == {"unit-author-interpretation", "unit-mechanism"}
+    assert len(understanding["presentation"]["findings"]) == 1
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["statement"] == (
+        "The higher VED coupled parameter combination (laser power and scanning "
+        "speed) reduced maximum defect length from 394 um to 86 um and increased "
+        "fatigue strength at 10^4 cycles from 340 MPa to 470 MPa. However, the "
+        "high-cycle fatigue limit remained concentrated in the 80-100 MPa range, "
+        "indicating only limited improvement with VED. Reduced defects and higher "
+        "ductility may explain the low-cycle fatigue improvement. This finding is "
+        "directly supported by one paper."
+    )
+    assert "93 MPa to 97 MPa" not in finding["statement"]
+    assert finding["variables"] == ["laser power and scanning speed"]
+    assert finding["mediators"] == ["reduced defects", "ductility"]
+    assert finding["paper_count"] == 1
+    assert finding["synthesis_status"] == "insufficient_confirmation"
+    assert finding["generalization_status"] == "paper_level_only"
+    assert len(finding["evidence_bundle"]["direct_result"]) == 3
+    assert len(finding["evidence_bundle"]["condition_context"]) == 1
+    assert len(finding["evidence_bundle"]["mechanism"]) == 1
+
+
+def test_goal_synthesis_aligns_one_multi_outcome_condition_contrast():
+    fatigue_limit = _evidence_unit(
+        "unit-fatigue-limit",
+        "paper-ved",
+        statement="Fatigue limit increased from 93 MPa to 97 MPa.",
+        direction="increases",
+    )
+    fatigue_limit["property_normalized"] = "fatigue limit"
+    fatigue_strength = _evidence_unit(
+        "unit-fatigue-strength",
+        "paper-ved",
+        statement="Fatigue strength increased from 340 MPa to 470 MPa.",
+        direction="increases",
+    )
+    fatigue_strength["property_normalized"] = "fatigue strength"
+    defect = _evidence_unit(
+        "unit-defect",
+        "paper-ved",
+        statement="Maximum defect length increased from 86 um to 394 um.",
+        direction="increases",
+    )
+    defect["property_normalized"] = "maximum defect length"
+    dominated = _evidence_unit(
+        "unit-middle-fatigue",
+        "paper-ved",
+        statement="Fatigue strength increased from 340 MPa to 450 MPa.",
+        direction="increases",
+    )
+    dominated["property_normalized"] = "fatigue strength"
+
+    low = {
+        "VED [J/mm3]": "50.8",
+        "Laser power [W]": "160",
+        "Scanning speed [mm/s]": "875",
+        "Hatch spacing [um]": "120",
+        "Layer thickness [um]": "30",
+    }
+    high = {
+        "VED [J/mm3]": "84.3",
+        "Laser power [W]": "220",
+        "Scanning speed [mm/s]": "725",
+        "Hatch spacing [um]": "120",
+        "Layer thickness [um]": "30",
+    }
+    middle = {
+        "VED [J/mm3]": "79.4",
+        "Laser power [W]": "190",
+        "Scanning speed [mm/s]": "800",
+        "Hatch spacing [um]": "100",
+        "Layer thickness [um]": "30",
+    }
+    for unit, baseline, current, value, baseline_value, axes in (
+        (fatigue_limit, low, high, 97, 93, "laser power, scanning speed"),
+        (fatigue_strength, low, high, 470, 340, "laser power, scanning speed"),
+        (defect, high, low, 394, 86, "laser power, scanning speed"),
+        (
+            dominated,
+            low,
+            middle,
+            450,
+            340,
+            "laser power, scanning speed, hatch spacing",
+        ),
+    ):
+        unit["process_context"] = current
+        unit["baseline_context"] = {
+            "process_context": baseline,
+            "source_value_text": str(baseline_value),
+            "value": baseline_value,
+        }
+        unit["value_payload"].update(
+            {
+                "comparison_axis": axes,
+                "source_value_text": str(value),
+                "value": value,
+                "direction": "increase",
+            }
+        )
+        unit["unit"] = "MPa" if "fatigue" in unit["property_normalized"] else "um"
+
+    payload = _payload([fatigue_limit, fatigue_strength, defect, dominated])
+    payload["objective"].update(
+        {
+            "process_axes": [
+                "volumetric energy density",
+                "laser power",
+                "scanning speed",
+                "hatch spacing",
+                "layer thickness",
+            ],
+            "property_axes": ["defect structure", "fatigue strength"],
+        }
+    )
+    payload["objective_context"].update(
+        {
+            "variable_process_axes": payload["objective"]["process_axes"],
+            "target_property_axes": payload["objective"]["property_axes"],
+        }
+    )
+    service, extractor = _service([])
+
+    service.build_goal_understanding(payload)
+
+    assert len(extractor.payloads[0]["result_sets"]) == 1
+    result_set = extractor.payloads[0]["result_sets"][0]
+    assert result_set["source_axes"] == ["laser power", "scanning speed"]
+    assert set(result_set["outcome_properties"]) == {
+        "fatigue limit",
+        "fatigue strength",
+        "maximum defect length",
+    }
+    result_units = result_set["document_evidence"][0]["result_units"]
+    assert {unit["evidence_unit_id"] for unit in result_units} == {
+        "unit-fatigue-limit",
+        "unit-fatigue-strength",
+        "unit-defect",
+    }
+    normalized_defect = next(
+        unit for unit in result_units if unit["evidence_unit_id"] == "unit-defect"
+    )
+    assert "decreased maximum defect length from 394 um to 86 um" in (
+        normalized_defect["statement"].lower()
+    )
+    assert (
+        extractor.payloads[0]["input_coverage"][
+            "alignment_omitted_evidence_unit_count"
+        ]
+        == 1
+    )
+
+
+def test_goal_synthesis_context_from_noncontributing_paper_cannot_raise_paper_count():
+    direct = _evidence_unit(
+        "unit-direct",
+        "paper-direct",
+        statement="Increasing energy density increased fatigue strength.",
+        direction="increases",
+    )
+    unrelated_context = _context_unit(
+        "unit-other-paper-context",
+        "paper-context-only",
+        unit_kind="interpretation",
+        statement="A second paper discusses fatigue mechanisms without a result.",
+    )
+    payload = _payload([direct, unrelated_context])
+    service, extractor = _service(
+        [
+            _model_finding(
+                synthesis_status="agreement",
+                supporting_ids=["unit-direct"],
+                context_ids=["unit-other-paper-context"],
+            )
+        ]
+    )
+
+    understanding = service.build_goal_understanding(payload)
+
+    assert extractor.payloads[0]["document_context"] == []
+    assert [
+        frame["document_id"] for frame in extractor.payloads[0]["paper_frames"]
+    ] == ["paper-direct"]
+    assert extractor.payloads[0]["input_coverage"]["document_count"] == 2
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["paper_count"] == 1
+    assert finding["synthesis_status"] == "insufficient_confirmation"
+
+
+def test_goal_synthesis_context_excerpt_does_not_repeat_compact_statement():
+    direct = _evidence_unit(
+        "unit-direct",
+        "paper-direct",
+        statement="Increasing energy density increased fatigue strength.",
+        direction="increases",
+    )
+    context = _context_unit(
+        "unit-context",
+        "paper-direct",
+        unit_kind="interpretation",
+        statement=(
+            "Fatigue strength is more related to ductility, which may explain "
+            "the LCF improvement."
+        ),
+    )
+    service, extractor = _service([])
+
+    service.build_goal_understanding(_payload([direct, context]))
+
+    context_unit = extractor.payloads[0]["document_context"][0]["context_units"][0]
+    assert context_unit["source_excerpt"] == (
+        "Fatigue strength is more related to ductility, which may explain "
+        "the LCF improvement."
+    )
+    assert context_unit["context_role"] == "mechanism"
+    assert "statement" not in context_unit
+    assert "omitted_by_document" not in extractor.payloads[0]["input_coverage"]
+
+
+def test_goal_synthesis_requires_each_composite_relationship_to_be_cross_paper():
+    defect = _evidence_unit(
+        "unit-defect-paper-one",
+        "paper-one",
+        statement="Higher energy density reduced defect size.",
+        direction="decreases",
+    )
+    defect["property_normalized"] = "defect size"
+    fatigue = _evidence_unit(
+        "unit-fatigue-paper-two",
+        "paper-two",
+        statement="Higher energy density increased fatigue strength.",
+        direction="increases",
+    )
+    fatigue["property_normalized"] = "fatigue strength"
+    service, _ = _service(
+        [
+            {
+                **_model_finding(
+                    synthesis_status="agreement",
+                    supporting_ids=[
+                        "unit-defect-paper-one",
+                        "unit-fatigue-paper-two",
+                    ],
+                    outcomes=[
+                        {
+                            "concept": "defect size",
+                            "direction": "decreases",
+                            "statement": "Higher energy density reduced defect size.",
+                            "supporting_evidence_unit_ids": [
+                                "unit-defect-paper-one"
+                            ],
+                            "conflicting_evidence_unit_ids": [],
+                        },
+                        {
+                            "concept": "fatigue strength",
+                            "direction": "increases",
+                            "statement": (
+                                "Higher energy density increased fatigue strength."
+                            ),
+                            "supporting_evidence_unit_ids": [
+                                "unit-fatigue-paper-two"
+                            ],
+                            "conflicting_evidence_unit_ids": [],
+                        },
+                    ],
+                ),
+                "statement": (
+                    "Higher energy density reduced defect size and increased "
+                    "fatigue strength."
+                ),
+            }
+        ]
+    )
+
+    understanding = service.build_goal_understanding(_payload([defect, fatigue]))
+
+    finding = understanding["presentation"]["findings"][0]
+    assert finding["paper_count"] == 2
+    assert finding["synthesis_status"] == "insufficient_confirmation"
+    assert finding["generalization_status"] != "scoped_cross_paper"
 
 
 def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
@@ -205,10 +727,15 @@ def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
     ]
     service, extractor = _service(
         [
-            _model_finding(
-                synthesis_status="agreement",
-                supporting_ids=["unit-paper-1", "unit-paper-2"],
-            )
+            {
+                **_model_finding(
+                    synthesis_status="agreement",
+                    supporting_ids=["unit-paper-1", "unit-paper-2"],
+                ),
+                "statement": (
+                    "Energy density increased relative density from 90% to 100%."
+                ),
+            }
         ]
     )
 
@@ -234,11 +761,14 @@ def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
     assert len(finding["evidence_bundle"]["direct_result"]) == 2
     assert finding["evidence_bundle"]["conflict"] == []
     assert finding["common_conditions"] == ["LPBF 316L", "Archimedes density"]
-    bucket = extractor.payloads[0]["evidence_ledger"][0]
-    assert bucket["source_axes"] == ["energy density"]
-    assert bucket["property_normalized"] == "relative density"
+    assert "99.1%" in finding["statement"]
+    assert "99.6%" in finding["statement"]
+    assert "90%" not in finding["statement"]
+    result_set = extractor.payloads[0]["result_sets"][0]
+    assert result_set["source_axes"] == ["energy density"]
+    assert result_set["outcome_properties"] == ["relative density"]
     assert [
-        paper["document_id"] for paper in bucket["document_evidence"]
+        paper["document_id"] for paper in result_set["document_evidence"]
     ] == ["paper-1", "paper-2"]
 
 
@@ -274,13 +804,16 @@ def test_goal_synthesis_groups_matching_relationships_across_documents():
 
     service.build_goal_understanding(payload)
 
-    ledger = extractor.payloads[0]["evidence_ledger"]
-    assert ledger[0]["source_axes"] == ["scan speed"]
-    assert ledger[0]["property_normalized"] == "relative density"
+    result_sets = extractor.payloads[0]["result_sets"]
+    by_source_axes = {
+        tuple(result_set["source_axes"]): result_set for result_set in result_sets
+    }
+    speed_results = by_source_axes[("scan speed",)]
+    assert speed_results["outcome_properties"] == ["relative density"]
     assert [
-        paper["document_id"] for paper in ledger[0]["document_evidence"]
+        paper["document_id"] for paper in speed_results["document_evidence"]
     ] == ["paper-1", "paper-2"]
-    assert ledger[1]["source_axes"] == ["laser power"]
+    assert ("laser power",) in by_source_axes
 
 
 def test_goal_synthesis_downgrades_model_agreement_with_one_direct_paper():
@@ -350,23 +883,20 @@ def test_goal_synthesis_projects_single_paper_microstructure_finding_for_review(
     service, _ = _service(
         [
             {
+                **_model_finding(
+                    synthesis_status="insufficient_confirmation",
+                    supporting_ids=["unit-preheating-microstructure"],
+                    target_concept="microstructure",
+                    direction="increases",
+                    common_conditions=["LPBF 316L"],
+                ),
                 "source_concept": "build platform preheating temperature",
-                "target_concept": "microstructure",
                 "mediator_concepts": [],
-                "direction": "increases",
                 "statement": (
                     "Build platform preheating temperature increases grain size "
                     "and changes grain shape."
                 ),
-                "synthesis_status": "insufficient_confirmation",
-                "supporting_evidence_unit_ids": [
-                    "unit-preheating-microstructure"
-                ],
-                "conflicting_evidence_unit_ids": [],
-                "common_conditions": ["LPBF 316L"],
-                "incomparable_conditions": [],
                 "confidence": 0.82,
-                "warnings": [],
             }
         ]
     )
@@ -405,8 +935,7 @@ def test_goal_synthesis_excludes_low_relevance_background_evidence_from_ledger()
 
     understanding = service.build_goal_understanding(payload)
 
-    ledger = extractor.payloads[0]["evidence_ledger"]
-    assert ledger == []
+    assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
 
 
@@ -508,7 +1037,7 @@ def test_goal_synthesis_rejects_raw_measurement_as_relationship_support():
 
     understanding = service.build_goal_understanding(_payload([unit]))
 
-    assert extractor.payloads[0]["evidence_ledger"] == []
+    assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
 
 
@@ -539,7 +1068,7 @@ def test_goal_synthesis_rejects_characterization_built_from_isolated_number():
 
     understanding = service.build_goal_understanding(_payload([unit]))
 
-    assert extractor.payloads[0]["evidence_ledger"] == []
+    assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
 
 
@@ -561,7 +1090,7 @@ def test_goal_synthesis_excludes_direct_units_without_relation_axes_or_target():
 
     service.build_goal_understanding(_payload([missing_source_axis, missing_target]))
 
-    assert extractor.payloads[0]["evidence_ledger"] == []
+    assert extractor.payloads[0]["result_sets"] == []
 
 
 def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
@@ -581,7 +1110,7 @@ def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
     service.build_goal_understanding(_payload(units))
 
     payload = extractor.payloads[0]
-    included = _ledger_units(payload)
+    included = _result_units(payload)
     serialized_length = sum(
         len(json.dumps(unit, ensure_ascii=False, separators=(",", ":")))
         for unit in included
@@ -589,9 +1118,9 @@ def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
     assert serialized_length <= 4_500
     assert payload["input_coverage"]["omitted_evidence_unit_count"] > 0
     assert all(
-        paper["evidence_units"]
-        for bucket in payload["evidence_ledger"]
-        for paper in bucket["document_evidence"]
+        paper["result_units"]
+        for result_set in payload["result_sets"]
+        for paper in result_set["document_evidence"]
     )
 
 
@@ -647,7 +1176,7 @@ def test_goal_synthesis_prioritizes_direct_results_before_measurements(monkeypat
 
     service.build_goal_understanding(payload)
 
-    included_units = _ledger_units(extractor.payloads[0])
+    included_units = _result_units(extractor.payloads[0])
     assert {
         unit["evidence_unit_id"]
         for unit in included_units
@@ -709,7 +1238,7 @@ def test_goal_synthesis_balances_bounded_ledger_across_source_axes():
 
     service.build_goal_understanding(payload)
 
-    included_units = _ledger_units(extractor.payloads[0])
+    included_units = _result_units(extractor.payloads[0])
     included_axes = {
         tuple(unit.get("source_axes", []))
         for unit in included_units
@@ -791,10 +1320,10 @@ def test_goal_synthesis_calibrates_numeric_axis_direction_from_direct_comparison
                 **_model_finding(
                     synthesis_status="insufficient_confirmation",
                     supporting_ids=["unit-scan-speed-density"],
+                    target_concept="density",
+                    direction="increases",
                 ),
                 "source_concept": "scan speed",
-                "target_concept": "density",
-                "direction": "increases",
                 "statement": "Increasing scan speed increases density.",
             }
         ]
@@ -878,10 +1407,10 @@ def test_goal_synthesis_preserves_coupled_axis_and_transition_direction():
                 **_model_finding(
                     synthesis_status="insufficient_confirmation",
                     supporting_ids=["unit-coupled-corrosion"],
+                    target_concept="pitting potential",
+                    direction="increases",
                 ),
                 "source_concept": "laser power and scanning speed",
-                "target_concept": "pitting potential",
-                "direction": "increases",
                 "statement": (
                     "Increasing laser power and scanning speed increases "
                     "pitting potential."
@@ -892,12 +1421,12 @@ def test_goal_synthesis_preserves_coupled_axis_and_transition_direction():
 
     understanding = service.build_goal_understanding(payload)
 
-    ledger_unit = _ledger_units(extractor.payloads[0])[0]
-    assert ledger_unit["source_axes"] == ["laser power", "scanning speed"]
+    result_unit = _result_units(extractor.payloads[0])[0]
+    assert result_unit["source_axes"] == ["laser power", "scanning speed"]
     assert (
         "changing laser power from 375 to 255 and scanning speed from 2100 "
         "to 1400 increased pitting potential from 124.7 mv to 199.7 mv."
-    ) in ledger_unit["statement"].lower()
+    ) in result_unit["statement"].lower()
     finding = understanding["presentation"]["findings"][0]
     assert finding["variables"] == ["laser power and scanning speed"]
     assert finding["direction"] == "decreases"
@@ -968,10 +1497,10 @@ def test_goal_synthesis_rejects_source_concept_not_supported_by_cited_unit_axis(
                 **_model_finding(
                     synthesis_status="insufficient_confirmation",
                     supporting_ids=["unit-defect-characterization"],
+                    target_concept="defect structure",
+                    direction="decreases",
                 ),
                 "source_concept": "volumetric energy density",
-                "target_concept": "defect structure",
-                "direction": "reduces",
                 "statement": (
                     "Higher volumetric energy density reduces defect structure."
                 ),
@@ -981,8 +1510,8 @@ def test_goal_synthesis_rejects_source_concept_not_supported_by_cited_unit_axis(
 
     understanding = service.build_goal_understanding(payload)
 
-    ledger_unit = _ledger_units(extractor.payloads[0])[0]
-    assert ledger_unit["source_axes"] == ["laser power", "scanning speed"]
+    result_unit = _result_units(extractor.payloads[0])[0]
+    assert result_unit["source_axes"] == ["laser power", "scanning speed"]
     assert understanding["presentation"]["findings"] == []
 
 
@@ -1052,10 +1581,10 @@ def test_goal_synthesis_matches_qualified_axis_to_source_statement():
                 **_model_finding(
                     synthesis_status="insufficient_confirmation",
                     supporting_ids=["unit-porosity-corrosion"],
+                    target_concept="pitting corrosion behavior",
+                    direction="improves",
                 ),
                 "source_concept": "laser power, scanning speed",
-                "target_concept": "pitting corrosion behavior",
-                "direction": "improves",
                 "statement": (
                     "Lower laser power and scanning speed improve pitting "
                     "corrosion behavior."
@@ -1066,8 +1595,8 @@ def test_goal_synthesis_matches_qualified_axis_to_source_statement():
 
     understanding = service.build_goal_understanding(payload)
 
-    ledger_unit = _ledger_units(extractor.payloads[0])[0]
-    assert ledger_unit["source_axes"] == ["porosity level"]
+    result_unit = _result_units(extractor.payloads[0])[0]
+    assert result_unit["source_axes"] == ["porosity level"]
     assert understanding["claims"] == []
 
 
@@ -1144,10 +1673,10 @@ def test_goal_synthesis_presentation_does_not_reinfer_source_axis_from_table_quo
                 **_model_finding(
                     synthesis_status="insufficient_confirmation",
                     supporting_ids=["unit-scan-strategy-yield"],
+                    target_concept="yield strength",
+                    direction="changes",
                 ),
                 "source_concept": "scanning strategy",
-                "target_concept": "yield strength",
-                "direction": "changes",
                 "statement": (
                     "Scanning strategy changes yield strength under constant "
                     "energy density and scanning speed."

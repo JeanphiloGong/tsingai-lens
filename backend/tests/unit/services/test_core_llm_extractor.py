@@ -214,14 +214,14 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
     payload = {
         "objective": {"question": "How does energy density affect density?"},
-        "evidence_ledger": [
+        "result_sets": [
             {
                 "source_axes": ["energy density"],
-                "property_normalized": "density",
+                "outcome_properties": ["density"],
                 "document_evidence": [
                     {
                         "document_id": "paper-1",
-                        "evidence_units": [
+                        "result_units": [
                             {
                                 "evidence_unit_id": "oeu-1",
                                 "direct_result": True,
@@ -244,33 +244,54 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "research_understanding_finding_synthesis"
-    assert trace["prompt_version"] == "research_understanding_finding_synthesis.v5"
+    assert trace["prompt_version"] == "research_understanding_finding_synthesis.v11"
     assert trace["parsed_output"] == {"findings": []}
 
 
 def test_research_understanding_finding_synthesis_prompt_uses_goal_level_contract():
     payload = {
         "objective": {"question": "How does energy density affect density?"},
-        "evidence_ledger": [],
+        "result_sets": [],
     }
 
     system_prompt, user_prompt = build_research_understanding_finding_synthesis_prompt(
         payload
     )
 
-    assert "Do not create paper Findings and then cluster" in system_prompt
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
     assert "one goal-level synthesis pass" in system_prompt
-    assert "paper_frames are" in system_prompt
-    assert "context, not result evidence" in system_prompt
     normalized_system_prompt = " ".join(system_prompt.split())
-    assert "only backend-eligible direct-result units" in normalized_system_prompt
-    assert (
-        "inspect every unit in its bucket across every document"
-        in normalized_system_prompt
+    assert "paper_frames are context, not result evidence" in normalized_system_prompt
+    assert "document_context" in normalized_system_prompt
+    assert "result_sets" in normalized_system_prompt
+    assert "Keep its linked measured outcomes together" in normalized_system_prompt
+    assert "One Finding must preserve all goal-relevant outcomes" in (
+        normalized_system_prompt
     )
-    assert "the heat-treatment result is not a conflict" in normalized_system_prompt
+    assert "Build `source_concept` from `source_axes` only" in (
+        normalized_system_prompt
+    )
+    assert "Never turn `document_context` into an unsupported outcome" in (
+        normalized_system_prompt
+    )
+    assert "If all direct-result ids come from one document" in (
+        normalized_system_prompt
+    )
+    assert "Context and mechanism id lists must be disjoint" in (
+        normalized_system_prompt
+    )
+    assert "Do not silently discard an explicit regime limitation" in (
+        normalized_system_prompt
+    )
+    assert "use that qualification instead of foregrounding a small endpoint delta" in (
+        normalized_system_prompt
+    )
+    assert "directly supported by one paper" in normalized_system_prompt
+    assert "cannot increase the contributing paper count" in normalized_system_prompt
+    assert "Every outcome must cite its own applicable direct-result ids" in (
+        normalized_system_prompt
+    )
     assert "`agreement`: at least two independent papers" in user_prompt
     assert "`insufficient_confirmation`" in user_prompt
     assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt

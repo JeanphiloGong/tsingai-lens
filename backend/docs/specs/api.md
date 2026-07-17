@@ -515,9 +515,10 @@ Objective research-view 最小返回结构：
   在下游 builder 未完成时可以为空，但字段必须保留
 - `understanding` 是 confirmed-goal analysis 持久化的 Core research
   understanding artifact。系统先遍历候选文献并按文献积累 objective evidence
-  units，再用一次 goal-level synthesis 直接生成 Findings；不会先生成单篇
-  Finding 再按字段聚类。GET 请求只读取已持久化 artifact，不触发新的 LLM
-  调用或重建
+  units，再把可比的 direct results 对齐为瞬时 result sets，并用一次 goal-level
+  synthesis 直接生成可包含多个 `outcomes` 的 Findings；不会持久化单篇 Finding，
+  也不会再运行第二次字段聚类。GET 请求只读取已持久化 artifact，不触发新的
+  LLM 调用或重建
 - `understanding.presentation` 是面向材料专家默认界面的展示投影，包含
   `summary`、`effects`、`evidence_items` 和 `context_summaries`；前端应优先用
   `effects` 展示变量轴、目标性能、证据数量、文献数量和待复核状态，内部
@@ -663,8 +664,9 @@ empty | processing | partial | ready | failed
   `relation_id`、`relation_type`、`subject`、`predicate`、`object`、
   `status`、`evidence_ref_ids` 和 `context_ids`；goal-level synthesis relation
   还可包含 `synthesis_status`、`supporting_evidence_ref_ids`、
-  `conflicting_evidence_ref_ids`、`common_conditions`、
-  `incomparable_conditions` 和 `paper_contributions`
+  `conflicting_evidence_ref_ids`、`context_evidence_ref_ids`、
+  `mechanism_evidence_ref_ids`、`common_conditions`、`incomparable_conditions`
+  和 `paper_contributions`
 - `evidence_refs`：可跳回来源文献、表格、文本窗口或 fact 的证据引用；每条至少包含
   `evidence_ref_id`、`source_kind`、`document_id`、`label`、`locator`、
   `fact_ids`、`anchor_ids`、`traceability_status` 和可选的
@@ -701,6 +703,10 @@ empty | processing | partial | ready | failed
     直接结果证据的独立文献，不等于遍历过的候选文献数；
     `paper_contributions` 按文献保留标题、来源文件、支持/反驳角色、贡献表述和
     evidence refs；
+    同一组 direct evidence units 只能投影为一个 Finding，即使模型使用不同 outcome
+    顺序或宽窄不同的同义概念重复返回；单篇复合 Finding 的 `statement` 必须显式说明
+    仅由一篇论文直接支持；模型漏选的 qualification/mechanism context 只有在来自同一
+    直接证据文献且与所选 outcome 明确匹配时才可由后端补回；
     `evidence_bundle`
     按 `evidence_role` 分到 `direct_result`、`mechanism`、
     `condition_context`、`background`、`conflict`、`noise`，没有显式角色的证据保留在

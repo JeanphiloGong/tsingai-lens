@@ -151,6 +151,8 @@ class ResearchRelationResponse(BaseModel):
     synthesis_status: str | None = Field(default=None)
     supporting_evidence_ref_ids: list[str] = Field(default_factory=list)
     conflicting_evidence_ref_ids: list[str] = Field(default_factory=list)
+    context_evidence_ref_ids: list[str] = Field(default_factory=list)
+    mechanism_evidence_ref_ids: list[str] = Field(default_factory=list)
     common_conditions: list[str] = Field(default_factory=list)
     incomparable_conditions: list[str] = Field(default_factory=list)
     paper_contributions: list[ResearchUnderstandingPaperContributionResponse] = Field(

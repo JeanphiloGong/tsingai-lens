@@ -20,10 +20,18 @@ artifacts.
   open-join context without putting prior raw text back into the prompt.
   Objective logic chains include traceable measurement value ranges assembled
   from resolved measurement units. For a confirmed goal, traversal accumulates
-  these units by document; the downstream research-understanding service groups
-  eligible direct results by exact source axes and target property, performs one
-  goal-level synthesis over that bounded ledger, and directly emits Findings.
-  It does not create paper Findings and cluster them later
+  these units by document. The downstream research-understanding service then
+  aligns eligible direct results into transient exact-condition result sets,
+  keeps multiple outcome properties from the same controlled contrast together,
+  and performs one goal-level synthesis that directly emits multi-outcome
+  Findings. Reverse comparisons are reoriented before synthesis and dominated
+  contrasts are omitted. These result sets are prompt inputs only: the service
+  does not persist paper Findings or run a second clustering stage. Model
+  candidates that cite the same direct-result unit set are collapsed to one
+  Finding. The final calibration may restore same-document qualification or
+  mechanism context only when it explicitly matches a selected outcome, then
+  orders structural results, performance results, regime limits, mechanisms,
+  and the single-paper evidence boundary into one expert-readable statement
 - `paper_facts_service.py`
   objective-aware semantic extraction for evidence anchors, method facts,
   variants, test conditions, baselines, and measurement results

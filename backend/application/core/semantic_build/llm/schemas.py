@@ -1038,10 +1038,8 @@ class StructuredResearchUnderstandingRelations(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredResearchUnderstandingFinding(_StrictModel):
-    source_concept: str
-    target_concept: str
-    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
+class StructuredResearchUnderstandingFindingOutcome(_StrictModel):
+    concept: str
     direction: Literal[
         "increases",
         "decreases",
@@ -1053,18 +1051,8 @@ class StructuredResearchUnderstandingFinding(_StrictModel):
         "unknown",
     ] = "unknown"
     statement: str
-    synthesis_status: Literal[
-        "agreement",
-        "conflict",
-        "condition_dependent",
-        "insufficient_confirmation",
-    ] = "insufficient_confirmation"
     supporting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=24)
     conflicting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
-    common_conditions: list[str] = Field(default_factory=list, max_length=10)
-    incomparable_conditions: list[str] = Field(default_factory=list, max_length=10)
-    confidence: float = 0.0
-    warnings: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("direction", mode="before")
     @classmethod
@@ -1074,6 +1062,28 @@ class StructuredResearchUnderstandingFinding(_StrictModel):
             allowed=_RESEARCH_UNDERSTANDING_DIRECTIONS,
             default="unknown",
         )
+
+
+class StructuredResearchUnderstandingFinding(_StrictModel):
+    source_concept: str
+    outcomes: list[StructuredResearchUnderstandingFindingOutcome] = Field(
+        min_length=1,
+        max_length=8,
+    )
+    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
+    statement: str
+    synthesis_status: Literal[
+        "agreement",
+        "conflict",
+        "condition_dependent",
+        "insufficient_confirmation",
+    ] = "insufficient_confirmation"
+    context_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
+    mechanism_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
+    common_conditions: list[str] = Field(default_factory=list, max_length=10)
+    incomparable_conditions: list[str] = Field(default_factory=list, max_length=10)
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("synthesis_status", mode="before")
     @classmethod

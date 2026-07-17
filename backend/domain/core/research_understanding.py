@@ -227,6 +227,8 @@ class ResearchRelation:
     synthesis_status: str | None
     supporting_evidence_ref_ids: tuple[str, ...]
     conflicting_evidence_ref_ids: tuple[str, ...]
+    context_evidence_ref_ids: tuple[str, ...]
+    mechanism_evidence_ref_ids: tuple[str, ...]
     common_conditions: tuple[str, ...]
     incomparable_conditions: tuple[str, ...]
     paper_contributions: tuple[dict[str, Any], ...]
@@ -271,6 +273,12 @@ class ResearchRelation:
             conflicting_evidence_ref_ids=_strings(
                 payload.get("conflicting_evidence_ref_ids")
             ),
+            context_evidence_ref_ids=_strings(
+                payload.get("context_evidence_ref_ids")
+            ),
+            mechanism_evidence_ref_ids=_strings(
+                payload.get("mechanism_evidence_ref_ids")
+            ),
             common_conditions=_strings(payload.get("common_conditions")),
             incomparable_conditions=_strings(
                 payload.get("incomparable_conditions")
@@ -300,6 +308,8 @@ class ResearchRelation:
             "conflicting_evidence_ref_ids": list(
                 self.conflicting_evidence_ref_ids
             ),
+            "context_evidence_ref_ids": list(self.context_evidence_ref_ids),
+            "mechanism_evidence_ref_ids": list(self.mechanism_evidence_ref_ids),
             "common_conditions": list(self.common_conditions),
             "incomparable_conditions": list(self.incomparable_conditions),
             "paper_contributions": [

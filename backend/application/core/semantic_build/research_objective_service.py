@@ -6288,13 +6288,35 @@ class ResearchObjectiveService:
                 data_rows=data_rows,
             )
         if route.role == "process_or_treatment":
-            return self._objective_process_table_matrix_records(
+            process_records = self._objective_process_table_matrix_records(
                 route=route,
                 source=source,
                 objective_context=objective_context,
                 headers=headers,
                 data_rows=data_rows,
             )
+            recover_result_columns = bool(
+                self._objective_route_result_columns(
+                    route,
+                    objective_context=objective_context,
+                )
+                or (
+                    objective_context is not None
+                    and objective_context.target_property_axes
+                )
+            )
+            result_records = (
+                self._objective_result_table_matrix_records(
+                    route=route,
+                    source=source,
+                    objective_context=objective_context,
+                    headers=headers,
+                    data_rows=data_rows,
+                )
+                if recover_result_columns
+                else ()
+            )
+            return (*process_records, *result_records)
         return ()
 
     def _objective_table_matrix_rows(

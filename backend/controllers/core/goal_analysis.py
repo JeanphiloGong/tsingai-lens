@@ -5,7 +5,6 @@ import logging
 from threading import Lock
 
 from fastapi import APIRouter, HTTPException
-from starlette.concurrency import run_in_threadpool
 
 from application.core.confirmed_goal_service import ConfirmedGoalNotFoundError
 from application.pipeline.goal_analysis.service import goal_analysis_service
@@ -27,16 +26,12 @@ _active_goal_analysis_jobs_lock = Lock()
     response_model=GoalAnalysisResponse,
     summary="运行 confirmed goal 深度分析",
 )
-async def run_confirmed_goal_analysis(
+def run_confirmed_goal_analysis(
     collection_id: str,
     goal_id: str,
 ) -> GoalAnalysisResponse:
     try:
-        payload = await run_in_threadpool(
-            goal_analysis_service.start_goal_analysis,
-            collection_id,
-            goal_id,
-        )
+        payload = goal_analysis_service.start_goal_analysis(collection_id, goal_id)
         if _register_goal_analysis_job(collection_id, goal_id):
             future = _goal_analysis_executor.submit(
                 _run_goal_analysis_blocking,
@@ -89,16 +84,12 @@ def _finish_goal_analysis_job(collection_id: str, goal_id: str, future) -> None:
     response_model=GoalAnalysisResponse,
     summary="读取 confirmed goal 深度分析结果",
 )
-async def get_confirmed_goal_analysis(
+def get_confirmed_goal_analysis(
     collection_id: str,
     goal_id: str,
 ) -> GoalAnalysisResponse:
     try:
-        payload = await run_in_threadpool(
-            goal_analysis_service.get_goal_analysis,
-            collection_id,
-            goal_id,
-        )
+        payload = goal_analysis_service.get_goal_analysis(collection_id, goal_id)
     except ConfirmedGoalNotFoundError as exc:
         raise _goal_not_found(exc) from exc
     return _analysis_response(collection_id, payload)

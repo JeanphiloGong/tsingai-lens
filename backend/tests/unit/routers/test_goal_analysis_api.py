@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 from controllers.core import goal_analysis as goal_analysis_controller
 from domain.core import ConfirmedGoal, ResearchUnderstanding
 
@@ -131,9 +129,7 @@ def test_goal_analysis_route_runs_goal_analysis(monkeypatch):
     )
     goal_analysis_controller._active_goal_analysis_jobs.clear()
 
-    response = asyncio.run(
-        goal_analysis_controller.run_confirmed_goal_analysis("col_1", "goal_1")
-    )
+    response = goal_analysis_controller.run_confirmed_goal_analysis("col_1", "goal_1")
 
     assert response.goal.goal_id == "goal_1"
     assert response.goal.status == "running"
@@ -152,9 +148,7 @@ def test_goal_analysis_route_reads_goal_analysis(monkeypatch):
         FakeGoalAnalysisService(),
     )
 
-    response = asyncio.run(
-        goal_analysis_controller.get_confirmed_goal_analysis("col_1", "goal_1")
-    )
+    response = goal_analysis_controller.get_confirmed_goal_analysis("col_1", "goal_1")
 
     assert response.goal.goal_id == "goal_1"
     assert response.understanding is not None

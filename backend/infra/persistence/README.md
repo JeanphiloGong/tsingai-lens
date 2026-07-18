@@ -10,6 +10,7 @@ The stable data ownership and identity contract lives in
 - `factory.py`
 - `file/`
 - `memory/`
+- `postgres/`
 - `sqlite/`
 - `mysql/`
 
@@ -46,6 +47,11 @@ second persistence authority.
 `database.py` owns the validated synchronous SQLAlchemy engine and session
 factory for the PostgreSQL cutover. It is intentionally not connected to
 application startup or current repositories until their direct cutover slices.
+
+`postgres/base.py` owns the declarative metadata for future PostgreSQL models.
+`../../migrations/` owns the version history and is the only PostgreSQL schema
+change path. The initial revision is deliberately empty; business tables arrive
+with their direct repository cutovers.
 
 ## Target Boundary
 

@@ -6,6 +6,7 @@ The stable data ownership and identity contract lives in
 
 ## Scope
 
+- `database.py`
 - `factory.py`
 - `file/`
 - `memory/`
@@ -41,6 +42,10 @@ only for collection, task, and artifact repositories. It constructs SQLite
 directly for every other family. Source pipeline JSON and Parquet outputs live
 under `infra/source/` runtime storage and are rebuildable intermediates, not a
 second persistence authority.
+
+`database.py` owns the validated synchronous SQLAlchemy engine and session
+factory for the PostgreSQL cutover. It is intentionally not connected to
+application startup or current repositories until their direct cutover slices.
 
 ## Target Boundary
 

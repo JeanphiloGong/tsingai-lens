@@ -13,13 +13,11 @@
 		fetchResearchUnderstandingCurations,
 		formatShortIdentifier,
 		importResearchUnderstandingReviewDecisions,
-		researchUnderstandingCollectionDatasetUrl,
 		researchUnderstandingDatasetUrl,
 		type ResearchUnderstanding,
 		type ResearchUnderstandingClaim,
 		type ResearchUnderstandingCuration,
 		type ResearchUnderstandingDataset,
-		type ResearchUnderstandingDatasetExportFormat,
 		type ResearchUnderstandingDatasetLabelStatus,
 		type ResearchUnderstandingAcceptanceGate,
 		type ResearchUnderstandingProtocolReadiness,
@@ -2809,31 +2807,13 @@
 		};
 	}
 
-	function datasetDownloadUrl(
-		format: ResearchUnderstandingDatasetExportFormat,
-		datasetUseStatus: ResearchUnderstandingDatasetUseStatus
-	) {
+	function trainingDatasetDownloadUrl() {
 		const filters = datasetFilters();
 		if (!collectionId || !filters) return '';
 		return researchUnderstandingDatasetUrl(
 			collectionId,
-			{ ...filters, dataset_use_status: datasetUseStatus },
-			format
-		);
-	}
-
-	function collectionDatasetDownloadUrl(
-		format: ResearchUnderstandingDatasetExportFormat,
-		datasetUseStatus: ResearchUnderstandingDatasetUseStatus
-	) {
-		if (!collectionId || understanding?.scope.scope_type !== 'goal') return '';
-		return researchUnderstandingCollectionDatasetUrl(
-			collectionId,
-			{
-				scope_type: 'goal',
-				dataset_use_status: datasetUseStatus
-			},
-			format
+			{ ...filters, dataset_use_status: 'training_ready' },
+			'training_jsonl'
 		);
 	}
 
@@ -4242,36 +4222,6 @@
 						<button type="button" on:click={openDatasetExport}>
 							{$t('research.understanding.reviewLoopOpenDataset')}
 						</button>
-						{#if datasetReviewCandidateSampleCount > 0}
-							<a
-								class="research-understanding-workbench__review-loop-link"
-								href={datasetDownloadUrl('decision_template', 'review_candidate')}
-								download
-							>
-								{$t('research.understanding.reviewLoopDownloadDecisionTemplate')}
-							</a>
-							<a
-								class="research-understanding-workbench__review-loop-link"
-								href={datasetDownloadUrl('decision_board_tsv', 'review_candidate')}
-								download
-							>
-								{$t('research.understanding.reviewLoopDownloadDecisionBoard')}
-							</a>
-							<a
-								class="research-understanding-workbench__review-loop-link"
-								href={datasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')}
-								download
-							>
-								{$t('research.understanding.reviewLoopDownloadAgentReviewPrompt')}
-							</a>
-							<a
-								class="research-understanding-workbench__review-loop-link"
-								href={datasetDownloadUrl('review_packet', 'review_candidate')}
-								download
-							>
-								{$t('research.understanding.reviewLoopDownloadReviewPacket')}
-							</a>
-						{/if}
 						{#if goalCopilotHref}
 							{#if datasetProtocolReadySampleCount > 0}
 								<a class="research-understanding-workbench__review-loop-link" href={goalCopilotHref}>
@@ -4696,36 +4646,9 @@
 								</p>
 								<div class="research-understanding-workbench__dataset-actions">
 									{#if datasetTrainingReadySampleCount > 0}
-										<a href={datasetDownloadUrl('json', 'training_ready')} download>
-											{$t('research.understanding.datasetDownloadTrainingJson')}
+										<a href={trainingDatasetDownloadUrl()} download>
+											{$t('research.understanding.datasetDownloadTrainingData')}
 										</a>
-										<a href={datasetDownloadUrl('jsonl', 'training_ready')} download>
-											{$t('research.understanding.datasetDownloadTrainingJsonl')}
-										</a>
-										<a href={datasetDownloadUrl('messages_jsonl', 'training_ready')} download>
-											{$t('research.understanding.datasetDownloadTrainingMessagesJsonl')}
-										</a>
-										<a href={datasetDownloadUrl('training_jsonl', 'training_ready')} download>
-											{$t('research.understanding.datasetDownloadTrainingTraceableJsonl')}
-										</a>
-										{#if understanding.scope.scope_type === 'goal'}
-											<a href={collectionDatasetDownloadUrl('json', 'training_ready')} download>
-												{$t('research.understanding.datasetDownloadCollectionTrainingJson')}
-											</a>
-											<a href={collectionDatasetDownloadUrl('jsonl', 'training_ready')} download>
-												{$t('research.understanding.datasetDownloadCollectionTrainingJsonl')}
-											</a>
-											<a href={collectionDatasetDownloadUrl('messages_jsonl', 'training_ready')} download>
-												{$t(
-													'research.understanding.datasetDownloadCollectionTrainingMessagesJsonl'
-												)}
-											</a>
-											<a href={collectionDatasetDownloadUrl('training_jsonl', 'training_ready')} download>
-												{$t(
-													'research.understanding.datasetDownloadCollectionTrainingTraceableJsonl'
-												)}
-											</a>
-										{/if}
 									{:else}
 										<span
 											class="research-understanding-workbench__dataset-action-disabled"
@@ -4733,46 +4656,6 @@
 										>
 											{$t('research.understanding.datasetNoTrainingReady')}
 										</span>
-									{/if}
-									{#if datasetReviewCandidateSampleCount > 0}
-										<a href={datasetDownloadUrl('json', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadReviewJson')}
-										</a>
-										<a href={datasetDownloadUrl('review_jsonl', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadReviewJsonl')}
-										</a>
-										<a href={datasetDownloadUrl('decision_template', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadDecisionTemplate')}
-										</a>
-										<a href={datasetDownloadUrl('decision_board_tsv', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadDecisionBoard')}
-										</a>
-										<a href={datasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadAgentReviewPrompt')}
-										</a>
-										<a href={datasetDownloadUrl('review_packet', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadReviewPacket')}
-										</a>
-									{/if}
-									{#if understanding.scope.scope_type === 'goal'}
-										<a href={collectionDatasetDownloadUrl('json', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadCollectionReviewJson')}
-										</a>
-										<a href={collectionDatasetDownloadUrl('review_jsonl', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadCollectionReviewJsonl')}
-										</a>
-										<a href={collectionDatasetDownloadUrl('decision_template', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadCollectionDecisionTemplate')}
-										</a>
-										<a href={collectionDatasetDownloadUrl('decision_board_tsv', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadCollectionDecisionBoard')}
-										</a>
-										<a href={collectionDatasetDownloadUrl('agent_review_prompt_jsonl', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadCollectionAgentReviewPrompt')}
-										</a>
-										<a href={collectionDatasetDownloadUrl('review_packet', 'review_candidate')} download>
-											{$t('research.understanding.datasetDownloadCollectionReviewPacket')}
-										</a>
 									{/if}
 								</div>
 								<div

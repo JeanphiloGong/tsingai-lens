@@ -2592,38 +2592,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(reviewLoop.getByText('Support is partial.')).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('heat treatment', { exact: true })).toBeInTheDocument();
 		await expect.element(reviewLoop.getByText('yield strength', { exact: true })).toBeInTheDocument();
-		const decisionBoardUrl = new URL(
-			reviewLoop
-				.getByRole('link', { name: 'Download decision board TSV' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(decisionBoardUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(decisionBoardUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(decisionBoardUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(decisionBoardUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
-		expect(decisionBoardUrl.searchParams.get('format')).toBe('decision_board_tsv');
-		const agentReviewPromptUrl = new URL(
-			reviewLoop
-				.getByRole('link', { name: 'Download agent review prompts' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(agentReviewPromptUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(agentReviewPromptUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(agentReviewPromptUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(agentReviewPromptUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(agentReviewPromptUrl.searchParams.get('format')).toBe(
-			'agent_review_prompt_jsonl'
-		);
+		expect(reviewLoop.element().querySelectorAll('a[download]')).toHaveLength(0);
 		await expect.element(reviewLoop.getByRole('button', { name: 'Review evidence' })).toBeInTheDocument();
 		await expect
 			.element(reviewLoop.getByRole('button', { name: 'Accept paper-level' }))
@@ -2811,11 +2780,11 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Training messages 0');
 		expect(datasetText).toContain('Protocol ready 0');
-		const messagesLink = browserPage.getByRole('link', { name: 'Training messages JSONL' });
-		await expect.element(messagesLink).toBeInTheDocument();
-		const messagesUrl = new URL(messagesLink.element().getAttribute('href') ?? '', 'http://localhost');
-		expect(messagesUrl.searchParams.get('format')).toBe('messages_jsonl');
-		expect(messagesUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		const exportLink = browserPage.getByRole('link', { name: 'Export training data' });
+		await expect.element(exportLink).toBeInTheDocument();
+		const exportUrl = new URL(exportLink.element().getAttribute('href') ?? '', 'http://localhost');
+		expect(exportUrl.searchParams.get('format')).toBe('training_jsonl');
+		expect(exportUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 	});
 
 	it('opens the next review candidate detail from the review loop', async () => {
@@ -3770,7 +3739,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(browserPage.getByLabelText('Claim detail')).not.toBeInTheDocument();
 	});
 
-	it('shows dataset readiness counts and same-origin export links', async () => {
+	it('shows dataset readiness counts and one current-scope training export', async () => {
 		render(ResearchUnderstandingWorkbench, {
 			understanding: understandingFixture(),
 			collectionId: 'col_123'
@@ -3817,145 +3786,23 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Evidence role');
 		expect(datasetText).not.toContain('No issue');
 
-		const jsonUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Training JSON', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
+		const datasetActions = datasetRegion?.querySelector(
+			'.research-understanding-workbench__dataset-actions'
 		);
-		expect(jsonUrl.pathname).toBe('/api/v1/collections/col_123/research-understanding/dataset');
-		expect(jsonUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(jsonUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(jsonUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
-		expect(jsonUrl.searchParams.get('format')).toBe('json');
-
-		const jsonlUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Training JSONL', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(jsonlUrl.pathname).toBe('/api/v1/collections/col_123/research-understanding/dataset');
-		expect(jsonlUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(jsonlUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(jsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
-		expect(jsonlUrl.searchParams.get('format')).toBe('jsonl');
-
-		const messagesJsonlUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Training messages JSONL' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(messagesJsonlUrl.pathname).toBe(
+		const exportLinks = Array.from(datasetActions?.querySelectorAll('a[download]') ?? []);
+		expect(exportLinks).toHaveLength(1);
+		expect(exportLinks[0]?.textContent?.trim()).toBe('Export training data');
+		const exportUrl = new URL(exportLinks[0]?.getAttribute('href') ?? '', 'http://localhost');
+		expect(exportUrl.pathname).toBe(
 			'/api/v1/collections/col_123/research-understanding/dataset'
 		);
-		expect(messagesJsonlUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(messagesJsonlUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(messagesJsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
-		expect(messagesJsonlUrl.searchParams.get('format')).toBe('messages_jsonl');
-
-		const reviewJsonUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Review candidates JSON' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(reviewJsonUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(reviewJsonUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(reviewJsonUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(reviewJsonUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
-		expect(reviewJsonUrl.searchParams.get('format')).toBe('json');
-
-		const reviewJsonlUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Review JSONL template' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(reviewJsonlUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(reviewJsonlUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(reviewJsonlUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(reviewJsonlUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
-		expect(reviewJsonlUrl.searchParams.get('format')).toBe('review_jsonl');
-
-		const reviewPacketUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Review packet', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(reviewPacketUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(reviewPacketUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(reviewPacketUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(reviewPacketUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
-		expect(reviewPacketUrl.searchParams.get('format')).toBe('review_packet');
-
-		const decisionTemplateUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Decision template', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(decisionTemplateUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(decisionTemplateUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(decisionTemplateUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(decisionTemplateUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(decisionTemplateUrl.searchParams.get('format')).toBe('decision_template');
-
-		const decisionBoardLink = Array.from(datasetRegion?.querySelectorAll('a') ?? []).find(
-			(link) => link.textContent?.trim() === 'Decision board TSV'
-		);
-		expect(decisionBoardLink).toBeTruthy();
-		const decisionBoardUrl = new URL(
-			decisionBoardLink?.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(decisionBoardUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(decisionBoardUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(decisionBoardUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(decisionBoardUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(decisionBoardUrl.searchParams.get('format')).toBe('decision_board_tsv');
-
-		const agentReviewPromptLink = Array.from(datasetRegion?.querySelectorAll('a') ?? []).find(
-			(link) => link.textContent?.trim() === 'Agent review prompts'
-		);
-		expect(agentReviewPromptLink).toBeTruthy();
-		const agentReviewPromptUrl = new URL(
-			agentReviewPromptLink?.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(agentReviewPromptUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset'
-		);
-		expect(agentReviewPromptUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(agentReviewPromptUrl.searchParams.get('scope_id')).toBe('obj_1');
-		expect(agentReviewPromptUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(agentReviewPromptUrl.searchParams.get('format')).toBe(
-			'agent_review_prompt_jsonl'
+		expect(exportUrl.searchParams.get('scope_type')).toBe('objective');
+		expect(exportUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(exportUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		expect(exportUrl.searchParams.get('format')).toBe('training_jsonl');
+		expect(exportUrl.pathname).not.toContain('/dataset/collection');
+		expect(datasetActions?.textContent ?? '').not.toMatch(
+			/Training JSON|Training messages|Review packet|Decision template|Decision board|Agent review/
 		);
 
 		const datasetGetCall = fetchMock.mock.calls.find(([input, init]) => {
@@ -3977,7 +3824,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(requestedUrl.searchParams.get('format')).toBeNull();
 	});
 
-	it('exposes collection-level training export links on goal scopes', async () => {
+	it('keeps the single training export scoped to the current goal', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = init?.method ?? 'GET';
@@ -4066,149 +3913,19 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetText).toContain('Needs cross-paper confirmation 7');
 		expect(datasetText).toContain('Table row alignment uncertain 4');
 
-		const collectionJsonUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection training JSON', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
+		const datasetActions = datasetRegion?.querySelector(
+			'.research-understanding-workbench__dataset-actions'
 		);
-		expect(collectionJsonUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
+		const exportLinks = Array.from(datasetActions?.querySelectorAll('a[download]') ?? []);
+		expect(exportLinks).toHaveLength(1);
+		const exportUrl = new URL(exportLinks[0]?.getAttribute('href') ?? '', 'http://localhost');
+		expect(exportUrl.pathname).toBe(
+			'/api/v1/collections/col_123/research-understanding/dataset'
 		);
-		expect(collectionJsonUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionJsonUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
-		expect(collectionJsonUrl.searchParams.get('format')).toBe('json');
-
-		const collectionJsonlUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection training JSONL' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionJsonlUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionJsonlUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionJsonlUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
-		expect(collectionJsonlUrl.searchParams.get('format')).toBe('jsonl');
-
-		const collectionMessagesJsonlUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection training messages JSONL' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionMessagesJsonlUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionMessagesJsonlUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionMessagesJsonlUrl.searchParams.get('dataset_use_status')).toBe(
-			'training_ready'
-		);
-		expect(collectionMessagesJsonlUrl.searchParams.get('format')).toBe('messages_jsonl');
-
-		const collectionReviewUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection review JSON', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionReviewUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionReviewUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionReviewUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
-		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
-
-		const collectionReviewJsonlUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection review JSONL template' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionReviewJsonlUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionReviewJsonlUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionReviewJsonlUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(collectionReviewJsonlUrl.searchParams.get('format')).toBe('review_jsonl');
-
-		const collectionReviewPacketUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection review packet' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionReviewPacketUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionReviewPacketUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionReviewPacketUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(collectionReviewPacketUrl.searchParams.get('format')).toBe('review_packet');
-
-		const collectionDecisionTemplateUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection decision template' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionDecisionTemplateUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionDecisionTemplateUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionDecisionTemplateUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(collectionDecisionTemplateUrl.searchParams.get('format')).toBe(
-			'decision_template'
-		);
-
-		const collectionDecisionBoardUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection decision board TSV' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionDecisionBoardUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionDecisionBoardUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionDecisionBoardUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(collectionDecisionBoardUrl.searchParams.get('format')).toBe(
-			'decision_board_tsv'
-		);
-
-		const collectionAgentReviewPromptUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection agent review prompts' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
-		);
-		expect(collectionAgentReviewPromptUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionAgentReviewPromptUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionAgentReviewPromptUrl.searchParams.get('dataset_use_status')).toBe(
-			'review_candidate'
-		);
-		expect(collectionAgentReviewPromptUrl.searchParams.get('format')).toBe(
-			'agent_review_prompt_jsonl'
-		);
+		expect(exportUrl.searchParams.get('scope_type')).toBe('goal');
+		expect(exportUrl.searchParams.get('scope_id')).toBe('goal_1');
+		expect(exportUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		expect(exportUrl.searchParams.get('format')).toBe('training_jsonl');
 	});
 
 	it('explains when the running backend lacks collection dataset routes', async () => {
@@ -4839,7 +4556,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 	});
 
-	it('keeps collection review export visible when the current goal has no review candidates', async () => {
+	it('does not expose collection exports when the current goal has no review candidates', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = init?.method ?? 'GET';
@@ -4884,22 +4601,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain('Training ready 1');
 
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Review candidates JSON' }))
-			.not.toBeInTheDocument();
-		const collectionReviewUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Collection review JSON', exact: true })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
+		const datasetActions = datasetRegion?.querySelector(
+			'.research-understanding-workbench__dataset-actions'
 		);
-		expect(collectionReviewUrl.pathname).toBe(
-			'/api/v1/collections/col_123/research-understanding/dataset/collection'
-		);
-		expect(collectionReviewUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(collectionReviewUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
-		expect(collectionReviewUrl.searchParams.get('format')).toBe('json');
+		const exportLinks = Array.from(datasetActions?.querySelectorAll('a[download]') ?? []);
+		expect(exportLinks).toHaveLength(1);
+		expect(exportLinks[0]?.getAttribute('href')).not.toContain('/dataset/collection');
 	});
 
 	it('links protocol drafting to Copilot when a goal has training-ready messages', async () => {
@@ -5115,21 +4822,13 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(datasetRegion).toBeTruthy();
 		datasetRegion?.setAttribute('open', '');
 		await expect.poll(() => currentDatasetRegionText()).toContain('No training-ready samples');
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Training JSON', exact: true }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Training JSONL' }))
-			.not.toBeInTheDocument();
-
-		const reviewJsonUrl = new URL(
-			browserPage
-				.getByRole('link', { name: 'Review candidates JSON' })
-				.element()
-				.getAttribute('href') ?? '',
-			'http://localhost'
+		const datasetActions = datasetRegion?.querySelector(
+			'.research-understanding-workbench__dataset-actions'
 		);
-		expect(reviewJsonUrl.searchParams.get('dataset_use_status')).toBe('review_candidate');
+		expect(datasetActions?.querySelectorAll('a[download]')).toHaveLength(0);
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Export training data' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('shows a dataset export error when readiness cannot load', async () => {
@@ -5817,7 +5516,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.poll(() => datasetRequestCount).toBeGreaterThanOrEqual(2);
 		await expect.poll(() => currentDatasetRegionText()).toContain('Training ready 1');
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Training JSON', exact: true }))
+			.element(browserPage.getByRole('link', { name: 'Export training data' }))
 			.toBeInTheDocument();
 	});
 
@@ -6176,7 +5875,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.poll(() => datasetRequestCount).toBeGreaterThanOrEqual(2);
 		await expect.poll(() => currentDatasetRegionText()).toContain('Training ready 1');
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Training JSON', exact: true }))
+			.element(browserPage.getByRole('link', { name: 'Export training data' }))
 			.toBeInTheDocument();
 	});
 

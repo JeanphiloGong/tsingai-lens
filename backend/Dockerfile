@@ -68,6 +68,8 @@ RUN set -eux; \
         /etc/apt/sources.list.d/debian.sources; \
     fi; \
     apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0t64 \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -78,6 +80,8 @@ COPY . .
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app
+
+RUN /app/.venv/bin/python -c "import cv2"
 
 EXPOSE 8010
 

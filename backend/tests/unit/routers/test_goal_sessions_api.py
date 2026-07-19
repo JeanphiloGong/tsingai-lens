@@ -20,8 +20,13 @@ from controllers.schemas.goal.session import (
 from infra.persistence.factory import build_goal_session_repository
 
 
-def _request(user_id: str = "local-user"):
-    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
+def _request(goal_session_service, user_id: str = "local-user"):
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(goal_session_service=goal_session_service),
+        ),
+        state=SimpleNamespace(current_user={"user_id": user_id}),
+    )
 
 
 class _FakeMessage:
@@ -58,7 +63,7 @@ class _FakeLLMClient:
 
 
 @pytest.fixture()
-def goal_session_services(monkeypatch, tmp_path):
+def goal_session_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalSessionService(
         collection_service=collection_service,
@@ -66,14 +71,13 @@ def goal_session_services(monkeypatch, tmp_path):
         llm_client=_FakeLLMClient("General background."),
         model="fake-model",
     )
-    monkeypatch.setattr(sessions_controller, "goal_session_service", service)
     return collection_service, service
 
 
 def test_goal_sessions_route_creates_minimal_session_and_messages(
     goal_session_services,
 ):
-    collection_service, _service = goal_session_services
+    collection_service, service = goal_session_services
     collection = collection_service.create_collection("Copilot Collection")
 
     session = asyncio.run(
@@ -83,7 +87,7 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
                 focused_objective_id="obj_lpbf_strength",
                 focused_goal_id="goal_lpbf_strength",
             ),
-            _request(),
+            _request(service),
         )
     )
     response = asyncio.run(
@@ -93,11 +97,14 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
                 message="What does the collection say?",
                 page_context={},
             ),
-            _request(),
+            _request(service),
         )
     )
     messages = asyncio.run(
-        sessions_controller.list_goal_session_messages(session.session_id, _request())
+        sessions_controller.list_goal_session_messages(
+            session.session_id,
+            _request(service),
+        )
     )
 
     assert session.collection_id == collection["collection_id"]
@@ -113,8 +120,11 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
 
 
 def test_goal_sessions_route_returns_404_for_missing_session(goal_session_services):
+    _collection_service, service = goal_session_services
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(sessions_controller.get_goal_session("gs_missing", _request()))
+        asyncio.run(
+            sessions_controller.get_goal_session("gs_missing", _request(service))
+        )
 
     exc = exc_info.value
     assert exc.status_code == 404
@@ -122,17 +132,22 @@ def test_goal_sessions_route_returns_404_for_missing_session(goal_session_servic
 
 
 def test_goal_sessions_route_hides_other_user_session(goal_session_services):
-    collection_service, _service = goal_session_services
+    collection_service, service = goal_session_services
     collection = collection_service.create_collection("Copilot Collection")
     session = asyncio.run(
         sessions_controller.create_goal_session(
             GoalSessionCreateRequest(collection_id=collection["collection_id"]),
-            _request("user-a"),
+            _request(service, "user-a"),
         )
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(sessions_controller.get_goal_session(session.session_id, _request("user-b")))
+        asyncio.run(
+            sessions_controller.get_goal_session(
+                session.session_id,
+                _request(service, "user-b"),
+            )
+        )
 
     exc = exc_info.value
     assert exc.status_code == 404

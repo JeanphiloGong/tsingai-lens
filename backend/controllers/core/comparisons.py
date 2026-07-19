@@ -2,23 +2,18 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from application.core.comparison_service import (
     ComparisonRowNotFoundError,
     ComparisonRowsNotReadyError,
-    ComparisonService,
 )
-from application.source.collection_service import CollectionService
 from controllers.schemas.core.comparisons import (
     ComparisonRowItemResponse,
     ComparisonRowListResponse,
 )
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["comparisons"])
-collection_service = CollectionService(repository=build_collection_repository())
-comparison_service = ComparisonService(collection_service=collection_service)
 
 
 def _comparison_rows_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -37,9 +32,13 @@ def _comparison_rows_not_ready_detail(collection_id: str) -> dict[str, str]:
 async def get_collection_comparison(
     collection_id: str,
     row_id: str,
+    request: Request,
 ) -> ComparisonRowItemResponse:
     try:
-        payload = comparison_service.get_comparison_row(collection_id, row_id)
+        payload = request.app.state.comparison_service.get_comparison_row(
+            collection_id,
+            row_id,
+        )
     except ComparisonRowNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -67,6 +66,7 @@ async def get_collection_comparison(
 )
 async def list_collection_comparisons(
     collection_id: str,
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
     material_system_normalized: Annotated[
@@ -83,7 +83,7 @@ async def list_collection_comparisons(
     ] = None,
 ) -> ComparisonRowListResponse:
     try:
-        payload = comparison_service.list_comparison_rows(
+        payload = request.app.state.comparison_service.list_comparison_rows(
             collection_id,
             offset=offset,
             limit=limit,

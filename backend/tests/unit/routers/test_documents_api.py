@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -213,25 +214,36 @@ def _store_core_document_semantics(
 
 
 @pytest.fixture()
-def document_services(monkeypatch, tmp_path):
+def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
     comparison_service = ComparisonService(collection_service)
     document_markdown_service = DocumentMarkdownService(collection_service)
-
-    monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
-    monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(
-        documents_controller,
-        "document_markdown_service",
-        document_markdown_service,
-    )
 
     return (
         collection_service,
         document_profile_service,
         comparison_service,
         document_markdown_service,
+    )
+
+
+def _document_request(document_services):
+    (
+        collection_service,
+        document_profile_service,
+        comparison_service,
+        document_markdown_service,
+    ) = document_services
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                collection_service=collection_service,
+                document_profile_service=document_profile_service,
+                comparison_service=comparison_service,
+                document_markdown_service=document_markdown_service,
+            )
+        )
     )
 
 
@@ -243,7 +255,10 @@ def test_documents_route_returns_409_when_profiles_are_not_ready(document_servic
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            documents_controller.list_collection_document_profiles(record["collection_id"])
+            documents_controller.list_collection_document_profiles(
+                record["collection_id"],
+                _document_request(document_services),
+            )
         )
 
     exc = exc_info.value
@@ -262,7 +277,10 @@ def test_documents_route_returns_404_for_missing_collection(document_services):
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            documents_controller.list_collection_document_profiles("col_missing")
+            documents_controller.list_collection_document_profiles(
+                "col_missing",
+                _document_request(document_services),
+            )
         )
 
     exc = exc_info.value
@@ -292,7 +310,11 @@ def test_document_profile_route_returns_single_profile(document_services):
         ],
     )
     payload = asyncio.run(
-        documents_controller.get_collection_document_profile(collection_id, "paper-1")
+        documents_controller.get_collection_document_profile(
+            collection_id,
+            "paper-1",
+            _document_request(document_services),
+        )
     )
 
     assert payload.document_id == "paper-1"
@@ -324,7 +346,11 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
         ],
     )
     payload = asyncio.run(
-        documents_controller.get_collection_document_profile(collection_id, "paper-1")
+        documents_controller.get_collection_document_profile(
+            collection_id,
+            "paper-1",
+            _document_request(document_services),
+        )
     )
 
     assert payload.doc_type == "experimental"
@@ -388,7 +414,11 @@ def test_document_content_route_includes_source_locators(
         ],
     )
     payload = asyncio.run(
-        documents_controller.get_collection_document_content(collection_id, "paper-1")
+        documents_controller.get_collection_document_content(
+            collection_id,
+            "paper-1",
+            _document_request(document_services),
+        )
     )
 
     first = payload.blocks[0]
@@ -449,7 +479,11 @@ def test_document_markdown_route_returns_markdown_projection(document_services):
     )
 
     payload = asyncio.run(
-        documents_controller.get_collection_document_markdown(collection_id, "paper-1")
+        documents_controller.get_collection_document_markdown(
+            collection_id,
+            "paper-1",
+            _document_request(document_services),
+        )
     )
 
     assert payload.collection_id == collection_id
@@ -477,6 +511,7 @@ def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
             documents_controller.get_collection_document_markdown(
                 record["collection_id"],
                 "paper-1",
+                _document_request(document_services),
             )
         )
 
@@ -518,7 +553,11 @@ def test_document_source_route_streams_manifest_source_file(document_services):
     )
 
     response = asyncio.run(
-        documents_controller.get_collection_document_source(collection_id, "paper-1")
+        documents_controller.get_collection_document_source(
+            collection_id,
+            "paper-1",
+            _document_request(document_services),
+        )
     )
 
     assert response.body == payload
@@ -578,6 +617,7 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
         documents_controller.get_collection_document_source(
             collection_id,
             "profile-hash-doc",
+            _document_request(document_services),
         )
     )
 
@@ -596,6 +636,7 @@ def test_document_source_route_returns_409_when_source_is_unavailable(document_s
             documents_controller.get_collection_document_source(
                 record["collection_id"],
                 "paper-1",
+                _document_request(document_services),
             )
         )
 
@@ -635,7 +676,11 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            documents_controller.get_collection_document_source(collection_id, "paper-1")
+            documents_controller.get_collection_document_source(
+                collection_id,
+                "paper-1",
+                _document_request(document_services),
+            )
         )
 
     exc = exc_info.value
@@ -683,6 +728,7 @@ def test_document_source_route_rejects_another_collections_storage_key(
             documents_controller.get_collection_document_source(
                 first["collection_id"],
                 "paper-1",
+                _document_request(document_services),
             )
         )
 
@@ -723,6 +769,7 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
             collection_id,
             "paper-1",
             "fig-1",
+            _document_request(document_services),
         )
     )
 
@@ -764,6 +811,7 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
                 collection_id,
                 "paper-1",
                 "fig-2",
+                _document_request(document_services),
             )
         )
 
@@ -807,6 +855,7 @@ def test_document_figure_image_route_rejects_path_outside_collection(
                 collection_id,
                 "paper-1",
                 "fig-1",
+                _document_request(document_services),
             )
         )
 
@@ -829,6 +878,7 @@ def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_
             documents_controller.get_collection_document_comparison_semantics(
                 record["collection_id"],
                 "paper-1",
+                _document_request(document_services),
             )
         )
 
@@ -869,6 +919,7 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
             documents_controller.get_collection_document_comparison_semantics(
                 collection_id,
                 "paper-1",
+                _document_request(document_services),
             )
         )
 
@@ -903,6 +954,7 @@ def test_document_comparison_semantics_route_returns_semantic_items_for_document
         documents_controller.get_collection_document_comparison_semantics(
             collection_id,
             "paper-1",
+            _document_request(document_services),
         )
     )
 
@@ -948,6 +1000,7 @@ def test_document_comparison_semantics_route_can_include_projected_rows(
         documents_controller.get_collection_document_comparison_semantics(
             collection_id,
             "paper-1",
+            _document_request(document_services),
             include_row_projections=True,
         )
     )
@@ -999,6 +1052,7 @@ def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
         documents_controller.get_collection_document_comparison_semantics(
             collection_id,
             PBF_DOCUMENT_ID,
+            _document_request(document_services),
             include_grouped_projections=True,
         )
     )

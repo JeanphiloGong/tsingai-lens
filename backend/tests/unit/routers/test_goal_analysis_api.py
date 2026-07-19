@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from controllers.core import goal_analysis as goal_analysis_controller
 from domain.core import ConfirmedGoal, ResearchUnderstanding
 
@@ -107,16 +109,12 @@ def test_goal_analysis_route_runs_goal_analysis(monkeypatch):
     service = FakeGoalAnalysisService()
     executor = ImmediateExecutor()
 
-    def run_blocking(collection_id: str, goal_id: str) -> dict:
+    def run_blocking(service_argument, collection_id: str, goal_id: str) -> dict:
+        assert service_argument is service
         assert (collection_id, goal_id) == ("col_1", "goal_1")
         service.ran = True
         return {}
 
-    monkeypatch.setattr(
-        goal_analysis_controller,
-        "goal_analysis_service",
-        service,
-    )
     monkeypatch.setattr(
         goal_analysis_controller,
         "_goal_analysis_executor",
@@ -128,8 +126,15 @@ def test_goal_analysis_route_runs_goal_analysis(monkeypatch):
         run_blocking,
     )
     goal_analysis_controller._active_goal_analysis_jobs.clear()
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(goal_analysis_service=service))
+    )
 
-    response = goal_analysis_controller.run_confirmed_goal_analysis("col_1", "goal_1")
+    response = goal_analysis_controller.run_confirmed_goal_analysis(
+        "col_1",
+        "goal_1",
+        request,
+    )
 
     assert response.goal.goal_id == "goal_1"
     assert response.goal.status == "running"
@@ -141,14 +146,18 @@ def test_goal_analysis_route_runs_goal_analysis(monkeypatch):
     assert len(executor.submitted) == 1
 
 
-def test_goal_analysis_route_reads_goal_analysis(monkeypatch):
-    monkeypatch.setattr(
-        goal_analysis_controller,
-        "goal_analysis_service",
-        FakeGoalAnalysisService(),
+def test_goal_analysis_route_reads_goal_analysis():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(goal_analysis_service=FakeGoalAnalysisService())
+        )
     )
 
-    response = goal_analysis_controller.get_confirmed_goal_analysis("col_1", "goal_1")
+    response = goal_analysis_controller.get_confirmed_goal_analysis(
+        "col_1",
+        "goal_1",
+        request,
+    )
 
     assert response.goal.goal_id == "goal_1"
     assert response.understanding is not None

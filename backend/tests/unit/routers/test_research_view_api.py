@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -296,15 +297,15 @@ class MissingMaterialResearchViewService(FakeResearchViewService):
         raise ResearchViewMaterialNotFoundError(collection_id, material_id, document_id)
 
 
-def test_collection_research_view_route_returns_contract_payload(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        FakeResearchViewService(),
+def test_collection_research_view_route_returns_contract_payload():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(research_view_service=FakeResearchViewService()),
+        )
     )
 
     payload = asyncio.run(
-        research_view_controller.get_collection_research_view("col-1")
+        research_view_controller.get_collection_research_view("col-1", request)
     )
 
     assert payload.collection_id == "col-1"
@@ -312,20 +313,21 @@ def test_collection_research_view_route_returns_contract_payload(monkeypatch):
     assert payload.overview.collection_id == "col-1"
 
 
-def test_collection_material_routes_return_contract_payload(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        FakeResearchViewService(),
+def test_collection_material_routes_return_contract_payload():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(research_view_service=FakeResearchViewService()),
+        )
     )
 
     materials = asyncio.run(
-        research_view_controller.list_collection_materials("col-1")
+        research_view_controller.list_collection_materials("col-1", request)
     )
     profile = asyncio.run(
         research_view_controller.get_collection_material_research_view(
             "col-1",
             "mat-316l-stainless-steel",
+            request,
         )
     )
 
@@ -341,10 +343,10 @@ def test_collection_material_routes_run_service_in_threadpool(monkeypatch):
         calls.append((func.__name__, args, kwargs))
         return func(*args, **kwargs)
 
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        FakeResearchViewService(),
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(research_view_service=FakeResearchViewService()),
+        )
     )
     monkeypatch.setattr(
         research_view_controller,
@@ -352,11 +354,14 @@ def test_collection_material_routes_run_service_in_threadpool(monkeypatch):
         fake_run_in_threadpool,
     )
 
-    asyncio.run(research_view_controller.list_collection_materials("col-1"))
+    asyncio.run(
+        research_view_controller.list_collection_materials("col-1", request)
+    )
     asyncio.run(
         research_view_controller.get_collection_material_research_view(
             "col-1",
             "mat-316l-stainless-steel",
+            request,
         )
     )
 
@@ -370,17 +375,18 @@ def test_collection_material_routes_run_service_in_threadpool(monkeypatch):
     ]
 
 
-def test_document_research_view_route_returns_contract_payload(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        FakeResearchViewService(),
+def test_document_research_view_route_returns_contract_payload():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(research_view_service=FakeResearchViewService()),
+        )
     )
 
     payload = asyncio.run(
         research_view_controller.get_collection_document_research_view(
             "col-1",
             "paper-1",
+            request,
         )
     )
 
@@ -389,17 +395,18 @@ def test_document_research_view_route_returns_contract_payload(monkeypatch):
     assert payload.sample_matrix.matrix_id == "sample-matrix:paper-1"
 
 
-def test_document_material_routes_return_contract_payload(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        FakeResearchViewService(),
+def test_document_material_routes_return_contract_payload():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(research_view_service=FakeResearchViewService()),
+        )
     )
 
     materials = asyncio.run(
         research_view_controller.list_collection_document_materials(
             "col-1",
             "paper-1",
+            request,
         )
     )
     profile = asyncio.run(
@@ -407,6 +414,7 @@ def test_document_material_routes_return_contract_payload(monkeypatch):
             "col-1",
             "paper-1",
             "mat-316l-stainless-steel",
+            request,
         )
     )
 
@@ -416,15 +424,19 @@ def test_document_material_routes_return_contract_payload(monkeypatch):
     assert profile.material_id == "mat-316l-stainless-steel"
 
 
-def test_collection_research_view_route_returns_409_when_not_ready(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        NotReadyResearchViewService(),
+def test_collection_research_view_route_returns_409_when_not_ready():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_view_service=NotReadyResearchViewService(),
+            ),
+        )
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(research_view_controller.get_collection_research_view("col-1"))
+        asyncio.run(
+            research_view_controller.get_collection_research_view("col-1", request)
+        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -432,11 +444,13 @@ def test_collection_research_view_route_returns_409_when_not_ready(monkeypatch):
     assert exc.detail["collection_id"] == "col-1"
 
 
-def test_collection_material_route_returns_404_for_missing_material(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        MissingMaterialResearchViewService(),
+def test_collection_material_route_returns_404_for_missing_material():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_view_service=MissingMaterialResearchViewService(),
+            ),
+        )
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -444,6 +458,7 @@ def test_collection_material_route_returns_404_for_missing_material(monkeypatch)
             research_view_controller.get_collection_material_research_view(
                 "col-1",
                 "mat-missing",
+                request,
             )
         )
 
@@ -453,11 +468,13 @@ def test_collection_material_route_returns_404_for_missing_material(monkeypatch)
     assert exc.detail["material_id"] == "mat-missing"
 
 
-def test_document_research_view_route_returns_404_for_missing_document(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        MissingDocumentResearchViewService(),
+def test_document_research_view_route_returns_404_for_missing_document():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_view_service=MissingDocumentResearchViewService(),
+            ),
+        )
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -465,6 +482,7 @@ def test_document_research_view_route_returns_404_for_missing_document(monkeypat
             research_view_controller.get_collection_document_research_view(
                 "col-1",
                 "paper-missing",
+                request,
             )
         )
 
@@ -474,11 +492,13 @@ def test_document_research_view_route_returns_404_for_missing_document(monkeypat
     assert exc.detail["document_id"] == "paper-missing"
 
 
-def test_document_material_route_returns_404_for_missing_material(monkeypatch):
-    monkeypatch.setattr(
-        research_view_controller,
-        "research_view_service",
-        MissingMaterialResearchViewService(),
+def test_document_material_route_returns_404_for_missing_material():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_view_service=MissingMaterialResearchViewService(),
+            ),
+        )
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -487,6 +507,7 @@ def test_document_material_route_returns_404_for_missing_material(monkeypatch):
                 "col-1",
                 "paper-1",
                 "mat-missing",
+                request,
             )
         )
 

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-from application.source.collection_service import CollectionService
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowResult,
     SourceReferenceWorkflowService,
@@ -16,14 +15,10 @@ from controllers.schemas.source.reference import (
     SourceReferenceSetResponse,
     SourceReferenceSummaryResponse,
 )
-from infra.persistence.factory import build_collection_repository
-
-
 router = APIRouter(
     prefix="/collections/{collection_id}/references",
     tags=["source-references"],
 )
-collection_service = CollectionService(repository=build_collection_repository())
 reference_workflow_service = SourceReferenceWorkflowService()
 
 
@@ -34,9 +29,10 @@ reference_workflow_service = SourceReferenceWorkflowService()
 )
 async def build_collection_references(
     collection_id: str,
+    request: Request,
 ) -> SourceReferenceSummaryResponse:
     try:
-        collection_service.get_collection(collection_id)
+        request.app.state.collection_service.get_collection(collection_id)
         result = await run_in_threadpool(
             reference_workflow_service.build_collection_references,
             collection_id,
@@ -51,9 +47,12 @@ async def build_collection_references(
     response_model=SourceReferenceSetResponse,
     summary="读取集合引用文献候选池",
 )
-async def get_collection_references(collection_id: str) -> SourceReferenceSetResponse:
+async def get_collection_references(
+    collection_id: str,
+    request: Request,
+) -> SourceReferenceSetResponse:
     try:
-        collection_service.get_collection(collection_id)
+        request.app.state.collection_service.get_collection(collection_id)
         result = await run_in_threadpool(
             reference_workflow_service.read_collection_references,
             collection_id,

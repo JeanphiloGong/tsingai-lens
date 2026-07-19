@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from application.core.research_view_aggregation_service import (
-    ResearchViewAggregationService,
     ResearchViewDocumentNotFoundError,
     ResearchViewMaterialNotFoundError,
     ResearchViewNotReadyError,
 )
-from application.source.collection_service import CollectionService
 from controllers.schemas.core.research_view import (
     CollectionAggregationResponse,
     DocumentMaterialProfileResponse,
@@ -18,13 +16,8 @@ from controllers.schemas.core.research_view import (
     PaperAggregationResponse,
     PaperMaterialSummariesResponse,
 )
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["research-view"])
-collection_service = CollectionService(repository=build_collection_repository())
-research_view_service = ResearchViewAggregationService(
-    collection_service=collection_service,
-)
 
 
 def _research_view_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -54,10 +47,11 @@ def _research_view_material_not_found_detail(
 )
 async def get_collection_research_view(
     collection_id: str,
+    request: Request,
 ) -> CollectionAggregationResponse:
     try:
         payload = await run_in_threadpool(
-            research_view_service.get_collection_research_view,
+            request.app.state.research_view_service.get_collection_research_view,
             collection_id,
         )
     except ResearchViewNotReadyError as exc:
@@ -77,10 +71,11 @@ async def get_collection_research_view(
 )
 async def list_collection_materials(
     collection_id: str,
+    request: Request,
 ) -> MaterialSummariesResponse:
     try:
         payload = await run_in_threadpool(
-            research_view_service.list_collection_materials,
+            request.app.state.research_view_service.list_collection_materials,
             collection_id,
         )
     except ResearchViewNotReadyError as exc:
@@ -101,10 +96,11 @@ async def list_collection_materials(
 async def get_collection_material_research_view(
     collection_id: str,
     material_id: str,
+    request: Request,
 ) -> MaterialProfileResponse:
     try:
         payload = await run_in_threadpool(
-            research_view_service.get_collection_material_research_view,
+            request.app.state.research_view_service.get_collection_material_research_view,
             collection_id,
             material_id,
         )
@@ -131,10 +127,11 @@ async def get_collection_material_research_view(
 async def get_collection_document_research_view(
     collection_id: str,
     document_id: str,
+    request: Request,
 ) -> PaperAggregationResponse:
     try:
         payload = await run_in_threadpool(
-            research_view_service.get_document_research_view,
+            request.app.state.research_view_service.get_document_research_view,
             collection_id,
             document_id,
         )
@@ -166,10 +163,11 @@ async def get_collection_document_research_view(
 async def list_collection_document_materials(
     collection_id: str,
     document_id: str,
+    request: Request,
 ) -> PaperMaterialSummariesResponse:
     try:
         payload = await run_in_threadpool(
-            research_view_service.list_document_materials,
+            request.app.state.research_view_service.list_document_materials,
             collection_id,
             document_id,
         )
@@ -202,10 +200,11 @@ async def get_collection_document_material_research_view(
     collection_id: str,
     document_id: str,
     material_id: str,
+    request: Request,
 ) -> DocumentMaterialProfileResponse:
     try:
         payload = await run_in_threadpool(
-            research_view_service.get_document_material_research_view,
+            request.app.state.research_view_service.get_document_material_research_view,
             collection_id,
             document_id,
             material_id,

@@ -2,20 +2,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
-    ComparisonService,
     ResultNotFoundError,
 )
-from application.source.collection_service import CollectionService
 from controllers.schemas.core.results import ResultItemResponse, ResultListResponse
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["results"])
-collection_service = CollectionService(repository=build_collection_repository())
-comparison_service = ComparisonService(collection_service=collection_service)
 
 
 def _results_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -33,6 +28,7 @@ def _results_not_ready_detail(collection_id: str) -> dict[str, str]:
 )
 async def list_collection_results(
     collection_id: str,
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
     material_system_normalized: Annotated[
@@ -55,7 +51,7 @@ async def list_collection_results(
     ] = None,
 ) -> ResultListResponse:
     try:
-        payload = comparison_service.list_collection_results(
+        payload = request.app.state.comparison_service.list_collection_results(
             collection_id,
             offset=offset,
             limit=limit,
@@ -84,9 +80,13 @@ async def list_collection_results(
 async def get_collection_result(
     collection_id: str,
     result_id: str,
+    request: Request,
 ) -> ResultItemResponse:
     try:
-        payload = comparison_service.get_collection_result(collection_id, result_id)
+        payload = request.app.state.comparison_service.get_collection_result(
+            collection_id,
+            result_id,
+        )
     except ResultNotFoundError as exc:
         raise HTTPException(
             status_code=404,

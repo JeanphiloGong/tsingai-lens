@@ -392,7 +392,6 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    monkeypatch.setattr(graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
 
     collection = collection_service.create_collection("Objective Graph Collection")
@@ -417,6 +416,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         collection_id=collection_id,
         max_nodes=40,
         min_weight=0.0,
+        collection_service=collection_service,
     )
 
     assert payload["collection_id"] == collection_id
@@ -434,6 +434,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         collection_id=collection_id,
         max_nodes=40,
         min_weight=0.0,
+        collection_service=collection_service,
     )
 
     assert filename == f"{collection_id}.graphml"
@@ -465,7 +466,6 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
 
     collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    monkeypatch.setattr(graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
 
     collection = collection_service.create_collection("Graph Neighborhood Collection")
@@ -489,6 +489,7 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     payload = graph_service.get_collection_graph_neighbors(
         collection_id=collection_id,
         node_id="step:chain-1:measurement_results",
+        collection_service=collection_service,
     )
 
     assert payload["collection_id"] == collection_id

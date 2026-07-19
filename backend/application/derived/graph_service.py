@@ -9,15 +9,11 @@ from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
-from infra.persistence.factory import (
-    build_collection_repository,
-    build_core_fact_repository,
-)
+from infra.persistence.factory import build_core_fact_repository
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
 artifact_registry_service = ArtifactRegistryService()
-collection_service = CollectionService(repository=build_collection_repository())
 core_fact_repository = build_core_fact_repository()
 _NEIGHBORHOOD_MAX_NODES = 2_147_483_647
 
@@ -46,7 +42,11 @@ class GraphNodeNotFoundError(RuntimeError):
         super().__init__(f"graph node not found: {collection_id}/{node_id}")
 
 
-def resolve_collection_output_dir(collection_id: str) -> Path:
+def resolve_collection_output_dir(
+    collection_id: str,
+    *,
+    collection_service: CollectionService,
+) -> Path:
     collection_service.get_collection(collection_id)
 
     try:
@@ -69,9 +69,16 @@ def resolve_collection_output_dir(collection_id: str) -> Path:
     return paths.output_dir.resolve()
 
 
-def _graph_error_output_dir(collection_id: str) -> Path:
+def _graph_error_output_dir(
+    collection_id: str,
+    *,
+    collection_service: CollectionService,
+) -> Path:
     try:
-        return resolve_collection_output_dir(collection_id)
+        return resolve_collection_output_dir(
+            collection_id,
+            collection_service=collection_service,
+        )
     except GraphNotReadyError as exc:
         return exc.output_dir
 
@@ -80,13 +87,18 @@ def load_graph_payload(
     collection_id: str,
     max_nodes: int,
     min_weight: float,
+    *,
+    collection_service: CollectionService,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     collection_service.get_collection(collection_id)
     facts = core_fact_repository.read_collection_facts(collection_id)
     if not facts.graph_ready:
         raise GraphNotReadyError(
             collection_id=collection_id,
-            output_dir=_graph_error_output_dir(collection_id),
+            output_dir=_graph_error_output_dir(
+                collection_id,
+                collection_service=collection_service,
+            ),
             missing_artifacts=_missing_core_graph_inputs(facts),
         )
     projection = build_core_fact_projection_records(facts)
@@ -130,11 +142,14 @@ def get_collection_graph(
     collection_id: str,
     max_nodes: int,
     min_weight: float,
+    *,
+    collection_service: CollectionService,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, truncated = load_graph_payload(
         collection_id=collection_id,
         max_nodes=max_nodes,
         min_weight=min_weight,
+        collection_service=collection_service,
     )
     return {
         "collection_id": collection_id,
@@ -148,11 +163,14 @@ def build_graphml(
     collection_id: str,
     max_nodes: int,
     min_weight: float,
+    *,
+    collection_service: CollectionService,
 ) -> tuple[bytes, str]:
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
         max_nodes=max_nodes,
         min_weight=min_weight,
+        collection_service=collection_service,
     )
     return to_graphml(nodes_payload, edges_payload), f"{collection_id}.graphml"
 
@@ -160,11 +178,14 @@ def build_graphml(
 def get_collection_graph_neighbors(
     collection_id: str,
     node_id: str,
+    *,
+    collection_service: CollectionService,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
         max_nodes=_NEIGHBORHOOD_MAX_NODES,
         min_weight=0.0,
+        collection_service=collection_service,
     )
 
     node_ids = {str(node.get("id")) for node in nodes_payload}
@@ -202,7 +223,6 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
 __all__ = [
     "artifact_registry_service",
     "build_graphml",
-    "collection_service",
     "core_fact_repository",
     "get_collection_graph_neighbors",
     "get_collection_graph",

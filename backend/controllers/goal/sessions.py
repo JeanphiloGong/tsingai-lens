@@ -4,9 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from application.goal.session_service import (
     GoalSessionNotFoundError,
-    GoalSessionService,
 )
-from application.source.collection_service import CollectionService
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.goal.session import (
     GoalSessionCreateRequest,
@@ -16,11 +14,8 @@ from controllers.schemas.goal.session import (
     GoalSessionResponse,
     GoalSessionUpdateRequest,
 )
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/goal-sessions", tags=["goal-sessions"])
-collection_service = CollectionService(repository=build_collection_repository())
-goal_session_service = GoalSessionService(collection_service=collection_service)
 
 
 def _not_found_detail(exc: GoalSessionNotFoundError) -> dict[str, str]:
@@ -41,7 +36,7 @@ async def create_goal_session(
     request: Request,
 ) -> GoalSessionResponse:
     try:
-        session = goal_session_service.create_session(
+        session = request.app.state.goal_session_service.create_session(
             collection_id=payload.collection_id,
             user_id=current_user_id(request),
             focused_material_id=payload.focused_material_id,
@@ -69,7 +64,7 @@ async def get_goal_session(
     request: Request,
 ) -> GoalSessionResponse:
     try:
-        session = goal_session_service.get_session_for_user(
+        session = request.app.state.goal_session_service.get_session_for_user(
             session_id,
             current_user_id(request),
         )
@@ -91,7 +86,7 @@ async def update_goal_session(
     request: Request,
 ) -> GoalSessionResponse:
     try:
-        session = goal_session_service.update_session_for_user(
+        session = request.app.state.goal_session_service.update_session_for_user(
             session_id,
             current_user_id(request),
             **payload.model_dump(exclude_unset=True),
@@ -116,7 +111,7 @@ async def post_goal_session_message(
     request: Request,
 ) -> GoalSessionMessageResponse:
     try:
-        response = goal_session_service.post_message_for_user(
+        response = request.app.state.goal_session_service.post_message_for_user(
             session_id,
             current_user_id(request),
             message=payload.message,
@@ -141,7 +136,7 @@ async def list_goal_session_messages(
     request: Request,
 ) -> GoalSessionMessageListResponse:
     try:
-        response = goal_session_service.list_messages_for_user(
+        response = request.app.state.goal_session_service.list_messages_for_user(
             session_id,
             current_user_id(request),
         )

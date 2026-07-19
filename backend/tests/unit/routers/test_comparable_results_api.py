@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -135,23 +136,23 @@ def _store_core_comparable_result_facts(
 
 
 @pytest.fixture()
-def comparable_result_services(monkeypatch, tmp_path):
+def comparable_result_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     comparison_service = ComparisonService(collection_service)
 
-    monkeypatch.setattr(
-        comparable_results_controller,
-        "comparison_service",
-        comparison_service,
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(comparison_service=comparison_service),
+        )
     )
 
-    return collection_service, comparison_service
+    return collection_service, comparison_service, request
 
 
 def test_comparable_results_route_returns_200_without_row_cache(
     comparable_result_services,
 ):
-    collection_service, comparison_service = comparable_result_services
+    collection_service, comparison_service, request = comparable_result_services
     collection = collection_service.create_collection(name="Comparable Results Collection")
     collection_id = collection["collection_id"]
 
@@ -168,7 +169,10 @@ def test_comparable_results_route_returns_200_without_row_cache(
     )
 
     payload = asyncio.run(
-        comparable_results_controller.list_comparable_results(collection_id=collection_id)
+        comparable_results_controller.list_comparable_results(
+            request,
+            collection_id=collection_id,
+        )
     )
 
     assert payload.collection_id == collection_id
@@ -182,11 +186,14 @@ def test_comparable_results_route_returns_200_without_row_cache(
 def test_comparable_result_detail_route_returns_404_when_missing(
     comparable_result_services,
 ):
-    _collection_service, _comparison_service = comparable_result_services
+    _collection_service, _comparison_service, request = comparable_result_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            comparable_results_controller.get_comparable_result("cres-missing")
+            comparable_results_controller.get_comparable_result(
+                "cres-missing",
+                request,
+            )
         )
 
     exc = exc_info.value

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,7 +18,7 @@ from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVa
 
 
 @pytest.fixture()
-def evidence_services(monkeypatch, tmp_path):
+def evidence_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
@@ -25,17 +26,25 @@ def evidence_services(monkeypatch, tmp_path):
         document_profile_service=document_profile_service,
     )
 
-    monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
-
-    return collection_service, paper_facts_service
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(paper_facts_service=paper_facts_service),
+        )
+    )
+    return collection_service, paper_facts_service, request
 
 
 def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
-    collection_service, _paper_facts_service = evidence_services
+    collection_service, _paper_facts_service, request = evidence_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(evidence_controller.list_collection_evidence_cards(record["collection_id"]))
+        asyncio.run(
+            evidence_controller.list_collection_evidence_cards(
+                record["collection_id"],
+                request,
+            )
+        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -44,10 +53,12 @@ def test_evidence_route_returns_409_when_cards_are_not_ready(evidence_services):
 
 
 def test_evidence_route_returns_404_for_missing_collection(evidence_services):
-    _collection_service, _paper_facts_service = evidence_services
+    _collection_service, _paper_facts_service, request = evidence_services
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(evidence_controller.list_collection_evidence_cards("col_missing"))
+        asyncio.run(
+            evidence_controller.list_collection_evidence_cards("col_missing", request)
+        )
 
     exc = exc_info.value
     assert exc.status_code == 404
@@ -57,7 +68,7 @@ def test_evidence_route_returns_404_for_missing_collection(evidence_services):
 def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     evidence_services,
 ):
-    collection_service, paper_facts_service = evidence_services
+    collection_service, paper_facts_service, request = evidence_services
     record = collection_service.create_collection(name="Empty Evidence Collection")
     collection_id = record["collection_id"]
     paper_facts_service.core_fact_repository.replace_collection_facts(
@@ -66,7 +77,7 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     )
 
     payload = asyncio.run(
-        evidence_controller.list_collection_evidence_cards(collection_id)
+        evidence_controller.list_collection_evidence_cards(collection_id, request)
     )
 
     assert payload.collection_id == collection_id
@@ -75,7 +86,7 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
 
 
 def test_evidence_card_route_returns_single_card(evidence_services):
-    collection_service, paper_facts_service = evidence_services
+    collection_service, paper_facts_service, request = evidence_services
     record = collection_service.create_collection(name="Single Evidence Collection")
     collection_id = record["collection_id"]
     paper_facts_service.core_fact_repository.replace_collection_facts(
@@ -132,6 +143,7 @@ def test_evidence_card_route_returns_single_card(evidence_services):
         evidence_controller.get_collection_evidence_card(
             collection_id,
             "ev_result_res-1",
+            request,
         )
     )
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi.testclient import TestClient
+import pytest
 
 from application.evaluation import ResearchUnderstandingFeedbackService
 from domain.core import ResearchUnderstanding
@@ -148,11 +150,12 @@ class PassthroughResearchUnderstandingService:
         return understanding.to_record()
 
 
-def _build_client(
+@pytest.fixture()
+def feedback_client(
     monkeypatch,
     tmp_path,
     auth_session_service,
-) -> tuple[TestClient, RecordingResearchUnderstandingFeedbackService]:
+) -> Iterator[tuple[TestClient, RecordingResearchUnderstandingFeedbackService]]:
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
@@ -165,25 +168,26 @@ def _build_client(
 
     from tests.support.collection_service import build_test_collection_service
     from controllers.core import research_understanding_feedback
-    from controllers.source import collections as collections_controller
     from main import create_app
 
-    collections_controller.collection_service = build_test_collection_service(
-        tmp_path / "collections"
-    )
+    collection_service = build_test_collection_service(tmp_path / "collections")
     feedback_service = RecordingResearchUnderstandingFeedbackService()
-    research_understanding_feedback.feedback_service = feedback_service
-    return (
-        TestClient(create_app(auth_session_service=auth_session_service)),
+    monkeypatch.setattr(
+        research_understanding_feedback,
+        "feedback_service",
         feedback_service,
     )
+    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
+        client.app.state.collection_service = collection_service
+        yield client, feedback_service
 
 
-def _build_client_with_real_feedback_service(
+@pytest.fixture()
+def real_feedback_client(
     monkeypatch,
     tmp_path,
     auth_session_service,
-) -> TestClient:
+) -> Iterator[TestClient]:
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
@@ -196,22 +200,24 @@ def _build_client_with_real_feedback_service(
 
     from tests.support.collection_service import build_test_collection_service
     from controllers.core import research_understanding_feedback
-    from controllers.source import collections as collections_controller
     from main import create_app
 
-    collections_controller.collection_service = build_test_collection_service(
-        tmp_path / "collections"
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    feedback_service = ResearchUnderstandingFeedbackService(
+        evaluation_repository=PersistingEvaluationRepository(),
+        core_fact_repository=StaticResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
+        research_understanding_service=PassthroughResearchUnderstandingService(),
     )
-    research_understanding_feedback.feedback_service = (
-        ResearchUnderstandingFeedbackService(
-            evaluation_repository=PersistingEvaluationRepository(),
-            core_fact_repository=StaticResearchUnderstandingRepository(
-                _sample_understanding()
-            ),
-            research_understanding_service=PassthroughResearchUnderstandingService(),
-        )
+    monkeypatch.setattr(
+        research_understanding_feedback,
+        "feedback_service",
+        feedback_service,
     )
-    return TestClient(create_app(auth_session_service=auth_session_service))
+    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
+        client.app.state.collection_service = collection_service
+        yield client
 
 
 def _login(client: TestClient) -> None:
@@ -338,15 +344,9 @@ def _sample_understanding() -> ResearchUnderstanding:
 
 
 def test_feedback_route_uses_authenticated_user_not_spoofed_reviewer(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
+    feedback_client,
 ):
-    client, feedback_service = _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-    )
+    client, feedback_service = feedback_client
     _login(client)
     collection_id = _create_collection(client)
 
@@ -370,15 +370,9 @@ def test_feedback_route_uses_authenticated_user_not_spoofed_reviewer(
 
 
 def test_curation_route_uses_authenticated_user_not_spoofed_reviewer(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
+    feedback_client,
 ):
-    client, feedback_service = _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-    )
+    client, feedback_service = feedback_client
     _login(client)
     collection_id = _create_collection(client)
 
@@ -408,15 +402,9 @@ def test_curation_route_uses_authenticated_user_not_spoofed_reviewer(
 
 
 def test_feedback_route_preserves_agent_reviewer(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
+    feedback_client,
 ):
-    client, feedback_service = _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-    )
+    client, feedback_service = feedback_client
     _login(client)
     collection_id = _create_collection(client)
 
@@ -443,15 +431,9 @@ def test_feedback_route_preserves_agent_reviewer(
 
 
 def test_feedback_route_requires_login_before_writing(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
+    feedback_client,
 ):
-    client, feedback_service = _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-    )
+    client, feedback_service = feedback_client
 
     response = client.post(
         "/api/v1/collections/col-missing/research-understanding/feedback",
@@ -471,15 +453,9 @@ def test_feedback_route_requires_login_before_writing(
 
 
 def test_human_curation_route_makes_dataset_sample_training_ready(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
+    real_feedback_client,
 ):
-    client = _build_client_with_real_feedback_service(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-    )
+    client = real_feedback_client
     _login(client)
     collection_id = _create_collection(client)
 

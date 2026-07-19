@@ -2,23 +2,18 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from application.core.comparison_service import (
     ComparableResultNotFoundError,
     ComparisonRowsNotReadyError,
-    ComparisonService,
 )
-from application.source.collection_service import CollectionService
 from controllers.schemas.core.comparable_results import (
     ComparableResultCorpusItemResponse,
     ComparableResultCorpusListResponse,
 )
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(tags=["comparable-results"])
-collection_service = CollectionService(repository=build_collection_repository())
-comparison_service = ComparisonService(collection_service=collection_service)
 
 
 def _comparable_results_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -35,6 +30,7 @@ def _comparable_results_not_ready_detail(collection_id: str) -> dict[str, str]:
     summary="按 corpus 读取 comparable results",
 )
 async def list_comparable_results(
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
     material_system_normalized: Annotated[
@@ -57,7 +53,7 @@ async def list_comparable_results(
     ] = None,
 ) -> ComparableResultCorpusListResponse:
     try:
-        payload = comparison_service.list_corpus_comparable_results(
+        payload = request.app.state.comparison_service.list_corpus_comparable_results(
             offset=offset,
             limit=limit,
             material_system_normalized=material_system_normalized,
@@ -84,12 +80,13 @@ async def list_comparable_results(
 )
 async def get_comparable_result(
     comparable_result_id: str,
+    request: Request,
     collection_id: Annotated[
         str | None, Query(description="限定到一个 collection 的 current scope")
     ] = None,
 ) -> ComparableResultCorpusItemResponse:
     try:
-        payload = comparison_service.get_corpus_comparable_result(
+        payload = request.app.state.comparison_service.get_corpus_comparable_result(
             comparable_result_id,
             collection_id=collection_id,
         )

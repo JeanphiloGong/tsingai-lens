@@ -5,6 +5,26 @@ from time import perf_counter
 
 from config import DATA_DIR
 from application.auth import AuthSessionService, SessionNotFoundError
+from application.core.comparison_service import ComparisonService
+from application.core.research_view_aggregation_service import (
+    ResearchViewAggregationService,
+)
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.research_objective_service import (
+    ResearchObjectiveService,
+)
+from application.core.workspace_overview_service import WorkspaceService
+from application.goal.brief_service import GoalService
+from application.goal.session_service import GoalSessionService
+from application.pipeline.collection_build.service import CollectionBuildPipelineService
+from application.pipeline.goal_analysis.service import GoalAnalysisPipelineService
+from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.collection_service import CollectionService
+from application.source.document_markdown_service import DocumentMarkdownService
+from application.source.task_service import TaskService
 from controllers import auth
 from controllers.core import (
     comparable_results,
@@ -32,6 +52,7 @@ from infra.persistence.database import (
     build_database_engine,
     build_session_factory,
 )
+from infra.persistence.factory import build_collection_repository
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 
 from utils.logger import (
@@ -65,20 +86,86 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        if auth_session_service is not None:
-            yield
-            return
-
-        engine = build_database_engine(DatabaseSettings())
-        service = AuthSessionService(
-            PostgresAuthRepository(build_session_factory(engine))
-        )
-        application.state.auth_session_service = service
+        engine = None
         try:
-            service.ensure_bootstrap_user()
+            if auth_session_service is None:
+                engine = build_database_engine(DatabaseSettings())
+                active_auth_session_service = AuthSessionService(
+                    PostgresAuthRepository(build_session_factory(engine))
+                )
+                application.state.auth_session_service = active_auth_session_service
+                active_auth_session_service.ensure_bootstrap_user()
+
+            collection_service = CollectionService(
+                repository=build_collection_repository()
+            )
+            task_service = TaskService()
+            artifact_registry_service = ArtifactRegistryService()
+            document_profile_service = DocumentProfileService(
+                collection_service=collection_service,
+            )
+            paper_facts_service = PaperFactsService(
+                collection_service=collection_service,
+                document_profile_service=document_profile_service,
+            )
+            comparison_service = ComparisonService(
+                collection_service=collection_service,
+                document_profile_service=document_profile_service,
+            )
+            research_objective_service = ResearchObjectiveService(
+                collection_service=collection_service,
+                document_profile_service=document_profile_service,
+            )
+            workspace_service = WorkspaceService(
+                collection_service=collection_service,
+                task_service=task_service,
+                document_profile_service=document_profile_service,
+            )
+            research_view_service = ResearchViewAggregationService(
+                collection_service=collection_service,
+                task_service=task_service,
+                document_profile_service=document_profile_service,
+                paper_facts_service=paper_facts_service,
+                comparison_service=comparison_service,
+                workspace_service=workspace_service,
+            )
+
+            application.state.collection_service = collection_service
+            application.state.task_service = task_service
+            application.state.artifact_registry_service = artifact_registry_service
+            application.state.document_profile_service = document_profile_service
+            application.state.document_markdown_service = DocumentMarkdownService(
+                collection_service=collection_service,
+            )
+            application.state.paper_facts_service = paper_facts_service
+            application.state.comparison_service = comparison_service
+            application.state.research_objective_service = research_objective_service
+            application.state.workspace_service = workspace_service
+            application.state.research_view_service = research_view_service
+            application.state.build_pipeline_service = CollectionBuildPipelineService(
+                collection_service=collection_service,
+                task_service=task_service,
+                artifact_registry_service=artifact_registry_service,
+                document_profile_service=document_profile_service,
+                research_objective_service=research_objective_service,
+            )
+            application.state.goal_service = GoalService(collection_service)
+            application.state.goal_session_service = GoalSessionService(
+                collection_service=collection_service,
+                task_service=task_service,
+                research_view_service=research_view_service,
+                workspace_service=workspace_service,
+                comparison_service=comparison_service,
+                paper_facts_service=paper_facts_service,
+                research_objective_service=research_objective_service,
+            )
+            application.state.goal_analysis_service = GoalAnalysisPipelineService(
+                research_objective_service=research_objective_service,
+            )
             yield
         finally:
-            engine.dispose()
+            if engine is not None:
+                engine.dispose()
 
     app = FastAPI(
         title="TsingAI-Lens API",
@@ -167,7 +254,11 @@ def create_app(
 
         request.state.current_user = user
         collection_id = _extract_collection_id(request.url.path)
-        if collection_id and not _user_owns_collection(collection_id, user["user_id"]):
+        if collection_id and not _user_owns_collection(
+            request.app.state.collection_service,
+            collection_id,
+            user["user_id"],
+        ):
             return JSONResponse(
                 status_code=404,
                 content={
@@ -219,9 +310,13 @@ def _extract_collection_id(path: str) -> str | None:
     return collection_id or None
 
 
-def _user_owns_collection(collection_id: str, user_id: str) -> bool:
+def _user_owns_collection(
+    collection_service: CollectionService,
+    collection_id: str,
+    user_id: str,
+) -> bool:
     try:
-        collections.collection_service.get_collection_for_user(collection_id, user_id)
+        collection_service.get_collection_for_user(collection_id, user_id)
     except FileNotFoundError:
         return False
     return True

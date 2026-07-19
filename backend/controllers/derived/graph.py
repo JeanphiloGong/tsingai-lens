@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
 import application.derived.graph_service as graph_service
@@ -54,6 +54,7 @@ def _graph_node_not_found_detail(
 )
 async def get_collection_graph(
     collection_id: str,
+    request: Request,
     max_nodes: int = Query(default=200, ge=1, le=2000),
     min_weight: float = Query(default=0.0, ge=0.0),
 ) -> CollectionGraphResponse:
@@ -62,6 +63,7 @@ async def get_collection_graph(
             collection_id=collection_id,
             max_nodes=max_nodes,
             min_weight=min_weight,
+            collection_service=request.app.state.collection_service,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -83,6 +85,7 @@ async def get_collection_graph(
 @router.get("/{collection_id}/graphml", summary="导出集合 GraphML")
 async def export_collection_graphml(
     collection_id: str,
+    request: Request,
     max_nodes: int = Query(default=200, ge=1, le=2000),
     min_weight: float = Query(default=0.0, ge=0.0),
 ) -> Response:
@@ -91,6 +94,7 @@ async def export_collection_graphml(
             collection_id=collection_id,
             max_nodes=max_nodes,
             min_weight=min_weight,
+            collection_service=request.app.state.collection_service,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -122,11 +126,13 @@ async def export_collection_graphml(
 async def get_collection_graph_neighbors(
     collection_id: str,
     node_id: str,
+    request: Request,
 ) -> CollectionGraphNeighborhoodResponse:
     try:
         payload = graph_service.get_collection_graph_neighbors(
             collection_id=collection_id,
             node_id=node_id,
+            collection_service=request.app.state.collection_service,
         )
     except FileNotFoundError as exc:
         raise HTTPException(

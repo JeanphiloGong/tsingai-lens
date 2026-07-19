@@ -4,10 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from application.core.confirmed_goal_service import ConfirmedGoalNotFoundError
-from application.pipeline.goal_analysis.service import goal_analysis_service
+from application.pipeline.goal_analysis.service import GoalAnalysisPipelineService
 from controllers.schemas.core.goal_analysis import GoalAnalysisResponse
 from domain.core import ConfirmedGoal, ResearchUnderstanding
 
@@ -29,12 +29,15 @@ _active_goal_analysis_jobs_lock = Lock()
 def run_confirmed_goal_analysis(
     collection_id: str,
     goal_id: str,
+    request: Request,
 ) -> GoalAnalysisResponse:
+    goal_analysis_service = request.app.state.goal_analysis_service
     try:
         payload = goal_analysis_service.start_goal_analysis(collection_id, goal_id)
         if _register_goal_analysis_job(collection_id, goal_id):
             future = _goal_analysis_executor.submit(
                 _run_goal_analysis_blocking,
+                goal_analysis_service,
                 collection_id,
                 goal_id,
             )
@@ -52,7 +55,11 @@ def run_confirmed_goal_analysis(
     return _analysis_response(collection_id, payload)
 
 
-def _run_goal_analysis_blocking(collection_id: str, goal_id: str) -> dict:
+def _run_goal_analysis_blocking(
+    goal_analysis_service: GoalAnalysisPipelineService,
+    collection_id: str,
+    goal_id: str,
+) -> dict:
     import asyncio
 
     return asyncio.run(
@@ -87,9 +94,13 @@ def _finish_goal_analysis_job(collection_id: str, goal_id: str, future) -> None:
 def get_confirmed_goal_analysis(
     collection_id: str,
     goal_id: str,
+    request: Request,
 ) -> GoalAnalysisResponse:
     try:
-        payload = goal_analysis_service.get_goal_analysis(collection_id, goal_id)
+        payload = request.app.state.goal_analysis_service.get_goal_analysis(
+            collection_id,
+            goal_id,
+        )
     except ConfirmedGoalNotFoundError as exc:
         raise _goal_not_found(exc) from exc
     return _analysis_response(collection_id, payload)

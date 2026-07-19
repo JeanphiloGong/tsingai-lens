@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from application.core.semantic_build.document_profile_service import (
     DocumentContentNotReadyError,
@@ -11,19 +11,14 @@ from application.core.semantic_build.document_profile_service import (
 from application.core.semantic_build.paper_facts_service import (
     EvidenceCardNotFoundError,
     PaperFactsNotReadyError,
-    PaperFactsService,
 )
-from application.source.collection_service import CollectionService
 from controllers.schemas.core.evidence import (
     EvidenceCardItemResponse,
     EvidenceCardListResponse,
     EvidenceTracebackResponse,
 )
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["evidence"])
-collection_service = CollectionService(repository=build_collection_repository())
-paper_facts_service = PaperFactsService(collection_service=collection_service)
 
 
 def _evidence_cards_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -41,11 +36,12 @@ def _evidence_cards_not_ready_detail(collection_id: str) -> dict[str, str]:
 )
 async def list_collection_evidence_cards(
     collection_id: str,
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
 ) -> EvidenceCardListResponse:
     try:
-        payload = paper_facts_service.list_evidence_cards(
+        payload = request.app.state.paper_facts_service.list_evidence_cards(
             collection_id,
             offset=offset,
             limit=limit,
@@ -68,9 +64,13 @@ async def list_collection_evidence_cards(
 async def get_collection_evidence_card(
     collection_id: str,
     evidence_id: str,
+    request: Request,
 ) -> EvidenceCardItemResponse:
     try:
-        payload = paper_facts_service.get_evidence_card(collection_id, evidence_id)
+        payload = request.app.state.paper_facts_service.get_evidence_card(
+            collection_id,
+            evidence_id,
+        )
     except EvidenceCardNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -99,9 +99,13 @@ async def get_collection_evidence_card(
 async def get_collection_evidence_traceback(
     collection_id: str,
     evidence_id: str,
+    request: Request,
 ) -> EvidenceTracebackResponse:
     try:
-        payload = paper_facts_service.get_evidence_traceback(collection_id, evidence_id)
+        payload = request.app.state.paper_facts_service.get_evidence_traceback(
+            collection_id,
+            evidence_id,
+        )
     except EvidenceCardNotFoundError as exc:
         raise HTTPException(
             status_code=404,

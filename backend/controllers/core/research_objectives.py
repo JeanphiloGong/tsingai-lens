@@ -1,25 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveNotFoundError,
-    ResearchObjectiveService,
     ResearchObjectivesNotReadyError,
 )
-from application.source.collection_service import CollectionService
 from controllers.schemas.core.research_objectives import (
     ObjectiveListResponse,
     ObjectiveResearchViewResponse,
 )
-from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
-collection_service = CollectionService(repository=build_collection_repository())
-research_objective_service = ResearchObjectiveService(
-    collection_service=collection_service,
-)
 
 
 def _research_objectives_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -38,10 +31,13 @@ def _research_objectives_not_ready_detail(collection_id: str) -> dict[str, str]:
     response_model=ObjectiveListResponse,
     summary="读取 collection research objectives",
 )
-async def list_collection_objectives(collection_id: str) -> ObjectiveListResponse:
+async def list_collection_objectives(
+    collection_id: str,
+    request: Request,
+) -> ObjectiveListResponse:
     try:
         payload = await run_in_threadpool(
-            research_objective_service.list_objective_workspaces,
+            request.app.state.research_objective_service.list_objective_workspaces,
             collection_id,
         )
     except ResearchObjectivesNotReadyError as exc:
@@ -62,10 +58,11 @@ async def list_collection_objectives(collection_id: str) -> ObjectiveListRespons
 async def get_collection_objective_research_view(
     collection_id: str,
     objective_id: str,
+    request: Request,
 ) -> ObjectiveResearchViewResponse:
     try:
         payload = await run_in_threadpool(
-            research_objective_service.get_objective_research_view,
+            request.app.state.research_objective_service.get_objective_research_view,
             collection_id,
             objective_id,
         )

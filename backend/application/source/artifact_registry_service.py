@@ -8,11 +8,11 @@ from domain.ports import (
     BuildRepository,
     CoreFactRepository,
     SourceArtifactRepository,
+    SourceReferenceRepository,
 )
 from domain.source import ArtifactStatusRecord, ArtifactVersionRecord
 from infra.persistence.factory import (
     build_core_fact_repository,
-    build_source_artifact_repository,
 )
 
 
@@ -108,24 +108,34 @@ class ArtifactRegistryService:
     def __init__(
         self,
         repository: BuildRepository,
-        source_artifact_repository: SourceArtifactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository,
+        source_reference_repository: SourceReferenceRepository,
         core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.repository = repository
-        self.source_artifact_repository = (
-            source_artifact_repository or build_source_artifact_repository()
-        )
+        self.source_artifact_repository = source_artifact_repository
+        self.source_reference_repository = source_reference_repository
         self.core_fact_repository = core_fact_repository or build_core_fact_repository()
 
     def build_registry(
         self,
         collection_id: str,
         output_dir: str | Path,
+        *,
+        build_id: str | None = None,
     ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
-        source_artifacts = self.source_artifact_repository.read_collection_artifacts(
-            collection_id
+        source_artifacts = (
+            self.source_artifact_repository.read_collection_artifacts(
+                collection_id,
+                build_id=build_id,
+            )
+            if build_id is not None
+            else self.source_artifact_repository.read_collection_artifacts(
+                collection_id
+            )
         )
+        figures = self.source_reference_repository.list_figures(collection_id)
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         source_artifacts_generated = not source_artifacts.is_empty()
         payload = ArtifactStatusRecord.build(
@@ -171,7 +181,7 @@ class ArtifactRegistryService:
             blocks_generated=source_artifacts_generated,
             blocks_ready=bool(source_artifacts.blocks),
             figures_generated=source_artifacts_generated,
-            figures_ready=bool(source_artifacts.figures),
+            figures_ready=bool(figures),
             table_rows_generated=source_artifacts_generated,
             table_rows_ready=bool(source_artifacts.table_rows),
             table_cells_generated=source_artifacts_generated,
@@ -185,6 +195,8 @@ class ArtifactRegistryService:
         task_id: str,
         collection_id: str,
         output_dir: str | Path,
+        *,
+        build_id: str | None = None,
     ) -> dict:
         stage = next(
             (
@@ -196,7 +208,7 @@ class ArtifactRegistryService:
         )
         if stage is None:
             raise RuntimeError(f"artifact_registry stage not found for task: {task_id}")
-        payload = self.build_registry(collection_id, output_dir)
+        payload = self.build_registry(collection_id, output_dir, build_id=build_id)
         records = tuple(
             ArtifactVersionRecord(
                 artifact_version_id=f"artifact_{uuid4().hex[:20]}",

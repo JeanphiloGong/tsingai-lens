@@ -21,6 +21,16 @@ from infra.persistence.postgres.models.document import (
     Document,
     DocumentVersion,
 )
+from infra.persistence.postgres.models.source import (
+    SourceBlock,
+    SourceBlockTextUnit,
+    SourceDocument,
+    SourceTable,
+    SourceTableCell,
+    SourceTableRow,
+    SourceTextUnit,
+    SourceTextUnitDocument,
+)
 
 __all__ = [
     "ArtifactVersion",
@@ -38,5 +48,13 @@ __all__ = [
     "Document",
     "DocumentVersion",
     "StoredObject",
+    "SourceBlock",
+    "SourceBlockTextUnit",
+    "SourceDocument",
+    "SourceTable",
+    "SourceTableCell",
+    "SourceTableRow",
+    "SourceTextUnit",
+    "SourceTextUnitDocument",
     "Task",
 ]

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -17,6 +18,14 @@ if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
 from application.derived.core_fact_projection import build_core_fact_projection_records
+from infra.persistence.database import (
+    DatabaseSettings,
+    build_database_engine,
+    build_session_factory,
+)
+from infra.persistence.postgres.source_artifact_repository import (
+    PostgresSourceArtifactRepository,
+)
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
@@ -175,9 +184,14 @@ def _load_artifacts(
     collection_id: str,
 ) -> dict[str, pd.DataFrame]:
     db_path = backend_root / "data" / "lens.sqlite"
-    source_artifacts = SqliteSourceArtifactRepository(
-        db_path
-    ).read_collection_artifacts(collection_id)
+    engine = build_database_engine(DatabaseSettings())
+    try:
+        source_artifacts = PostgresSourceArtifactRepository(
+            build_session_factory(engine)
+        ).read_collection_artifacts(collection_id)
+    finally:
+        engine.dispose()
+    figures = SqliteSourceArtifactRepository(db_path).list_figures(collection_id)
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
     projection = build_core_fact_projection_records(core_facts)
     frames: dict[str, pd.DataFrame] = {}
@@ -185,7 +199,7 @@ def _load_artifacts(
         "documents": source_artifacts.documents,
         "text_units": source_artifacts.text_units,
         "blocks": source_artifacts.blocks,
-        "figures": source_artifacts.figures,
+        "figures": figures,
         "tables": source_artifacts.tables,
         "table_rows": source_artifacts.table_rows,
         "table_cells": source_artifacts.table_cells,

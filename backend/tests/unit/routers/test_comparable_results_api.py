@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.collection_service import build_test_collection_service
 from controllers.core import comparable_results as comparable_results_controller
 from domain.core import (
@@ -138,7 +139,12 @@ def _store_core_comparable_result_facts(
 @pytest.fixture()
 def comparable_result_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service)
+    comparison_service = ComparisonService(
+        collection_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
+    )
 
     request = SimpleNamespace(
         app=SimpleNamespace(

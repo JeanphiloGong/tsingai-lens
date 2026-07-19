@@ -8,9 +8,11 @@ and cite.
 
 The Source business records and shared structure logic live in
 `backend/domain/source/`. Infrastructure should parse input files, build those
-domain records, and serialize them into the persisted artifact tables.
-The SQLite Source artifact repository is the structured persistence path; local
-exports and traces are derived from that repository.
+domain records, and return one `SourceArtifactBundle` to the application build
+pipeline. The build pipeline persists document structure to build-versioned
+PostgreSQL rows. Figure metadata and references remain in their narrow SQLite
+repository until their dedicated cutover; local exports and traces read these
+two authorities explicitly.
 
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.
@@ -28,8 +30,10 @@ create_source_artifacts
 ```
 
 `load_input_documents` scans the configured input storage and writes a source
-inventory. `create_source_artifacts` reads that inventory, parses each PDF or
-text document, and writes the final Source handoff artifacts.
+inventory. `create_source_artifacts` reads that inventory and parses each PDF
+or text document. It does not construct a repository or persist authoritative
+rows; the application Source node persists its returned bundle with the pending
+collection `build_id`.
 
 After Source finishes, `application/source` starts Core post-processing:
 
@@ -48,7 +52,7 @@ comparison rows
 
 ## Source Artifacts
 
-The final Source artifact family persisted in the Source repository is:
+The final Source artifact family is:
 
 - `documents`
   Document records, source metadata, full text, and text-unit ids.

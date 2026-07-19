@@ -35,10 +35,13 @@ class MemoryTaskService:
 def build_context(task_service: MemoryTaskService) -> CollectionBuildContext:
     return CollectionBuildContext(
         task_id="task_1",
+        build_id="build_1",
         collection_id="col_1",
         task_service=task_service,
         collection_service=SimpleNamespace(),
         artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
+        source_reference_repository=SimpleNamespace(),
     )
 
 

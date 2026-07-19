@@ -209,16 +209,74 @@ class SourceArtifactRepository(Protocol):
     def replace_collection_artifacts(
         self,
         collection_id: str,
+        build_id: str,
         artifacts: SourceArtifactSet,
     ) -> None: ...
 
-    def read_collection_artifacts(self, collection_id: str) -> SourceArtifactSet: ...
+    def read_collection_artifacts(
+        self,
+        collection_id: str,
+        build_id: str | None = None,
+    ) -> SourceArtifactSet: ...
 
     def read_document_tree(
         self,
         collection_id: str,
         document_id: str,
+        build_id: str | None = None,
     ) -> SourceDocumentTree: ...
+
+    def list_documents(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceDocument]: ...
+
+    def list_text_units(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceTextUnit]: ...
+
+    def list_blocks(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceBlock]: ...
+
+    def list_tables(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceTable]: ...
+
+    def list_table_rows(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceTableRow]: ...
+
+    def list_table_cells(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+        row_index: int | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceTableCell]: ...
+
+
+class SourceReferenceRepository(Protocol):
+    backend_name: str
 
     def replace_collection_references(
         self,
@@ -228,38 +286,11 @@ class SourceArtifactRepository(Protocol):
 
     def read_collection_references(self, collection_id: str) -> SourceReferenceSet: ...
 
-    def list_documents(self, collection_id: str) -> list[SourceDocument]: ...
-
-    def list_text_units(
+    def replace_collection_figures(
         self,
         collection_id: str,
-        document_id: str | None = None,
-    ) -> list[SourceTextUnit]: ...
-
-    def list_blocks(
-        self,
-        collection_id: str,
-        document_id: str | None = None,
-    ) -> list[SourceBlock]: ...
-
-    def list_tables(
-        self,
-        collection_id: str,
-        document_id: str | None = None,
-    ) -> list[SourceTable]: ...
-
-    def list_table_rows(
-        self,
-        collection_id: str,
-        table_id: str | None = None,
-    ) -> list[SourceTableRow]: ...
-
-    def list_table_cells(
-        self,
-        collection_id: str,
-        table_id: str | None = None,
-        row_index: int | None = None,
-    ) -> list[SourceTableCell]: ...
+        figures: tuple[SourceFigure, ...],
+    ) -> None: ...
 
     def list_figures(
         self,

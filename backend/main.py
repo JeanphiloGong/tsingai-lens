@@ -24,6 +24,7 @@ from application.pipeline.goal_analysis.service import GoalAnalysisPipelineServi
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.document_markdown_service import DocumentMarkdownService
+from application.source.reference_workflow_service import SourceReferenceWorkflowService
 from application.source.task_service import TaskService
 from controllers import auth
 from controllers.core import (
@@ -55,6 +56,11 @@ from infra.persistence.database import (
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.source_artifact_repository import (
+    PostgresSourceArtifactRepository,
+)
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from domain.ports import SourceArtifactRepository, SourceReferenceRepository
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -87,6 +93,8 @@ def create_app(
     auth_session_service: AuthSessionService | None = None,
     collection_service: CollectionService | None = None,
     task_service: TaskService | None = None,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_reference_repository: SourceReferenceRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -97,6 +105,7 @@ def create_app(
                 auth_session_service is None
                 or collection_service is None
                 or task_service is None
+                or source_artifact_repository is None
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -114,35 +123,49 @@ def create_app(
             active_task_service = task_service or TaskService(
                 PostgresBuildRepository(session_factory)
             )
+            active_source_artifact_repository = (
+                source_artifact_repository
+                or PostgresSourceArtifactRepository(session_factory)
+            )
+            active_source_reference_repository = (
+                source_reference_repository
+                or SqliteSourceArtifactRepository(DATA_DIR / "lens.sqlite")
+            )
             artifact_registry_service = ArtifactRegistryService(
-                active_task_service.repository
+                active_task_service.repository,
+                active_source_artifact_repository,
+                active_source_reference_repository,
             )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
             )
             paper_facts_service = PaperFactsService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
                 document_profile_service=document_profile_service,
             )
             comparison_service = ComparisonService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
                 document_profile_service=document_profile_service,
             )
             research_objective_service = ResearchObjectiveService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
+                source_reference_repository=active_source_reference_repository,
                 document_profile_service=document_profile_service,
             )
             workspace_service = WorkspaceService(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
+                source_artifact_repository=active_source_artifact_repository,
                 document_profile_service=document_profile_service,
             )
             research_view_service = ResearchViewAggregationService(
                 collection_service=active_collection_service,
-                workspace_service=workspace_service,
-                document_profile_service=document_profile_service,
-                paper_facts_service=paper_facts_service,
-                comparison_service=comparison_service,
+                source_artifact_repository=active_source_artifact_repository,
+                core_fact_repository=paper_facts_service.core_fact_repository,
             )
 
             application.state.collection_service = active_collection_service
@@ -151,6 +174,12 @@ def create_app(
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
+                source_reference_repository=active_source_reference_repository,
+            )
+            application.state.reference_workflow_service = SourceReferenceWorkflowService(
+                source_artifact_repository=active_source_artifact_repository,
+                source_reference_repository=active_source_reference_repository,
             )
             application.state.paper_facts_service = paper_facts_service
             application.state.comparison_service = comparison_service
@@ -161,6 +190,8 @@ def create_app(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
                 artifact_registry_service=artifact_registry_service,
+                source_artifact_repository=active_source_artifact_repository,
+                source_reference_repository=active_source_reference_repository,
                 document_profile_service=document_profile_service,
                 research_objective_service=research_objective_service,
             )

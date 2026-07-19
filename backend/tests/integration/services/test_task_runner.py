@@ -20,25 +20,49 @@ from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 
 class DummyWorkflowOutput:
-    def __init__(self, workflow: str = "build", errors: list[str] | None = None):
+    def __init__(
+        self,
+        workflow: str = "build",
+        errors: list[str] | None = None,
+        result=None,  # noqa: ANN001
+    ):
         self.workflow = workflow
         self.errors = errors
+        self.result = result
+
+
+class MemorySourceArtifactRepository:
+    def __init__(self) -> None:
+        self._artifacts: dict[tuple[str, str], SourceArtifactSet] = {}
+
+    def replace_collection_artifacts(
+        self,
+        collection_id: str,
+        build_id: str,
+        artifacts: SourceArtifactSet,
+    ) -> None:
+        self._artifacts[(collection_id, build_id)] = artifacts
+
+    def read_collection_artifacts(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> SourceArtifactSet:
+        if build_id is None:
+            return SourceArtifactSet()
+        return self._artifacts.get((collection_id, build_id), SourceArtifactSet())
 
 
 def _write_source_artifact_outputs(
     output_dir: Path,
-    *,
-    collection_id: str | None = None,
-    source_repository=None,  # noqa: ANN001
-) -> None:
+) -> SourceArtifactBundle:
     output_dir.mkdir(parents=True, exist_ok=True)
-    collection_id = collection_id or output_dir.parent.name
-    if source_repository is None:
-        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
@@ -99,17 +123,35 @@ def _write_source_artifact_outputs(
     )
     table_rows = build_table_rows(documents, text_units)
     table_cells = build_table_cells(documents, text_units)
-    source_repository.replace_collection_artifacts(
-        collection_id,
-        SourceArtifactSet.from_records(
-            documents=documents.to_dict(orient="records"),
-            text_units=text_units.to_dict(orient="records"),
-            blocks=blocks.to_dict(orient="records"),
-            tables=tables.to_dict(orient="records"),
-            table_rows=table_rows.to_dict(orient="records"),
-            table_cells=table_cells.to_dict(orient="records"),
-        ),
+    return SourceArtifactBundle(
+        documents=documents,
+        text_units=text_units,
+        blocks=blocks,
+        figures=pd.DataFrame(),
+        tables=tables,
+        table_rows=table_rows,
+        table_cells=table_cells,
+        figure_assets={},
     )
+
+
+def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN001
+    source_repository = MemorySourceArtifactRepository()
+    reference_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    artifact_registry = ArtifactRegistryService(
+        build_repository,
+        source_artifact_repository=source_repository,
+        source_reference_repository=reference_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
+    )
+    runner = CollectionBuildPipelineService(
+        collection_service,
+        TaskService(build_repository),
+        artifact_registry,
+        source_artifact_repository=source_repository,
+        source_reference_repository=reference_repository,
+    )
+    return runner, artifact_registry
 
 
 def test_build_pipeline_service_builds_runtime_config_without_config_file(
@@ -117,12 +159,10 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
     build_repository = MemoryBuildRepository()
-    task_service = TaskService(build_repository)
-    artifact_registry = ArtifactRegistryService(build_repository)
-    runner = CollectionBuildPipelineService(
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
         collection_service,
-        task_service,
-        artifact_registry,
+        build_repository,
     )
 
     collection = collection_service.create_collection("Direct Config Collection")
@@ -145,13 +185,11 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     collection_service = build_test_collection_service(tmp_path / "collections")
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
-    source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    artifact_registry = ArtifactRegistryService(
+    runner, artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
         build_repository,
-        source_artifact_repository=source_artifact_repository,
-        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
     )
-    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Composite Papers")
     paths = collection_service.get_paths(collection["collection_id"])
@@ -161,11 +199,9 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        _write_source_artifact_outputs(
-            paths.output_dir,
-            source_repository=source_artifact_repository,
-        )
-        return [DummyWorkflowOutput()]
+        return [
+            DummyWorkflowOutput(result=_write_source_artifact_outputs(paths.output_dir))
+        ]
 
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
@@ -225,8 +261,11 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
     collection_service = build_test_collection_service(tmp_path / "collections")
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
-    artifact_registry = ArtifactRegistryService(build_repository)
-    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
 
     collection = collection_service.create_collection("Empty Collection")
 
@@ -251,8 +290,11 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(monkeypatch,
     collection_service = build_test_collection_service(tmp_path / "collections")
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
-    artifact_registry = ArtifactRegistryService(build_repository)
-    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
 
     collection = collection_service.create_collection("Source Error Collection")
     collection_service.add_file(collection["collection_id"], "paper.txt", b"bad pdf")
@@ -278,16 +320,20 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
     collection_service = build_test_collection_service(tmp_path / "collections")
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
-    artifact_registry = ArtifactRegistryService(build_repository)
-    runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
 
     collection = collection_service.create_collection("Logging Progress Collection")
     paths = collection_service.get_paths(collection["collection_id"])
     collection_service.add_file(collection["collection_id"], "paper.txt", b"Experimental Section\nMix and anneal.")
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
-        _write_source_artifact_outputs(paths.output_dir)
-        return [DummyWorkflowOutput()]
+        return [
+            DummyWorkflowOutput(result=_write_source_artifact_outputs(paths.output_dir))
+        ]
 
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 

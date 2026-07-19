@@ -6,7 +6,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from application.source.collection_service import CollectionService
-from domain.ports import SourceArtifactRepository
+from domain.ports import SourceArtifactRepository, SourceReferenceRepository
 from domain.source import (
     SourceArtifactSet,
     SourceDocument,
@@ -16,7 +16,7 @@ from domain.source import (
     SourceTable,
     render_markdown_table,
 )
-from infra.persistence.factory import build_source_artifact_repository
+from application.source.artifact_input_service import load_document_tree
 from infra.source.runtime.mapping.text_quality import (
     is_garbled_pdf_text,
     normalize_display_text,
@@ -76,15 +76,12 @@ class DocumentMarkdownService:
     def __init__(
         self,
         collection_service: CollectionService,
-        source_artifact_repository: SourceArtifactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository,
+        source_reference_repository: SourceReferenceRepository,
     ) -> None:
         self.collection_service = collection_service
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.source_artifact_repository = source_artifact_repository
+        self.source_reference_repository = source_reference_repository
 
     def get_document_markdown(
         self,
@@ -94,9 +91,11 @@ class DocumentMarkdownService:
         self.collection_service.get_collection(collection_id)
         artifacts = self._load_source_artifacts(collection_id)
         document = self._find_document(artifacts, collection_id, document_id)
-        document_tree = self.source_artifact_repository.read_document_tree(
+        document_tree = load_document_tree(
             collection_id,
             document_id,
+            self.source_artifact_repository,
+            self.source_reference_repository,
         )
         display_names = self._document_display_names(collection_id, document)
 
@@ -142,7 +141,7 @@ class DocumentMarkdownService:
         figure = next(
             (
                 item
-                for item in self.source_artifact_repository.list_figures(
+                for item in self.source_reference_repository.list_figures(
                     collection_id,
                     document_key,
                 )
@@ -191,7 +190,15 @@ class DocumentMarkdownService:
         )
         if not artifacts.documents:
             raise DocumentMarkdownNotReadyError(collection_id)
-        return artifacts
+        return SourceArtifactSet(
+            documents=artifacts.documents,
+            text_units=artifacts.text_units,
+            blocks=artifacts.blocks,
+            tables=artifacts.tables,
+            table_rows=artifacts.table_rows,
+            table_cells=artifacts.table_cells,
+            figures=tuple(self.source_reference_repository.list_figures(collection_id)),
+        )
 
     def _find_document(
         self,

@@ -39,6 +39,7 @@ from application.pipeline.collection_build.runner import CollectionBuildPipeline
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
+from domain.ports import SourceArtifactRepository, SourceReferenceRepository
 from utils.logger import bind_request_id, clear_request_id
 
 logger = logging.getLogger(__name__)
@@ -69,19 +70,26 @@ class CollectionBuildPipelineService:
         collection_service: CollectionService,
         task_service: TaskService,
         artifact_registry_service: ArtifactRegistryService,
+        source_artifact_repository: SourceArtifactRepository,
+        source_reference_repository: SourceReferenceRepository,
         document_profile_service: DocumentProfileService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
         self.artifact_registry_service = artifact_registry_service
+        self.source_artifact_repository = source_artifact_repository
+        self.source_reference_repository = source_reference_repository
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
+            source_artifact_repository=self.source_artifact_repository,
         )
         self.research_objective_service = (
             research_objective_service
             or ResearchObjectiveService(
                 collection_service=self.collection_service,
+                source_artifact_repository=self.source_artifact_repository,
+                source_reference_repository=self.source_reference_repository,
                 document_profile_service=self.document_profile_service,
             )
         )
@@ -148,15 +156,21 @@ class CollectionBuildPipelineService:
             config, output_dir = self._build_collection_config(collection_id)
             self.collection_service.update_collection(collection_id, status="running")
             task = self.task_service.get_task(task_id)
+            build = self.task_service.repository.read_build(task_id)
+            if build is None or build.collection_id != collection_id:
+                raise RuntimeError(f"build not found for task: {task_id}")
             if not task.get("started_at"):
                 self.task_service.update_task(task_id, started_at=task["updated_at"])
 
             context = CollectionBuildContext(
                 task_id=task_id,
+                build_id=build.build_id,
                 collection_id=collection_id,
                 task_service=self.task_service,
                 collection_service=self.collection_service,
                 artifact_registry_service=self.artifact_registry_service,
+                source_artifact_repository=self.source_artifact_repository,
+                source_reference_repository=self.source_reference_repository,
                 config=config,
                 output_dir=output_dir,
                 method=method or IndexingMethod.Standard,

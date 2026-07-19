@@ -17,6 +17,7 @@ from domain.core import (
 )
 from domain.source import SourceArtifactSet
 from infra.persistence.memory import MemoryBuildRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.runtime.source_evidence import build_blocks
 
 
@@ -39,7 +40,13 @@ def _write_source_artifacts(
 def test_workspace_service_builds_collection_overview(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
+    )
 
     collection = collection_service.create_collection("Composite Workspace")
     collection_id = collection["collection_id"]
@@ -66,10 +73,15 @@ def test_workspace_service_builds_collection_overview(tmp_path):
 def test_workspace_service_includes_document_summary_and_links(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    profile_service = DocumentProfileService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
+        source_artifact_repository=source_repository,
         document_profile_service=profile_service,
     )
     collection = collection_service.create_collection("Profiled Workspace")
@@ -132,7 +144,13 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
 def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
+    )
     collection = collection_service.create_collection("Semantic Graph Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(
@@ -239,7 +257,13 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
 def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
+    )
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(

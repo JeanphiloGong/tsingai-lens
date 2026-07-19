@@ -1,27 +1,18 @@
 from __future__ import annotations
 
-import json
 import math
 import re
 from collections import defaultdict
 from typing import Any
 
-from application.core.comparison_service import (
-    ComparisonService,
-)
-from application.core.semantic_build.document_profile_service import (
-    DocumentProfileService,
-)
-from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.research_understanding_service import ResearchUnderstandingService
-from application.core.workspace_overview_service import WorkspaceService
 from application.source.collection_service import CollectionService
 from domain.core import ResearchUnderstanding
 from domain.core.fact_store import CoreFactSet
 from domain.core.objective_material_projection import (
     project_objective_material_rows,
 )
-from domain.ports import CoreFactRepository
+from domain.ports import CoreFactRepository, SourceArtifactRepository
 from infra.persistence.factory import build_core_fact_repository
 
 
@@ -148,36 +139,19 @@ class ResearchViewAggregationService:
     def __init__(
         self,
         collection_service: CollectionService,
-        workspace_service: WorkspaceService,
-        document_profile_service: DocumentProfileService | None = None,
-        paper_facts_service: PaperFactsService | None = None,
-        comparison_service: ComparisonService | None = None,
+        source_artifact_repository: SourceArtifactRepository,
         core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.workspace_service = workspace_service
         self.core_fact_repository = (
             core_fact_repository
-            or getattr(paper_facts_service, "core_fact_repository", None)
             or build_core_fact_repository(
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
-        self.document_profile_service = document_profile_service or DocumentProfileService(
-            collection_service=self.collection_service,
-            core_fact_repository=self.core_fact_repository,
+        self.research_understanding_service = ResearchUnderstandingService(
+            source_artifact_repository
         )
-        self.paper_facts_service = paper_facts_service or PaperFactsService(
-            collection_service=self.collection_service,
-            document_profile_service=self.document_profile_service,
-            core_fact_repository=self.core_fact_repository,
-        )
-        self.comparison_service = comparison_service or ComparisonService(
-            collection_service=self.collection_service,
-            document_profile_service=self.document_profile_service,
-            core_fact_repository=self.core_fact_repository,
-        )
-        self.research_understanding_service = ResearchUnderstandingService()
 
     def get_collection_research_view(self, collection_id: str) -> dict[str, Any]:
         collection = self.collection_service.get_collection(collection_id)

@@ -10,5 +10,6 @@ def run(context: CollectionBuildContext) -> dict:
     ].build_objective_candidates(
         context.collection_id,
         progress_callback=progress_callback,
+        build_id=context.build_id,
     )
     return {"objective_candidate_count": len(objectives)}

@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVariant
 from domain.source import SourceArtifactSet
@@ -25,7 +26,7 @@ def _load_trace_module():
     return module
 
 
-def test_export_trace_writes_readable_artifact_views(tmp_path):
+def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     trace = _load_trace_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
@@ -118,6 +119,17 @@ def test_export_trace_writes_readable_artifact_views(tmp_path):
                 ),
             ),
         ),
+    )
+    monkeypatch.setattr(
+        trace,
+        "build_database_engine",
+        lambda _settings: SimpleNamespace(dispose=lambda: None),
+    )
+    monkeypatch.setattr(trace, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(
+        trace,
+        "PostgresSourceArtifactRepository",
+        lambda _session_factory: SqliteSourceArtifactRepository(db_path),
     )
 
     trace_dir = trace.export_trace(

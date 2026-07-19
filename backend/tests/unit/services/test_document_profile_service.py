@@ -12,12 +12,18 @@ from application.core.semantic_build.document_profile_service import (
 from tests.support.collection_service import build_test_collection_service
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.runtime.source_evidence import build_blocks
 
 
 def _build_profile_service(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    return collection_service, DocumentProfileService(collection_service)
+    return collection_service, DocumentProfileService(
+        collection_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
+    )
 
 
 def _write_source_artifacts(
@@ -173,6 +179,9 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     profile_service = DocumentProfileService(
         collection_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
         structured_extractor=ExplodingExtractor(),
     )
     collection = collection_service.create_collection("Sparse Profiles")
@@ -192,6 +201,9 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
 def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):
     profile_service = DocumentProfileService(
         collection_service=build_test_collection_service(tmp_path / "collections"),
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
     )
 
     profiles = [

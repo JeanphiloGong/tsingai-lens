@@ -15,10 +15,20 @@ from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from application.source import artifact_input_service
 
 
-def test_artifact_input_service_prefers_sqlite_source_repository(monkeypatch, tmp_path):
-    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    repository.replace_collection_artifacts(
-        "col_source",
+class _SourceRepository:
+    def __init__(self, artifacts: SourceArtifactSet) -> None:
+        self.artifacts = artifacts
+
+    def read_collection_artifacts(
+        self,
+        collection_id: str,
+        build_id: str | None = None,
+    ) -> SourceArtifactSet:
+        return self.artifacts
+
+
+def test_artifact_input_service_uses_explicit_source_repository():
+    repository = _SourceRepository(
         SourceArtifactSet(
             documents=(
                 SourceDocument(
@@ -86,17 +96,17 @@ def test_artifact_input_service_prefers_sqlite_source_repository(monkeypatch, tm
             ),
         ),
     )
-    monkeypatch.setattr(
-        artifact_input_service,
-        "build_source_artifact_repository",
-        lambda: repository,
+    documents, text_units = artifact_input_service.load_collection_inputs(
+        "col_source", repository
     )
-
-    documents, text_units = artifact_input_service.load_collection_inputs("col_source")
-    blocks = artifact_input_service.load_blocks_artifact("col_source")
-    tables = artifact_input_service.load_tables_artifact("col_source")
-    table_rows = artifact_input_service.load_table_rows_artifact("col_source")
-    table_cells = artifact_input_service.load_table_cells_artifact("col_source")
+    blocks = artifact_input_service.load_blocks_artifact("col_source", repository)
+    tables = artifact_input_service.load_tables_artifact("col_source", repository)
+    table_rows = artifact_input_service.load_table_rows_artifact(
+        "col_source", repository
+    )
+    table_cells = artifact_input_service.load_table_cells_artifact(
+        "col_source", repository
+    )
 
     assert documents[0]["id"] == "doc-1"
     assert text_units is not None
@@ -107,10 +117,8 @@ def test_artifact_input_service_prefers_sqlite_source_repository(monkeypatch, tm
     assert table_cells[0]["header_path"] == "Value"
 
 
-def test_artifact_input_service_loads_document_tree(monkeypatch, tmp_path):
-    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    repository.replace_collection_artifacts(
-        "col_source",
+def test_artifact_input_service_loads_document_tree(tmp_path):
+    source_repository = _SourceRepository(
         SourceArtifactSet(
             documents=(
                 SourceDocument(
@@ -141,7 +149,8 @@ def test_artifact_input_service_loads_document_tree(monkeypatch, tmp_path):
             ),
         ),
     )
-    repository.replace_collection_references(
+    reference_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    reference_repository.replace_collection_references(
         "col_source",
         SourceReferenceSet(
             entries=(
@@ -153,13 +162,12 @@ def test_artifact_input_service_loads_document_tree(monkeypatch, tmp_path):
             )
         ),
     )
-    monkeypatch.setattr(
-        artifact_input_service,
-        "build_source_artifact_repository",
-        lambda: repository,
-    )
-
-    tree = artifact_input_service.load_document_tree("col_source", "doc-1")
+    tree = artifact_input_service.load_document_tree(
+        "col_source",
+        "doc-1",
+        source_repository,
+        reference_repository,
+    ).to_record()
 
     assert tree["document_id"] == "doc-1"
     assert tree["collection_id"] == "col_source"

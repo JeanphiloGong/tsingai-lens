@@ -19,6 +19,9 @@ from domain.core import (
     ResearchObjective,
 )
 from infra.persistence.sqlite.core_fact_repository import SqliteCoreFactRepository
+from infra.persistence.sqlite.source_artifact_repository import (
+    SqliteSourceArtifactRepository,
+)
 
 
 def _seed_objective_collection(tmp_path):
@@ -115,9 +118,12 @@ def _seed_objective_collection(tmp_path):
             ),
         ),
     )
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     service = ResearchObjectiveService(
         collection_service=collection_service,
         core_fact_repository=repository,
+        source_artifact_repository=source_repository,
+        source_reference_repository=source_repository,
     )
     service.persist_objective_understandings(collection_id)
     return collection_id, objective.objective_id, service

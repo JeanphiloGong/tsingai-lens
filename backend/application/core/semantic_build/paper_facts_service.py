@@ -75,7 +75,6 @@ from domain.shared.enums import (
 from domain.shared.record_normalization import normalize_record_value
 from infra.persistence.factory import (
     build_core_fact_repository,
-    build_source_artifact_repository,
 )
 
 logger = logging.getLogger(__name__)
@@ -432,10 +431,10 @@ class PaperFactsService:
     def __init__(
         self,
         collection_service: CollectionService,
+        source_artifact_repository: SourceArtifactRepository,
         document_profile_service: DocumentProfileService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
-        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.document_profile_service = document_profile_service or DocumentProfileService(
@@ -450,13 +449,7 @@ class PaperFactsService:
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or getattr(self.document_profile_service, "source_artifact_repository", None)
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.source_artifact_repository = source_artifact_repository
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
         if self._structured_extractor is None:

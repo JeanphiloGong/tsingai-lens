@@ -28,6 +28,7 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from infra.persistence.memory import MemoryBuildRepository
+from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
@@ -43,9 +44,38 @@ API_V1_PREFIX = "/api/v1"
 
 
 class DummyWorkflowOutput:
-    def __init__(self, workflow: str = "build", errors: list[str] | None = None):
+    def __init__(
+        self,
+        workflow: str = "build",
+        errors: list[str] | None = None,
+        result=None,  # noqa: ANN001
+    ):
         self.workflow = workflow
         self.errors = errors
+        self.result = result
+
+
+class MemorySourceArtifactRepository:
+    def __init__(self) -> None:
+        self._artifacts: dict[tuple[str, str], SourceArtifactSet] = {}
+
+    def replace_collection_artifacts(
+        self,
+        collection_id: str,
+        build_id: str,
+        artifacts: SourceArtifactSet,
+    ) -> None:
+        self._artifacts[(collection_id, build_id)] = artifacts
+
+    def read_collection_artifacts(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> SourceArtifactSet:
+        if build_id is None:
+            return SourceArtifactSet()
+        return self._artifacts.get((collection_id, build_id), SourceArtifactSet())
 
 
 def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) -> dict:  # noqa: ANN001
@@ -75,19 +105,14 @@ def _collection_output_dir(app_client, collection_id: str) -> Path:  # noqa: ANN
 
 def _write_source_artifact_outputs(
     output_dir: Path,
-    *,
-    collection_id: str | None = None,
-    source_repository=None,  # noqa: ANN001
-) -> None:
+) -> SourceArtifactBundle:
     output_dir.mkdir(parents=True, exist_ok=True)
-    collection_id = collection_id or output_dir.parent.name
-    if source_repository is None:
-        source_repository = SqliteSourceArtifactRepository(output_dir.parents[2] / "lens.sqlite")
     documents = pd.DataFrame(
         [
             {
                 "id": "paper-1",
                 "title": "Composite Paper",
+                "metadata": {"source_path": "paper.txt"},
                 "text": "\n".join(
                     [
                         "Experimental Section",
@@ -143,16 +168,15 @@ def _write_source_artifact_outputs(
     )
     table_rows = build_table_rows(documents, text_units)
     table_cells = build_table_cells(documents, text_units)
-    source_repository.replace_collection_artifacts(
-        collection_id,
-        SourceArtifactSet.from_records(
-            documents=documents.to_dict(orient="records"),
-            text_units=text_units.to_dict(orient="records"),
-            blocks=blocks.to_dict(orient="records"),
-            tables=tables.to_dict(orient="records"),
-            table_rows=table_rows.to_dict(orient="records"),
-            table_cells=table_cells.to_dict(orient="records"),
-        ),
+    return SourceArtifactBundle(
+        documents=documents,
+        text_units=text_units,
+        blocks=blocks,
+        figures=pd.DataFrame(),
+        tables=tables,
+        table_rows=table_rows,
+        table_cells=table_cells,
+        figure_assets={},
     )
 
 
@@ -433,8 +457,7 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured["bound_request_id"] = get_request_id()
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_source_artifact_outputs(output_dir)
-        return [DummyWorkflowOutput()]
+        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
 
@@ -591,11 +614,15 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
 
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
-    source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    source_artifact_repository = MemorySourceArtifactRepository()
+    source_reference_repository = SqliteSourceArtifactRepository(
+        tmp_path / "lens.sqlite"
+    )
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_artifact_repository,
+        source_reference_repository=source_reference_repository,
         core_fact_repository=core_fact_repository,
     )
     document_profile_service = DocumentProfileService(
@@ -620,11 +647,14 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         document_profile_service=document_profile_service,
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
+        source_reference_repository=source_reference_repository,
     )
     runner = CollectionBuildPipelineService(
         collection_service=collection_service,
         task_service=task_service,
         artifact_registry_service=artifact_registry,
+        source_artifact_repository=source_artifact_repository,
+        source_reference_repository=source_reference_repository,
         document_profile_service=document_profile_service,
         research_objective_service=research_objective_service,
     )
@@ -637,21 +667,14 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     )
     research_view_service = ResearchViewAggregationService(
         collection_service=collection_service,
-        workspace_service=workspace_service,
-        document_profile_service=document_profile_service,
-        paper_facts_service=paper_facts_service,
-        comparison_service=comparison_service,
+        source_artifact_repository=source_artifact_repository,
         core_fact_repository=core_fact_repository,
     )
     goal_service = GoalService(collection_service)
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_source_artifact_outputs(
-            output_dir,
-            source_repository=source_artifact_repository,
-        )
-        return [DummyWorkflowOutput()]
+        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
     monkeypatch.setattr(
@@ -760,7 +783,7 @@ def test_collection_task_flow(app_client):
     assert body["graph_stale"] is False
     assert body["blocks_generated"] is True
     assert body["blocks_ready"] is True
-    assert body["figures_generated"] is True
+    assert body["figures_generated"] is False
     assert body["figures_ready"] is False
     assert body["table_rows_generated"] is True
     assert body["table_rows_ready"] is False
@@ -1356,8 +1379,7 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     async def capturing_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
         output_dir = Path(kwargs["config"].output.base_dir)
-        _write_source_artifact_outputs(output_dir)
-        return [DummyWorkflowOutput()]
+        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
     monkeypatch.setattr(
         task_runner_module,

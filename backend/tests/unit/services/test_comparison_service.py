@@ -73,6 +73,7 @@ def test_comparison_service_projects_rows_from_objective_measurements():
     )
     service = ComparisonService(
         collection_service=FakeCollectionService(),
+        source_artifact_repository=SimpleNamespace(),
         document_profile_service=SimpleNamespace(),
         core_fact_repository=repository,
     )
@@ -109,6 +110,7 @@ def test_comparison_service_does_not_fall_back_to_paper_facts_for_empty_objectiv
     )
     service = ComparisonService(
         collection_service=FakeCollectionService(),
+        source_artifact_repository=SimpleNamespace(),
         document_profile_service=SimpleNamespace(),
         core_fact_repository=repository,
     )

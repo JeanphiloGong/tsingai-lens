@@ -20,6 +20,7 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from controllers.core import documents as documents_controller
 from domain.core import (
     BaselineReference,
@@ -225,9 +226,20 @@ def _store_core_document_semantics(
 @pytest.fixture()
 def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service)
-    comparison_service = ComparisonService(collection_service)
-    document_markdown_service = DocumentMarkdownService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
+    document_markdown_service = DocumentMarkdownService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        source_reference_repository=source_repository,
+    )
 
     return (
         collection_service,

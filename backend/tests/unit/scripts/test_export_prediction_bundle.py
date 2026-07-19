@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from domain.core import (
     BaselineReference,
@@ -46,11 +47,26 @@ def _load_exporter_module():
     return module
 
 
-def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
+def test_export_prediction_bundle_writes_gold_aligned_system_output(
+    tmp_path,
+    monkeypatch,
+):
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
     _write_system_artifacts(backend_root, collection_id)
+    source_db_path = [backend_root / "data" / "lens.sqlite"]
+    monkeypatch.setattr(
+        exporter,
+        "build_database_engine",
+        lambda _settings: SimpleNamespace(dispose=lambda: None),
+    )
+    monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(
+        exporter,
+        "PostgresSourceArtifactRepository",
+        lambda _session_factory: SqliteSourceArtifactRepository(source_db_path[0]),
+    )
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
 
     result_path = exporter.export_prediction_bundle(
@@ -107,6 +123,7 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(tmp_path):
     run_output_dir = run_root / "collections" / run_collection_id / "output"
     run_output_dir.mkdir(parents=True)
     _write_system_artifacts_to_db(run_root / "lens.sqlite", run_collection_id)
+    source_db_path[0] = run_root / "lens.sqlite"
     run_output_prediction_path = tmp_path / "generated" / "prediction_from_run.json"
 
     exporter.export_prediction_bundle(
@@ -1408,11 +1425,23 @@ def test_export_prediction_bundle_normalizes_objective_metric_aliases(tmp_path):
     ] == ["MPa", "MPa", "%", "MPa", "MPa", "%"]
 
 
-def test_export_prediction_bundle_allows_missing_artifacts(tmp_path):
+def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch):
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-empty"
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
+    db_path = backend_root / "data" / "lens.sqlite"
+    monkeypatch.setattr(
+        exporter,
+        "build_database_engine",
+        lambda _settings: SimpleNamespace(dispose=lambda: None),
+    )
+    monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(
+        exporter,
+        "PostgresSourceArtifactRepository",
+        lambda _session_factory: SqliteSourceArtifactRepository(db_path),
+    )
 
     exporter.export_prediction_bundle(
         backend_root=backend_root,

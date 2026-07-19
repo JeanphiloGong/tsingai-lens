@@ -35,9 +35,10 @@ must name the authoritative records from which they can be rebuilt.
 ## Current Runtime Model
 
 The current runtime is split between PostgreSQL auth, collection, canonical
-document, file-provenance, and build-lineage records; uploaded and generated
-files; and five handwritten SQLite repositories. This table records that split
-so later migrations do not accidentally preserve it.
+document, file-provenance, build-lineage, and Source structure records;
+uploaded and generated files; and the remaining handwritten SQLite
+repositories. This table records that split so later migrations do not
+accidentally preserve it.
 
 | Current family | Current runtime owner | Rebuildable now? | Target authority |
 | --- | --- | --- | --- |
@@ -51,11 +52,12 @@ so later migrations do not accidentally preserve it.
 | Artifact readiness and active-build selection | PostgreSQL `artifact_versions` and `collection_active_builds` | No | PostgreSQL metadata; binary exports in object storage |
 | Users and auth sessions | PostgreSQL `auth_users` and `auth_sessions` | No | PostgreSQL |
 | Goal sessions and experiment plans | `lens.sqlite` Goal tables | No | PostgreSQL |
-| Source document structure and references | `lens.sqlite` Source tables | No | PostgreSQL |
+| Source documents, text units, blocks, tables, rows, cells, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL |
+| Source figures and references | `lens.sqlite` Source tables | No | PostgreSQL metadata and object storage |
 | Core facts, objectives, comparisons, goals, and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
 | Feedback, curation, and evaluation | `lens.sqlite` evaluation tables | No | PostgreSQL |
 | Extracted images and other generated binary media | `images/` and collection output paths | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL metadata |
-| Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; some files currently duplicate SQLite Source rows | Local scratch only |
+| Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
 | Report, GraphML, archive, and review exports | generated output paths | Yes from versioned records | Object storage; PostgreSQL stores export metadata |
 | Embedding, parser, and model caches | `cache/` and runtime cache paths | Yes | Local scratch; optional accepted embeddings use `pgvector` |
 | Trace payloads and logs | `traces/` and log paths | Yes for product behavior; retained only for diagnostics | Local scratch or object storage when an explicit retention rule requires it |
@@ -79,6 +81,14 @@ Successful completion may advance `collection_active_builds`; failed builds and
 older concurrent completions remain history and cannot replace a newer active
 build. Task-specific artifact readiness is derived from immutable version rows,
 not stored as a mutable boolean document.
+
+The Source structure aggregate is direct and relational as well. Parser
+workflows return a bundle without constructing persistence. The application
+Source node writes the pending build explicitly, and ordinary readers resolve
+`collection_active_builds`. Every Source document resolves by exact stored
+filename to one same-collection membership and immutable document version.
+Figures and references remain a separate SQLite authority until their recorded
+cutover; application read models combine the two families explicitly.
 
 ### Legacy SQLite Inventory
 

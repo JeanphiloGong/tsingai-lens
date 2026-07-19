@@ -14,7 +14,6 @@ from application.source.task_service import TaskService
 from domain.ports import CoreFactRepository, SourceArtifactRepository
 from infra.persistence.factory import (
     build_core_fact_repository,
-    build_source_artifact_repository,
 )
 
 
@@ -25,9 +24,9 @@ class WorkspaceService:
         self,
         collection_service: CollectionService,
         task_service: TaskService,
+        source_artifact_repository: SourceArtifactRepository,
         document_profile_service: DocumentProfileService | None = None,
         core_fact_repository: CoreFactRepository | None = None,
-        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
@@ -37,12 +36,7 @@ class WorkspaceService:
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             core_fact_repository=self.core_fact_repository,

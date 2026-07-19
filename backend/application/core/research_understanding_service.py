@@ -12,7 +12,6 @@ from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtra
 from domain.core import ResearchUnderstanding
 from domain.ports import SourceArtifactRepository
 from domain.source import SourceBlock, SourceDocument, SourceTable
-from infra.persistence.factory import build_source_artifact_repository
 from infra.source.runtime.mapping.text_quality import normalize_display_text
 
 logger = logging.getLogger(__name__)
@@ -102,9 +101,7 @@ class ResearchUnderstandingService:
         source_artifact_repository: SourceArtifactRepository | None = None,
         structured_extractor: Any | None = None,
     ) -> None:
-        self.source_artifact_repository = (
-            source_artifact_repository or build_source_artifact_repository()
-        )
+        self.source_artifact_repository = source_artifact_repository
         self.structured_extractor = structured_extractor or CoreLLMStructuredExtractor()
 
     def with_presentation(

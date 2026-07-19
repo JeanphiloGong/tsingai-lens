@@ -71,6 +71,12 @@ class CollectionDocument(Base):
             "collection_document_id",
             name="uq_collection_documents_collection_membership_identity",
         ),
+        UniqueConstraint(
+            "collection_id",
+            "collection_document_id",
+            "document_version_id",
+            name="uq_collection_documents_membership_version",
+        ),
     )
 
     collection_document_id: Mapped[str] = mapped_column(String(64), primary_key=True)

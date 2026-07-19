@@ -18,10 +18,15 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
-from infra.persistence.sqlite import (  # noqa: E402
-    SqliteCoreFactRepository,
-    SqliteSourceArtifactRepository,
+from infra.persistence.database import (  # noqa: E402
+    DatabaseSettings,
+    build_database_engine,
+    build_session_factory,
 )
+from infra.persistence.postgres.source_artifact_repository import (  # noqa: E402
+    PostgresSourceArtifactRepository,
+)
+from infra.persistence.sqlite import SqliteCoreFactRepository  # noqa: E402
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
     / "tests"
@@ -322,9 +327,13 @@ def _load_artifacts(
     collection_id: str,
     db_path: Path,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
-    source_artifacts = SqliteSourceArtifactRepository(
-        db_path
-    ).read_collection_artifacts(collection_id)
+    engine = build_database_engine(DatabaseSettings())
+    try:
+        source_artifacts = PostgresSourceArtifactRepository(
+            build_session_factory(engine)
+        ).read_collection_artifacts(collection_id)
+    finally:
+        engine.dispose()
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
     records_by_artifact: dict[str, list[dict[str, Any]]] = {
         "documents": [record.to_record() for record in source_artifacts.documents],

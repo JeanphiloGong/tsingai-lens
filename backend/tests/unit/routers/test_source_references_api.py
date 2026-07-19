@@ -24,16 +24,15 @@ def source_reference_services(monkeypatch, tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     workflow_service = SourceReferenceWorkflowService(
-        source_artifact_repository=repository
-    )
-    monkeypatch.setattr(
-        references_controller,
-        "reference_workflow_service",
-        workflow_service,
+        source_artifact_repository=repository,
+        source_reference_repository=repository,
     )
     request = SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(collection_service=collection_service),
+            state=SimpleNamespace(
+                collection_service=collection_service,
+                reference_workflow_service=workflow_service,
+            ),
         )
     )
     return collection_service, repository, request

@@ -16,7 +16,34 @@ from infra.persistence.postgres.base import Base
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260719_0006"
+HEAD_REVISION = "20260719_0007"
+EXPECTED_TABLES = {
+    "alembic_version",
+    "artifact_versions",
+    "auth_sessions",
+    "auth_users",
+    "build_stages",
+    "collection_active_builds",
+    "collection_builds",
+    "collection_documents",
+    "collection_files",
+    "collection_handoffs",
+    "collection_import_documents",
+    "collection_imports",
+    "collections",
+    "document_versions",
+    "documents",
+    "source_block_text_units",
+    "source_blocks",
+    "source_documents",
+    "source_table_cells",
+    "source_table_rows",
+    "source_tables",
+    "source_text_unit_documents",
+    "source_text_units",
+    "stored_objects",
+    "tasks",
+}
 
 
 def test_empty_database_upgrades_checks_downgrades_and_upgrades_again(
@@ -44,25 +71,7 @@ def test_empty_database_upgrades_checks_downgrades_and_upgrades_again(
                 MigrationContext.configure(connection).get_current_revision()
                 == HEAD_REVISION
             )
-            assert inspect(connection).get_table_names() == [
-                "alembic_version",
-                "artifact_versions",
-                "auth_sessions",
-                "auth_users",
-                "build_stages",
-                "collection_active_builds",
-                "collection_builds",
-                "collection_documents",
-                "collection_files",
-                "collection_handoffs",
-                "collection_import_documents",
-                "collection_imports",
-                "collections",
-                "document_versions",
-                "documents",
-                "stored_objects",
-                "tasks",
-            ]
+            assert inspect(connection).get_table_names() == sorted(EXPECTED_TABLES)
             command.check(config)
 
             command.downgrade(config, "base")
@@ -105,25 +114,7 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 MigrationContext.configure(connection).get_current_revision()
                 == HEAD_REVISION
             )
-            assert set(inspect(connection).get_table_names()) == {
-                "alembic_version",
-                "auth_sessions",
-                "auth_users",
-                "artifact_versions",
-                "build_stages",
-                "collection_active_builds",
-                "collection_builds",
-                "collection_documents",
-                "collection_files",
-                "collection_handoffs",
-                "collection_import_documents",
-                "collection_imports",
-                "collections",
-                "document_versions",
-                "documents",
-                "stored_objects",
-                "tasks",
-            }
+            assert set(inspect(connection).get_table_names()) == EXPECTED_TABLES
             command.check(config)
 
             command.downgrade(config, "base")

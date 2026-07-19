@@ -43,19 +43,6 @@ class FakeCollectionService:
         return [{"filename": "paper.pdf"}]
 
 
-class FakeDocumentProfileService:
-    def __init__(self, profiles: list[dict]) -> None:
-        self.profiles = profiles
-
-    def read_document_profiles(self, collection_id: str) -> list[dict]:  # noqa: ARG002
-        return self.profiles
-
-
-class FakePaperFactsService:
-    def __init__(self, core_fact_repository: "FakeCoreFactRepository") -> None:
-        self.core_fact_repository = core_fact_repository
-
-
 class FakeCoreFactRepository:
     backend_name = "fake"
 
@@ -431,9 +418,7 @@ def _service(
     core_fact_repository = FakeCoreFactRepository(profiles, frames, comparison_rows)
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(has_files=has_files),
-        document_profile_service=FakeDocumentProfileService(profiles),
-        paper_facts_service=FakePaperFactsService(core_fact_repository),
-        workspace_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
         core_fact_repository=core_fact_repository,
     )
 
@@ -465,9 +450,7 @@ def _service_from_frames(
     )
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(),
-        document_profile_service=FakeDocumentProfileService(profiles),
-        paper_facts_service=FakePaperFactsService(core_fact_repository),
-        workspace_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
         core_fact_repository=core_fact_repository,
     )
 

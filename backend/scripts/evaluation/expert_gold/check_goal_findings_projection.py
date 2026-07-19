@@ -595,13 +595,22 @@ def _api_json_request(
 
 def build_source_artifact_index(collection_id: str) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
-        from infra.persistence.factory import (  # noqa: PLC0415
-            build_source_artifact_repository,
+        from infra.persistence.database import (  # noqa: PLC0415
+            DatabaseSettings,
+            build_database_engine,
+            build_session_factory,
+        )
+        from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
+            PostgresSourceArtifactRepository,
         )
 
-        artifacts = build_source_artifact_repository().read_collection_artifacts(
-            collection_id
-        )
+        engine = build_database_engine(DatabaseSettings())
+        try:
+            artifacts = PostgresSourceArtifactRepository(
+                build_session_factory(engine)
+            ).read_collection_artifacts(collection_id)
+        finally:
+            engine.dispose()
     documents = {
         document.document_id
         for document in artifacts.documents

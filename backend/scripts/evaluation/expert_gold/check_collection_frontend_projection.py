@@ -85,19 +85,17 @@ def check_collection_frontend_projection(
         DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS
     ),
 ) -> dict[str, Any]:
-    backend_root = str(DEFAULT_BACKEND_ROOT)
-    if backend_root not in sys.path:
-        sys.path.insert(0, backend_root)
+    backend_root = DEFAULT_BACKEND_ROOT
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
 
     from application.core.research_view_aggregation_service import (  # noqa: PLC0415
         ResearchViewAggregationService,
     )
-    from application.core.workspace_overview_service import WorkspaceService  # noqa: PLC0415
     from application.core.semantic_build.research_objective_service import (  # noqa: PLC0415
         ResearchObjectiveService,
     )
     from application.source.collection_service import CollectionService  # noqa: PLC0415
-    from application.source.task_service import TaskService  # noqa: PLC0415
     from infra.persistence.database import (  # noqa: PLC0415
         DatabaseSettings,
         build_database_engine,
@@ -107,8 +105,11 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
         PostgresCollectionRepository,
     )
-    from infra.persistence.postgres.build_repository import (  # noqa: PLC0415
-        PostgresBuildRepository,
+    from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
+        PostgresSourceArtifactRepository,
+    )
+    from infra.persistence.sqlite import (  # noqa: PLC0415
+        SqliteSourceArtifactRepository,
     )
 
     engine = build_database_engine(DatabaseSettings())
@@ -118,18 +119,20 @@ def check_collection_frontend_projection(
             repository=PostgresCollectionRepository(session_factory),
             workspace=FileCollectionWorkspace(),
         )
-        workspace_service = WorkspaceService(
-            collection_service=collection_service,
-            task_service=TaskService(PostgresBuildRepository(session_factory)),
+        source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
+        source_reference_repository = SqliteSourceArtifactRepository(
+            backend_root / "data" / "lens.sqlite"
         )
         objective_service = ResearchObjectiveService(
             collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            source_reference_repository=source_reference_repository,
         )
         objectives = objective_service.list_objective_workspaces(collection_id)
         material_profile = (
             ResearchViewAggregationService(
                 collection_service=collection_service,
-                workspace_service=workspace_service,
+                source_artifact_repository=source_artifact_repository,
             ).get_collection_material_research_view(
                 collection_id,
                 material_id,

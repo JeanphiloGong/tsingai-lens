@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.task_service import TaskService
 from domain.core import (
@@ -21,7 +23,14 @@ from infra.persistence.sqlite import (
 
 
 def test_artifact_registry_ignores_absent_legacy_graph_outputs(tmp_path):
-    artifact_registry = ArtifactRegistryService(MemoryBuildRepository())
+    source_repository = Mock()
+    source_repository.read_collection_artifacts.return_value = SourceArtifactSet()
+    reference_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    artifact_registry = ArtifactRegistryService(
+        MemoryBuildRepository(),
+        source_artifact_repository=source_repository,
+        source_reference_repository=reference_repository,
+    )
 
     payload = artifact_registry.build_registry("col_demo", tmp_path / "output")
 
@@ -59,6 +68,10 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
                 }
             ],
         ),
+    )
+    structure_repository = Mock()
+    structure_repository.read_collection_artifacts.return_value = (
+        source_repository.read_collection_artifacts(collection_id)
     )
     core_repository.replace_collection_facts(
         collection_id,
@@ -144,7 +157,8 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
     )
     artifact_registry = ArtifactRegistryService(
         MemoryBuildRepository(),
-        source_artifact_repository=source_repository,
+        source_artifact_repository=structure_repository,
+        source_reference_repository=source_repository,
         core_fact_repository=core_repository,
     )
 
@@ -177,6 +191,10 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
                 }
             ],
         ),
+    )
+    structure_repository = Mock()
+    structure_repository.read_collection_artifacts.return_value = (
+        source_repository.read_collection_artifacts(collection_id)
     )
     document_profiles = (
         DocumentProfile.from_mapping(
@@ -253,7 +271,8 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
     )
     artifact_registry = ArtifactRegistryService(
         MemoryBuildRepository(),
-        source_artifact_repository=source_repository,
+        source_artifact_repository=structure_repository,
+        source_reference_repository=source_repository,
         core_fact_repository=core_repository,
     )
 
@@ -307,9 +326,14 @@ def test_artifact_registry_persists_version_rows_and_rebuilds_task_projection(
             ]
         ),
     )
+    structure_repository = Mock()
+    structure_repository.read_collection_artifacts.return_value = (
+        source_repository.read_collection_artifacts(collection_id)
+    )
     registry = ArtifactRegistryService(
         repository,
-        source_artifact_repository=source_repository,
+        source_artifact_repository=structure_repository,
+        source_reference_repository=source_repository,
         core_fact_repository=core_repository,
     )
 

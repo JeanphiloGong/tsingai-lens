@@ -11,6 +11,7 @@ from application.source.document_markdown_service import (
     SourceDocumentNotFoundError,
 )
 from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
@@ -20,7 +21,12 @@ from infra.source.ingestion.normalized_import import (
 
 def _build_markdown_service(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    return collection_service, DocumentMarkdownService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    return collection_service, DocumentMarkdownService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        source_reference_repository=source_repository,
+    )
 
 
 def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):

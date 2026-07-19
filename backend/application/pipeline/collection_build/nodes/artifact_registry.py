@@ -8,6 +8,7 @@ def run(context: CollectionBuildContext) -> dict:
         context.task_id,
         context.collection_id,
         context.output_dir,
+        build_id=context.build_id,
     )
     context.state["artifacts"] = artifacts
     return {"output_path": artifacts["output_path"]}

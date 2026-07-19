@@ -28,14 +28,17 @@ from domain.core import (
     ResearchUnderstanding,
     build_research_objective_id,
     is_question_shaped_objective,
-    project_objective_material_rows,
 )
-from domain.ports import CoreFactRepository, SourceArtifactRepository
+from domain.ports import (
+    CoreFactRepository,
+    SourceArtifactRepository,
+    SourceReferenceRepository,
+)
 from domain.source import SourceArtifactSet, SourceDocumentTree
 from infra.persistence.factory import (
     build_core_fact_repository,
-    build_source_artifact_repository,
 )
+from application.source.artifact_input_service import load_document_tree
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
@@ -343,9 +346,10 @@ class ResearchObjectiveService:
     def __init__(
         self,
         collection_service: CollectionService,
+        source_artifact_repository: SourceArtifactRepository,
+        source_reference_repository: SourceReferenceRepository,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
-        source_artifact_repository: SourceArtifactRepository | None = None,
         document_profile_service: DocumentProfileService | None = None,
     ) -> None:
         self.collection_service = collection_service
@@ -357,20 +361,17 @@ class ResearchObjectiveService:
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or getattr(document_profile_service, "source_artifact_repository", None)
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.source_artifact_repository = source_artifact_repository
+        self.source_reference_repository = source_reference_repository
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             structured_extractor=structured_extractor,
             core_fact_repository=self.core_fact_repository,
             source_artifact_repository=self.source_artifact_repository,
         )
-        self.research_understanding_service = ResearchUnderstandingService()
+        self.research_understanding_service = ResearchUnderstandingService(
+            source_artifact_repository=self.source_artifact_repository,
+        )
 
     def read_paper_skims(self, collection_id: str) -> tuple[PaperSkim, ...]:
         self.collection_service.get_collection(collection_id)
@@ -512,10 +513,13 @@ class ResearchObjectiveService:
         self,
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
+        *,
+        build_id: str | None = None,
     ) -> tuple[ResearchObjective, ...]:
         objective_inputs = self._build_objective_candidate_inputs(
             collection_id,
             progress_callback=progress_callback,
+            build_id=build_id,
         )
         artifacts = objective_inputs["artifacts"]
         profiles_by_document_id = objective_inputs["profiles_by_document_id"]
@@ -600,10 +604,13 @@ class ResearchObjectiveService:
         self,
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
+        *,
+        build_id: str | None = None,
     ) -> tuple[ResearchObjective, ...]:
         objective_inputs = self._build_objective_candidate_inputs(
             collection_id,
             progress_callback=progress_callback,
+            build_id=build_id,
         )
         self.core_fact_repository.replace_collection_research_objectives(
             collection_id,
@@ -1011,8 +1018,13 @@ class ResearchObjectiveService:
         self,
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
+        *,
+        build_id: str | None = None,
     ) -> dict[str, Any]:
-        source_inputs = self._load_objective_source_inputs(collection_id)
+        source_inputs = self._load_objective_source_inputs(
+            collection_id,
+            build_id=build_id,
+        )
         artifacts = source_inputs["artifacts"]
         profiles_by_document_id = source_inputs["profiles_by_document_id"]
         blocks_by_document_id = source_inputs["blocks_by_document_id"]
@@ -1184,10 +1196,15 @@ class ResearchObjectiveService:
             progress_callback=progress_callback,
         )
 
-    def _load_objective_source_inputs(self, collection_id: str) -> dict[str, Any]:
+    def _load_objective_source_inputs(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> dict[str, Any]:
         self.collection_service.get_collection(collection_id)
         try:
-            artifacts = self._load_source_artifacts(collection_id)
+            artifacts = self._load_source_artifacts(collection_id, build_id=build_id)
             profiles = self.document_profile_service.read_document_profiles(collection_id)
         except (FileNotFoundError, DocumentProfilesNotReadyError) as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
@@ -1205,9 +1222,12 @@ class ResearchObjectiveService:
             ),
             "figures_by_document_id": self._group_by_document_id(artifacts.figures),
             "document_trees_by_document_id": {
-                document.document_id: self.source_artifact_repository.read_document_tree(
+                document.document_id: load_document_tree(
                     collection_id,
                     document.document_id,
+                    self.source_artifact_repository,
+                    self.source_reference_repository,
+                    build_id=build_id,
                 )
                 for document in artifacts.documents
             },
@@ -10327,13 +10347,31 @@ class ResearchObjectiveService:
             self._structured_extractor = build_default_core_llm_structured_extractor()
         return self._structured_extractor
 
-    def _load_source_artifacts(self, collection_id: str) -> SourceArtifactSet:
-        artifacts = self.source_artifact_repository.read_collection_artifacts(
-            collection_id
+    def _load_source_artifacts(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> SourceArtifactSet:
+        artifacts = (
+            self.source_artifact_repository.read_collection_artifacts(
+                collection_id,
+                build_id=build_id,
+            )
+            if build_id is not None
+            else self.source_artifact_repository.read_collection_artifacts(collection_id)
         )
         if not artifacts.documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return artifacts
+        return SourceArtifactSet(
+            documents=artifacts.documents,
+            text_units=artifacts.text_units,
+            blocks=artifacts.blocks,
+            tables=artifacts.tables,
+            table_rows=artifacts.table_rows,
+            table_cells=artifacts.table_cells,
+            figures=tuple(self.source_reference_repository.list_figures(collection_id)),
+        )
 
     def _build_paper_skim_payload(
         self,

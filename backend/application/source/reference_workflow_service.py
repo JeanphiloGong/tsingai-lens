@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from domain.ports import SourceArtifactRepository
-from domain.source import SourceReferenceSet
-from infra.persistence.factory import build_source_artifact_repository
+from domain.ports import SourceArtifactRepository, SourceReferenceRepository
+from domain.source import SourceArtifactSet, SourceReferenceSet
 
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
@@ -31,12 +30,12 @@ class SourceReferenceWorkflowService:
 
     def __init__(
         self,
-        source_artifact_repository: SourceArtifactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository,
+        source_reference_repository: SourceReferenceRepository,
         extraction_service: SourceReferenceExtractionService | None = None,
     ) -> None:
-        self.source_artifact_repository = (
-            source_artifact_repository or build_source_artifact_repository()
-        )
+        self.source_artifact_repository = source_artifact_repository
+        self.source_reference_repository = source_reference_repository
         self.extraction_service = extraction_service or SourceReferenceExtractionService()
 
     def build_collection_references(
@@ -48,8 +47,17 @@ class SourceReferenceWorkflowService:
         )
         if not artifacts.documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
+        artifacts = SourceArtifactSet(
+            documents=artifacts.documents,
+            text_units=artifacts.text_units,
+            blocks=artifacts.blocks,
+            tables=artifacts.tables,
+            table_rows=artifacts.table_rows,
+            table_cells=artifacts.table_cells,
+            figures=tuple(self.source_reference_repository.list_figures(collection_id)),
+        )
         references = self.extraction_service.extract(artifacts)
-        self.source_artifact_repository.replace_collection_references(
+        self.source_reference_repository.replace_collection_references(
             collection_id,
             references,
         )
@@ -62,7 +70,7 @@ class SourceReferenceWorkflowService:
         self,
         collection_id: str,
     ) -> SourceReferenceWorkflowResult:
-        references = self.source_artifact_repository.read_collection_references(
+        references = self.source_reference_repository.read_collection_references(
             collection_id
         )
         return SourceReferenceWorkflowResult(

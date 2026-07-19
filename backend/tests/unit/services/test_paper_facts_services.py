@@ -13,7 +13,9 @@ from application.core.semantic_build.llm.prompts import (
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
-from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.paper_facts_service import (
+    PaperFactsService as _PaperFactsService,
+)
 from application.core.semantic_build.llm.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
@@ -65,6 +67,23 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from tests.support.collection_service import build_test_collection_service
+
+
+def _build_paper_facts_service(*, collection_service, **kwargs) -> _PaperFactsService:
+    source_repository = kwargs.pop("source_artifact_repository", None)
+    if source_repository is None:
+        source_repository = getattr(
+            kwargs.get("document_profile_service"),
+            "source_artifact_repository",
+            None,
+        ) or SqliteSourceArtifactRepository(
+            collection_service.root_dir.parent / "lens.sqlite"
+        )
+    return _PaperFactsService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        **kwargs,
+    )
 
 
 def _build_test_comparable_result(
@@ -210,7 +229,7 @@ class CountingEvidenceExtractor(EvidenceOnlyExtractor):
 
 
 def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -342,7 +361,7 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
 
 
 def test_paper_facts_payloads_include_sanitized_objective_context(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -461,7 +480,7 @@ def test_paper_facts_payloads_include_sanitized_objective_context(tmp_path):
 
 
 def test_paper_facts_selects_objective_context_by_text_and_table_route(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     structural_context = ObjectiveContext.from_mapping(
@@ -575,7 +594,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
         core_fact_repository=core_repository,
         source_artifact_repository=source_repository,
     )
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=collection_service,
         document_profile_service=document_profile_service,
         structured_extractor=extractor,
@@ -710,6 +729,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             ],
         ),
     )
+    document_profile_service.build_document_profiles(collection_id)
 
     objective = ResearchObjective.from_mapping(
         {
@@ -879,7 +899,7 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
     collection = collection_service.create_collection("Objective Evidence Cards")
     collection_id = collection["collection_id"]
     core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=collection_service,
         core_fact_repository=core_repository,
     )
@@ -943,7 +963,7 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
 
 
 def test_document_method_family_conditions_bind_table_results(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     text_windows = [
@@ -1078,7 +1098,7 @@ def test_document_method_family_conditions_bind_table_results(tmp_path):
 
 
 def test_characterization_observations_include_table_derived_pbf_context(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     sample_variants = (
@@ -1162,7 +1182,7 @@ def test_characterization_observations_include_table_derived_pbf_context(tmp_pat
 
 
 def test_table_row_process_context_uses_cell_header_bindings(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1184,7 +1204,7 @@ def test_table_row_process_context_uses_cell_header_bindings(tmp_path):
 
 
 def test_table_row_process_context_keeps_p001_process_columns_separate(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1206,7 +1226,7 @@ def test_table_row_process_context_keeps_p001_process_columns_separate(tmp_path)
 
 
 def test_text_window_test_conditions_skip_empty_payload(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     text_window = {
@@ -1234,7 +1254,7 @@ def test_text_window_test_conditions_skip_empty_payload(tmp_path):
 
 
 def test_generic_text_samples_are_removed_when_table_samples_exist(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     samples = service._normalize_sample_variant_records(
@@ -1309,7 +1329,7 @@ def test_generic_text_samples_are_removed_when_table_samples_exist(tmp_path):
 def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics(
     tmp_path,
 ):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurements = service._normalize_measurement_result_records(
@@ -1452,7 +1472,7 @@ def test_paper_facts_service_reads_extraction_concurrency_from_env(
 ):
     monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "8")
 
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1466,7 +1486,7 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
 ):
     monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "invalid")
 
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1480,7 +1500,7 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
 
 
 def test_table_batch_payload_truncates_supporting_window_text(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1525,7 +1545,7 @@ def test_table_batch_payload_truncates_supporting_window_text(tmp_path):
 
 
 def test_table_batch_payload_includes_source_table_context(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1590,7 +1610,7 @@ def test_table_batch_payload_includes_source_table_context(tmp_path):
 
 
 def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1620,7 +1640,7 @@ def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables(tmp_pat
 
 
 def test_table_batch_payload_bounds_large_table_matrix_to_target_rows(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     matrix = [["Sample", "Strength"]]
@@ -1663,7 +1683,7 @@ def test_table_batch_payload_bounds_large_table_matrix_to_target_rows(tmp_path):
 
 
 def test_table_row_binding_repairs_split_lpbf_variant_labels(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     row_cells = [
@@ -1741,12 +1761,16 @@ def test_table_row_binding_repairs_split_lpbf_variant_labels(tmp_path):
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
     from application.core.semantic_build.document_profile_service import DocumentProfileService
-    from application.core.semantic_build.paper_facts_service import PaperFactsService
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service)
-    paper_facts_service = PaperFactsService(
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
+    paper_facts_service = _build_paper_facts_service(
         collection_service=collection_service,
+        source_artifact_repository=source_repository,
         document_profile_service=document_profile_service,
     )
 
@@ -2382,6 +2406,9 @@ def test_comparison_service_lists_corpus_results_without_manifest_cache_artifact
     collection_service = build_test_collection_service(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
     )
 
     collection = collection_service.create_collection("Corpus Cache Collection")
@@ -2420,6 +2447,9 @@ def test_comparison_service_reflects_repository_updates_without_manifest_cache(
     collection_service = build_test_collection_service(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
+        source_artifact_repository=SqliteSourceArtifactRepository(
+            tmp_path / "lens.sqlite"
+        ),
     )
 
     collection = collection_service.create_collection("Corpus Refresh Collection")

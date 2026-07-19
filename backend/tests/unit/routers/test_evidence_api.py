@@ -15,14 +15,20 @@ from application.core.semantic_build.document_profile_service import DocumentPro
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import evidence as evidence_controller
 from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVariant
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
 @pytest.fixture()
 def evidence_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
     paper_facts_service = PaperFactsService(
         collection_service=collection_service,
+        source_artifact_repository=source_repository,
         document_profile_service=document_profile_service,
     )
 

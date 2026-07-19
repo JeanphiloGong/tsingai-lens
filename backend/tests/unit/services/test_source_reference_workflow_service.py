@@ -47,7 +47,10 @@ def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
             ),
         ),
     )
-    service = SourceReferenceWorkflowService(source_artifact_repository=repository)
+    service = SourceReferenceWorkflowService(
+        source_artifact_repository=repository,
+        source_reference_repository=repository,
+    )
 
     result = service.build_collection_references("col_refs")
 
@@ -65,8 +68,10 @@ def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
 
 
 def test_source_reference_workflow_requires_source_artifacts(tmp_path):
+    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     service = SourceReferenceWorkflowService(
-        source_artifact_repository=SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+        source_artifact_repository=repository,
+        source_reference_repository=repository,
     )
 
     with pytest.raises(FileNotFoundError, match="source artifacts not ready"):

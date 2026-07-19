@@ -20,7 +20,6 @@ from domain.shared.enums import (
 from domain.shared.record_normalization import normalize_record_value
 from infra.persistence.factory import (
     build_core_fact_repository,
-    build_source_artifact_repository,
 )
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
@@ -95,9 +94,9 @@ class DocumentProfileService:
     def __init__(
         self,
         collection_service: CollectionService,
+        source_artifact_repository: SourceArtifactRepository,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
-        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._structured_extractor = structured_extractor
@@ -107,12 +106,7 @@ class DocumentProfileService:
                 self.collection_service.root_dir.parent / "lens.sqlite"
             )
         )
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.source_artifact_repository = source_artifact_repository
 
     def list_document_profiles(
         self,
@@ -224,10 +218,12 @@ class DocumentProfileService:
     def build_document_profiles(
         self,
         collection_id: str,
+        *,
+        build_id: str | None = None,
     ) -> tuple[DocumentProfile, ...]:
         self.collection_service.get_collection(collection_id)
         try:
-            artifacts = self._load_source_artifacts(collection_id)
+            artifacts = self._load_source_artifacts(collection_id, build_id=build_id)
         except FileNotFoundError as exc:
             raise DocumentProfilesNotReadyError(collection_id) from exc
         document_records = self._build_document_records(artifacts)
@@ -279,9 +275,19 @@ class DocumentProfileService:
             self._structured_extractor = build_default_core_llm_structured_extractor()
         return self._structured_extractor
 
-    def _load_source_artifacts(self, collection_id: str) -> SourceArtifactSet:
-        artifacts = self.source_artifact_repository.read_collection_artifacts(
-            collection_id
+    def _load_source_artifacts(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> SourceArtifactSet:
+        artifacts = (
+            self.source_artifact_repository.read_collection_artifacts(
+                collection_id,
+                build_id=build_id,
+            )
+            if build_id is not None
+            else self.source_artifact_repository.read_collection_artifacts(collection_id)
         )
         if not artifacts.documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")

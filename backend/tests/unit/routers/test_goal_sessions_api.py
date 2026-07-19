@@ -14,6 +14,9 @@ from application.goal.session_service import GoalSessionService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
+from application.core.semantic_build.research_objective_service import (
+    ResearchObjectiveService,
+)
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.task_service import TaskService
 from tests.support.collection_service import build_test_collection_service
@@ -24,6 +27,7 @@ from controllers.schemas.goal.session import (
 )
 from infra.persistence.factory import build_goal_session_repository
 from infra.persistence.memory import MemoryBuildRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
 def _request(goal_session_service, user_id: str = "local-user"):
@@ -72,14 +76,25 @@ class _FakeLLMClient:
 def goal_session_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=source_repository,
+    )
+    research_objective_service = ResearchObjectiveService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        source_reference_repository=source_repository,
+    )
     service = GoalSessionService(
         collection_service=collection_service,
         research_view_service=ResearchViewAggregationService(
-            collection_service,
-            workspace_service,
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
         ),
         workspace_service=workspace_service,
+        research_objective_service=research_objective_service,
         goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient("General background."),
         model="fake-model",

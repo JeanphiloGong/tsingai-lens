@@ -25,10 +25,10 @@ def _build_client(monkeypatch, tmp_path, auth_session_service) -> TestClient:
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from controllers.source import collections as collections_controller
-    from application.source.collection_service import CollectionService
+    from tests.support.collection_service import build_test_collection_service
     from main import create_app
 
-    collections_controller.collection_service = CollectionService(
+    collections_controller.collection_service = build_test_collection_service(
         tmp_path / "collections"
     )
     return TestClient(create_app(auth_session_service=auth_session_service))

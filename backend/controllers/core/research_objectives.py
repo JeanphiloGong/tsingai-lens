@@ -8,13 +8,18 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
     ResearchObjectivesNotReadyError,
 )
+from application.source.collection_service import CollectionService
 from controllers.schemas.core.research_objectives import (
     ObjectiveListResponse,
     ObjectiveResearchViewResponse,
 )
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
-research_objective_service = ResearchObjectiveService()
+collection_service = CollectionService(repository=build_collection_repository())
+research_objective_service = ResearchObjectiveService(
+    collection_service=collection_service,
+)
 
 
 def _research_objectives_not_ready_detail(collection_id: str) -> dict[str, str]:

@@ -185,8 +185,11 @@ def build_services(
     from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
+    from infra.persistence.factory import build_collection_repository
 
-    collection_service = CollectionService(root_dir=collections_root)
+    collection_service = CollectionService(
+        repository=build_collection_repository(root_dir=collections_root),
+    )
     artifact_registry_service = ArtifactRegistryService(root_dir=collections_root)
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
@@ -217,8 +220,11 @@ def load_collection_inputs_for_benchmark(
         DocumentProfilesNotReadyError,
     )
     from application.source.collection_service import CollectionService
+    from infra.persistence.factory import build_collection_repository
 
-    collection_service = CollectionService(root_dir=collections_root)
+    collection_service = CollectionService(
+        repository=build_collection_repository(root_dir=collections_root),
+    )
     output_dir = collection_service.get_paths(collection_id).output_dir
     documents, text_units = load_collection_inputs(collection_id)
     blocks = load_blocks_artifact(collection_id)

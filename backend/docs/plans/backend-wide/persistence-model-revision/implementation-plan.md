@@ -465,6 +465,55 @@ session-expiry, and API behavior.
 
 **Issue handoff:** `yes`, `delivery_task`, grouping key `relational-root`; verify PostgreSQL auth parity and integrity.
 
+## Task 7A: Make Collection Runtime Composition Explicit
+
+**Description:** Remove implicit `CollectionService()` construction from
+application services and controller modules, then compose one shared collection
+service explicitly at the FastAPI lifecycle boundary. This is a behavior-neutral
+precondition for replacing the collection repository without leaving hidden
+file-backed readers in the active service graph.
+
+**Acceptance criteria:**
+- [ ] Every application service that consumes collections requires an explicit
+  `CollectionService` dependency.
+- [ ] FastAPI owns one shared collection service and passes that exact instance
+  to collection, build, workspace, Goal, document, evidence, comparison, graph,
+  and research-view entry points.
+- [ ] Importing the application does not construct collection persistence or
+  connect to a database.
+- [ ] Public collection, ownership, build, workspace, Goal, and evidence
+  behavior remains baseline-equivalent.
+
+**Quality target:**
+- [ ] Collection runtime ownership is visible in one composition root before
+  its persistence implementation changes.
+
+**Verification:**
+- [ ] Run focused service tests after making dependencies explicit.
+- [ ] Run application import, collection ownership, collection build, and
+  application-layer integration tests after centralizing runtime composition.
+- [ ] Scan maintained application and controller code for implicit
+  `CollectionService()` construction.
+
+**Dependencies:** Tasks 6-7.
+
+**Delivery slices:**
+- `explicit-collection-service-dependencies`: require and update direct
+  collection-service callers without changing the file-backed authority.
+- `collection-runtime-composition`: construct and bind one shared collection
+  service in the FastAPI lifecycle before the PostgreSQL cutover.
+
+**Files likely touched:**
+- `backend/application/**` collection consumers
+- `backend/controllers/**` collection-consuming entry points
+- `backend/main.py`
+- focused service, router, and application integration tests
+
+**Estimated scope:** Large, two atomic behavior-neutral slices.
+
+**Issue handoff:** reuse #235; this work is inseparable preparation for the
+relational collection root and does not create a separate product requirement.
+
 ## Task 8: Cut Collection Metadata To PostgreSQL
 
 **Description:** Persist collection identity, ownership, name, lifecycle, counts,
@@ -482,7 +531,7 @@ object store for bytes.
 **Verification:**
 - [ ] Run collection domain, service, ownership-router, and API integration tests.
 
-**Dependencies:** Tasks 6-7.
+**Dependencies:** Tasks 6-7A.
 
 **Files likely touched:**
 - `backend/infra/persistence/postgres/models/collection.py`

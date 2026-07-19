@@ -9,12 +9,15 @@ from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService
-from infra.persistence.factory import build_core_fact_repository
+from infra.persistence.factory import (
+    build_collection_repository,
+    build_core_fact_repository,
+)
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
 artifact_registry_service = ArtifactRegistryService()
-collection_service = CollectionService()
+collection_service = CollectionService(repository=build_collection_repository())
 core_fact_repository = build_core_fact_repository()
 _NEIGHBORHOOD_MAX_NODES = 2_147_483_647
 

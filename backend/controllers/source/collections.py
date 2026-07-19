@@ -12,9 +12,10 @@ from controllers.schemas.source.collection import (
     CollectionResponse,
 )
 from application.source.collection_service import CollectionService
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["collections"])
-collection_service = CollectionService()
+collection_service = CollectionService(repository=build_collection_repository())
 
 
 @router.post("", response_model=CollectionResponse, summary="create the paper collection")

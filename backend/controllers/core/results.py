@@ -9,10 +9,13 @@ from application.core.comparison_service import (
     ComparisonService,
     ResultNotFoundError,
 )
+from application.source.collection_service import CollectionService
 from controllers.schemas.core.results import ResultItemResponse, ResultListResponse
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["results"])
-comparison_service = ComparisonService()
+collection_service = CollectionService(repository=build_collection_repository())
+comparison_service = ComparisonService(collection_service=collection_service)
 
 
 def _results_not_ready_detail(collection_id: str) -> dict[str, str]:

@@ -6,6 +6,7 @@ from application.goal.session_service import (
     GoalSessionNotFoundError,
     GoalSessionService,
 )
+from application.source.collection_service import CollectionService
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.goal.session import (
     GoalSessionCreateRequest,
@@ -15,9 +16,11 @@ from controllers.schemas.goal.session import (
     GoalSessionResponse,
     GoalSessionUpdateRequest,
 )
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/goal-sessions", tags=["goal-sessions"])
-goal_session_service = GoalSessionService()
+collection_service = CollectionService(repository=build_collection_repository())
+goal_session_service = GoalSessionService(collection_service=collection_service)
 
 
 def _not_found_detail(exc: GoalSessionNotFoundError) -> dict[str, str]:

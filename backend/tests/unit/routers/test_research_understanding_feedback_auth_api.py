@@ -163,12 +163,12 @@ def _build_client(
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
-    from application.source.collection_service import CollectionService
+    from tests.support.collection_service import build_test_collection_service
     from controllers.core import research_understanding_feedback
     from controllers.source import collections as collections_controller
     from main import create_app
 
-    collections_controller.collection_service = CollectionService(
+    collections_controller.collection_service = build_test_collection_service(
         tmp_path / "collections"
     )
     feedback_service = RecordingResearchUnderstandingFeedbackService()
@@ -194,12 +194,12 @@ def _build_client_with_real_feedback_service(
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
-    from application.source.collection_service import CollectionService
+    from tests.support.collection_service import build_test_collection_service
     from controllers.core import research_understanding_feedback
     from controllers.source import collections as collections_controller
     from main import create_app
 
-    collections_controller.collection_service = CollectionService(
+    collections_controller.collection_service = build_test_collection_service(
         tmp_path / "collections"
     )
     research_understanding_feedback.feedback_service = (

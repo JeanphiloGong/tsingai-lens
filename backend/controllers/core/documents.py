@@ -17,7 +17,10 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.source.collection_service import DocumentSourceUnavailableError
+from application.source.collection_service import (
+    CollectionService,
+    DocumentSourceUnavailableError,
+)
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
     DocumentMarkdownService,
@@ -32,11 +35,17 @@ from controllers.schemas.core.documents import (
     DocumentProfileItemResponse,
     DocumentProfileListResponse,
 )
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["documents"])
-document_profile_service = DocumentProfileService()
-comparison_service = ComparisonService()
-document_markdown_service = DocumentMarkdownService()
+collection_service = CollectionService(repository=build_collection_repository())
+document_profile_service = DocumentProfileService(
+    collection_service=collection_service,
+)
+comparison_service = ComparisonService(collection_service=collection_service)
+document_markdown_service = DocumentMarkdownService(
+    collection_service=collection_service,
+)
 
 
 def _document_profiles_not_ready_detail(collection_id: str) -> dict[str, str]:

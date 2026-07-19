@@ -9,7 +9,7 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
@@ -145,7 +145,7 @@ def _store_core_comparison_artifacts(
 
 @pytest.fixture()
 def comparison_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
     comparison_service = ComparisonService(
         collection_service=collection_service,

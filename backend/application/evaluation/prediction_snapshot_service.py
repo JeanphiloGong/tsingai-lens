@@ -32,11 +32,11 @@ class EvaluationPredictionSnapshotService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         core_fact_repository: CoreFactRepository | None = None,
         evaluation_repository: EvaluationRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.core_fact_repository = core_fact_repository or build_core_fact_repository()
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()

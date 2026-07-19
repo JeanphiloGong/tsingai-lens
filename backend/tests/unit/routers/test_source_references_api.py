@@ -9,7 +9,7 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowService,
 )
@@ -20,7 +20,7 @@ from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     workflow_service = SourceReferenceWorkflowService(
         source_artifact_repository=repository

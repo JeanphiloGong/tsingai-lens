@@ -388,9 +388,9 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     import application.derived.graph_service as graph_service
 
-    from application.source.collection_service import CollectionService
+    from tests.support.collection_service import build_test_collection_service
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
@@ -461,9 +461,9 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
 
     import application.derived.graph_service as graph_service
 
-    from application.source.collection_service import CollectionService
+    from tests.support.collection_service import build_test_collection_service
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     monkeypatch.setattr(graph_service, "collection_service", collection_service)
     monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)

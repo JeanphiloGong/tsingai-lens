@@ -581,7 +581,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service):
     import application.derived.graph_service as graph_service_module
     import application.pipeline.collection_build.service as task_runner_module
     from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
+    from tests.support.collection_service import build_test_collection_service
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -600,7 +600,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service):
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")

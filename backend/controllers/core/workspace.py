@@ -6,9 +6,10 @@ from controllers.schemas.core.workspace import WorkspaceOverviewResponse
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from application.core.workspace_overview_service import WorkspaceService
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["workspace"])
-collection_service = CollectionService()
+collection_service = CollectionService(repository=build_collection_repository())
 task_service = TaskService()
 workspace_service = WorkspaceService(
     collection_service=collection_service,

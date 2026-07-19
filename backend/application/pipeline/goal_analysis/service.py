@@ -23,6 +23,8 @@ from application.pipeline.goal_analysis.nodes import (
     prepare_goal,
 )
 from application.pipeline.goal_analysis.runner import GoalAnalysisPipelineRunner
+from application.source.collection_service import CollectionService
+from infra.persistence.factory import build_collection_repository
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +40,12 @@ class GoalAnalysisPipelineService:
 
     def __init__(
         self,
+        research_objective_service: ResearchObjectiveService,
         confirmed_goal_service: ConfirmedGoalService | None = None,
-        research_objective_service: ResearchObjectiveService | None = None,
         research_understanding_service: ResearchUnderstandingService | None = None,
     ) -> None:
         self.confirmed_goal_service = confirmed_goal_service or ConfirmedGoalService()
-        self.research_objective_service = (
-            research_objective_service or ResearchObjectiveService()
-        )
+        self.research_objective_service = research_objective_service
         self.research_understanding_service = (
             research_understanding_service or ResearchUnderstandingService()
         )
@@ -280,4 +280,11 @@ class GoalAnalysisPipelineService:
         return self.research_understanding_service.with_presentation(understanding)
 
 
-goal_analysis_service = GoalAnalysisPipelineService()
+_goal_analysis_collection_service = CollectionService(
+    repository=build_collection_repository()
+)
+goal_analysis_service = GoalAnalysisPipelineService(
+    research_objective_service=ResearchObjectiveService(
+        collection_service=_goal_analysis_collection_service,
+    )
+)

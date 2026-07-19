@@ -13,14 +13,17 @@ from application.core.semantic_build.paper_facts_service import (
     PaperFactsNotReadyError,
     PaperFactsService,
 )
+from application.source.collection_service import CollectionService
 from controllers.schemas.core.evidence import (
     EvidenceCardItemResponse,
     EvidenceCardListResponse,
     EvidenceTracebackResponse,
 )
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["evidence"])
-paper_facts_service = PaperFactsService()
+collection_service = CollectionService(repository=build_collection_repository())
+paper_facts_service = PaperFactsService(collection_service=collection_service)
 
 
 def _evidence_cards_not_ready_detail(collection_id: str) -> dict[str, str]:

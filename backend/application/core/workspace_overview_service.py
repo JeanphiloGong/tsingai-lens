@@ -23,13 +23,13 @@ class WorkspaceService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         task_service: TaskService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.task_service = task_service or TaskService()
         self.core_fact_repository = (
             core_fact_repository

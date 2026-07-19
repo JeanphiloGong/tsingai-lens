@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.goal.session_service import GoalSessionService
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from controllers.goal import sessions as sessions_controller
 from controllers.schemas.goal.session import (
     GoalSessionCreateRequest,
@@ -59,7 +59,7 @@ class _FakeLLMClient:
 
 @pytest.fixture()
 def goal_session_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalSessionService(
         collection_service=collection_service,
         goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),

@@ -514,12 +514,11 @@ def check_goal_findings_projection(
 def _local_goal_analysis_payload(collection_id: str, goal_id: str) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
         from application.pipeline.goal_analysis.service import (  # noqa: PLC0415
-            GoalAnalysisPipelineService,
+            goal_analysis_service,
         )
         from controllers.core.goal_analysis import _analysis_response  # noqa: PLC0415
 
-        service = GoalAnalysisPipelineService()
-        payload = service.get_goal_analysis(collection_id, goal_id)
+        payload = goal_analysis_service.get_goal_analysis(collection_id, goal_id)
         return _analysis_response(collection_id, payload).model_dump(mode="json")
 
 

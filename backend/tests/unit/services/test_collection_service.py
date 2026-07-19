@@ -14,10 +14,16 @@ from infra.source.ingestion.normalized_import import (
     NormalizedImportTextUnit,
 )
 from infra.source.ingestion.source_adapter import SourceAdapterRequest
+from tests.support.collection_service import build_test_collection_service
+
+
+def test_collection_service_requires_explicit_repository():
+    with pytest.raises(TypeError, match="repository"):
+        CollectionService()
 
 
 def test_collection_service_normalizes_legacy_meta(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     paths = service.get_paths("default")
     paths.collection_dir.mkdir(parents=True, exist_ok=True)
     paths.meta_path.write_text(
@@ -51,7 +57,7 @@ def test_collection_service_normalizes_legacy_meta(tmp_path):
 
 
 def test_delete_collection_removes_collection_directory(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     record = service.create_collection("Delete Me")
     collection_id = record["collection_id"]
     paths = service.get_paths(collection_id)
@@ -76,7 +82,7 @@ def test_delete_collection_removes_collection_directory(tmp_path):
 
 
 def test_delete_collection_raises_for_missing_collection(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
 
     try:
         service.delete_collection("col_missing")
@@ -87,7 +93,7 @@ def test_delete_collection_raises_for_missing_collection(tmp_path):
 
 
 def test_delete_collection_rejects_another_collections_storage_key(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     first = service.create_collection(name="First collection")
     second = service.create_collection(name="Second collection")
     second_file = service.add_file(
@@ -115,7 +121,7 @@ def test_delete_collection_rejects_another_collections_storage_key(tmp_path):
 
 
 def test_collection_service_returns_empty_import_manifest_for_existing_collection(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("No Manifest Yet")
 
     manifest = service.get_import_manifest(collection["collection_id"])
@@ -129,7 +135,7 @@ def test_collection_service_returns_empty_import_manifest_for_existing_collectio
 
 
 def test_collection_service_registers_goal_brief_handoff(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Goal Collection")
 
     handoff = service.register_goal_brief_handoff(
@@ -161,7 +167,7 @@ def test_collection_service_registers_goal_brief_handoff(tmp_path):
 
 
 def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Imported Collection")
     collection_id = collection["collection_id"]
 
@@ -252,7 +258,7 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
 
 
 def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Upload Collection")
     collection_id = collection["collection_id"]
     captured: dict[str, object] = {}
@@ -308,7 +314,7 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
 
 
 def test_collection_service_imports_from_source_adapter(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Adapter Collection")
     captured: dict[str, object] = {}
 
@@ -401,7 +407,7 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
 
 
 def test_collection_service_rejects_source_adapter_batch_shape_mismatch(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Bad Adapter Collection")
 
     class BadAdapter:

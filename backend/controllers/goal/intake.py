@@ -3,11 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from application.goal.brief_service import GoalService
+from application.source.collection_service import CollectionService
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.goal.intake import GoalIntakeRequest, GoalIntakeResponse
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/goals", tags=["goals"])
-goal_service = GoalService()
+collection_service = CollectionService(repository=build_collection_repository())
+goal_service = GoalService(collection_service=collection_service)
 
 
 @router.post(

@@ -7,7 +7,7 @@ from application.core.semantic_build.paper_facts_service import PaperFactsNotRea
 from application.evaluation import ResearchUnderstandingFeedbackService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.goal.session_service import GoalSessionService, _StructuredProtocolDraft
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from domain.core.research_understanding import ResearchUnderstanding
 from infra.persistence.factory import build_goal_session_repository
 from infra.persistence.sqlite import (
@@ -625,7 +625,7 @@ def _service(
     comparison_service=None,
     paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalSessionService(
         collection_service=collection_service,
         research_view_service=_MaterialResearchViewService(),
@@ -650,7 +650,7 @@ def _service_with_llm_client(
     comparison_service=None,
     paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalSessionService(
         collection_service=collection_service,
         research_view_service=_MaterialResearchViewService(),

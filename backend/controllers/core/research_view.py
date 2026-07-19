@@ -9,6 +9,7 @@ from application.core.research_view_aggregation_service import (
     ResearchViewMaterialNotFoundError,
     ResearchViewNotReadyError,
 )
+from application.source.collection_service import CollectionService
 from controllers.schemas.core.research_view import (
     CollectionAggregationResponse,
     DocumentMaterialProfileResponse,
@@ -17,9 +18,13 @@ from controllers.schemas.core.research_view import (
     PaperAggregationResponse,
     PaperMaterialSummariesResponse,
 )
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(prefix="/collections", tags=["research-view"])
-research_view_service = ResearchViewAggregationService()
+collection_service = CollectionService(repository=build_collection_repository())
+research_view_service = ResearchViewAggregationService(
+    collection_service=collection_service,
+)
 
 
 def _research_view_not_ready_detail(collection_id: str) -> dict[str, str]:

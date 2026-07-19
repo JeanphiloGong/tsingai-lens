@@ -6,7 +6,7 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveNotFoundError,
     ResearchObjectiveService,
 )
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     CoreFactSet,
     DocumentProfile,
@@ -22,7 +22,7 @@ from infra.persistence.sqlite.core_fact_repository import SqliteCoreFactReposito
 
 
 def _seed_objective_collection(tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")

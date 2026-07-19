@@ -9,13 +9,16 @@ from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
+from application.source.collection_service import CollectionService
 from controllers.schemas.core.comparable_results import (
     ComparableResultCorpusItemResponse,
     ComparableResultCorpusListResponse,
 )
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(tags=["comparable-results"])
-comparison_service = ComparisonService()
+collection_service = CollectionService(repository=build_collection_repository())
+comparison_service = ComparisonService(collection_service=collection_service)
 
 
 def _comparable_results_not_ready_detail(collection_id: str) -> dict[str, str]:

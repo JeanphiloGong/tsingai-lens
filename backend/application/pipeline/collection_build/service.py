@@ -66,13 +66,13 @@ class CollectionBuildPipelineService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         task_service: TaskService | None = None,
         artifact_registry_service: ArtifactRegistryService | None = None,
         document_profile_service: DocumentProfileService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.task_service = task_service or TaskService()
         self.artifact_registry_service = (
             artifact_registry_service or ArtifactRegistryService()

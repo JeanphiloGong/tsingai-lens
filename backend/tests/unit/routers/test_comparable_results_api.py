@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from controllers.core import comparable_results as comparable_results_controller
 from domain.core import (
     CollectionComparableResult,
@@ -136,7 +136,7 @@ def _store_core_comparable_result_facts(
 
 @pytest.fixture()
 def comparable_result_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     comparison_service = ComparisonService(collection_service)
 
     monkeypatch.setattr(

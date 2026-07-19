@@ -12,7 +12,6 @@ from domain.source import ArtifactStatusRecord, CollectionRecord, empty_import_m
 from domain.source.ports import ObjectStore
 from infra.persistence.factory import (
     build_artifact_repository,
-    build_collection_repository,
 )
 from infra.persistence.file.object_store import FileObjectStore
 from infra.source.ingestion import (
@@ -51,12 +50,11 @@ class CollectionService:
 
     def __init__(
         self,
-        root_dir: Path | None = None,
-        repository: CollectionRepository | None = None,
+        repository: CollectionRepository,
         artifact_repository: ArtifactRepository | None = None,
         object_store: ObjectStore | None = None,
     ) -> None:
-        self.repository = repository or build_collection_repository(root_dir)
+        self.repository = repository
         self.artifact_repository = (
             artifact_repository
             or build_artifact_repository(

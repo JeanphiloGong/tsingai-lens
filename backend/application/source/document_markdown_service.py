@@ -75,10 +75,10 @@ class DocumentMarkdownService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.source_artifact_repository = (
             source_artifact_repository
             or build_source_artifact_repository(

@@ -11,7 +11,7 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 from application.source.artifact_registry_service import ArtifactRegistryService
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
 from domain.source import SourceArtifactSet
@@ -114,7 +114,7 @@ def _write_source_artifact_outputs(
 def test_build_pipeline_service_builds_runtime_config_without_config_file(
     tmp_path,
 ):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     runner = CollectionBuildPipelineService(
@@ -140,7 +140,7 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
 def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
     import application.pipeline.collection_build.service as task_runner_module
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
@@ -217,7 +217,7 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
 def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):
     import application.pipeline.collection_build.service as task_runner_module
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
@@ -242,7 +242,7 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
 def test_build_pipeline_service_marks_source_artifact_errors_failed(monkeypatch, tmp_path):
     import application.pipeline.collection_build.service as task_runner_module
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
@@ -268,7 +268,7 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(monkeypatch,
 def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplog):
     import application.pipeline.collection_build.service as task_runner_module
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     artifact_registry = ArtifactRegistryService(tmp_path / "collections")
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)

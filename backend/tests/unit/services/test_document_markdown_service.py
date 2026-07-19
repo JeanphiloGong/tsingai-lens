@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
     DocumentMarkdownService,
@@ -12,7 +12,7 @@ from domain.source import SourceArtifactSet
 
 
 def _build_markdown_service(tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     return collection_service, DocumentMarkdownService(collection_service)
 
 

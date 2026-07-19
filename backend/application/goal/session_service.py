@@ -113,7 +113,7 @@ class GoalSessionService:
     def __init__(
         self,
         *,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         task_service: TaskService | None = None,
         research_view_service: ResearchViewAggregationService | None = None,
         workspace_service: WorkspaceService | None = None,
@@ -127,7 +127,7 @@ class GoalSessionService:
         llm_client: Any | None = None,
         model: str | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.task_service = task_service or TaskService(
             self.collection_service.root_dir.parent / "tasks"
         )

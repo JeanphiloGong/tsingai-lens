@@ -15,9 +15,10 @@ from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
+from infra.persistence.factory import build_collection_repository
 
 router = APIRouter(tags=["tasks"])
-collection_service = CollectionService()
+collection_service = CollectionService(repository=build_collection_repository())
 task_service = TaskService()
 artifact_registry_service = ArtifactRegistryService()
 build_pipeline_service = CollectionBuildPipelineService(

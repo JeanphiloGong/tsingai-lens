@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.goal.brief_service import GoalService
 
 
 def test_goal_service_creates_seed_collection_and_contract(tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalService(collection_service)
 
     payload = service.intake_goal(
@@ -42,7 +42,7 @@ def test_goal_service_creates_seed_collection_and_contract(tmp_path):
 
 
 def test_goal_service_rejects_empty_goal_signal(tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalService(collection_service)
 
     with pytest.raises(ValueError) as exc_info:

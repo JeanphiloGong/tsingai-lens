@@ -16,13 +16,14 @@ from controllers.schemas.source.reference import (
     SourceReferenceSetResponse,
     SourceReferenceSummaryResponse,
 )
+from infra.persistence.factory import build_collection_repository
 
 
 router = APIRouter(
     prefix="/collections/{collection_id}/references",
     tags=["source-references"],
 )
-collection_service = CollectionService()
+collection_service = CollectionService(repository=build_collection_repository())
 reference_workflow_service = SourceReferenceWorkflowService()
 
 

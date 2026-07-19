@@ -13,10 +13,10 @@ class EvaluationGoldService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         evaluation_repository: EvaluationRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()
         )

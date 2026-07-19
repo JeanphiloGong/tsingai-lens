@@ -95,11 +95,20 @@ def check_collection_frontend_projection(
     from application.core.semantic_build.research_objective_service import (  # noqa: PLC0415
         ResearchObjectiveService,
     )
+    from application.source.collection_service import CollectionService  # noqa: PLC0415
+    from infra.persistence.factory import build_collection_repository  # noqa: PLC0415
 
-    objective_service = ResearchObjectiveService()
+    collection_service = CollectionService(
+        repository=build_collection_repository(),
+    )
+    objective_service = ResearchObjectiveService(
+        collection_service=collection_service,
+    )
     objectives = objective_service.list_objective_workspaces(collection_id)
     material_profile = (
-        ResearchViewAggregationService().get_collection_material_research_view(
+        ResearchViewAggregationService(
+            collection_service=collection_service,
+        ).get_collection_material_research_view(
             collection_id,
             material_id,
         )

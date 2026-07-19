@@ -114,7 +114,16 @@ export function buildApiUrl(path: string) {
 }
 
 function buildApiError(response: Response, detail: unknown) {
-	return new ApiError(response.status, response.statusText, normalizeDetail(detail));
+	const error = new ApiError(response.status, response.statusText, normalizeDetail(detail));
+	if (
+		error.status === 401 &&
+		getApiErrorCode(error) === 'authentication_required' &&
+		typeof window !== 'undefined' &&
+		window.location.pathname !== '/login'
+	) {
+		window.location.replace('/login');
+	}
+	return error;
 }
 
 async function readResponseData(response: Response) {

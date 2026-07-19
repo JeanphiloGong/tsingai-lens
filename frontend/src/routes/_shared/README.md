@@ -13,7 +13,8 @@ This node owns browser-side helpers that are shared across frontend routes.
 ## Responsibilities
 
 - keep route data access consistent with the `/api/*` and `/api/v1/*` contract
-- centralize browser error handling and shared formatting logic
+- centralize browser error handling, including redirecting expired sessions to
+  login, and shared formatting logic
 - prevent route components from duplicating API and state-shaping helpers
 
 ## Important Files

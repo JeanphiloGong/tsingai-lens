@@ -11,17 +11,11 @@ from typing import Any
 
 from config import DATA_DIR
 from domain.core import (
-    BaselineReference,
-    CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
     ConfirmedGoal,
     ComparisonRowRecord,
     CoreFactSet,
-    DocumentProfile,
-    EvidenceAnchor,
-    MeasurementResult,
-    MethodFact,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
@@ -29,11 +23,8 @@ from domain.core import (
     ObjectivePaperFrame,
     PaperSkim,
     PairwiseComparisonRelation,
-    SampleVariant,
     ResearchObjective,
     ResearchUnderstanding,
-    StructureFeature,
-    TestCondition,
 )
 
 
@@ -283,245 +274,6 @@ _OBJECTIVE_TABLES: tuple[_TableSpec, ...] = (
 )
 
 
-_PAPER_FACT_TABLES: tuple[_TableSpec, ...] = (
-    _TableSpec(
-        table_name="core_document_profiles",
-        attr_name="document_profiles",
-        record_cls=DocumentProfile,
-        id_column="document_id",
-        columns=(
-            "document_id",
-            "collection_id",
-            "title",
-            "source_filename",
-            "doc_type",
-            "parsing_warnings",
-            "confidence",
-        ),
-        json_columns=frozenset({"parsing_warnings"}),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "doc_type"),
-    ),
-    _TableSpec(
-        table_name="core_evidence_anchors",
-        attr_name="evidence_anchors",
-        record_cls=EvidenceAnchor,
-        id_column="anchor_id",
-        columns=(
-            "anchor_id",
-            "document_id",
-            "locator_type",
-            "locator_confidence",
-            "source_type",
-            "section_id",
-            "char_range",
-            "bbox",
-            "page",
-            "quote",
-            "deep_link",
-            "block_id",
-            "snippet_id",
-            "figure_or_table",
-            "quote_span",
-        ),
-        json_columns=frozenset({"char_range", "bbox"}),
-        integer_columns=frozenset({"page"}),
-        index_columns=("document_id", "source_type", "block_id", "figure_or_table"),
-    ),
-    _TableSpec(
-        table_name="core_method_facts",
-        attr_name="method_facts",
-        record_cls=MethodFact,
-        id_column="method_id",
-        columns=(
-            "method_id",
-            "document_id",
-            "collection_id",
-            "domain_profile",
-            "method_role",
-            "method_name",
-            "method_payload",
-            "evidence_anchor_ids",
-            "confidence",
-            "epistemic_status",
-        ),
-        json_columns=frozenset({"method_payload", "evidence_anchor_ids"}),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "method_role"),
-    ),
-    _TableSpec(
-        table_name="core_sample_variants",
-        attr_name="sample_variants",
-        record_cls=SampleVariant,
-        id_column="variant_id",
-        columns=(
-            "variant_id",
-            "document_id",
-            "collection_id",
-            "domain_profile",
-            "variant_label",
-            "host_material_system",
-            "composition",
-            "variable_axis_type",
-            "variable_value",
-            "process_context",
-            "profile_payload",
-            "structure_feature_ids",
-            "source_anchor_ids",
-            "confidence",
-            "epistemic_status",
-        ),
-        json_columns=frozenset(
-            {
-                "host_material_system",
-                "variable_value",
-                "process_context",
-                "profile_payload",
-                "structure_feature_ids",
-                "source_anchor_ids",
-            }
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "variant_label", "variable_axis_type"),
-    ),
-    _TableSpec(
-        table_name="core_test_conditions",
-        attr_name="test_conditions",
-        record_cls=TestCondition,
-        id_column="test_condition_id",
-        columns=(
-            "test_condition_id",
-            "document_id",
-            "collection_id",
-            "domain_profile",
-            "property_type",
-            "template_type",
-            "scope_level",
-            "condition_payload",
-            "condition_completeness",
-            "missing_fields",
-            "evidence_anchor_ids",
-            "confidence",
-            "epistemic_status",
-        ),
-        json_columns=frozenset(
-            {"condition_payload", "missing_fields", "evidence_anchor_ids"}
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "property_type", "template_type"),
-    ),
-    _TableSpec(
-        table_name="core_baseline_references",
-        attr_name="baseline_references",
-        record_cls=BaselineReference,
-        id_column="baseline_id",
-        columns=(
-            "baseline_id",
-            "document_id",
-            "collection_id",
-            "domain_profile",
-            "variant_id",
-            "baseline_type",
-            "baseline_label",
-            "baseline_scope",
-            "evidence_anchor_ids",
-            "confidence",
-            "epistemic_status",
-        ),
-        json_columns=frozenset({"evidence_anchor_ids"}),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "variant_id", "baseline_type"),
-    ),
-    _TableSpec(
-        table_name="core_measurement_results",
-        attr_name="measurement_results",
-        record_cls=MeasurementResult,
-        id_column="result_id",
-        columns=(
-            "result_id",
-            "document_id",
-            "collection_id",
-            "domain_profile",
-            "variant_id",
-            "property_normalized",
-            "result_type",
-            "claim_scope",
-            "value_payload",
-            "unit",
-            "test_condition_id",
-            "baseline_id",
-            "structure_feature_ids",
-            "characterization_observation_ids",
-            "evidence_anchor_ids",
-            "traceability_status",
-            "result_source_type",
-            "epistemic_status",
-        ),
-        json_columns=frozenset(
-            {
-                "value_payload",
-                "structure_feature_ids",
-                "characterization_observation_ids",
-                "evidence_anchor_ids",
-            }
-        ),
-        index_columns=(
-            "document_id",
-            "variant_id",
-            "property_normalized",
-            "test_condition_id",
-            "baseline_id",
-        ),
-    ),
-    _TableSpec(
-        table_name="core_characterization_observations",
-        attr_name="characterization_observations",
-        record_cls=CharacterizationObservation,
-        id_column="observation_id",
-        columns=(
-            "observation_id",
-            "document_id",
-            "collection_id",
-            "variant_id",
-            "characterization_type",
-            "observation_text",
-            "observed_value",
-            "observed_unit",
-            "condition_context",
-            "evidence_anchor_ids",
-            "confidence",
-            "epistemic_status",
-        ),
-        json_columns=frozenset(
-            {"observed_value", "condition_context", "evidence_anchor_ids"}
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "variant_id", "characterization_type"),
-    ),
-    _TableSpec(
-        table_name="core_structure_features",
-        attr_name="structure_features",
-        record_cls=StructureFeature,
-        id_column="feature_id",
-        columns=(
-            "feature_id",
-            "document_id",
-            "collection_id",
-            "variant_id",
-            "feature_type",
-            "feature_value",
-            "feature_unit",
-            "qualitative_descriptor",
-            "source_observation_ids",
-            "confidence",
-            "epistemic_status",
-        ),
-        json_columns=frozenset({"feature_value", "source_observation_ids"}),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "variant_id", "feature_type"),
-    ),
-)
-
 _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
     _TableSpec(
         table_name="core_comparable_results",
@@ -667,8 +419,7 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
     ),
 )
 
-_FACT_REPLACE_TABLES = (*_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
-_ALL_TABLES = (*_OBJECTIVE_TABLES, *_PAPER_FACT_TABLES, *_COMPARISON_TABLES)
+_ALL_TABLES = (*_OBJECTIVE_TABLES, *_COMPARISON_TABLES)
 _STATUS_TABLE = "core_fact_collection_status"
 _RESEARCH_UNDERSTANDING_TABLE = "core_research_understanding_artifacts"
 _CONFIRMED_GOAL_TABLE = "core_confirmed_goals"
@@ -718,54 +469,6 @@ class SqliteCoreFactRepository:
                 connection,
                 collection_id,
                 research_objectives_ready=any(records_by_attr.values()),
-            )
-
-    def replace_collection_document_profiles(
-        self,
-        collection_id: str,
-        document_profiles: tuple[DocumentProfile, ...],
-    ) -> None:
-        self._ensure_schema()
-        spec = _PAPER_FACT_TABLES[0]
-        with self._connection() as connection:
-            self._delete_collection(connection, spec, collection_id)
-            self._insert_records(
-                connection,
-                spec,
-                collection_id,
-                document_profiles,
-            )
-            self._upsert_status(connection, collection_id)
-
-    def replace_collection_facts(
-        self,
-        collection_id: str,
-        facts: CoreFactSet,
-    ) -> None:
-        self._ensure_schema()
-        with self._connection() as connection:
-            for spec in _FACT_REPLACE_TABLES:
-                self._delete_collection(connection, spec, collection_id)
-            for spec in _FACT_REPLACE_TABLES:
-                self._insert_records(
-                    connection,
-                    spec,
-                    collection_id,
-                    getattr(facts, spec.attr_name),
-                )
-            self._upsert_status(
-                connection,
-                collection_id,
-                paper_facts_ready=True,
-                comparison_artifacts_ready=(
-                    facts.comparison_artifacts_ready
-                    or bool(
-                        facts.comparable_results
-                        or facts.collection_comparable_results
-                        or facts.pairwise_comparison_relations
-                        or facts.comparison_rows
-                    )
-                ),
             )
 
     def replace_collection_comparison_artifacts(
@@ -1070,7 +773,6 @@ class SqliteCoreFactRepository:
             CREATE TABLE IF NOT EXISTS {_STATUS_TABLE} (
                 collection_id TEXT PRIMARY KEY,
                 research_objectives_ready INTEGER NOT NULL DEFAULT 0,
-                paper_facts_ready INTEGER NOT NULL DEFAULT 0,
                 comparison_artifacts_ready INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -1101,14 +803,12 @@ class SqliteCoreFactRepository:
         collection_id: str,
         *,
         research_objectives_ready: bool | None = None,
-        paper_facts_ready: bool | None = None,
         comparison_artifacts_ready: bool | None = None,
     ) -> None:
         current = connection.execute(
             f"""
             SELECT
                 research_objectives_ready,
-                paper_facts_ready,
                 comparison_artifacts_ready
             FROM {_STATUS_TABLE}
             WHERE collection_id = ?
@@ -1118,14 +818,9 @@ class SqliteCoreFactRepository:
         next_research_objectives_ready = (
             bool(current["research_objectives_ready"]) if current else False
         )
-        next_paper_facts_ready = (
-            bool(current["paper_facts_ready"]) if current else False
-        )
         next_comparison_artifacts_ready = (
             bool(current["comparison_artifacts_ready"]) if current else False
         )
-        if paper_facts_ready is not None:
-            next_paper_facts_ready = bool(paper_facts_ready)
         if research_objectives_ready is not None:
             next_research_objectives_ready = bool(research_objectives_ready)
         if comparison_artifacts_ready is not None:
@@ -1135,19 +830,16 @@ class SqliteCoreFactRepository:
             INSERT INTO {_STATUS_TABLE} (
                 collection_id,
                 research_objectives_ready,
-                paper_facts_ready,
                 comparison_artifacts_ready
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?)
             ON CONFLICT(collection_id) DO UPDATE SET
                 research_objectives_ready = excluded.research_objectives_ready,
-                paper_facts_ready = excluded.paper_facts_ready,
                 comparison_artifacts_ready = excluded.comparison_artifacts_ready
             """,
             (
                 collection_id,
                 int(next_research_objectives_ready),
-                int(next_paper_facts_ready),
                 int(next_comparison_artifacts_ready),
             ),
         )
@@ -1162,7 +854,6 @@ class SqliteCoreFactRepository:
             f"""
             SELECT
                 research_objectives_ready,
-                paper_facts_ready,
                 comparison_artifacts_ready
             FROM {_STATUS_TABLE}
             WHERE collection_id = ?
@@ -1172,7 +863,6 @@ class SqliteCoreFactRepository:
         if row is not None:
             return {
                 "research_objectives_ready": bool(row["research_objectives_ready"]),
-                "paper_facts_ready": bool(row["paper_facts_ready"]),
                 "comparison_artifacts_ready": bool(
                     row["comparison_artifacts_ready"]
                 ),
@@ -1180,9 +870,6 @@ class SqliteCoreFactRepository:
         return {
             "research_objectives_ready": any(
                 records_by_attr[spec.attr_name] for spec in _OBJECTIVE_TABLES
-            ),
-            "paper_facts_ready": any(
-                records_by_attr[spec.attr_name] for spec in _PAPER_FACT_TABLES[1:]
             ),
             "comparison_artifacts_ready": any(
                 records_by_attr[spec.attr_name] for spec in _COMPARISON_TABLES

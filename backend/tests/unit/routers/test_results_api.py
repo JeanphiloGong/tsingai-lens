@@ -11,21 +11,23 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from application.core.semantic_build.document_profile_service import DocumentProfileService
+from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from tests.support.collection_service import build_test_collection_service
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from controllers.core import results as results_controller
 from domain.core import (
     BaselineReference,
     CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
-    CoreFactSet,
     DocumentProfile,
     MeasurementResult,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
 )
@@ -152,15 +154,19 @@ def _store_core_result_facts(
     characterization_observations: list[dict] | None = None,
     structure_features: list[dict] | None = None,
 ) -> None:
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
+        "build_test",
+        tuple(
+            DocumentProfile.from_mapping(row)
+            for row in (document_profiles or [])
+        ),
+    )
+    comparison_service.paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
             paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            document_profiles=tuple(
-                DocumentProfile.from_mapping(row)
-                for row in (document_profiles or [])
-            ),
             sample_variants=tuple(
                 SampleVariant.from_mapping(row) for row in (sample_variants or [])
             ),
@@ -184,25 +190,32 @@ def _store_core_result_facts(
                 StructureFeature.from_mapping(row)
                 for row in (structure_features or [])
             ),
-            comparable_results=tuple(
-                ComparableResult.from_mapping(row)
-                for row in (comparable_results or [])
-            ),
-            collection_comparable_results=tuple(
-                CollectionComparableResult.from_mapping(row)
-                for row in (scoped_results or [])
-            ),
         ),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        tuple(ComparableResult.from_mapping(row) for row in (comparable_results or [])),
+        tuple(
+            CollectionComparableResult.from_mapping(row)
+            for row in (scoped_results or [])
+        ),
+        (),
     )
 
 
 @pytest.fixture()
 def result_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     comparison_service = ComparisonService(
         collection_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
+        document_profile_service=DocumentProfileService(
+            collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
         ),
     )
 

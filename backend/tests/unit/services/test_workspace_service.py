@@ -9,16 +9,18 @@ from application.source.task_service import TaskService
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
-    CoreFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
     ObjectiveEvidenceUnit,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.memory import MemoryBuildRepository
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from infra.source.runtime.source_evidence import build_blocks
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 
 def _write_source_artifacts(
@@ -29,6 +31,7 @@ def _write_source_artifacts(
 ) -> None:
     profile_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=documents.to_dict(orient="records"),
             text_units=text_units.to_dict(orient="records"),
@@ -40,12 +43,21 @@ def _write_source_artifacts(
 def test_workspace_service_builds_collection_overview(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
-        ),
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=profile_service,
     )
 
     collection = collection_service.create_collection("Composite Workspace")
@@ -73,15 +85,20 @@ def test_workspace_service_builds_collection_overview(tmp_path):
 def test_workspace_service_includes_document_summary_and_links(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    source_repository = MemorySourceArtifactRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
         document_profile_service=profile_service,
     )
     collection = collection_service.create_collection("Profiled Workspace")
@@ -121,7 +138,7 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    profile_service.build_document_profiles(collection_id)
+    profile_service.build_document_profiles(collection_id, build_id="build_test")
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
@@ -144,12 +161,21 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
 def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
-        ),
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=profile_service,
     )
     collection = collection_service.create_collection("Semantic Graph Workspace")
     collection_id = collection["collection_id"]
@@ -158,12 +184,10 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
         "paper.txt",
         b"Experimental Section\nConductivity increased after annealing.",
     )
-    workspace_service.core_fact_repository.replace_collection_facts(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            document_profiles=(
+        "build_test",
+        (
                 DocumentProfile.from_mapping(
                     {
                         "document_id": "paper-1",
@@ -174,7 +198,13 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
                         "confidence": 0.9,
                     }
                 ),
-            ),
+        ),
+    )
+    paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
                     {
@@ -202,43 +232,46 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
                     }
                 ),
             ),
-            comparable_results=(
-                ComparableResult.from_mapping(
-                    {
-                        "comparable_result_id": "cres-1",
-                        "source_result_id": "res-1",
-                        "source_document_id": "paper-1",
-                        "normalized_context": {
-                            "material_system_normalized": "oxide cathode",
-                            "process_normalized": "700 C",
-                            "baseline_normalized": "as-prepared",
-                            "test_condition_normalized": "EIS",
-                        },
-                        "value": {
-                            "property_normalized": "conductivity",
-                            "result_type": "scalar",
-                            "numeric_value": 12.0,
-                            "unit": "mS/cm",
-                            "summary": "12 mS/cm",
-                        },
-                    }
-                ),
-            ),
-            collection_comparable_results=(
-                CollectionComparableResult.from_mapping(
-                    {
-                        "collection_id": collection_id,
-                        "comparable_result_id": "cres-1",
-                        "assessment": {
-                            "comparability_status": "comparable",
-                            "requires_expert_review": False,
-                        },
-                        "included": True,
-                        "sort_order": 0,
-                    }
-                ),
+        ),
+    )
+    comparable_result = ComparableResult.from_mapping(
+        {
+            "comparable_result_id": "cres-1",
+            "source_result_id": "res-1",
+            "source_document_id": "paper-1",
+            "normalized_context": {
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+            },
+            "value": {
+                "property_normalized": "conductivity",
+                "result_type": "scalar",
+                "numeric_value": 12.0,
+                "unit": "mS/cm",
+                "summary": "12 mS/cm",
+            },
+        }
+    )
+    core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        (comparable_result,),
+        (
+            CollectionComparableResult.from_mapping(
+                {
+                    "collection_id": collection_id,
+                    "comparable_result_id": "cres-1",
+                    "assessment": {
+                        "comparability_status": "comparable",
+                        "requires_expert_review": False,
+                    },
+                    "included": True,
+                    "sort_order": 0,
+                }
             ),
         ),
+        (),
     )
     overview = workspace_service.get_workspace_overview(collection_id)
 
@@ -257,12 +290,21 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
 def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
-        ),
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=profile_service,
     )
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
@@ -304,11 +346,12 @@ def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path
             }
         ),
     )
-    workspace_service.core_fact_repository.replace_collection_document_profiles(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         document_profiles,
     )
-    workspace_service.core_fact_repository.replace_collection_research_objectives(
+    core_fact_repository.replace_collection_research_objectives(
         collection_id,
         paper_skims=(),
         research_objectives=(),

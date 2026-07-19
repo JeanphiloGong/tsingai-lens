@@ -8,7 +8,6 @@ from pathlib import Path
 from domain.core import (
     BaselineReference,
     ConfirmedGoal,
-    CoreFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
@@ -18,6 +17,7 @@ from domain.core import (
     SampleVariant,
     TestCondition as CoreTestCondition,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.evaluation import (
     EvaluationGoldItem,
     EvaluationGoldSet,
@@ -54,6 +54,7 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from scripts.persistence.capture_baseline import capture_baseline
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -80,11 +81,14 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     )
     build_repository = PostgresBuildRepository(auth_repository.session_factory)
     source_repository = SqliteSourceArtifactRepository(db_path)
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_repository = SqliteCoreFactRepository(db_path)
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_repository,
     )
-    core_repository = SqliteCoreFactRepository(db_path)
     goal_session_repository = SqliteGoalSessionRepository(db_path)
     experiment_plan_repository = SqliteExperimentPlanRepository(db_path)
     evaluation_repository = SqliteEvaluationRepository(db_path)
@@ -234,13 +238,19 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         (),
         (),
     )
-    core_repository.replace_collection_facts(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            document_profiles=tuple(
-                DocumentProfile.from_mapping(item)
-                for item in records["core_document_profiles"]
-            ),
+        "build_test",
+        tuple(
+            DocumentProfile.from_mapping(item)
+            for item in records["core_document_profiles"]
+        ),
+    )
+    paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
             evidence_anchors=tuple(
                 EvidenceAnchor.from_mapping(item)
                 for item in records["core_evidence_anchors"]
@@ -370,22 +380,31 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             for index, actual in enumerate(actual_items)
         ]
 
-    facts = core_repository.read_collection_facts(collection_id)
+    paper_facts = paper_fact_repository.read(collection_id)
+    core_facts = core_repository.read_collection_facts(collection_id)
     core_families = {
         "core_document_profiles": [
-            item.to_record() for item in facts.document_profiles
+            item.to_record() for item in paper_facts.document_profiles
         ],
-        "core_evidence_anchors": [item.to_record() for item in facts.evidence_anchors],
-        "core_method_facts": [item.to_record() for item in facts.method_facts],
-        "core_sample_variants": [item.to_record() for item in facts.sample_variants],
-        "core_test_conditions": [item.to_record() for item in facts.test_conditions],
+        "core_evidence_anchors": [
+            item.to_record() for item in paper_facts.evidence_anchors
+        ],
+        "core_method_facts": [item.to_record() for item in paper_facts.method_facts],
+        "core_sample_variants": [
+            item.to_record() for item in paper_facts.sample_variants
+        ],
+        "core_test_conditions": [
+            item.to_record() for item in paper_facts.test_conditions
+        ],
         "core_baseline_references": [
-            item.to_record() for item in facts.baseline_references
+            item.to_record() for item in paper_facts.baseline_references
         ],
         "core_measurement_results": [
-            item.to_record() for item in facts.measurement_results
+            item.to_record() for item in paper_facts.measurement_results
         ],
-        "research_objectives": [item.to_record() for item in facts.research_objectives],
+        "research_objectives": [
+            item.to_record() for item in core_facts.research_objectives
+        ],
         "confirmed_goals": [
             item.to_record()
             for item in core_repository.list_confirmed_goals(collection_id)

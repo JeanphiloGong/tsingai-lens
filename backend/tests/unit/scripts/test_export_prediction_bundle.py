@@ -12,7 +12,6 @@ from domain.core import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonRowRecord,
-    CoreFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
@@ -22,8 +21,10 @@ from domain.core import (
     StructureFeature,
     TestCondition,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _load_exporter_module():
@@ -54,7 +55,7 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
-    _write_system_artifacts(backend_root, collection_id)
+    paper_fact_repository = _write_system_artifacts(backend_root, collection_id)
     source_db_path = [backend_root / "data" / "lens.sqlite"]
     monkeypatch.setattr(
         exporter,
@@ -66,6 +67,12 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
         exporter,
         "PostgresSourceArtifactRepository",
         lambda _session_factory: SqliteSourceArtifactRepository(source_db_path[0]),
+    )
+    paper_fact_repositories = [paper_fact_repository]
+    monkeypatch.setattr(
+        exporter,
+        "PostgresPaperFactRepository",
+        lambda _session_factory: paper_fact_repositories[0],
     )
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
 
@@ -122,8 +129,11 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     run_collection_id = "col-run"
     run_output_dir = run_root / "collections" / run_collection_id / "output"
     run_output_dir.mkdir(parents=True)
-    _write_system_artifacts_to_db(run_root / "lens.sqlite", run_collection_id)
+    run_paper_fact_repository = _write_system_artifacts_to_db(
+        run_root / "lens.sqlite", run_collection_id
+    )
     source_db_path[0] = run_root / "lens.sqlite"
+    paper_fact_repositories[0] = run_paper_fact_repository
     run_output_prediction_path = tmp_path / "generated" / "prediction_from_run.json"
 
     exporter.export_prediction_bundle(
@@ -1442,6 +1452,11 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
         "PostgresSourceArtifactRepository",
         lambda _session_factory: SqliteSourceArtifactRepository(db_path),
     )
+    monkeypatch.setattr(
+        exporter,
+        "PostgresPaperFactRepository",
+        lambda _session_factory: MemoryPaperFactRepository(),
+    )
 
     exporter.export_prediction_bundle(
         backend_root=backend_root,
@@ -1456,12 +1471,16 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
     assert "documents" in bundle["metadata"]["missing_artifacts"]
 
 
-def _write_system_artifacts(backend_root: Path, collection_id: str) -> None:
+def _write_system_artifacts(
+    backend_root: Path, collection_id: str
+) -> MemoryPaperFactRepository:
     db_path = backend_root / "data" / "lens.sqlite"
-    _write_system_artifacts_to_db(db_path, collection_id)
+    return _write_system_artifacts_to_db(db_path, collection_id)
 
 
-def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
+def _write_system_artifacts_to_db(
+    db_path: Path, collection_id: str
+) -> MemoryPaperFactRepository:
     SqliteSourceArtifactRepository(db_path).replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -1475,22 +1494,29 @@ def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
             ],
         ),
     )
-    SqliteCoreFactRepository(db_path).replace_collection_facts(
+    paper_fact_repository = MemoryPaperFactRepository()
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            document_profiles=(
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "collection_id": collection_id,
-                        "title": "Prediction Paper",
-                        "source_filename": "paper.pdf",
-                        "doc_type": "experimental",
-                        "parsing_warnings": [],
-                        "confidence": 0.9,
-                    }
-                ),
+        "build_test",
+        (
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "collection_id": collection_id,
+                    "title": "Prediction Paper",
+                    "source_filename": "paper.pdf",
+                    "doc_type": "experimental",
+                    "parsing_warnings": [],
+                    "confidence": 0.9,
+                }
             ),
+        ),
+    )
+    paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
                     {
@@ -1657,8 +1683,10 @@ def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
                     }
                 ),
             ),
-            comparable_results=(
-                ComparableResult.from_mapping(
+        ),
+    )
+    comparable_results = (
+        ComparableResult.from_mapping(
                     {
                         "comparable_result_id": "cres-1",
                         "source_result_id": "res-1",
@@ -1691,10 +1719,10 @@ def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
                         "baseline_reference": "control",
                         "result_source_type": "table",
                     }
-                ),
-            ),
-            collection_comparable_results=(
-                CollectionComparableResult.from_mapping(
+        ),
+    )
+    collection_comparable_results = (
+        CollectionComparableResult.from_mapping(
                     {
                         "collection_id": collection_id,
                         "comparable_result_id": "cres-1",
@@ -1702,10 +1730,10 @@ def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
                         "included": True,
                         "sort_order": 0,
                     }
-                ),
-            ),
-            pairwise_comparison_relations=(
-                PairwiseComparisonRelation.from_mapping(
+        ),
+    )
+    pairwise_comparison_relations = (
+        PairwiseComparisonRelation.from_mapping(
                     {
                         "relation_id": "rel-1",
                         "collection_id": collection_id,
@@ -1727,10 +1755,10 @@ def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
                         },
                         "confidence": 0.8,
                     }
-                ),
-            ),
-            comparison_rows=(
-                ComparisonRowRecord.from_mapping(
+        ),
+    )
+    comparison_rows = (
+        ComparisonRowRecord.from_mapping(
                     {
                         "row_id": "row-1",
                         "collection_id": collection_id,
@@ -1762,7 +1790,13 @@ def _write_system_artifacts_to_db(db_path: Path, collection_id: str) -> None:
                         "value": 940,
                         "unit": "MPa",
                     }
-                ),
-            ),
         ),
     )
+    SqliteCoreFactRepository(db_path).replace_collection_comparison_artifacts(
+        collection_id,
+        comparable_results,
+        collection_comparable_results,
+        comparison_rows,
+        pairwise_comparison_relations,
+    )
+    return paper_fact_repository

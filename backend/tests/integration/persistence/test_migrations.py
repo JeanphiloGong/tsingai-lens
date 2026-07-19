@@ -16,7 +16,7 @@ from infra.persistence.postgres.base import Base
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260719_0008"
+HEAD_REVISION = "20260719_0009"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -33,6 +33,26 @@ EXPECTED_TABLES = {
     "collections",
     "document_versions",
     "documents",
+    "paper_fact_baseline_evidence_anchors",
+    "paper_fact_baseline_references",
+    "paper_fact_builds",
+    "paper_fact_characterization_observations",
+    "paper_fact_condition_evidence_anchors",
+    "paper_fact_document_profiles",
+    "paper_fact_evidence_anchors",
+    "paper_fact_feature_observations",
+    "paper_fact_measurement_results",
+    "paper_fact_method_evidence_anchors",
+    "paper_fact_methods",
+    "paper_fact_observation_evidence_anchors",
+    "paper_fact_result_evidence_anchors",
+    "paper_fact_result_observations",
+    "paper_fact_result_structure_features",
+    "paper_fact_sample_variants",
+    "paper_fact_structure_features",
+    "paper_fact_test_conditions",
+    "paper_fact_variant_evidence_anchors",
+    "paper_fact_variant_structure_features",
     "source_block_text_units",
     "source_blocks",
     "source_documents",

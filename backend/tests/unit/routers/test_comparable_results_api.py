@@ -11,13 +11,16 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from tests.support.collection_service import build_test_collection_service
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from controllers.core import comparable_results as comparable_results_controller
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
-    CoreFactSet,
 )
 from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
@@ -120,29 +123,29 @@ def _store_core_comparable_result_facts(
     comparable_results: list[dict],
     scoped_results: list[dict],
 ) -> None:
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            comparable_results=tuple(
-                ComparableResult.from_mapping(row) for row in comparable_results
-            ),
-            collection_comparable_results=tuple(
-                CollectionComparableResult.from_mapping(row)
-                for row in scoped_results
-            ),
+        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
+        tuple(
+            CollectionComparableResult.from_mapping(row) for row in scoped_results
         ),
+        (),
     )
 
 
 @pytest.fixture()
 def comparable_result_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     comparison_service = ComparisonService(
         collection_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
+        document_profile_service=DocumentProfileService(
+            collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
         ),
     )
 

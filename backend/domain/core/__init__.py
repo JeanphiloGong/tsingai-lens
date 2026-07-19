@@ -49,6 +49,7 @@ from domain.core.evidence_backbone import (
     TestCondition,
 )
 from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.core.objective_material_projection import (
     ObjectiveMaterialProjectionRow,
     project_objective_material_rows,
@@ -117,6 +118,7 @@ __all__ = [
     "ComparisonSemanticRecords",
     "ContextBinding",
     "CoreFactSet",
+    "PaperFactSet",
     "CLAIM_STATUSES",
     "CLAIM_TYPES",
     "CONFIRMED_GOAL_SOURCE_TYPES",

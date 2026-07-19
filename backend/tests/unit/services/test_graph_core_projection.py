@@ -12,6 +12,7 @@ from domain.core.research_objective import (
     ResearchObjective,
 )
 from infra.persistence.sqlite import SqliteCoreFactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _profile(document_id: str = "paper-1") -> dict:
@@ -104,7 +105,6 @@ def _logic_chain() -> dict:
 def _core_graph_fact_set(collection_id: str) -> CoreFactSet:
     return CoreFactSet(
         research_objectives_ready=True,
-        document_profiles=(DocumentProfile.from_mapping(_profile()),),
         research_objectives=(ResearchObjective.from_mapping(_objective()),),
         objective_evidence_units=(
             ObjectiveEvidenceUnit.from_mapping(_measurement_unit()),
@@ -392,7 +392,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
 
     collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
+    paper_fact_repository = MemoryPaperFactRepository()
 
     collection = collection_service.create_collection("Objective Graph Collection")
     collection_id = collection["collection_id"]
@@ -407,9 +407,10 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         objective_evidence_units=_core_graph_fact_set(collection_id).objective_evidence_units,
         objective_logic_chains=_core_graph_fact_set(collection_id).objective_logic_chains,
     )
-    core_fact_repository.replace_collection_document_profiles(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        _core_graph_fact_set(collection_id).document_profiles,
+        "build_test",
+        (DocumentProfile.from_mapping(_profile()),),
     )
 
     payload = graph_service.get_collection_graph(
@@ -417,6 +418,8 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         max_nodes=40,
         min_weight=0.0,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
 
     assert payload["collection_id"] == collection_id
@@ -435,6 +438,8 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         max_nodes=40,
         min_weight=0.0,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
 
     assert filename == f"{collection_id}.graphml"
@@ -466,7 +471,7 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
 
     collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
+    paper_fact_repository = MemoryPaperFactRepository()
 
     collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
@@ -481,15 +486,18 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
         objective_evidence_units=fact_set.objective_evidence_units,
         objective_logic_chains=fact_set.objective_logic_chains,
     )
-    core_fact_repository.replace_collection_document_profiles(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        fact_set.document_profiles,
+        "build_test",
+        (DocumentProfile.from_mapping(_profile()),),
     )
 
     payload = graph_service.get_collection_graph_neighbors(
         collection_id=collection_id,
         node_id="step:chain-1:measurement_results",
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
 
     assert payload["collection_id"] == collection_id

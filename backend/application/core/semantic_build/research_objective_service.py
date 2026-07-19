@@ -31,12 +31,10 @@ from domain.core import (
 )
 from domain.ports import (
     CoreFactRepository,
+    PaperFactRepository,
     SourceArtifactRepository,
 )
 from domain.source import SourceArtifactSet, SourceDocumentTree
-from infra.persistence.factory import (
-    build_core_fact_repository,
-)
 from application.source.artifact_input_service import load_document_tree
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
@@ -346,26 +344,17 @@ class ResearchObjectiveService:
         self,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
+        paper_fact_repository: PaperFactRepository,
+        core_fact_repository: CoreFactRepository,
+        document_profile_service: DocumentProfileService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
-        document_profile_service: DocumentProfileService | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._structured_extractor = structured_extractor
-        self.core_fact_repository = (
-            core_fact_repository
-            or getattr(document_profile_service, "core_fact_repository", None)
-            or build_core_fact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.paper_fact_repository = paper_fact_repository
+        self.core_fact_repository = core_fact_repository
         self.source_artifact_repository = source_artifact_repository
-        self.document_profile_service = document_profile_service or DocumentProfileService(
-            collection_service=self.collection_service,
-            structured_extractor=structured_extractor,
-            core_fact_repository=self.core_fact_repository,
-            source_artifact_repository=self.source_artifact_repository,
-        )
+        self.document_profile_service = document_profile_service
         self.research_understanding_service = ResearchUnderstandingService(
             source_artifact_repository=self.source_artifact_repository,
         )
@@ -474,7 +463,11 @@ class ResearchObjectiveService:
             source_logic_chain=self._select_objective_logic_chain(logic_chains),
             evidence_units=evidence_units,
         )
-        frame_views = self._objective_paper_frame_views(frames, facts=facts)
+        frame_views = self._objective_paper_frame_views(
+            frames,
+            collection_id=collection_id,
+            facts=facts,
+        )
         payload = {
             "collection_id": collection_id,
             "state": self._objective_detail_state(
@@ -799,6 +792,7 @@ class ResearchObjectiveService:
                     ),
                     "paper_frames": self._objective_paper_frame_views(
                         list(objective_paper_frames),
+                        collection_id=goal.collection_id,
                         facts=self.core_fact_repository.read_collection_facts(
                             goal.collection_id
                         ),
@@ -1202,7 +1196,10 @@ class ResearchObjectiveService:
         self.collection_service.get_collection(collection_id)
         try:
             artifacts = self._load_source_artifacts(collection_id, build_id=build_id)
-            profiles = self.document_profile_service.read_document_profiles(collection_id)
+            profiles = self.document_profile_service.read_document_profiles(
+                collection_id,
+                build_id=build_id,
+            )
         except (FileNotFoundError, DocumentProfilesNotReadyError) as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
@@ -1284,7 +1281,11 @@ class ResearchObjectiveService:
                 source_logic_chain=self._select_objective_logic_chain(logic_chains),
                 evidence_units=evidence_units,
             )
-            frame_views = self._objective_paper_frame_views(frames, facts=facts)
+            frame_views = self._objective_paper_frame_views(
+                frames,
+                collection_id=collection_id,
+                facts=facts,
+            )
             payload = {
                 "collection_id": collection_id,
                 "objective": objective.to_record(),
@@ -1761,9 +1762,13 @@ class ResearchObjectiveService:
         self,
         frames: list[ObjectivePaperFrame],
         *,
+        collection_id: str,
         facts,
     ) -> list[dict[str, Any]]:
-        metadata_by_document_id = self._objective_document_metadata(facts)
+        metadata_by_document_id = self._objective_document_metadata(
+            collection_id,
+            facts,
+        )
         return [
             {
                 **frame.to_record(),
@@ -1776,14 +1781,18 @@ class ResearchObjectiveService:
             for frame in frames
         ]
 
-    def _objective_document_metadata(self, facts) -> dict[str, dict[str, str | None]]:
+    def _objective_document_metadata(
+        self,
+        collection_id: str,
+        facts,
+    ) -> dict[str, dict[str, str | None]]:
         metadata: dict[str, dict[str, str | None]] = {}
         for skim in facts.paper_skims:
             metadata[skim.document_id] = {
                 "title": skim.title,
                 "source_filename": skim.source_filename,
             }
-        for profile in facts.document_profiles:
+        for profile in self.paper_fact_repository.read(collection_id).document_profiles:
             metadata[profile.document_id] = {
                 "title": profile.title or metadata.get(profile.document_id, {}).get("title"),
                 "source_filename": (

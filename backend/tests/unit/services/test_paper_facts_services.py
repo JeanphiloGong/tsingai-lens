@@ -16,6 +16,9 @@ from application.core.semantic_build.llm.prompts import (
 from application.core.semantic_build.paper_facts_service import (
     PaperFactsService as _PaperFactsService,
 )
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
 from application.core.semantic_build.llm.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
@@ -55,6 +58,7 @@ from domain.core.evidence_backbone import (
     MeasurementResult,
     SampleVariant,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
@@ -67,21 +71,47 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from tests.support.collection_service import build_test_collection_service
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+
+def test_paper_fact_set_owns_only_reusable_document_facts():
+    facts = PaperFactSet(paper_facts_ready=True)
+
+    assert facts.paper_facts_generated is True
+    assert facts.evidence_cards_generated is True
+    assert facts.evidence_cards_ready is False
+    assert facts.has_paper_facts() is False
 
 
 def _build_paper_facts_service(*, collection_service, **kwargs) -> _PaperFactsService:
+    paper_fact_repository = kwargs.pop(
+        "paper_fact_repository", MemoryPaperFactRepository()
+    )
+    core_fact_repository = kwargs.pop(
+        "core_fact_repository",
+        SqliteCoreFactRepository(collection_service.root_dir.parent / "lens.sqlite"),
+    )
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
         source_repository = getattr(
             kwargs.get("document_profile_service"),
             "source_artifact_repository",
             None,
-        ) or SqliteSourceArtifactRepository(
-            collection_service.root_dir.parent / "lens.sqlite"
+        ) or MemorySourceArtifactRepository()
+    document_profile_service = kwargs.pop("document_profile_service", None)
+    if document_profile_service is None:
+        document_profile_service = DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
         )
     return _PaperFactsService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
         **kwargs,
     )
 
@@ -586,13 +616,14 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     collection = collection_service.create_collection("Route Gated Facts")
     collection_id = collection["collection_id"]
     core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    source_repository = MemorySourceArtifactRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
     extractor = CountingEvidenceExtractor()
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         structured_extractor=extractor,
-        core_fact_repository=core_repository,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     service = _build_paper_facts_service(
         collection_service=collection_service,
@@ -600,9 +631,11 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
         structured_extractor=extractor,
         core_fact_repository=core_repository,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     source_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -729,7 +762,10 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             ],
         ),
     )
-    document_profile_service.build_document_profiles(collection_id)
+    document_profile_service.build_document_profiles(
+        collection_id,
+        build_id="build_test",
+    )
 
     objective = ResearchObjective.from_mapping(
         {
@@ -823,7 +859,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     )
 
     with caplog.at_level("INFO"):
-        service.build_paper_facts(collection_id)
+        service.build_paper_facts(collection_id, build_id="build_test")
 
     assert len(extractor.text_window_payloads) == 1
     assert extractor.text_window_payloads[0]["text_window"]["text"].startswith(
@@ -876,7 +912,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     )
 
     with caplog.at_level("INFO"):
-        service.build_paper_facts(collection_id)
+        service.build_paper_facts(collection_id, build_id="build_test")
 
     assert extractor.text_window_payloads == []
     assert len(extractor.table_batch_payloads) == 1
@@ -1767,6 +1803,7 @@ def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=MemoryPaperFactRepository(),
     )
     paper_facts_service = _build_paper_facts_service(
         collection_service=collection_service,
@@ -2404,11 +2441,17 @@ def test_comparison_service_lists_corpus_results_without_manifest_cache_artifact
 ):
 
     collection_service = build_test_collection_service(tmp_path / "collections")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
+        document_profile_service=DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
         ),
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
     )
 
     collection = collection_service.create_collection("Corpus Cache Collection")
@@ -2445,11 +2488,17 @@ def test_comparison_service_reflects_repository_updates_without_manifest_cache(
 ):
 
     collection_service = build_test_collection_service(tmp_path / "collections")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
+        document_profile_service=DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
         ),
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
     )
 
     collection = collection_service.create_collection("Corpus Refresh Collection")

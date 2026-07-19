@@ -116,8 +116,8 @@ class GoalSessionService:
         research_view_service: ResearchViewAggregationService,
         workspace_service: WorkspaceService,
         research_objective_service: ResearchObjectiveService,
-        comparison_service: ComparisonService | None = None,
-        paper_facts_service: PaperFactsService | None = None,
+        comparison_service: ComparisonService,
+        paper_facts_service: PaperFactsService,
         research_understanding_feedback_service: (
             ResearchUnderstandingFeedbackService | None
         ) = None,
@@ -128,14 +128,8 @@ class GoalSessionService:
         self.collection_service = collection_service
         self.research_view_service = research_view_service
         self.workspace_service = workspace_service
-        self.comparison_service = comparison_service or ComparisonService(
-            collection_service=self.collection_service,
-            source_artifact_repository=self.workspace_service.source_artifact_repository,
-        )
-        self.paper_facts_service = paper_facts_service or PaperFactsService(
-            collection_service=self.collection_service,
-            source_artifact_repository=self.workspace_service.source_artifact_repository,
-        )
+        self.comparison_service = comparison_service
+        self.paper_facts_service = paper_facts_service
         self.research_objective_service = research_objective_service
         self.research_understanding_feedback_service = (
             research_understanding_feedback_service

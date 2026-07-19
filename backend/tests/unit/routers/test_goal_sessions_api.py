@@ -11,9 +11,14 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.goal.session_service import GoalSessionService
+from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from application.core.semantic_build.paper_facts_service import PaperFactsService
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
@@ -27,7 +32,11 @@ from controllers.schemas.goal.session import (
 )
 from infra.persistence.factory import build_goal_session_repository
 from infra.persistence.memory import MemoryBuildRepository
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _request(goal_session_service, user_id: str = "local-user"):
@@ -77,23 +86,53 @@ def goal_session_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    workspace_service = WorkspaceService(
-        collection_service,
-        task_service,
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    workspace_service = WorkspaceService(
+        collection_service=collection_service,
+        task_service=task_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
     )
     research_objective_service = ResearchObjectiveService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
+    )
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
     )
     service = GoalSessionService(
         collection_service=collection_service,
         research_view_service=ResearchViewAggregationService(
             collection_service=collection_service,
             source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+            core_fact_repository=core_fact_repository,
         ),
         workspace_service=workspace_service,
         research_objective_service=research_objective_service,
+        comparison_service=comparison_service,
+        paper_facts_service=paper_facts_service,
         goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient("General background."),
         model="fake-model",

@@ -12,6 +12,7 @@ from domain.core.comparison import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ConfirmedGoal,
     ObjectiveContext,
@@ -296,6 +297,31 @@ class SourceArtifactRepository(Protocol):
     ) -> list[SourceFigure]: ...
 
 
+class PaperFactRepository(Protocol):
+    backend_name: str
+
+    def replace_document_profiles(
+        self,
+        collection_id: str,
+        build_id: str,
+        profiles: tuple[DocumentProfile, ...],
+    ) -> None: ...
+
+    def replace_paper_facts(
+        self,
+        collection_id: str,
+        build_id: str,
+        facts: PaperFactSet,
+    ) -> None: ...
+
+    def read(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> PaperFactSet: ...
+
+
 class CoreFactRepository(Protocol):
     backend_name: str
 
@@ -309,18 +335,6 @@ class CoreFactRepository(Protocol):
         objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
         objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
         objective_logic_chains: tuple[ObjectiveLogicChain, ...],
-    ) -> None: ...
-
-    def replace_collection_document_profiles(
-        self,
-        collection_id: str,
-        document_profiles: tuple[DocumentProfile, ...],
-    ) -> None: ...
-
-    def replace_collection_facts(
-        self,
-        collection_id: str,
-        facts: CoreFactSet,
     ) -> None: ...
 
     def replace_collection_comparison_artifacts(

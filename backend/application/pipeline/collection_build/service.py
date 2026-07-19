@@ -73,28 +73,15 @@ class CollectionBuildPipelineService:
         task_service: TaskService,
         artifact_registry_service: ArtifactRegistryService,
         source_artifact_repository: SourceArtifactRepository,
-        document_profile_service: DocumentProfileService | None = None,
-        research_objective_service: ResearchObjectiveService | None = None,
+        document_profile_service: DocumentProfileService,
+        research_objective_service: ResearchObjectiveService,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
         self.artifact_registry_service = artifact_registry_service
         self.source_artifact_repository = source_artifact_repository
-        self.document_profile_service = (
-            document_profile_service
-            or DocumentProfileService(
-                collection_service=self.collection_service,
-                source_artifact_repository=self.source_artifact_repository,
-            )
-        )
-        self.research_objective_service = (
-            research_objective_service
-            or ResearchObjectiveService(
-                collection_service=self.collection_service,
-                source_artifact_repository=self.source_artifact_repository,
-                document_profile_service=self.document_profile_service,
-            )
-        )
+        self.document_profile_service = document_profile_service
+        self.research_objective_service = research_objective_service
 
     def _resolve_build_source_artifacts(self):
         global build_source_artifacts

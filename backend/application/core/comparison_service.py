@@ -26,8 +26,7 @@ from domain.core.comparison import (
     ComparisonRowRecord,
 )
 from domain.core.fact_store import CoreFactSet
-from domain.ports import CoreFactRepository, SourceArtifactRepository
-from infra.persistence.factory import build_core_fact_repository
+from domain.ports import CoreFactRepository, PaperFactRepository
 
 logger = logging.getLogger(__name__)
 
@@ -110,22 +109,14 @@ class ComparisonService:
     def __init__(
         self,
         collection_service: CollectionService,
-        source_artifact_repository: SourceArtifactRepository,
-        document_profile_service: DocumentProfileService | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
+        paper_fact_repository: PaperFactRepository,
+        core_fact_repository: CoreFactRepository,
+        document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
-        self.document_profile_service = document_profile_service or DocumentProfileService(
-            collection_service=self.collection_service,
-            core_fact_repository=core_fact_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
-        self.core_fact_repository = (
-            core_fact_repository
-            or build_core_fact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.paper_fact_repository = paper_fact_repository
+        self.core_fact_repository = core_fact_repository
+        self.document_profile_service = document_profile_service
         self.comparison_row_projector = ComparisonRowProjector()
 
     def list_comparison_rows(
@@ -263,7 +254,7 @@ class ComparisonService:
         if not matching_records:
             raise ResultNotFoundError(collection_id, result_key)
         scoped_record, comparable_record, document_payload = matching_records[0]
-        projection_context = self._projection_context_from_facts(facts)
+        projection_context = self._projection_context_from_paper_facts(collection_id)
         return self._serialize_collection_result_detail(
             collection_id,
             comparable_record,
@@ -410,7 +401,7 @@ class ComparisonService:
             "items": items,
         }
         if include_grouped_projections:
-            projection_context = self._projection_context_from_facts(facts)
+            projection_context = self._projection_context_from_paper_facts(collection_id)
             payload["variant_dossiers"] = self._build_variant_dossiers(
                 collection_id=collection_id,
                 comparable_records=comparable_records,
@@ -493,7 +484,7 @@ class ComparisonService:
             for record in facts.comparable_results
             if self._safe_text(record.comparable_result_id)
         }
-        document_lookup = self._document_profile_lookup_from_facts(facts)
+        document_lookup = self._document_profile_lookup(collection_id)
         records: list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]] = []
         for scoped_record in facts.collection_comparable_results:
             if self._safe_text(scoped_record.collection_id) != collection_id or not scoped_record.included:
@@ -940,7 +931,11 @@ class ComparisonService:
     ) -> dict[str, Any]:
         return record.to_record()
 
-    def _projection_context_from_facts(self, facts: CoreFactSet) -> dict[str, Any]:
+    def _projection_context_from_paper_facts(
+        self,
+        collection_id: str,
+    ) -> dict[str, Any]:
+        facts = self.paper_fact_repository.read(collection_id)
         return {
             "sample_variants_by_id": self._index_records_by_text(
                 [record.to_record() for record in facts.sample_variants],
@@ -971,10 +966,11 @@ class ComparisonService:
             ),
         }
 
-    def _document_profile_lookup_from_facts(
+    def _document_profile_lookup(
         self,
-        facts: CoreFactSet,
+        collection_id: str,
     ) -> dict[str, dict[str, Any]]:
+        facts = self.paper_fact_repository.read(collection_id)
         return self._index_records_by_text(
             [record.to_record() for record in facts.document_profiles],
             "document_id",

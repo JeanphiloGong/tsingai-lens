@@ -18,7 +18,9 @@ from domain.core import (
     ObjectiveEvidenceUnit,
     ResearchUnderstanding,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 class FakeCollectionService:
@@ -3063,6 +3065,7 @@ def test_prediction_snapshot_service_exports_objective_first_measurements():
     repository = FakeEvaluationRepository()
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
+        paper_fact_repository=MemoryPaperFactRepository(),
         core_fact_repository=FakeCoreFactRepository(
             CoreFactSet(
                 objective_evidence_units=(
@@ -3103,28 +3106,34 @@ def test_prediction_snapshot_service_exports_objective_first_measurements():
 
 def test_prediction_snapshot_service_exports_paper_fact_measurements():
     repository = FakeEvaluationRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
+    paper_fact_repository.replace_paper_facts(
+        "col-gold",
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
+            measurement_results=(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": "res-1",
+                        "document_id": "doc-1",
+                        "collection_id": "col-gold",
+                        "variant_id": "sample-a",
+                        "property_normalized": "yield_strength",
+                        "value_payload": {"numeric_value": 520},
+                        "unit": "MPa",
+                        "evidence_anchor_ids": ["anc-1"],
+                        "traceability_status": "direct",
+                        "result_source_type": "table",
+                    }
+                ),
+            ),
+        ),
+    )
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
-        core_fact_repository=FakeCoreFactRepository(
-            CoreFactSet(
-                measurement_results=(
-                    MeasurementResult.from_mapping(
-                        {
-                            "result_id": "res-1",
-                            "document_id": "doc-1",
-                            "collection_id": "col-gold",
-                            "variant_id": "sample-a",
-                            "property_normalized": "yield_strength",
-                            "value_payload": {"numeric_value": 520},
-                            "unit": "MPa",
-                            "evidence_anchor_ids": ["anc-1"],
-                            "traceability_status": "direct",
-                            "result_source_type": "table",
-                        }
-                    ),
-                )
-            )
-        ),
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=repository,
     )
 
@@ -3142,6 +3151,7 @@ def test_prediction_snapshot_service_exports_paper_fact_measurements():
 def test_prediction_snapshot_service_reports_not_ready_when_no_items():
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
+        paper_fact_repository=MemoryPaperFactRepository(),
         core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=FakeEvaluationRepository(),
     )
@@ -3154,6 +3164,7 @@ def test_prediction_snapshot_service_allows_empty_ready_core_outputs():
     repository = FakeEvaluationRepository()
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
+        paper_fact_repository=MemoryPaperFactRepository(),
         core_fact_repository=FakeCoreFactRepository(
             CoreFactSet(research_objectives_ready=True)
         ),
@@ -3198,6 +3209,7 @@ def test_core_evaluation_service_scores_matching_measurements():
     )
     snapshot_service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
+        paper_fact_repository=MemoryPaperFactRepository(),
         core_fact_repository=FakeCoreFactRepository(
             CoreFactSet(
                 objective_evidence_units=(
@@ -3271,6 +3283,7 @@ def test_core_evaluation_service_reports_missing_extra_and_unit_failures():
     repository.upsert_prediction_snapshot(
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
+            paper_fact_repository=MemoryPaperFactRepository(),
             core_fact_repository=FakeCoreFactRepository(
                 CoreFactSet(
                     objective_evidence_units=(
@@ -3350,6 +3363,7 @@ def test_core_evaluation_service_scores_empty_prediction_as_zero_recall():
     repository.upsert_prediction_snapshot(
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
+            paper_fact_repository=MemoryPaperFactRepository(),
             core_fact_repository=FakeCoreFactRepository(
                 CoreFactSet(research_objectives_ready=True)
             ),
@@ -3399,6 +3413,7 @@ def test_core_evaluation_service_matches_objective_first_comparison_values():
     )
     snapshot = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
+        paper_fact_repository=MemoryPaperFactRepository(),
         core_fact_repository=FakeCoreFactRepository(
             CoreFactSet(
                 objective_evidence_units=(
@@ -3470,6 +3485,7 @@ def test_core_evaluation_service_reports_numeric_and_evidence_failures():
     repository.upsert_prediction_snapshot(
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
+            paper_fact_repository=MemoryPaperFactRepository(),
             core_fact_repository=FakeCoreFactRepository(
                 CoreFactSet(
                     objective_evidence_units=(

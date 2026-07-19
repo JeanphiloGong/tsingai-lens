@@ -24,6 +24,8 @@ from domain.core import (
     TestCondition as CoreTestCondition,
     project_objective_comparison_rows,
 )
+from domain.core.paper_fact import PaperFactSet
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 class FakeCollectionService:
@@ -48,8 +50,6 @@ class FakeCoreFactRepository:
 
     def __init__(
         self,
-        profiles: list[dict],
-        frames: dict[str, list[dict]],
         comparison_rows: list[dict] | None,
         objective_units: list[dict] | None = None,
         research_objectives: list[dict] | None = None,
@@ -58,39 +58,6 @@ class FakeCoreFactRepository:
             research_objectives=self._records(
                 research_objectives if research_objectives is not None else [],
                 ResearchObjective,
-            ),
-            document_profiles=self._records(profiles, DocumentProfile),
-            evidence_anchors=self._records(
-                frames.get("evidence_anchors", []),
-                EvidenceAnchor,
-            ),
-            method_facts=self._records(
-                frames.get("method_facts", []),
-                MethodFact,
-            ),
-            sample_variants=self._records(
-                frames.get("sample_variants", []),
-                SampleVariant,
-            ),
-            test_conditions=self._records(
-                frames.get("test_conditions", []),
-                CoreTestCondition,
-            ),
-            baseline_references=self._records(
-                frames.get("baseline_references", []),
-                BaselineReference,
-            ),
-            measurement_results=self._records(
-                frames.get("measurement_results", []),
-                MeasurementResult,
-            ),
-            characterization_observations=self._records(
-                frames.get("characterization_observations", []),
-                CharacterizationObservation,
-            ),
-            structure_features=self._records(
-                frames.get("structure_features", []),
-                StructureFeature,
             ),
             comparison_rows=self._records(
                 comparison_rows if comparison_rows is not None else [],
@@ -415,10 +382,12 @@ def _service(
     comparison_rows: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
     profiles, frames = _frames()
-    core_fact_repository = FakeCoreFactRepository(profiles, frames, comparison_rows)
+    paper_fact_repository = _paper_fact_repository(profiles, frames)
+    core_fact_repository = FakeCoreFactRepository(comparison_rows)
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(has_files=has_files),
         source_artifact_repository=SimpleNamespace(),
+        paper_fact_repository=paper_fact_repository,
         core_fact_repository=core_fact_repository,
     )
 
@@ -441,9 +410,8 @@ def _service_from_frames(
     objective_units: list[dict] | None = None,
     research_objectives: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
+    paper_fact_repository = _paper_fact_repository(profiles, frames)
     core_fact_repository = FakeCoreFactRepository(
-        profiles,
-        frames,
         comparison_rows,
         objective_units,
         research_objectives,
@@ -451,8 +419,60 @@ def _service_from_frames(
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(),
         source_artifact_repository=SimpleNamespace(),
+        paper_fact_repository=paper_fact_repository,
         core_fact_repository=core_fact_repository,
     )
+
+
+def _paper_fact_repository(
+    profiles: list[dict],
+    frames: dict[str, list[dict]],
+) -> MemoryPaperFactRepository:
+    repository = MemoryPaperFactRepository()
+    repository.replace_document_profiles(
+        "col-1",
+        "build_test",
+        tuple(DocumentProfile.from_mapping(record) for record in profiles),
+    )
+    repository.replace_paper_facts(
+        "col-1",
+        "build_test",
+        PaperFactSet(
+            evidence_anchors=tuple(
+                EvidenceAnchor.from_mapping(record)
+                for record in frames.get("evidence_anchors", [])
+            ),
+            method_facts=tuple(
+                MethodFact.from_mapping(record)
+                for record in frames.get("method_facts", [])
+            ),
+            sample_variants=tuple(
+                SampleVariant.from_mapping(record)
+                for record in frames.get("sample_variants", [])
+            ),
+            test_conditions=tuple(
+                CoreTestCondition.from_mapping(record)
+                for record in frames.get("test_conditions", [])
+            ),
+            baseline_references=tuple(
+                BaselineReference.from_mapping(record)
+                for record in frames.get("baseline_references", [])
+            ),
+            measurement_results=tuple(
+                MeasurementResult.from_mapping(record)
+                for record in frames.get("measurement_results", [])
+            ),
+            characterization_observations=tuple(
+                CharacterizationObservation.from_mapping(record)
+                for record in frames.get("characterization_observations", [])
+            ),
+            structure_features=tuple(
+                StructureFeature.from_mapping(record)
+                for record in frames.get("structure_features", [])
+            ),
+        ),
+    )
+    return repository
 
 
 def test_document_research_view_builds_sample_matrix_and_condition_series():

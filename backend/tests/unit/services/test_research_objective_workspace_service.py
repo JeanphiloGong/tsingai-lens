@@ -6,9 +6,9 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveNotFoundError,
     ResearchObjectiveService,
 )
+from application.core.semantic_build.document_profile_service import DocumentProfileService
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
-    CoreFactSet,
     DocumentProfile,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
@@ -22,6 +22,7 @@ from infra.persistence.sqlite.core_fact_repository import SqliteCoreFactReposito
 from infra.persistence.sqlite.source_artifact_repository import (
     SqliteSourceArtifactRepository,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _seed_objective_collection(tmp_path):
@@ -102,27 +103,34 @@ def _seed_objective_collection(tmp_path):
         (),
         (),
     )
-    repository.replace_collection_facts(
+    paper_fact_repository = MemoryPaperFactRepository()
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            document_profiles=(
-                DocumentProfile(
-                    document_id="paper-1",
-                    collection_id=collection_id,
-                    title="Profile Title",
-                    source_filename="profile-paper.pdf",
-                    doc_type="experimental",
-                    parsing_warnings=(),
-                    confidence=0.9,
-                ),
+        "build_test",
+        (
+            DocumentProfile(
+                document_id="paper-1",
+                collection_id=collection_id,
+                title="Profile Title",
+                source_filename="profile-paper.pdf",
+                doc_type="experimental",
+                parsing_warnings=(),
+                confidence=0.9,
             ),
         ),
     )
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
     service = ResearchObjectiveService(
         collection_service=collection_service,
         core_fact_repository=repository,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        document_profile_service=document_profile_service,
     )
     service.persist_objective_understandings(collection_id)
     return collection_id, objective.objective_id, service

@@ -14,13 +14,14 @@ from tests.support.collection_service import build_test_collection_service
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from controllers.core import comparisons as comparisons_controller
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     build_comparison_row_id,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _build_semantic_comparison_record(
@@ -149,13 +150,16 @@ def _store_core_comparison_artifacts(
 def comparison_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     comparison_service = ComparisonService(
         collection_service=collection_service,
-        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
         document_profile_service=document_profile_service,
     )
 

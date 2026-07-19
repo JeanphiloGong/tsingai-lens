@@ -9,11 +9,11 @@ from application.core.research_understanding_service import ResearchUnderstandin
 from application.source.collection_service import CollectionService
 from domain.core import ResearchUnderstanding
 from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.core.objective_material_projection import (
     project_objective_material_rows,
 )
-from domain.ports import CoreFactRepository, SourceArtifactRepository
-from infra.persistence.factory import build_core_fact_repository
+from domain.ports import CoreFactRepository, PaperFactRepository, SourceArtifactRepository
 
 
 _PROCESS_COLUMN_ORDER = (
@@ -140,15 +140,12 @@ class ResearchViewAggregationService:
         self,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
-        core_fact_repository: CoreFactRepository | None = None,
+        paper_fact_repository: PaperFactRepository,
+        core_fact_repository: CoreFactRepository,
     ) -> None:
         self.collection_service = collection_service
-        self.core_fact_repository = (
-            core_fact_repository
-            or build_core_fact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.paper_fact_repository = paper_fact_repository
+        self.core_fact_repository = core_fact_repository
         self.research_understanding_service = ResearchUnderstandingService(
             source_artifact_repository
         )
@@ -160,7 +157,9 @@ class ResearchViewAggregationService:
             return self._empty_collection_payload(collection_id, collection)
 
         facts = self._load_collection_facts(collection_id)
-        frames = self._core_fact_records(facts)
+        frames = self._core_fact_records(
+            self.paper_fact_repository.read(collection_id)
+        )
         projection = self._comparison_projection_from_facts(facts)
         objective_material_rows = self._objective_material_rows_from_facts(facts)
         if objective_material_rows:
@@ -476,13 +475,15 @@ class ResearchViewAggregationService:
         return self._clean_value(profile)
 
     def _load_fact_frames(self, collection_id: str) -> _FactRows:
-        return self._core_fact_records(self._load_collection_facts(collection_id))
+        self._load_collection_facts(collection_id)
+        return self._core_fact_records(self.paper_fact_repository.read(collection_id))
 
     def _load_collection_facts(self, collection_id: str) -> CoreFactSet:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if not facts.has_paper_facts() and not facts.objective_evidence_units:
+        paper_facts = self.paper_fact_repository.read(collection_id)
+        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        if not paper_facts.has_paper_facts() and not core_facts.objective_evidence_units:
             raise ResearchViewNotReadyError(collection_id)
-        return facts
+        return core_facts
 
     def _objective_material_rows_from_facts(
         self,
@@ -546,7 +547,7 @@ class ResearchViewAggregationService:
             return None
         return self._records_list(facts.comparison_rows)
 
-    def _core_fact_records(self, facts: CoreFactSet) -> _FactRows:
+    def _core_fact_records(self, facts: PaperFactSet) -> _FactRows:
         return {
             "document_profiles": self._records_list(facts.document_profiles),
             "evidence_anchors": self._records_list(facts.evidence_anchors),
@@ -694,7 +695,8 @@ class ResearchViewAggregationService:
             comparable_group_count = len(self._group_comparison_rows(projection))
         return {
             "collection_id": collection_id,
-            "document_count": len(document_ids) or len(facts.document_profiles),
+            "document_count": len(document_ids)
+            or len(self.paper_fact_repository.read(collection_id).document_profiles),
             "sample_variant_count": len(sample_keys),
             "measurement_count": sum(
                 1
@@ -728,7 +730,9 @@ class ResearchViewAggregationService:
         facts: CoreFactSet,
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        profiles = self._records_list(facts.document_profiles)
+        profiles = self._records_list(
+            self.paper_fact_repository.read(collection_id).document_profiles
+        )
         coverage: list[dict[str, Any]] = []
         for document_id in sorted(
             {
@@ -2259,7 +2263,9 @@ class ResearchViewAggregationService:
         facts: CoreFactSet,
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        profiles = self._records_list(facts.document_profiles)
+        profiles = self._records_list(
+            self.paper_fact_repository.read(collection_id).document_profiles
+        )
         material_id = self._material_id_from_key(material_key)
         coverage: list[dict[str, Any]] = []
         for document_id in sorted(

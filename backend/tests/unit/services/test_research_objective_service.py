@@ -23,6 +23,9 @@ from application.core.semantic_build.llm.schemas import (
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService as _ResearchObjectiveService,
 )
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     ConfirmedGoal,
@@ -38,8 +41,10 @@ from domain.core import (
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
 from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _build_research_objective_service(
@@ -56,9 +61,27 @@ def _build_research_objective_service(
         ) or SqliteSourceArtifactRepository(
             collection_service.root_dir.parent / "lens.sqlite"
         )
+    paper_fact_repository = kwargs.pop(
+        "paper_fact_repository",
+        MemoryPaperFactRepository(),
+    )
+    core_fact_repository = kwargs.pop(
+        "core_fact_repository",
+        SqliteCoreFactRepository(collection_service.root_dir.parent / "lens.sqlite"),
+    )
+    document_profile_service = kwargs.pop("document_profile_service", None)
+    if document_profile_service is None:
+        document_profile_service = DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+        )
     return _ResearchObjectiveService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
         **kwargs,
     )
 
@@ -85,8 +108,9 @@ def _seed_document_profiles(
                 }
             )
         )
-    service.core_fact_repository.replace_collection_document_profiles(
+    service.paper_fact_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         tuple(profiles),
     )
 

@@ -19,7 +19,10 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 from controllers.core import documents as documents_controller
 from domain.core import (
     BaselineReference,
@@ -27,13 +30,13 @@ from domain.core import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonRowRecord,
-    CoreFactSet,
     DocumentProfile,
     MeasurementResult,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.source import (
     CollectionFileRecord,
     CollectionImportDocumentRecord,
@@ -61,6 +64,7 @@ from tests.support.pbf_acceptance_fixture import (
     pbf_acceptance_structure_features,
     pbf_acceptance_test_conditions,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _store_document_profiles(
@@ -68,8 +72,9 @@ def _store_document_profiles(
     collection_id: str,
     profiles: list[dict],
 ) -> None:
-    document_profile_service.core_fact_repository.replace_collection_document_profiles(
+    document_profile_service.paper_fact_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         tuple(DocumentProfile.from_mapping(row) for row in profiles),
     )
 
@@ -185,11 +190,11 @@ def _store_core_document_semantics(
                 CollectionComparableResult.from_mapping(row) for row in scoped_results
             ),
         )
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_paper_facts(
         collection_id,
-        CoreFactSet(
+        "build_test",
+        PaperFactSet(
             paper_facts_ready=True,
-            comparison_artifacts_ready=True,
             sample_variants=tuple(
                 SampleVariant.from_mapping(row) for row in (sample_variants or [])
             ),
@@ -211,14 +216,13 @@ def _store_core_document_semantics(
             structure_features=tuple(
                 StructureFeature.from_mapping(row) for row in (structure_features or [])
             ),
-            comparable_results=tuple(
-                ComparableResult.from_mapping(row) for row in comparable_results
-            ),
-            collection_comparable_results=tuple(
-                CollectionComparableResult.from_mapping(row) for row in scoped_results
-            ),
-            comparison_rows=comparison_rows,
         ),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
+        tuple(CollectionComparableResult.from_mapping(row) for row in scoped_results),
+        comparison_rows,
     )
 
 
@@ -226,13 +230,18 @@ def _store_core_document_semantics(
 def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     comparison_service = ComparisonService(
         collection_service,
-        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
     )
     document_markdown_service = DocumentMarkdownService(
         collection_service,
@@ -1116,23 +1125,27 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
     ) = document_services
     record = collection_service.create_collection(name="Missing Document Semantics")
     collection_id = record["collection_id"]
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            comparison_artifacts_ready=True,
-            document_profiles=(
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-2",
-                        "collection_id": collection_id,
-                        "title": "Other Paper",
-                        "source_filename": "other.txt",
-                        "doc_type": "experimental",
-                        "confidence": 0.9,
-                    }
-                ),
+        "build_test",
+        (
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-2",
+                    "collection_id": collection_id,
+                    "title": "Other Paper",
+                    "source_filename": "other.txt",
+                    "doc_type": "experimental",
+                    "confidence": 0.9,
+                }
             ),
         ),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        (),
+        (),
+        (),
     )
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

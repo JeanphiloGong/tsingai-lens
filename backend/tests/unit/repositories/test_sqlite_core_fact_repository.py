@@ -1,236 +1,24 @@
 from __future__ import annotations
 
 from domain.core import (
-    BaselineReference,
-    CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
     ConfirmedGoal,
     ComparisonRowRecord,
-    CoreFactSet,
-    DocumentProfile,
-    EvidenceAnchor,
-    MeasurementResult,
-    MethodFact,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
-    PairwiseComparisonRelation,
     ResearchObjective,
     ResearchUnderstanding,
-    SampleVariant,
-    StructureFeature,
-    TestCondition as CoreTestCondition,
 )
 from infra.persistence.sqlite import SqliteCoreFactRepository
 
 
-def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
+def test_sqlite_core_fact_repository_round_trips_comparison_facts(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    facts = CoreFactSet(
-        document_profiles=(
-            DocumentProfile(
-                document_id="doc-1",
-                collection_id="col_test",
-                title="LPBF 316L",
-                source_filename="paper.pdf",
-                doc_type="experimental",
-                parsing_warnings=("table fragmented",),
-                confidence=0.88,
-            ),
-        ),
-        evidence_anchors=(
-            EvidenceAnchor(
-                anchor_id="anc-1",
-                document_id="doc-1",
-                locator_type="table",
-                locator_confidence="high",
-                source_type="table",
-                section_id="results",
-                char_range={"start": 10, "end": 24},
-                bbox={"x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0},
-                page=3,
-                quote="YS 620 MPa",
-                deep_link=None,
-                block_id="blk-1",
-                snippet_id=None,
-                figure_or_table="tbl-1",
-                quote_span="YS 620 MPa",
-            ),
-        ),
-        method_facts=(
-            MethodFact(
-                method_id="met-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                domain_profile="core_neutral",
-                method_role="process",
-                method_name="LPBF",
-                method_payload={"process": "LPBF"},
-                evidence_anchor_ids=("anc-1",),
-                confidence=0.91,
-                epistemic_status="directly_observed",
-            ),
-        ),
-        sample_variants=(
-            SampleVariant(
-                variant_id="var-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                domain_profile="core_neutral",
-                variant_label="HT-SLM",
-                host_material_system={"family": "316L stainless steel"},
-                composition=None,
-                variable_axis_type="heat_treatment",
-                variable_value="HT",
-                process_context={"temperature_c": 1050},
-                profile_payload={"source_kind": "table_row"},
-                structure_feature_ids=("feat-1",),
-                source_anchor_ids=("anc-1",),
-                confidence=0.9,
-                epistemic_status="normalized_from_evidence",
-            ),
-        ),
-        test_conditions=(
-            CoreTestCondition(
-                test_condition_id="tc-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                domain_profile="core_neutral",
-                property_type="yield_strength",
-                template_type="mechanical",
-                scope_level="variant",
-                condition_payload={"temperature_c": 25},
-                condition_completeness="complete",
-                missing_fields=(),
-                evidence_anchor_ids=("anc-1",),
-                confidence=0.82,
-                epistemic_status="directly_observed",
-            ),
-        ),
-        baseline_references=(
-            BaselineReference(
-                baseline_id="base-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                domain_profile="core_neutral",
-                variant_id="var-1",
-                baseline_type="control",
-                baseline_label="as-built",
-                baseline_scope="document",
-                evidence_anchor_ids=("anc-1",),
-                confidence=0.8,
-                epistemic_status="directly_observed",
-            ),
-        ),
-        measurement_results=(
-            MeasurementResult(
-                result_id="res-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                domain_profile="core_neutral",
-                variant_id="var-1",
-                property_normalized="yield_strength",
-                result_type="scalar",
-                claim_scope="current_work",
-                value_payload={"numeric_value": 620},
-                unit="MPa",
-                test_condition_id="tc-1",
-                baseline_id="base-1",
-                structure_feature_ids=("feat-1",),
-                characterization_observation_ids=("obs-1",),
-                evidence_anchor_ids=("anc-1",),
-                traceability_status="direct",
-                result_source_type="table",
-                epistemic_status="directly_observed",
-            ),
-        ),
-        characterization_observations=(
-            CharacterizationObservation(
-                observation_id="obs-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                variant_id="var-1",
-                characterization_type="microstructure",
-                observation_text="cellular structure",
-                observed_value={"descriptor": "cellular"},
-                observed_unit=None,
-                condition_context={"method": "SEM"},
-                evidence_anchor_ids=("anc-1",),
-                confidence=0.7,
-                epistemic_status="directly_observed",
-            ),
-        ),
-        structure_features=(
-            StructureFeature(
-                feature_id="feat-1",
-                document_id="doc-1",
-                collection_id="col_test",
-                variant_id="var-1",
-                feature_type="grain_size",
-                feature_value=12,
-                feature_unit="um",
-                qualitative_descriptor=None,
-                source_observation_ids=("obs-1",),
-                confidence=0.7,
-                epistemic_status="normalized_from_evidence",
-            ),
-        ),
-        comparable_results=(_comparable_result(),),
-        collection_comparable_results=(_collection_comparable_result(),),
-        pairwise_comparison_relations=(
-            PairwiseComparisonRelation(
-                relation_id="pcr-1",
-                collection_id="col_test",
-                document_id="doc-1",
-                current_variant_id="var-1",
-                reference_variant_id="var-2",
-                comparison_axis="scan_strategy",
-                property_normalized="yield_strength",
-                current_result_id="res-1",
-                reference_result_id="res-2",
-                current_value=620,
-                reference_value=580,
-                unit="MPa",
-                direction="increase",
-                evidence_anchor_ids=("anc-1",),
-                relation_payload={"current_variant_label": "HT-SLM"},
-                confidence=0.84,
-                epistemic_status="normalized_from_evidence",
-            ),
-        ),
-        comparison_rows=(_comparison_row(),),
-    )
-
-    repository.replace_collection_facts("col_test", facts)
-    restored = repository.read_collection_facts("col_test")
-
-    assert restored.paper_facts_ready is True
-    assert restored.comparison_artifacts_ready is True
-    assert restored.document_profiles[0].parsing_warnings == ("table fragmented",)
-    assert restored.evidence_anchors[0].bbox == {
-        "x0": 1.0,
-        "y0": 2.0,
-        "x1": 3.0,
-        "y1": 4.0,
-    }
-    assert restored.method_facts[0].method_payload == {"process": "LPBF"}
-    assert restored.sample_variants[0].host_material_system["family"] == (
-        "316L stainless steel"
-    )
-    assert restored.measurement_results[0].value_payload["numeric_value"] == 620
-    assert restored.characterization_observations[0].observed_value == {
-        "descriptor": "cellular"
-    }
-    assert restored.structure_features[0].source_observation_ids == ("obs-1",)
-    assert restored.comparable_results[0].value.numeric_value == 620.0
-    assert restored.collection_comparable_results[0].included is True
-    assert restored.pairwise_comparison_relations[0].comparison_axis == "scan_strategy"
-    assert restored.comparison_rows[0].supporting_anchor_ids == ("anc-1",)
-
     repository.replace_collection_comparison_artifacts(
         "col_test",
         (_comparable_result(value=640),),
@@ -239,9 +27,7 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
     )
     refreshed = repository.read_collection_facts("col_test")
 
-    assert refreshed.paper_facts_ready is True
     assert refreshed.comparison_artifacts_ready is True
-    assert refreshed.document_profiles[0].document_id == "doc-1"
     assert refreshed.comparable_results[0].value.numeric_value == 640.0
     assert refreshed.collection_comparable_results[0].sort_order == 2
     assert refreshed.comparison_rows[0].value == 640.0
@@ -249,7 +35,6 @@ def test_sqlite_core_fact_repository_round_trips_core_fact_set(tmp_path):
     repository.replace_collection_comparison_artifacts("col_empty", (), (), ())
     empty_comparison = repository.read_collection_facts("col_empty")
 
-    assert empty_comparison.paper_facts_ready is False
     assert empty_comparison.comparison_artifacts_ready is True
     assert empty_comparison.comparison_rows == ()
 
@@ -389,7 +174,6 @@ def test_sqlite_core_fact_repository_round_trips_research_objectives(tmp_path):
     restored = repository.read_collection_facts("col_test")
 
     assert restored.research_objectives_ready is True
-    assert restored.paper_facts_ready is False
     assert restored.paper_skims[0].candidate_materials == ("316L stainless steel",)
     assert restored.research_objectives[0].objective_id.startswith("obj_")
     assert restored.research_objectives[0].seed_document_ids == ("paper-1",)
@@ -403,69 +187,25 @@ def test_sqlite_core_fact_repository_round_trips_research_objectives(tmp_path):
     )
 
 
-def test_sqlite_core_fact_repository_preserves_research_objectives_when_replacing_facts(
-    tmp_path,
-):
+def test_sqlite_core_fact_repository_does_not_own_paper_facts(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "possible_objectives": [
-                "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
-            ],
-        }
-    )
-    objective = ResearchObjective.from_mapping(
-        {
-            "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
-            "material_scope": ["316L stainless steel"],
-        }
-    )
-    repository.replace_collection_research_objectives(
-        "col_test",
-        (paper_skim,),
-        (objective,),
-        (
-            ObjectiveContext.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "question": objective.question,
-                    "material_scope": ["316L stainless steel"],
-                }
-            ),
-        ),
-        (),
-        (),
-        (),
-        (),
+
+    assert not hasattr(repository, "replace_collection_facts")
+    assert not hasattr(repository, "replace_collection_document_profiles")
+    assert not hasattr(
+        repository.read_collection_facts("col_test"), "document_profiles"
     )
 
-    repository.replace_collection_facts(
-        "col_test",
-        CoreFactSet(
-            document_profiles=(
-                DocumentProfile(
-                    document_id="doc-1",
-                    collection_id="col_test",
-                    title="LPBF 316L",
-                    source_filename="paper.pdf",
-                    doc_type="experimental",
-                    parsing_warnings=(),
-                    confidence=0.88,
-                ),
-            ),
-        ),
-    )
-    restored = repository.read_collection_facts("col_test")
+    with repository._connection() as connection:
+        table_names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
 
-    assert restored.research_objectives_ready is True
-    assert restored.paper_facts_ready is True
-    assert restored.paper_skims[0].document_id == "paper-1"
-    assert restored.research_objectives[0].material_scope == ("316L stainless steel",)
-    assert restored.objective_contexts[0].objective_id == objective.objective_id
-    assert restored.document_profiles[0].document_id == "doc-1"
+    assert not any(name.startswith("core_document_profiles") for name in table_names)
+    assert not any(name.startswith("core_method_facts") for name in table_names)
 
 
 def test_sqlite_core_fact_repository_round_trips_research_understandings(tmp_path):

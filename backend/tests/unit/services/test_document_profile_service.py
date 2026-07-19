@@ -12,17 +12,17 @@ from application.core.semantic_build.document_profile_service import (
 from tests.support.collection_service import build_test_collection_service
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceArtifactSet
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.runtime.source_evidence import build_blocks
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 
 def _build_profile_service(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     return collection_service, DocumentProfileService(
         collection_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
-        ),
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        paper_fact_repository=MemoryPaperFactRepository(),
     )
 
 
@@ -35,6 +35,7 @@ def _write_source_artifacts(
     blocks = build_blocks(documents, text_units)
     profile_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=documents.to_dict(orient="records"),
             text_units=(
@@ -105,7 +106,7 @@ def test_document_profile_service_builds_profiles_and_summary(tmp_path):
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    profile_service.build_document_profiles(collection_id)
+    profile_service.build_document_profiles(collection_id, build_id="build_test")
 
     payload = profile_service.list_document_profiles(collection_id)
 
@@ -120,7 +121,7 @@ def test_document_profile_service_builds_profiles_and_summary(tmp_path):
         "mixed": 1,
         "review": 1,
     }
-    facts = profile_service.core_fact_repository.read_collection_facts(collection_id)
+    facts = profile_service.paper_fact_repository.read(collection_id)
     assert len(facts.document_profiles) == 3
 
 
@@ -160,7 +161,7 @@ def test_document_profile_service_returns_source_filename_from_file_mapping(tmp_
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    profile_service.build_document_profiles(collection_id)
+    profile_service.build_document_profiles(collection_id, build_id="build_test")
 
     payload = profile_service.list_document_profiles(collection_id)
 
@@ -179,9 +180,8 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     profile_service = DocumentProfileService(
         collection_service,
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
-        ),
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        paper_fact_repository=MemoryPaperFactRepository(),
         structured_extractor=ExplodingExtractor(),
     )
     collection = collection_service.create_collection("Sparse Profiles")
@@ -189,7 +189,7 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    profile_service.build_document_profiles(collection_id)
+    profile_service.build_document_profiles(collection_id, build_id="build_test")
 
     payload = profile_service.list_document_profiles(collection_id)
 
@@ -201,9 +201,8 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
 def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):
     profile_service = DocumentProfileService(
         collection_service=build_test_collection_service(tmp_path / "collections"),
-        source_artifact_repository=SqliteSourceArtifactRepository(
-            tmp_path / "lens.sqlite"
-        ),
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        paper_fact_repository=MemoryPaperFactRepository(),
     )
 
     profiles = [
@@ -268,7 +267,7 @@ def test_document_profile_service_round_trips_repository_storage_fields(tmp_path
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    profile_service.build_document_profiles(collection_id)
+    profile_service.build_document_profiles(collection_id, build_id="build_test")
 
     restored = profile_service.read_document_profiles(collection_id)
     assert isinstance(restored[0].to_record()["parsing_warnings"], list)

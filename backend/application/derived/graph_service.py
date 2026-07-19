@@ -8,11 +8,10 @@ from application.derived.core_fact_projection import build_core_fact_projection_
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
-from infra.persistence.factory import build_core_fact_repository
+from domain.ports import CoreFactRepository, PaperFactRepository
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
-core_fact_repository = build_core_fact_repository()
 _NEIGHBORHOOD_MAX_NODES = 2_147_483_647
 
 
@@ -77,30 +76,52 @@ def load_graph_payload(
     min_weight: float,
     *,
     collection_service: CollectionService,
+    paper_fact_repository: PaperFactRepository,
+    core_fact_repository: CoreFactRepository,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     collection_service.get_collection(collection_id)
-    facts = core_fact_repository.read_collection_facts(collection_id)
-    if not facts.graph_ready:
+    paper_facts = paper_fact_repository.read(collection_id)
+    core_facts = core_fact_repository.read_collection_facts(collection_id)
+    evidence_cards_ready = bool(
+        paper_facts.evidence_cards_ready or core_facts.objective_evidence_units
+    )
+    graph_ready = bool(
+        paper_facts.document_profiles
+        and evidence_cards_ready
+        and (
+            core_facts.objective_evidence_units
+            or core_facts.objective_logic_chains
+            or core_facts.comparable_results
+            or core_facts.collection_comparable_results
+            or core_facts.comparison_rows
+        )
+    )
+    if not graph_ready:
         raise GraphNotReadyError(
             collection_id=collection_id,
             output_dir=_graph_error_output_dir(
                 collection_id,
                 collection_service=collection_service,
             ),
-            missing_artifacts=_missing_core_graph_inputs(facts),
+            missing_artifacts=_missing_core_graph_inputs(
+                paper_facts,
+                core_facts,
+            ),
         )
-    projection = build_core_fact_projection_records(facts)
+    projection = build_core_fact_projection_records(paper_facts, core_facts)
 
     return load_core_graph_payload(
-        profiles=tuple(profile.to_record() for profile in facts.document_profiles),
+        profiles=tuple(
+            profile.to_record() for profile in paper_facts.document_profiles
+        ),
         research_objectives=tuple(
-            objective.to_record() for objective in facts.research_objectives
+            objective.to_record() for objective in core_facts.research_objectives
         ),
         objective_evidence_units=tuple(
-            unit.to_record() for unit in facts.objective_evidence_units
+            unit.to_record() for unit in core_facts.objective_evidence_units
         ),
         objective_logic_chains=tuple(
-            chain.to_record() for chain in facts.objective_logic_chains
+            chain.to_record() for chain in core_facts.objective_logic_chains
         ),
         max_nodes=max_nodes,
         min_weight=min_weight,
@@ -109,18 +130,18 @@ def load_graph_payload(
     )
 
 
-def _missing_core_graph_inputs(facts: Any) -> list[str]:
+def _missing_core_graph_inputs(paper_facts: Any, core_facts: Any) -> list[str]:
     missing: list[str] = []
-    if not facts.document_profiles:
+    if not paper_facts.document_profiles:
         missing.append("core_fact_repository.document_profiles")
-    if not facts.evidence_cards_ready:
+    if not (paper_facts.evidence_cards_ready or core_facts.objective_evidence_units):
         missing.append("core_fact_repository.evidence_cards")
     if not (
-        facts.objective_evidence_units_ready
-        or facts.objective_logic_chains
-        or facts.comparable_results
-        or facts.collection_comparable_results
-        or facts.comparison_rows
+        core_facts.objective_evidence_units
+        or core_facts.objective_logic_chains
+        or core_facts.comparable_results
+        or core_facts.collection_comparable_results
+        or core_facts.comparison_rows
     ):
         missing.append("core_fact_repository.comparison_artifacts")
     return missing or ["core_fact_repository.comparison_artifacts"]
@@ -132,12 +153,16 @@ def get_collection_graph(
     min_weight: float,
     *,
     collection_service: CollectionService,
+    paper_fact_repository: PaperFactRepository,
+    core_fact_repository: CoreFactRepository,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, truncated = load_graph_payload(
         collection_id=collection_id,
         max_nodes=max_nodes,
         min_weight=min_weight,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
     return {
         "collection_id": collection_id,
@@ -153,12 +178,16 @@ def build_graphml(
     min_weight: float,
     *,
     collection_service: CollectionService,
+    paper_fact_repository: PaperFactRepository,
+    core_fact_repository: CoreFactRepository,
 ) -> tuple[bytes, str]:
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
         max_nodes=max_nodes,
         min_weight=min_weight,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
     return to_graphml(nodes_payload, edges_payload), f"{collection_id}.graphml"
 
@@ -168,12 +197,16 @@ def get_collection_graph_neighbors(
     node_id: str,
     *,
     collection_service: CollectionService,
+    paper_fact_repository: PaperFactRepository,
+    core_fact_repository: CoreFactRepository,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
         max_nodes=_NEIGHBORHOOD_MAX_NODES,
         min_weight=0.0,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
 
     node_ids = {str(node.get("id")) for node in nodes_payload}
@@ -210,7 +243,6 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
 
 __all__ = [
     "build_graphml",
-    "core_fact_repository",
     "get_collection_graph_neighbors",
     "get_collection_graph",
     "GraphNodeNotFoundError",

@@ -14,21 +14,28 @@ from tests.support.collection_service import build_test_collection_service
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.paper_facts_service import PaperFactsService
 from controllers.core import evidence as evidence_controller
-from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVariant
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
+from domain.core.paper_fact import PaperFactSet
+from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 @pytest.fixture()
 def evidence_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     paper_facts_service = PaperFactsService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
     )
 
@@ -77,9 +84,10 @@ def test_evidence_route_returns_200_with_empty_cards_after_stage_generated(
     collection_service, paper_facts_service, request = evidence_services
     record = collection_service.create_collection(name="Empty Evidence Collection")
     collection_id = record["collection_id"]
-    paper_facts_service.core_fact_repository.replace_collection_facts(
+    paper_facts_service.paper_fact_repository.replace_paper_facts(
         collection_id,
-        CoreFactSet(paper_facts_ready=True),
+        "build_test",
+        PaperFactSet(paper_facts_ready=True),
     )
 
     payload = asyncio.run(
@@ -95,9 +103,10 @@ def test_evidence_card_route_returns_single_card(evidence_services):
     collection_service, paper_facts_service, request = evidence_services
     record = collection_service.create_collection(name="Single Evidence Collection")
     collection_id = record["collection_id"]
-    paper_facts_service.core_fact_repository.replace_collection_facts(
+    paper_facts_service.paper_fact_repository.replace_paper_facts(
         collection_id,
-        CoreFactSet(
+        "build_test",
+        PaperFactSet(
             paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(

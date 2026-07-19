@@ -11,10 +11,7 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfilesNotReadyError,
 )
 from application.source.task_service import TaskService
-from domain.ports import CoreFactRepository, SourceArtifactRepository
-from infra.persistence.factory import (
-    build_core_fact_repository,
-)
+from domain.ports import CoreFactRepository, PaperFactRepository, SourceArtifactRepository
 
 
 class WorkspaceService:
@@ -25,58 +22,75 @@ class WorkspaceService:
         collection_service: CollectionService,
         task_service: TaskService,
         source_artifact_repository: SourceArtifactRepository,
-        document_profile_service: DocumentProfileService | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
+        paper_fact_repository: PaperFactRepository,
+        core_fact_repository: CoreFactRepository,
+        document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
-        self.core_fact_repository = (
-            core_fact_repository
-            or build_core_fact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.paper_fact_repository = paper_fact_repository
+        self.core_fact_repository = core_fact_repository
         self.source_artifact_repository = source_artifact_repository
-        self.document_profile_service = document_profile_service or DocumentProfileService(
-            collection_service=self.collection_service,
-            core_fact_repository=self.core_fact_repository,
-            source_artifact_repository=self.source_artifact_repository,
-        )
+        self.document_profile_service = document_profile_service
 
     def _build_artifacts(self, collection_id: str, collection: dict) -> dict:
         source_artifacts = self.source_artifact_repository.read_collection_artifacts(
             collection_id
         )
+        paper_facts = self.paper_fact_repository.read(collection_id)
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        objective_evidence_ready = bool(core_facts.objective_evidence_units)
+        evidence_cards_generated = bool(
+            paper_facts.paper_facts_generated or objective_evidence_ready
+        )
+        evidence_cards_ready = bool(
+            paper_facts.evidence_cards_ready or objective_evidence_ready
+        )
+        graph_generated = bool(
+            paper_facts.document_profiles
+            and evidence_cards_generated
+            and (objective_evidence_ready or core_facts.comparison_artifacts_generated)
+        )
+        graph_ready = bool(
+            paper_facts.document_profiles
+            and evidence_cards_ready
+            and (
+                objective_evidence_ready
+                or core_facts.objective_logic_chains
+                or core_facts.comparable_results
+                or core_facts.collection_comparable_results
+                or core_facts.comparison_rows
+            )
+        )
         source_artifacts_generated = not source_artifacts.is_empty()
         return {
             "collection_id": collection_id,
             "documents_generated": bool(source_artifacts.documents),
             "documents_ready": bool(source_artifacts.documents),
-            "document_profiles_generated": bool(core_facts.document_profiles),
-            "document_profiles_ready": bool(core_facts.document_profiles),
-            "evidence_anchors_generated": core_facts.paper_facts_generated,
-            "evidence_anchors_ready": bool(core_facts.evidence_anchors),
-            "method_facts_generated": core_facts.paper_facts_generated,
-            "method_facts_ready": bool(core_facts.method_facts),
-            "evidence_cards_generated": core_facts.evidence_cards_generated,
-            "evidence_cards_ready": core_facts.evidence_cards_ready,
+            "document_profiles_generated": bool(paper_facts.document_profiles),
+            "document_profiles_ready": bool(paper_facts.document_profiles),
+            "evidence_anchors_generated": paper_facts.paper_facts_generated,
+            "evidence_anchors_ready": bool(paper_facts.evidence_anchors),
+            "method_facts_generated": paper_facts.paper_facts_generated,
+            "method_facts_ready": bool(paper_facts.method_facts),
+            "evidence_cards_generated": evidence_cards_generated,
+            "evidence_cards_ready": evidence_cards_ready,
             "characterization_observations_generated": (
-                core_facts.paper_facts_generated
+                paper_facts.paper_facts_generated
             ),
             "characterization_observations_ready": bool(
-                core_facts.characterization_observations
+                paper_facts.characterization_observations
             ),
-            "structure_features_generated": core_facts.paper_facts_generated,
-            "structure_features_ready": bool(core_facts.structure_features),
-            "test_conditions_generated": core_facts.paper_facts_generated,
-            "test_conditions_ready": bool(core_facts.test_conditions),
-            "baseline_references_generated": core_facts.paper_facts_generated,
-            "baseline_references_ready": bool(core_facts.baseline_references),
-            "sample_variants_generated": core_facts.paper_facts_generated,
-            "sample_variants_ready": bool(core_facts.sample_variants),
-            "measurement_results_generated": core_facts.paper_facts_generated,
-            "measurement_results_ready": bool(core_facts.measurement_results),
+            "structure_features_generated": paper_facts.paper_facts_generated,
+            "structure_features_ready": bool(paper_facts.structure_features),
+            "test_conditions_generated": paper_facts.paper_facts_generated,
+            "test_conditions_ready": bool(paper_facts.test_conditions),
+            "baseline_references_generated": paper_facts.paper_facts_generated,
+            "baseline_references_ready": bool(paper_facts.baseline_references),
+            "sample_variants_generated": paper_facts.paper_facts_generated,
+            "sample_variants_ready": bool(paper_facts.sample_variants),
+            "measurement_results_generated": paper_facts.paper_facts_generated,
+            "measurement_results_ready": bool(paper_facts.measurement_results),
             "comparable_results_generated": core_facts.comparison_artifacts_generated,
             "comparable_results_ready": bool(core_facts.comparable_results),
             "collection_comparable_results_generated": (
@@ -89,8 +103,8 @@ class WorkspaceService:
             "comparison_rows_generated": core_facts.comparison_artifacts_generated,
             "comparison_rows_ready": bool(core_facts.comparison_rows),
             "comparison_rows_stale": False,
-            "graph_generated": core_facts.graph_generated,
-            "graph_ready": core_facts.graph_ready,
+            "graph_generated": graph_generated,
+            "graph_ready": graph_ready,
             "graph_stale": False,
             "blocks_generated": source_artifacts_generated,
             "blocks_ready": bool(source_artifacts.blocks),

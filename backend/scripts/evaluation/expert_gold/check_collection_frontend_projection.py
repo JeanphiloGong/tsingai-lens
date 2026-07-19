@@ -92,6 +92,9 @@ def check_collection_frontend_projection(
     from application.core.research_view_aggregation_service import (  # noqa: PLC0415
         ResearchViewAggregationService,
     )
+    from application.core.semantic_build.document_profile_service import (  # noqa: PLC0415
+        DocumentProfileService,
+    )
     from application.core.semantic_build.research_objective_service import (  # noqa: PLC0415
         ResearchObjectiveService,
     )
@@ -105,9 +108,13 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
         PostgresCollectionRepository,
     )
+    from infra.persistence.postgres.paper_fact_repository import (  # noqa: PLC0415
+        PostgresPaperFactRepository,
+    )
     from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
         PostgresSourceArtifactRepository,
     )
+    from infra.persistence.sqlite import SqliteCoreFactRepository  # noqa: PLC0415
 
     engine = build_database_engine(DatabaseSettings())
     try:
@@ -117,14 +124,28 @@ def check_collection_frontend_projection(
             workspace=FileCollectionWorkspace(),
         )
         source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
+        paper_fact_repository = PostgresPaperFactRepository(session_factory)
+        core_fact_repository = SqliteCoreFactRepository(
+            backend_root / "data" / "lens.sqlite"
+        )
+        document_profile_service = DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+        )
         objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+            core_fact_repository=core_fact_repository,
+            document_profile_service=document_profile_service,
         )
         objectives = objective_service.list_objective_workspaces(collection_id)
         material_profile = ResearchViewAggregationService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+            core_fact_repository=core_fact_repository,
         ).get_collection_material_research_view(
             collection_id,
             material_id,

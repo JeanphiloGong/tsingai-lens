@@ -58,10 +58,14 @@ from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
+from infra.persistence.postgres.paper_fact_repository import (
+    PostgresPaperFactRepository,
+)
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from domain.ports import SourceArtifactRepository
+from domain.ports import CoreFactRepository, PaperFactRepository, SourceArtifactRepository
+from infra.persistence.factory import build_core_fact_repository
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -95,6 +99,8 @@ def create_app(
     collection_service: CollectionService | None = None,
     task_service: TaskService | None = None,
     source_artifact_repository: SourceArtifactRepository | None = None,
+    paper_fact_repository: PaperFactRepository | None = None,
+    core_fact_repository: CoreFactRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -106,6 +112,7 @@ def create_app(
                 or collection_service is None
                 or task_service is None
                 or source_artifact_repository is None
+                or paper_fact_repository is None
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -127,43 +134,63 @@ def create_app(
                 source_artifact_repository
                 or PostgresSourceArtifactRepository(session_factory)
             )
+            active_paper_fact_repository = (
+                paper_fact_repository
+                or PostgresPaperFactRepository(session_factory)
+            )
+            active_core_fact_repository = (
+                core_fact_repository or build_core_fact_repository()
+            )
             artifact_registry_service = ArtifactRegistryService(
                 active_task_service.repository,
                 active_source_artifact_repository,
+                active_paper_fact_repository,
+                active_core_fact_repository,
             )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
             )
             paper_facts_service = PaperFactsService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
             )
             comparison_service = ComparisonService(
                 collection_service=active_collection_service,
-                source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
             )
             research_objective_service = ResearchObjectiveService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
             )
             workspace_service = WorkspaceService(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
                 source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
             )
             research_view_service = ResearchViewAggregationService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
-                core_fact_repository=paper_facts_service.core_fact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                core_fact_repository=active_core_fact_repository,
             )
 
             application.state.collection_service = active_collection_service
             application.state.task_service = active_task_service
+            application.state.paper_fact_repository = active_paper_fact_repository
+            application.state.core_fact_repository = active_core_fact_repository
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(

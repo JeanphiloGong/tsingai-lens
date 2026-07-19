@@ -26,6 +26,7 @@ from infra.persistence.database import (
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
+from infra.persistence.postgres.paper_fact_repository import PostgresPaperFactRepository
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
 )
@@ -186,13 +187,15 @@ def _load_artifacts(
     db_path = backend_root / "data" / "lens.sqlite"
     engine = build_database_engine(DatabaseSettings())
     try:
+        session_factory = build_session_factory(engine)
         source_artifacts = PostgresSourceArtifactRepository(
-            build_session_factory(engine)
+            session_factory
         ).read_collection_artifacts(collection_id)
+        paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
     finally:
         engine.dispose()
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
-    projection = build_core_fact_projection_records(core_facts)
+    projection = build_core_fact_projection_records(paper_facts, core_facts)
     frames: dict[str, pd.DataFrame] = {}
     source_records = {
         "documents": source_artifacts.documents,
@@ -208,15 +211,15 @@ def _load_artifacts(
             pd.DataFrame([record.to_record() for record in source_records[name]])
         )
     core_records = {
-        "document_profiles": core_facts.document_profiles,
-        "evidence_anchors": core_facts.evidence_anchors,
-        "method_facts": core_facts.method_facts,
-        "sample_variants": core_facts.sample_variants,
-        "test_conditions": core_facts.test_conditions,
-        "baseline_references": core_facts.baseline_references,
-        "measurement_results": core_facts.measurement_results,
-        "characterization_observations": core_facts.characterization_observations,
-        "structure_features": core_facts.structure_features,
+        "document_profiles": paper_facts.document_profiles,
+        "evidence_anchors": paper_facts.evidence_anchors,
+        "method_facts": paper_facts.method_facts,
+        "sample_variants": paper_facts.sample_variants,
+        "test_conditions": paper_facts.test_conditions,
+        "baseline_references": paper_facts.baseline_references,
+        "measurement_results": paper_facts.measurement_results,
+        "characterization_observations": paper_facts.characterization_observations,
+        "structure_features": paper_facts.structure_features,
         "comparable_results": core_facts.comparable_results,
         "collection_comparable_results": core_facts.collection_comparable_results,
     }

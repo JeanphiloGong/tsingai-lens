@@ -11,6 +11,8 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 from application.source.artifact_registry_service import ArtifactRegistryService
+from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.research_objective_service import ResearchObjectiveService
 from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
@@ -29,6 +31,7 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 class DummyWorkflowOutput:
@@ -194,16 +197,33 @@ def _write_source_artifact_outputs(
 
 def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN001
     source_repository = MemorySourceArtifactRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
+    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    research_objective_service = ResearchObjectiveService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
+        document_profile_service=document_profile_service,
+    )
     artifact_registry = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
-        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
+        paper_fact_repository=paper_fact_repository,
+        core_fact_repository=core_fact_repository,
     )
     runner = CollectionBuildPipelineService(
         collection_service,
         TaskService(build_repository),
         artifact_registry,
         source_artifact_repository=source_repository,
+        document_profile_service=document_profile_service,
+        research_objective_service=research_objective_service,
     )
     return runner, artifact_registry
 

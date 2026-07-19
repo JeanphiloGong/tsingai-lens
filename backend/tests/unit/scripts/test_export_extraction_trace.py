@@ -6,9 +6,11 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVariant
+from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
+from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
-from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 def _load_trace_module():
@@ -68,9 +70,11 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
             ],
         ),
     )
-    SqliteCoreFactRepository(db_path).replace_collection_facts(
+    paper_fact_repository = MemoryPaperFactRepository()
+    paper_fact_repository.replace_paper_facts(
         collection_id,
-        CoreFactSet(
+        "build_test",
+        PaperFactSet(
             paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
@@ -130,6 +134,11 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
         trace,
         "PostgresSourceArtifactRepository",
         lambda _session_factory: SqliteSourceArtifactRepository(db_path),
+    )
+    monkeypatch.setattr(
+        trace,
+        "PostgresPaperFactRepository",
+        lambda _session_factory: paper_fact_repository,
     )
 
     trace_dir = trace.export_trace(

@@ -21,7 +21,7 @@ from domain.core.comparison import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.evidence_backbone import EvidenceAnchor, MeasurementResult
-from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.source import (
     SourceArtifactSet,
     SourceReferenceSet,
@@ -33,6 +33,7 @@ from infra.persistence.sqlite import (
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 try:
     from fastapi.testclient import TestClient
@@ -233,9 +234,7 @@ def _write_source_artifact_outputs(
     )
 
 
-def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    core_repository = SqliteCoreFactRepository(output_dir.parents[2] / "lens.sqlite")
+def _write_core_graph_outputs(comparison_service, collection_id: str) -> None:  # noqa: ANN001
     comparable_result, scoped_result, _row_id = _build_semantic_comparison_record(
         collection_id=collection_id,
         comparable_result_id="cres-graph-1",
@@ -272,23 +271,27 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
         comparable_results=(ComparableResult.from_mapping(comparable_result),),
         scoped_results=(CollectionComparableResult.from_mapping(scoped_result),),
     )
-    core_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            document_profiles=(
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "collection_id": collection_id,
-                        "title": "Core Projection Paper",
-                        "source_filename": "paper.txt",
-                        "doc_type": "experimental",
-                        "confidence": 0.91,
-                    }
-                ),
+        "build_test",
+        (
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "collection_id": collection_id,
+                    "title": "Core Projection Paper",
+                    "source_filename": "paper.txt",
+                    "doc_type": "experimental",
+                    "confidence": 0.91,
+                }
             ),
+        ),
+    )
+    comparison_service.paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
                     {
@@ -315,12 +318,13 @@ def _write_core_graph_outputs(output_dir: Path, collection_id: str) -> None:
                     }
                 ),
             ),
-            comparable_results=(ComparableResult.from_mapping(comparable_result),),
-            collection_comparable_results=(
-                CollectionComparableResult.from_mapping(scoped_result),
-            ),
-            comparison_rows=row_records,
         ),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        (ComparableResult.from_mapping(comparable_result),),
+        (CollectionComparableResult.from_mapping(scoped_result),),
+        row_records,
     )
 
 
@@ -454,24 +458,27 @@ def _store_core_comparison_facts(
             for row in scoped_results
         ),
     )
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            document_profiles=tuple(
-                DocumentProfile.from_mapping(row)
-                for row in (document_profiles or [])
-            ),
-            comparable_results=tuple(
-                ComparableResult.from_mapping(row) for row in comparable_results
-            ),
-            collection_comparable_results=tuple(
-                CollectionComparableResult.from_mapping(row)
-                for row in scoped_results
-            ),
-            comparison_rows=row_records,
+        "build_test",
+        tuple(
+            DocumentProfile.from_mapping(row)
+            for row in (document_profiles or [])
         ),
+    )
+    comparison_service.paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(paper_facts_ready=True),
+    )
+    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+        collection_id,
+        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
+        tuple(
+            CollectionComparableResult.from_mapping(row)
+            for row in scoped_results
+        ),
+        row_records,
     )
 
 
@@ -491,6 +498,11 @@ def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[s
     task_id = task_resp.json()["task_id"]
     final_task = _wait_for_task_terminal(app_client, task_id)
     assert final_task["status"] == "completed"
+    active_build = app_client.app.state.task_service.repository.read_active_build(
+        collection_id
+    )
+    assert active_build is not None
+    app_client.app.state.paper_fact_repository.activate(active_build.build_id)
     return collection_id, task_id
 
 
@@ -640,22 +652,8 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 
 @pytest.fixture()
 def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
-    import application.derived.graph_service as graph_service_module
     import application.pipeline.collection_build.service as task_runner_module
-    from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.core.comparison_service import ComparisonService
-    from application.core.semantic_build.document_profile_service import DocumentProfileService
-    from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.core.semantic_build.research_objective_service import (
-        ResearchObjectiveService,
-    )
-    from application.core.research_view_aggregation_service import (
-        ResearchViewAggregationService,
-    )
-    from application.goal.brief_service import GoalService
-    from application.pipeline.collection_build.service import CollectionBuildPipelineService
     from application.source.task_service import TaskService
-    from application.core.workspace_overview_service import WorkspaceService
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -668,87 +666,24 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
     source_artifact_repository = MemorySourceArtifactRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    artifact_registry = ArtifactRegistryService(
-        build_repository,
-        source_artifact_repository=source_artifact_repository,
-        core_fact_repository=core_fact_repository,
-    )
-    document_profile_service = DocumentProfileService(
-        collection_service=collection_service,
-        core_fact_repository=core_fact_repository,
-        source_artifact_repository=source_artifact_repository,
-    )
-    paper_facts_service = PaperFactsService(
-        collection_service=collection_service,
-        document_profile_service=document_profile_service,
-        core_fact_repository=core_fact_repository,
-        source_artifact_repository=source_artifact_repository,
-    )
-    comparison_service = ComparisonService(
-        collection_service=collection_service,
-        document_profile_service=document_profile_service,
-        core_fact_repository=core_fact_repository,
-        source_artifact_repository=source_artifact_repository,
-    )
-    research_objective_service = ResearchObjectiveService(
-        collection_service=collection_service,
-        document_profile_service=document_profile_service,
-        core_fact_repository=core_fact_repository,
-        source_artifact_repository=source_artifact_repository,
-    )
-    runner = CollectionBuildPipelineService(
-        collection_service=collection_service,
-        task_service=task_service,
-        artifact_registry_service=artifact_registry,
-        source_artifact_repository=source_artifact_repository,
-        document_profile_service=document_profile_service,
-        research_objective_service=research_objective_service,
-    )
-    workspace_service = WorkspaceService(
-        collection_service=collection_service,
-        task_service=task_service,
-        document_profile_service=document_profile_service,
-        core_fact_repository=core_fact_repository,
-        source_artifact_repository=source_artifact_repository,
-    )
-    research_view_service = ResearchViewAggregationService(
-        collection_service=collection_service,
-        source_artifact_repository=source_artifact_repository,
-        core_fact_repository=core_fact_repository,
-    )
-    goal_service = GoalService(collection_service)
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
         return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
-    monkeypatch.setattr(
-        graph_service_module,
-        "core_fact_repository",
-        comparison_service.core_fact_repository,
-    )
     with TestClient(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             task_service=task_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+            core_fact_repository=core_fact_repository,
         )
     ) as client:
-        state = client.app.state
-        state.collection_service = collection_service
-        state.task_service = task_service
-        state.artifact_registry_service = artifact_registry
-        state.document_profile_service = document_profile_service
-        state.paper_facts_service = paper_facts_service
-        state.comparison_service = comparison_service
-        state.research_objective_service = research_objective_service
-        state.workspace_service = workspace_service
-        state.research_view_service = research_view_service
-        state.build_pipeline_service = runner
-        state.goal_service = goal_service
-
         login_response = client.post(
             f"{API_V1_PREFIX}/auth/login",
             json={"email": "admin@example.com", "password": "admin-password"},
@@ -1309,9 +1244,7 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    output_dir = _collection_output_dir(app_client, collection_id)
-
-    _write_core_graph_outputs(output_dir, collection_id)
+    _write_core_graph_outputs(app_client.app.state.comparison_service, collection_id)
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()

@@ -11,6 +11,7 @@ from domain.core.evidence_backbone import (
     SampleVariant,
 )
 from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.shared.enums import TRACEABILITY_STATUS_DIRECT, TRACEABILITY_STATUS_MISSING
 
 
@@ -21,35 +22,41 @@ class CoreFactProjectionRecords:
     comparison_rows: tuple[dict[str, Any], ...]
 
 
-def build_core_fact_projection_records(facts: CoreFactSet) -> CoreFactProjectionRecords:
+def build_core_fact_projection_records(
+    paper_facts: PaperFactSet,
+    core_facts: CoreFactSet,
+) -> CoreFactProjectionRecords:
     return CoreFactProjectionRecords(
         document_profiles=tuple(
-            profile.to_record() for profile in facts.document_profiles
+            profile.to_record() for profile in paper_facts.document_profiles
         ),
-        evidence_cards=tuple(_build_evidence_card_records(facts)),
-        comparison_rows=tuple(row.to_record() for row in facts.comparison_rows),
+        evidence_cards=tuple(_build_evidence_card_records(paper_facts, core_facts)),
+        comparison_rows=tuple(row.to_record() for row in core_facts.comparison_rows),
     )
 
 
-def _build_evidence_card_records(facts: CoreFactSet) -> list[dict[str, Any]]:
+def _build_evidence_card_records(
+    paper_facts: PaperFactSet,
+    core_facts: CoreFactSet,
+) -> list[dict[str, Any]]:
     anchor_lookup = {
         anchor.anchor_id: anchor
-        for anchor in facts.evidence_anchors
+        for anchor in paper_facts.evidence_anchors
         if anchor.anchor_id
     }
     variant_lookup = {
         variant.variant_id: variant
-        for variant in facts.sample_variants
+        for variant in paper_facts.sample_variants
         if variant.variant_id
     }
     document_material_lookup: dict[str, dict[str, Any]] = {}
-    for variant in facts.sample_variants:
+    for variant in paper_facts.sample_variants:
         if not variant.document_id or variant.document_id in document_material_lookup:
             continue
         document_material_lookup[variant.document_id] = dict(variant.host_material_system)
 
     records: dict[str, dict[str, Any]] = {}
-    for method in facts.method_facts:
+    for method in paper_facts.method_facts:
         evidence_id = _method_fact_evidence_id(method)
         if not evidence_id:
             continue
@@ -74,7 +81,7 @@ def _build_evidence_card_records(facts: CoreFactSet) -> list[dict[str, Any]]:
             ),
         }
 
-    for result in facts.measurement_results:
+    for result in paper_facts.measurement_results:
         evidence_id = _measurement_result_evidence_id(result)
         if not evidence_id:
             continue
@@ -100,7 +107,7 @@ def _build_evidence_card_records(facts: CoreFactSet) -> list[dict[str, Any]]:
             "traceability_status": result.traceability_status or TRACEABILITY_STATUS_MISSING,
         }
 
-    for row in facts.comparison_rows:
+    for row in core_facts.comparison_rows:
         for evidence_id in row.supporting_evidence_ids:
             if not evidence_id or evidence_id in records:
                 continue

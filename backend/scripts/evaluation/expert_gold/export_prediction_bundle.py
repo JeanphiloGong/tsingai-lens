@@ -26,6 +26,9 @@ from infra.persistence.database import (  # noqa: E402
 from infra.persistence.postgres.source_artifact_repository import (  # noqa: E402
     PostgresSourceArtifactRepository,
 )
+from infra.persistence.postgres.paper_fact_repository import (  # noqa: E402
+    PostgresPaperFactRepository,
+)
 from infra.persistence.sqlite import SqliteCoreFactRepository  # noqa: E402
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
@@ -329,17 +332,17 @@ def _load_artifacts(
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     engine = build_database_engine(DatabaseSettings())
     try:
+        session_factory = build_session_factory(engine)
         source_artifacts = PostgresSourceArtifactRepository(
-            build_session_factory(engine)
+            session_factory
         ).read_collection_artifacts(collection_id)
+        paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
     finally:
         engine.dispose()
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
     records_by_artifact: dict[str, list[dict[str, Any]]] = {
         "documents": [record.to_record() for record in source_artifacts.documents],
-        "document_profiles": [
-            record.to_record() for record in core_facts.document_profiles
-        ],
+        "document_profiles": [record.to_record() for record in paper_facts.document_profiles],
         "objective_evidence_units": [
             record.to_record() for record in core_facts.objective_evidence_units
         ],
@@ -347,26 +350,26 @@ def _load_artifacts(
             record.to_record() for record in core_facts.objective_logic_chains
         ],
         "evidence_anchors": [
-            record.to_record() for record in core_facts.evidence_anchors
+            record.to_record() for record in paper_facts.evidence_anchors
         ],
-        "method_facts": [record.to_record() for record in core_facts.method_facts],
+        "method_facts": [record.to_record() for record in paper_facts.method_facts],
         "sample_variants": [
-            record.to_record() for record in core_facts.sample_variants
+            record.to_record() for record in paper_facts.sample_variants
         ],
         "test_conditions": [
-            record.to_record() for record in core_facts.test_conditions
+            record.to_record() for record in paper_facts.test_conditions
         ],
         "baseline_references": [
-            record.to_record() for record in core_facts.baseline_references
+            record.to_record() for record in paper_facts.baseline_references
         ],
         "measurement_results": [
-            record.to_record() for record in core_facts.measurement_results
+            record.to_record() for record in paper_facts.measurement_results
         ],
         "characterization_observations": [
-            record.to_record() for record in core_facts.characterization_observations
+            record.to_record() for record in paper_facts.characterization_observations
         ],
         "structure_features": [
-            record.to_record() for record in core_facts.structure_features
+            record.to_record() for record in paper_facts.structure_features
         ],
         "comparable_results": [
             record.to_record() for record in core_facts.comparable_results

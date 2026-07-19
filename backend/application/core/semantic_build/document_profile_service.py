@@ -12,15 +12,12 @@ from domain.core.document_profile import (
     DocumentProfile,
     summarize_document_profile_collection,
 )
-from domain.ports import CoreFactRepository, SourceArtifactRepository
+from domain.ports import PaperFactRepository, SourceArtifactRepository
 from domain.source import SourceArtifactSet
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
 from domain.shared.record_normalization import normalize_record_value
-from infra.persistence.factory import (
-    build_core_fact_repository,
-)
 from .llm.extractor import (
     CoreLLMStructuredExtractor,
     build_default_core_llm_structured_extractor,
@@ -95,17 +92,12 @@ class DocumentProfileService:
         self,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
+        paper_fact_repository: PaperFactRepository,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._structured_extractor = structured_extractor
-        self.core_fact_repository = (
-            core_fact_repository
-            or build_core_fact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.paper_fact_repository = paper_fact_repository
         self.source_artifact_repository = source_artifact_repository
 
     def list_document_profiles(
@@ -205,9 +197,14 @@ class DocumentProfileService:
             "warnings": warnings,
         }
 
-    def read_document_profiles(self, collection_id: str) -> tuple[DocumentProfile, ...]:
+    def read_document_profiles(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> tuple[DocumentProfile, ...]:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.paper_fact_repository.read(collection_id, build_id=build_id)
         if facts.document_profiles:
             return self._normalize_profile_records(
                 facts.document_profiles,
@@ -219,7 +216,7 @@ class DocumentProfileService:
         self,
         collection_id: str,
         *,
-        build_id: str | None = None,
+        build_id: str,
     ) -> tuple[DocumentProfile, ...]:
         self.collection_service.get_collection(collection_id)
         try:
@@ -259,8 +256,9 @@ class DocumentProfileService:
             profiles,
             collection_id,
         )
-        self.core_fact_repository.replace_collection_document_profiles(
+        self.paper_fact_repository.replace_document_profiles(
             collection_id,
+            build_id,
             normalized_profiles,
         )
         logger.info(

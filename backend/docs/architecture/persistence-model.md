@@ -35,8 +35,8 @@ must name the authoritative records from which they can be rebuilt.
 ## Current Runtime Model
 
 The current runtime is split between PostgreSQL auth, collection, canonical
-document, file-provenance, build-lineage, and Source structure records;
-uploaded and generated files; and the remaining handwritten SQLite
+document, file-provenance, build-lineage, and all Source records; immutable
+uploaded and generated objects; and the remaining handwritten SQLite
 repositories. This table records that split so later migrations do not
 accidentally preserve it.
 
@@ -52,11 +52,10 @@ accidentally preserve it.
 | Artifact readiness and active-build selection | PostgreSQL `artifact_versions` and `collection_active_builds` | No | PostgreSQL metadata; binary exports in object storage |
 | Users and auth sessions | PostgreSQL `auth_users` and `auth_sessions` | No | PostgreSQL |
 | Goal sessions and experiment plans | `lens.sqlite` Goal tables | No | PostgreSQL |
-| Source documents, text units, blocks, tables, rows, cells, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL |
-| Source figures and references | `lens.sqlite` Source tables | No | PostgreSQL metadata and object storage |
+| Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Core facts, objectives, comparisons, goals, and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
 | Feedback, curation, and evaluation | `lens.sqlite` evaluation tables | No | PostgreSQL |
-| Extracted images and other generated binary media | `images/` and collection output paths | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL metadata |
+| Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
 | Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
 | Report, GraphML, archive, and review exports | generated output paths | Yes from versioned records | Object storage; PostgreSQL stores export metadata |
 | Embedding, parser, and model caches | `cache/` and runtime cache paths | Yes | Local scratch; optional accepted embeddings use `pgvector` |
@@ -82,13 +81,15 @@ older concurrent completions remain history and cannot replace a newer active
 build. Task-specific artifact readiness is derived from immutable version rows,
 not stored as a mutable boolean document.
 
-The Source structure aggregate is direct and relational as well. Parser
+The Source aggregate is direct and relational as well. Parser
 workflows return a bundle without constructing persistence. The application
-Source node writes the pending build explicitly, and ordinary readers resolve
-`collection_active_builds`. Every Source document resolves by exact stored
-filename to one same-collection membership and immutable document version.
-Figures and references remain a separate SQLite authority until their recorded
-cutover; application read models combine the two families explicitly.
+Source node writes structure, figure metadata, and extracted references under
+the pending build explicitly; ordinary readers resolve `collection_active_builds`.
+Every Source document resolves by exact stored filename to one same-collection
+membership and immutable document version. Figure bytes are written once to a
+collection/build-scoped object key before metadata is committed. Product reads
+never consult SQLite Source tables, Source JSON/Parquet, or collection output
+image directories.
 
 ### Legacy SQLite Inventory
 
@@ -189,7 +190,7 @@ Concrete migration names may differ, but these identity rules may not.
 | Stored object, collection file, and import | `object_id`, `file_id`, `import_id` | Each collection-scoped object replica references one version; each file references an object and a membership in the same collection; imported document references one import and file in that collection. |
 | Task and build | `task_id`, `collection_build_id`, `build_stage_id` | Build references collection and task; stage references build; stage kind and version are unique within a build. |
 | Artifact version | `artifact_version_id` | References its build stage and optional stored object; schema and content versions are typed. |
-| Source records | Existing domain IDs per record family | Every record references a Source build stage and document version; join tables use declared foreign keys. |
+| Source records | Existing domain IDs per record family | Every structure, figure, and reference row references one collection build and valid Source document ownership; reference links use declared foreign keys. Figure metadata records object key, SHA-256, MIME type, dimensions, and byte size, never image bytes. |
 | Evidence anchor | `anchor_id` | References document version and build stage plus exactly one supported Source locator, such as a text unit, block, table cell, or figure. |
 | Reusable Core facts | Existing domain IDs per fact family | Every fact references document version and Core build stage; many-to-many evidence uses link tables. |
 | Objective and collection assessment | `objective_id` and family-specific IDs | References collection; reusable fact selection and assessment use foreign-keyed links rather than copied payloads. |
@@ -246,6 +247,12 @@ reports, GraphML, archives, and retained large trace payloads. PostgreSQL owns
 their metadata and relationships. The first implementation may be the local
 filesystem, but only through stable storage keys; cloud storage is not part of
 this revision.
+
+For figures, the Source build writes immutable bytes under
+`<collection_id>/objects/source/<build_id>/figures/<sha256>.<ext>`. The active
+Source figure row authorizes the read and supplies the expected hash and media
+metadata. Removing `output/image_assets` must not affect document trees,
+reference reads, Markdown image links, or image delivery.
 
 No vector index is required for the relational cutover. If the retrieval gate
 later proves value, `pgvector` rows must reference canonical Source text units

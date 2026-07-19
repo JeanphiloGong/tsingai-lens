@@ -23,6 +23,12 @@ from domain.source import (
     SourceBoundingBox,
     SourceCharRange,
     SourceDocument,
+    SourceFigure,
+    SourceReferenceCandidate,
+    SourceReferenceEntry,
+    SourceReferenceMention,
+    SourceReferenceResolution,
+    SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
@@ -96,10 +102,11 @@ def source_repositories(tmp_path):
 
 def _collection_import(stored_filename: str) -> CollectionImportRecord:
     digest = sha256(stored_filename.encode("utf-8")).hexdigest()
+    suffix = digest[:12]
     file = CollectionFileRecord(
-        file_id="file_source",
+        file_id=f"file_{suffix}",
         collection_id="col_source",
-        object_id="obj_source",
+        object_id=f"obj_{suffix}",
         object_kind="source_input",
         original_filename="paper.pdf",
         stored_filename=stored_filename,
@@ -111,7 +118,7 @@ def _collection_import(stored_filename: str) -> CollectionImportRecord:
         created_at=NOW,
     )
     return CollectionImportRecord(
-        import_id="imp_source",
+        import_id=f"imp_{suffix}",
         collection_id="col_source",
         channel="upload",
         adapter_name="upload",
@@ -122,7 +129,7 @@ def _collection_import(stored_filename: str) -> CollectionImportRecord:
         ingested_at=NOW,
         documents=(
             CollectionImportDocumentRecord(
-                source_document_id="srcdoc_import",
+                source_document_id=f"srcdoc_{suffix}",
                 origin_channel="upload",
                 file=file,
                 language=None,
@@ -238,6 +245,91 @@ def _artifacts(title: str = "Paper") -> SourceArtifactSet:
     )
 
 
+def _figure(build_id: str) -> SourceFigure:
+    return SourceFigure(
+        figure_id="figure-1",
+        document_id="srcdoc_runtime",
+        figure_order=1,
+        figure_label="Figure 1",
+        caption_text="Figure 1. Result morphology.",
+        caption_block_id=None,
+        page=1,
+        bbox=SourceBoundingBox(l=1, t=2, r=3, b=4, coord_origin="top-left"),
+        heading_path="Results",
+        image_path=(f"col_source/objects/source/{build_id}/figures/{'a' * 64}.png"),
+        image_mime_type="image/png",
+        image_width=20,
+        image_height=10,
+        asset_sha256="a" * 64,
+        image_size_bytes=9,
+        metadata={"parser": "docling"},
+    )
+
+
+def _references() -> SourceReferenceSet:
+    return SourceReferenceSet(
+        entries=(
+            SourceReferenceEntry(
+                reference_id="reference-1",
+                document_id="srcdoc_runtime",
+                raw_reference="[1] Smith A. Result paper. 2024.",
+                reference_index="1",
+                title="Result paper",
+                authors_text="Smith A",
+                year=2024,
+                source_block_id="block-1",
+                page=1,
+                confidence=0.9,
+                metadata={"sequence": 1},
+            ),
+        ),
+        mentions=(
+            SourceReferenceMention(
+                mention_id="mention-1",
+                document_id="srcdoc_runtime",
+                reference_id="reference-1",
+                citation_marker="[1]",
+                context_text="Prior result [1].",
+                source_block_id="block-1",
+                page=1,
+                char_start=13,
+                char_end=16,
+                confidence=0.9,
+                metadata={"raw_marker": "[1]"},
+            ),
+        ),
+        resolutions=(
+            SourceReferenceResolution(
+                resolution_id="resolution-1",
+                reference_id="reference-1",
+                provider="crossref",
+                status="resolved",
+                resolved_title="Result paper",
+                resolved_year=2024,
+                resolved_doi="10.1000/result",
+                resolved_url="https://doi.org/10.1000/result",
+                confidence=0.8,
+                metadata={"match": "doi"},
+            ),
+        ),
+        candidates=(
+            SourceReferenceCandidate(
+                candidate_id="candidate-1",
+                reference_id="reference-1",
+                status="metadata_only",
+                relevance_score=0.75,
+                relevance_reason="Cited in results.",
+                cited_by_document_id="srcdoc_runtime",
+                mention_count=1,
+                representative_context="Prior result [1].",
+                resolved_doi="10.1000/result",
+                resolved_url="https://doi.org/10.1000/result",
+                metadata={"rank": 1},
+            ),
+        ),
+    )
+
+
 def _finish(
     builds: PostgresBuildRepository, task: TaskRecord, *, success: bool
 ) -> None:
@@ -315,6 +407,125 @@ def test_default_reads_keep_last_successful_build_when_next_build_fails(
     assert repository.list_documents("col_source")[0].title == "First"
 
 
+def test_source_repository_versions_figures_and_references_with_the_source_build(
+    source_repositories,
+) -> None:
+    repository, builds = source_repositories
+    task = _task("task_source_media")
+    build_id = "build_source_media"
+    builds.add_task(task, build_id=build_id)
+    artifacts = replace(_artifacts(), figures=(_figure(build_id),))
+
+    repository.replace_collection_artifacts("col_source", build_id, artifacts)
+    repository.replace_collection_references(
+        "col_source",
+        build_id,
+        _references(),
+    )
+
+    assert repository.list_figures("col_source") == []
+    assert repository.read_collection_references("col_source") == SourceReferenceSet()
+    assert repository.list_figures("col_source", build_id=build_id) == [
+        _figure(build_id)
+    ]
+    assert (
+        repository.read_collection_references("col_source", build_id=build_id)
+        == _references()
+    )
+
+    _finish(builds, task, success=True)
+
+    assert repository.list_figures("col_source") == [_figure(build_id)]
+    assert repository.read_collection_references("col_source") == _references()
+    tree = repository.read_document_tree("col_source", "srcdoc_runtime")
+    assert tree.node_for_source_ref("figure", "figure-1") is not None
+    assert tree.node_for_source_ref("reference", "reference-1") is not None
+    with pytest.raises(ValueError, match="collection build is not writable"):
+        repository.replace_collection_references(
+            "col_source",
+            build_id,
+            SourceReferenceSet(),
+        )
+
+
+def test_collection_artifact_read_pins_one_active_build(
+    source_repositories,
+    monkeypatch,
+) -> None:
+    repository, builds = source_repositories
+    first_task = _task("task_first_snapshot")
+    builds.add_task(first_task, build_id="build_first_snapshot")
+    repository.replace_collection_artifacts(
+        "col_source", "build_first_snapshot", _artifacts("First")
+    )
+    _finish(builds, first_task, success=True)
+
+    second_task = _task("task_second_snapshot")
+    second_build_id = "build_second_snapshot"
+    builds.add_task(second_task, build_id=second_build_id)
+    repository.replace_collection_artifacts(
+        "col_source",
+        second_build_id,
+        replace(_artifacts("Second"), figures=(_figure(second_build_id),)),
+    )
+    original_list_text_units = repository.list_text_units
+
+    def activate_then_list_text_units(*args, **kwargs):
+        _finish(builds, second_task, success=True)
+        return original_list_text_units(*args, **kwargs)
+
+    monkeypatch.setattr(
+        repository,
+        "list_text_units",
+        activate_then_list_text_units,
+    )
+
+    artifacts = repository.read_collection_artifacts("col_source")
+
+    assert artifacts.documents[0].title == "First"
+    assert artifacts.figures == ()
+
+
+def test_document_tree_read_pins_one_active_build(
+    source_repositories,
+    monkeypatch,
+) -> None:
+    repository, builds = source_repositories
+    first_task = _task("task_first_tree")
+    builds.add_task(first_task, build_id="build_first_tree")
+    repository.replace_collection_artifacts(
+        "col_source", "build_first_tree", _artifacts("First")
+    )
+    repository.replace_collection_references(
+        "col_source", "build_first_tree", SourceReferenceSet()
+    )
+    _finish(builds, first_task, success=True)
+
+    second_task = _task("task_second_tree")
+    second_build_id = "build_second_tree"
+    builds.add_task(second_task, build_id=second_build_id)
+    repository.replace_collection_artifacts(
+        "col_source",
+        second_build_id,
+        replace(_artifacts("Second"), figures=(_figure(second_build_id),)),
+    )
+    repository.replace_collection_references(
+        "col_source", second_build_id, _references()
+    )
+    original_list_blocks = repository.list_blocks
+
+    def activate_then_list_blocks(*args, **kwargs):
+        _finish(builds, second_task, success=True)
+        return original_list_blocks(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "list_blocks", activate_then_list_blocks)
+
+    tree = repository.read_document_tree("col_source", "srcdoc_runtime")
+
+    assert tree.node_for_source_ref("figure", "figure-1") is None
+    assert tree.node_for_source_ref("reference", "reference-1") is None
+
+
 def test_source_repository_rejects_unresolved_document_and_orphan_links(
     source_repositories,
 ) -> None:
@@ -345,6 +556,63 @@ def test_source_repository_rejects_unresolved_document_and_orphan_links(
     assert repository.read_collection_artifacts(
         "col_source", build_id="build_invalid"
     ).is_empty()
+
+
+def test_source_repository_rejects_cross_document_and_orphan_reference_links(
+    source_repositories,
+) -> None:
+    repository, builds = source_repositories
+    task = _task("task_invalid_references")
+    build_id = "build_invalid_references"
+    builds.add_task(task, build_id=build_id)
+    PostgresCollectionRepository(repository.session_factory).add_collection_import(
+        _collection_import("stored-other.pdf"),
+        updated_at=NOW,
+    )
+    first = _artifacts()
+    second_document = replace(
+        first.documents[0],
+        document_id="srcdoc_other",
+        title="Other",
+        text_unit_ids=(),
+        metadata={"source_path": "stored-other.pdf", "source_parser": "docling"},
+    )
+    second_block = replace(
+        first.blocks[0],
+        block_id="block-other",
+        document_id="srcdoc_other",
+        text_unit_ids=(),
+    )
+    repository.replace_collection_artifacts(
+        "col_source",
+        build_id,
+        replace(
+            first,
+            documents=first.documents + (second_document,),
+            blocks=first.blocks + (second_block,),
+        ),
+    )
+    references = _references()
+    cross_document_mention = replace(
+        references.mentions[0],
+        document_id="srcdoc_other",
+        source_block_id="block-other",
+    )
+    with pytest.raises(IntegrityError):
+        repository.replace_collection_references(
+            "col_source",
+            build_id,
+            replace(references, mentions=(cross_document_mention,)),
+        )
+    with pytest.raises(IntegrityError):
+        repository.replace_collection_references(
+            "col_source",
+            build_id,
+            SourceReferenceSet(
+                resolutions=(references.resolutions[0],),
+                candidates=(references.candidates[0],),
+            ),
+        )
 
 
 def test_postgresql_enforces_source_structure_contract() -> None:
@@ -404,6 +672,47 @@ def test_postgresql_enforces_source_structure_contract() -> None:
             repository.read_collection_artifacts("col_source", build_id="build_source")
             == _artifacts()
         )
+
+        unordered_references = _references()
+        unordered_references = replace(
+            unordered_references,
+            entries=(
+                unordered_references.entries[0],
+                replace(
+                    unordered_references.entries[0],
+                    reference_id="reference-null-index",
+                    raw_reference="Unnumbered reference.",
+                    reference_index=None,
+                    source_block_id=None,
+                ),
+            ),
+            mentions=(
+                unordered_references.mentions[0],
+                replace(
+                    unordered_references.mentions[0],
+                    mention_id="mention-null-position",
+                    reference_id=None,
+                    citation_marker="[?]",
+                    source_block_id=None,
+                    char_start=None,
+                    char_end=None,
+                ),
+            ),
+        )
+        repository.replace_collection_references(
+            "col_source", "build_source", unordered_references
+        )
+        ordered_references = repository.read_collection_references(
+            "col_source", build_id="build_source"
+        )
+        assert [entry.reference_id for entry in ordered_references.entries] == [
+            "reference-null-index",
+            "reference-1",
+        ]
+        assert [mention.mention_id for mention in ordered_references.mentions] == [
+            "mention-null-position",
+            "mention-1",
+        ]
 
         orphan_block = replace(_artifacts().blocks[0], document_id="missing-document")
         with pytest.raises(IntegrityError):

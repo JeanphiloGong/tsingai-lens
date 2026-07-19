@@ -10,9 +10,9 @@ The Source business records and shared structure logic live in
 `backend/domain/source/`. Infrastructure should parse input files, build those
 domain records, and return one `SourceArtifactBundle` to the application build
 pipeline. The build pipeline persists document structure to build-versioned
-PostgreSQL rows. Figure metadata and references remain in their narrow SQLite
-repository until their dedicated cutover; local exports and traces read these
-two authorities explicitly.
+PostgreSQL rows, writes extracted figure bytes through the existing object
+store, and persists figure metadata plus deterministic references under the
+same pending build before activation.
 
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.
@@ -63,8 +63,8 @@ The final Source artifact family is:
   character range. Text contained within a figure region is represented by the
   figure artifact instead of being duplicated as body blocks.
 - `figures`
-  Figure rows with captions, heading context, page, bbox, image asset paths,
-  and parser metadata.
+  Figure rows with captions, heading context, page, bbox, immutable object key,
+  SHA-256, MIME type, dimensions, byte size, and parser metadata.
 - `tables`
   The primary complete-table structure with caption, heading, page, bbox,
   headers, `table_matrix`, Markdown, and plain text.
@@ -74,7 +74,8 @@ The final Source artifact family is:
   Cell-level evidence anchors with header paths, unit hints, row and column
   indexes, page, and bbox.
 - `image_assets/`
-  Extracted figure crops referenced by Source figure rows.
+  Parser scratch crops handed to the application pipeline. Product reads use
+  the registered object key and never depend on this directory.
 
 `tables` is the primary table context. `table_rows` and `table_cells` support
 anchoring, UI drilldown, and debugging; they are not replacements for the

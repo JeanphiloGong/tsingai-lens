@@ -56,14 +56,9 @@ def _build_research_objective_service(
         ) or SqliteSourceArtifactRepository(
             collection_service.root_dir.parent / "lens.sqlite"
         )
-    reference_repository = kwargs.pop(
-        "source_reference_repository",
-        source_repository,
-    )
     return _ResearchObjectiveService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
-        source_reference_repository=reference_repository,
         **kwargs,
     )
 

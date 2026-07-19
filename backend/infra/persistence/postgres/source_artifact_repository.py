@@ -12,6 +12,12 @@ from domain.source import (
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
+    SourceFigure,
+    SourceReferenceCandidate,
+    SourceReferenceEntry,
+    SourceReferenceMention,
+    SourceReferenceResolution,
+    SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
@@ -28,6 +34,11 @@ from infra.persistence.postgres.models.source import (
     SourceBlock as SourceBlockRow,
     SourceBlockTextUnit,
     SourceDocument as SourceDocumentRow,
+    SourceFigure as SourceFigureRow,
+    SourceReferenceCandidate as SourceReferenceCandidateRow,
+    SourceReferenceEntry as SourceReferenceEntryRow,
+    SourceReferenceMention as SourceReferenceMentionRow,
+    SourceReferenceResolution as SourceReferenceResolutionRow,
     SourceTable as SourceTableModel,
     SourceTableCell as SourceTableCellRow,
     SourceTableRow as SourceTableRowModel,
@@ -188,6 +199,29 @@ class PostgresSourceArtifactRepository:
                 )
                 for cell in artifacts.table_cells
             )
+            session.add_all(
+                SourceFigureRow(
+                    build_id=build_id,
+                    figure_id=figure.figure_id,
+                    collection_id=collection_id,
+                    source_document_id=figure.document_id,
+                    figure_order=figure.figure_order,
+                    figure_label=figure.figure_label,
+                    caption_text=figure.caption_text,
+                    caption_block_id=figure.caption_block_id,
+                    page=figure.page,
+                    bbox_json=figure.bbox.to_payload() if figure.bbox else None,
+                    heading_path=figure.heading_path,
+                    image_storage_key=figure.image_path,
+                    image_mime_type=figure.image_mime_type,
+                    image_width=figure.image_width,
+                    image_height=figure.image_height,
+                    asset_sha256=figure.asset_sha256,
+                    image_size_bytes=figure.image_size_bytes,
+                    metadata_json=dict(figure.metadata),
+                )
+                for figure in artifacts.figures
+            )
 
     def read_collection_artifacts(
         self,
@@ -201,6 +235,7 @@ class PostgresSourceArtifactRepository:
             tables=tuple(self.list_tables(collection_id, build_id=build_id)),
             table_rows=tuple(self.list_table_rows(collection_id, build_id=build_id)),
             table_cells=tuple(self.list_table_cells(collection_id, build_id=build_id)),
+            figures=tuple(self.list_figures(collection_id, build_id=build_id)),
         )
 
     def read_document_tree(
@@ -226,6 +261,10 @@ class PostgresSourceArtifactRepository:
             document=document,
             blocks=self.list_blocks(collection_id, document_id, build_id=build_id),
             tables=self.list_tables(collection_id, document_id, build_id=build_id),
+            figures=self.list_figures(collection_id, document_id, build_id=build_id),
+            references=self.read_collection_references(
+                collection_id, build_id=build_id
+            ),
         )
 
     def list_documents(
@@ -512,6 +551,291 @@ class PostgresSourceArtifactRepository:
                 )
                 for row in rows
             ]
+
+    def list_figures(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceFigure]:
+        with self.session_factory() as session:
+            resolved_build_id = self._resolve_read_build(
+                session, collection_id, build_id
+            )
+            if resolved_build_id is None:
+                return []
+            statement = select(SourceFigureRow).where(
+                SourceFigureRow.collection_id == collection_id,
+                SourceFigureRow.build_id == resolved_build_id,
+            )
+            if document_id is not None:
+                statement = statement.where(
+                    SourceFigureRow.source_document_id == document_id
+                )
+            rows = session.scalars(
+                statement.order_by(
+                    SourceFigureRow.source_document_id,
+                    SourceFigureRow.figure_order,
+                    SourceFigureRow.figure_id,
+                )
+            )
+            return [
+                SourceFigure.from_record(
+                    {
+                        "figure_id": row.figure_id,
+                        "document_id": row.source_document_id,
+                        "figure_order": row.figure_order,
+                        "figure_label": row.figure_label,
+                        "caption_text": row.caption_text,
+                        "caption_block_id": row.caption_block_id,
+                        "page": row.page,
+                        "bbox": row.bbox_json,
+                        "heading_path": row.heading_path,
+                        "image_path": row.image_storage_key,
+                        "image_mime_type": row.image_mime_type,
+                        "image_width": row.image_width,
+                        "image_height": row.image_height,
+                        "asset_sha256": row.asset_sha256,
+                        "image_size_bytes": row.image_size_bytes,
+                        "metadata": row.metadata_json,
+                    }
+                )
+                for row in rows
+            ]
+
+    def replace_collection_references(
+        self,
+        collection_id: str,
+        build_id: str,
+        references: SourceReferenceSet,
+    ) -> None:
+        with self.session_factory.begin() as session:
+            build = self._require_build(session, collection_id, build_id)
+            if build.status not in {"queued", "building"}:
+                raise ValueError(f"collection build is not writable: {build_id}")
+            for model in (
+                SourceReferenceCandidateRow,
+                SourceReferenceResolutionRow,
+                SourceReferenceMentionRow,
+                SourceReferenceEntryRow,
+            ):
+                session.execute(delete(model).where(model.build_id == build_id))
+            session.add_all(
+                SourceReferenceEntryRow(
+                    build_id=build_id,
+                    reference_id=entry.reference_id,
+                    collection_id=collection_id,
+                    source_document_id=entry.document_id,
+                    raw_reference=entry.raw_reference,
+                    reference_index=entry.reference_index,
+                    title=entry.title,
+                    authors_text=entry.authors_text,
+                    year=entry.year,
+                    doi=entry.doi,
+                    source_block_id=entry.source_block_id,
+                    page=entry.page,
+                    confidence=entry.confidence,
+                    metadata_json=dict(entry.metadata),
+                )
+                for entry in references.entries
+            )
+            session.flush()
+            session.add_all(
+                SourceReferenceMentionRow(
+                    build_id=build_id,
+                    mention_id=mention.mention_id,
+                    collection_id=collection_id,
+                    source_document_id=mention.document_id,
+                    reference_id=mention.reference_id,
+                    citation_marker=mention.citation_marker,
+                    context_text=mention.context_text,
+                    source_block_id=mention.source_block_id,
+                    page=mention.page,
+                    char_start=mention.char_start,
+                    char_end=mention.char_end,
+                    confidence=mention.confidence,
+                    metadata_json=dict(mention.metadata),
+                )
+                for mention in references.mentions
+            )
+            session.add_all(
+                SourceReferenceResolutionRow(
+                    build_id=build_id,
+                    resolution_id=resolution.resolution_id,
+                    collection_id=collection_id,
+                    reference_id=resolution.reference_id,
+                    provider=resolution.provider,
+                    status=resolution.status,
+                    resolved_title=resolution.resolved_title,
+                    resolved_authors_text=resolution.resolved_authors_text,
+                    resolved_year=resolution.resolved_year,
+                    resolved_venue=resolution.resolved_venue,
+                    resolved_doi=resolution.resolved_doi,
+                    resolved_url=resolution.resolved_url,
+                    open_access_url=resolution.open_access_url,
+                    confidence=resolution.confidence,
+                    metadata_json=dict(resolution.metadata),
+                )
+                for resolution in references.resolutions
+            )
+            session.add_all(
+                SourceReferenceCandidateRow(
+                    build_id=build_id,
+                    candidate_id=candidate.candidate_id,
+                    collection_id=collection_id,
+                    reference_id=candidate.reference_id,
+                    status=candidate.status,
+                    relevance_score=candidate.relevance_score,
+                    relevance_reason=candidate.relevance_reason,
+                    cited_by_document_id=candidate.cited_by_document_id,
+                    mention_count=candidate.mention_count,
+                    representative_context=candidate.representative_context,
+                    resolved_doi=candidate.resolved_doi,
+                    resolved_url=candidate.resolved_url,
+                    open_access_url=candidate.open_access_url,
+                    metadata_json=dict(candidate.metadata),
+                )
+                for candidate in references.candidates
+            )
+
+    def read_collection_references(
+        self,
+        collection_id: str,
+        build_id: str | None = None,
+    ) -> SourceReferenceSet:
+        with self.session_factory() as session:
+            resolved_build_id = self._resolve_read_build(
+                session, collection_id, build_id
+            )
+            if resolved_build_id is None:
+                return SourceReferenceSet()
+            entries = session.scalars(
+                select(SourceReferenceEntryRow)
+                .where(
+                    SourceReferenceEntryRow.collection_id == collection_id,
+                    SourceReferenceEntryRow.build_id == resolved_build_id,
+                )
+                .order_by(
+                    SourceReferenceEntryRow.source_document_id,
+                    SourceReferenceEntryRow.reference_index,
+                    SourceReferenceEntryRow.reference_id,
+                )
+            )
+            mentions = session.scalars(
+                select(SourceReferenceMentionRow)
+                .where(
+                    SourceReferenceMentionRow.collection_id == collection_id,
+                    SourceReferenceMentionRow.build_id == resolved_build_id,
+                )
+                .order_by(
+                    SourceReferenceMentionRow.source_document_id,
+                    SourceReferenceMentionRow.source_block_id,
+                    SourceReferenceMentionRow.char_start,
+                    SourceReferenceMentionRow.mention_id,
+                )
+            )
+            resolutions = session.scalars(
+                select(SourceReferenceResolutionRow)
+                .where(
+                    SourceReferenceResolutionRow.collection_id == collection_id,
+                    SourceReferenceResolutionRow.build_id == resolved_build_id,
+                )
+                .order_by(
+                    SourceReferenceResolutionRow.reference_id,
+                    SourceReferenceResolutionRow.provider,
+                    SourceReferenceResolutionRow.resolution_id,
+                )
+            )
+            candidates = session.scalars(
+                select(SourceReferenceCandidateRow)
+                .where(
+                    SourceReferenceCandidateRow.collection_id == collection_id,
+                    SourceReferenceCandidateRow.build_id == resolved_build_id,
+                )
+                .order_by(
+                    SourceReferenceCandidateRow.relevance_score.desc(),
+                    SourceReferenceCandidateRow.candidate_id,
+                )
+            )
+            return SourceReferenceSet(
+                entries=tuple(
+                    SourceReferenceEntry.from_record(
+                        {
+                            "reference_id": row.reference_id,
+                            "document_id": row.source_document_id,
+                            "raw_reference": row.raw_reference,
+                            "reference_index": row.reference_index,
+                            "title": row.title,
+                            "authors_text": row.authors_text,
+                            "year": row.year,
+                            "doi": row.doi,
+                            "source_block_id": row.source_block_id,
+                            "page": row.page,
+                            "confidence": row.confidence,
+                            "metadata": row.metadata_json,
+                        }
+                    )
+                    for row in entries
+                ),
+                mentions=tuple(
+                    SourceReferenceMention.from_record(
+                        {
+                            "mention_id": row.mention_id,
+                            "document_id": row.source_document_id,
+                            "reference_id": row.reference_id,
+                            "citation_marker": row.citation_marker,
+                            "context_text": row.context_text,
+                            "source_block_id": row.source_block_id,
+                            "page": row.page,
+                            "char_start": row.char_start,
+                            "char_end": row.char_end,
+                            "confidence": row.confidence,
+                            "metadata": row.metadata_json,
+                        }
+                    )
+                    for row in mentions
+                ),
+                resolutions=tuple(
+                    SourceReferenceResolution.from_record(
+                        {
+                            "resolution_id": row.resolution_id,
+                            "reference_id": row.reference_id,
+                            "provider": row.provider,
+                            "status": row.status,
+                            "resolved_title": row.resolved_title,
+                            "resolved_authors_text": row.resolved_authors_text,
+                            "resolved_year": row.resolved_year,
+                            "resolved_venue": row.resolved_venue,
+                            "resolved_doi": row.resolved_doi,
+                            "resolved_url": row.resolved_url,
+                            "open_access_url": row.open_access_url,
+                            "confidence": row.confidence,
+                            "metadata": row.metadata_json,
+                        }
+                    )
+                    for row in resolutions
+                ),
+                candidates=tuple(
+                    SourceReferenceCandidate.from_record(
+                        {
+                            "candidate_id": row.candidate_id,
+                            "reference_id": row.reference_id,
+                            "status": row.status,
+                            "relevance_score": row.relevance_score,
+                            "relevance_reason": row.relevance_reason,
+                            "cited_by_document_id": row.cited_by_document_id,
+                            "mention_count": row.mention_count,
+                            "representative_context": row.representative_context,
+                            "resolved_doi": row.resolved_doi,
+                            "resolved_url": row.resolved_url,
+                            "open_access_url": row.open_access_url,
+                            "metadata": row.metadata_json,
+                        }
+                    )
+                    for row in candidates
+                ),
+            )
 
     @staticmethod
     def _require_build(

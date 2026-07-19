@@ -274,28 +274,25 @@ class SourceArtifactRepository(Protocol):
         build_id: str | None = None,
     ) -> list[SourceTableCell]: ...
 
-
-class SourceReferenceRepository(Protocol):
-    backend_name: str
-
     def replace_collection_references(
         self,
         collection_id: str,
+        build_id: str,
         references: SourceReferenceSet,
     ) -> None: ...
 
-    def read_collection_references(self, collection_id: str) -> SourceReferenceSet: ...
-
-    def replace_collection_figures(
+    def read_collection_references(
         self,
         collection_id: str,
-        figures: tuple[SourceFigure, ...],
-    ) -> None: ...
+        build_id: str | None = None,
+    ) -> SourceReferenceSet: ...
 
     def list_figures(
         self,
         collection_id: str,
         document_id: str | None = None,
+        *,
+        build_id: str | None = None,
     ) -> list[SourceFigure]: ...
 
 

@@ -14,7 +14,9 @@ from infra.source.config.source_runtime_config import (
     StorageConfig,
 )
 
-from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
@@ -39,7 +41,7 @@ from application.pipeline.collection_build.runner import CollectionBuildPipeline
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
-from domain.ports import SourceArtifactRepository, SourceReferenceRepository
+from domain.ports import SourceArtifactRepository
 from utils.logger import bind_request_id, clear_request_id
 
 logger = logging.getLogger(__name__)
@@ -71,7 +73,6 @@ class CollectionBuildPipelineService:
         task_service: TaskService,
         artifact_registry_service: ArtifactRegistryService,
         source_artifact_repository: SourceArtifactRepository,
-        source_reference_repository: SourceReferenceRepository,
         document_profile_service: DocumentProfileService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
@@ -79,17 +80,18 @@ class CollectionBuildPipelineService:
         self.task_service = task_service
         self.artifact_registry_service = artifact_registry_service
         self.source_artifact_repository = source_artifact_repository
-        self.source_reference_repository = source_reference_repository
-        self.document_profile_service = document_profile_service or DocumentProfileService(
-            collection_service=self.collection_service,
-            source_artifact_repository=self.source_artifact_repository,
+        self.document_profile_service = (
+            document_profile_service
+            or DocumentProfileService(
+                collection_service=self.collection_service,
+                source_artifact_repository=self.source_artifact_repository,
+            )
         )
         self.research_objective_service = (
             research_objective_service
             or ResearchObjectiveService(
                 collection_service=self.collection_service,
                 source_artifact_repository=self.source_artifact_repository,
-                source_reference_repository=self.source_reference_repository,
                 document_profile_service=self.document_profile_service,
             )
         )
@@ -170,7 +172,6 @@ class CollectionBuildPipelineService:
                 collection_service=self.collection_service,
                 artifact_registry_service=self.artifact_registry_service,
                 source_artifact_repository=self.source_artifact_repository,
-                source_reference_repository=self.source_reference_repository,
                 config=config,
                 output_dir=output_dir,
                 method=method or IndexingMethod.Standard,
@@ -197,10 +198,14 @@ class CollectionBuildPipelineService:
             self.task_service.finish_task(
                 task_id,
                 status=final_status,
-                current_stage="artifacts_ready" if final_status != "failed" else "failed",
+                current_stage="artifacts_ready"
+                if final_status != "failed"
+                else "failed",
                 progress_percent=100,
                 progress_detail={
-                    "phase": "artifacts_ready" if final_status != "failed" else "failed",
+                    "phase": "artifacts_ready"
+                    if final_status != "failed"
+                    else "failed",
                     "unit": "steps",
                     "message": (
                         "Build artifacts are ready."
@@ -212,7 +217,9 @@ class CollectionBuildPipelineService:
                 errors=result["errors"],
                 warnings=result["warnings"],
             )
-            self.collection_service.update_collection(collection_id, status=final_status)
+            self.collection_service.update_collection(
+                collection_id, status=final_status
+            )
             return self.task_service.get_task(task_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -254,7 +261,9 @@ class CollectionBuildPipelineService:
             }
         )
 
-    def _resolve_final_status(self, context: CollectionBuildContext, result: dict) -> str:
+    def _resolve_final_status(
+        self, context: CollectionBuildContext, result: dict
+    ) -> str:
         if context.state.get("final_status"):
             return str(context.state["final_status"])
         node_states = result.get("pipeline_nodes", {})

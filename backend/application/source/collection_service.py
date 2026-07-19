@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
@@ -66,6 +66,55 @@ class CollectionService:
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
         return self.workspace.get_paths(collection_id)
+
+    def write_figure_asset(
+        self,
+        collection_id: str,
+        build_id: str,
+        asset_path: str,
+        payload: bytes,
+        expected_sha256: str,
+    ) -> str:
+        suffix = PurePosixPath(str(asset_path)).suffix.lower()
+        storage_key = self._figure_storage_key(
+            collection_id,
+            build_id,
+            expected_sha256,
+            suffix,
+        )
+        self.object_store.write(storage_key, payload, expected_sha256)
+        return storage_key
+
+    def read_figure_asset(
+        self,
+        collection_id: str,
+        storage_key: str,
+        expected_sha256: str,
+    ) -> bytes:
+        key = PurePosixPath(str(storage_key))
+        if (
+            len(key.parts) != 6
+            or key.parts[:3]
+            != (
+                str(collection_id),
+                "objects",
+                "source",
+            )
+            or key.parts[4] != "figures"
+        ):
+            raise ValueError("invalid figure storage key")
+        expected_key = self._figure_storage_key(
+            collection_id,
+            key.parts[3],
+            expected_sha256,
+            key.suffix.lower(),
+        )
+        if str(key) != expected_key:
+            raise ValueError("invalid figure storage key")
+        try:
+            return self.object_store.read(storage_key, expected_sha256)
+        except ValueError as exc:
+            raise OSError("figure object verification failed") from exc
 
     # define a method for creating a document collection
     def create_collection(
@@ -360,6 +409,30 @@ class CollectionService:
 
     def _input_storage_key(self, collection_id: str, stored_filename: str) -> str:
         return f"{collection_id}/input/{stored_filename}"
+
+    @staticmethod
+    def _figure_storage_key(
+        collection_id: str,
+        build_id: str,
+        sha256: str,
+        suffix: str,
+    ) -> str:
+        collection_key = str(collection_id).strip()
+        build_key = str(build_id).strip()
+        digest = str(sha256).strip()
+        extension = str(suffix).strip().lower()
+        if (
+            not collection_key
+            or not build_key
+            or any(character in collection_key + build_key for character in "/\\")
+            or not extension.startswith(".")
+            or not extension[1:].isalnum()
+            or len(extension) > 10
+        ):
+            raise ValueError("invalid figure storage key")
+        return (
+            f"{collection_key}/objects/source/{build_key}/figures/{digest}{extension}"
+        )
 
     def _group_text_units(
         self,

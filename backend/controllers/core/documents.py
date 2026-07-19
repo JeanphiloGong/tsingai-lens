@@ -5,7 +5,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
@@ -59,7 +59,9 @@ def _document_markdown_not_ready_detail(collection_id: str) -> dict[str, str]:
     }
 
 
-def _document_comparison_semantics_not_ready_detail(collection_id: str) -> dict[str, str]:
+def _document_comparison_semantics_not_ready_detail(
+    collection_id: str,
+) -> dict[str, str]:
     return {
         "code": "document_comparison_semantics_not_ready",
         "message": "The collection does not have document comparison semantics yet. Finish indexing first.",
@@ -267,7 +269,9 @@ async def get_collection_document_source(
     document_profile_service = request.app.state.document_profile_service
     source_filename: str | None = None
     try:
-        profile = document_profile_service.get_document_profile(collection_id, document_id)
+        profile = document_profile_service.get_document_profile(
+            collection_id, document_id
+        )
         source_filename = profile.get("source_filename")
     except (DocumentNotFoundError, DocumentProfilesNotReadyError):
         source_filename = None
@@ -317,7 +321,7 @@ async def get_collection_document_figure_image(
     document_id: str,
     figure_id: str,
     request: Request,
-) -> FileResponse:
+) -> Response:
     try:
         payload = request.app.state.document_markdown_service.resolve_figure_image_file(
             collection_id,
@@ -343,11 +347,16 @@ async def get_collection_document_figure_image(
         or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )
-    return FileResponse(
-        payload["path"],
+    encoded_filename = quote(filename)
+    content_disposition = (
+        f"inline; filename*=utf-8''{encoded_filename}"
+        if encoded_filename != filename
+        else f'inline; filename="{filename}"'
+    )
+    return Response(
+        content=payload["content"],
         media_type=media_type,
-        filename=filename,
-        content_disposition_type="inline",
+        headers={"content-disposition": content_disposition},
     )
 
 

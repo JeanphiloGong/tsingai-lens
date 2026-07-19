@@ -22,10 +22,13 @@ from domain.core.comparison import (
 from domain.core.document_profile import DocumentProfile
 from domain.core.evidence_backbone import EvidenceAnchor, MeasurementResult
 from domain.core.fact_store import CoreFactSet
-from domain.source import SourceArtifactSet
+from domain.source import (
+    SourceArtifactSet,
+    SourceReferenceSet,
+    build_source_document_tree,
+)
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
-    SqliteSourceArtifactRepository,
 )
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
@@ -58,6 +61,7 @@ class DummyWorkflowOutput:
 class MemorySourceArtifactRepository:
     def __init__(self) -> None:
         self._artifacts: dict[tuple[str, str], SourceArtifactSet] = {}
+        self._references: dict[tuple[str, str], SourceReferenceSet] = {}
 
     def replace_collection_artifacts(
         self,
@@ -76,6 +80,55 @@ class MemorySourceArtifactRepository:
         if build_id is None:
             return SourceArtifactSet()
         return self._artifacts.get((collection_id, build_id), SourceArtifactSet())
+
+    def replace_collection_references(
+        self,
+        collection_id: str,
+        build_id: str,
+        references: SourceReferenceSet,
+    ) -> None:
+        self._references[(collection_id, build_id)] = references
+
+    def read_collection_references(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> SourceReferenceSet:
+        if build_id is None:
+            return SourceReferenceSet()
+        return self._references.get((collection_id, build_id), SourceReferenceSet())
+
+    def read_document_tree(
+        self,
+        collection_id: str,
+        document_id: str,
+        build_id: str | None = None,
+    ):
+        artifacts = self.read_collection_artifacts(
+            collection_id,
+            build_id=build_id,
+        )
+        document = next(
+            item for item in artifacts.documents if item.document_id == document_id
+        )
+        return build_source_document_tree(
+            collection_id=collection_id,
+            document=document,
+            blocks=tuple(
+                item for item in artifacts.blocks if item.document_id == document_id
+            ),
+            tables=tuple(
+                item for item in artifacts.tables if item.document_id == document_id
+            ),
+            figures=tuple(
+                item for item in artifacts.figures if item.document_id == document_id
+            ),
+            references=self.read_collection_references(
+                collection_id,
+                build_id=build_id,
+            ),
+        )
 
 
 def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) -> dict:  # noqa: ANN001
@@ -615,14 +668,10 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
     source_artifact_repository = MemorySourceArtifactRepository()
-    source_reference_repository = SqliteSourceArtifactRepository(
-        tmp_path / "lens.sqlite"
-    )
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_artifact_repository,
-        source_reference_repository=source_reference_repository,
         core_fact_repository=core_fact_repository,
     )
     document_profile_service = DocumentProfileService(
@@ -647,14 +696,12 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         document_profile_service=document_profile_service,
         core_fact_repository=core_fact_repository,
         source_artifact_repository=source_artifact_repository,
-        source_reference_repository=source_reference_repository,
     )
     runner = CollectionBuildPipelineService(
         collection_service=collection_service,
         task_service=task_service,
         artifact_registry_service=artifact_registry,
         source_artifact_repository=source_artifact_repository,
-        source_reference_repository=source_reference_repository,
         document_profile_service=document_profile_service,
         research_objective_service=research_objective_service,
     )
@@ -783,7 +830,7 @@ def test_collection_task_flow(app_client):
     assert body["graph_stale"] is False
     assert body["blocks_generated"] is True
     assert body["blocks_ready"] is True
-    assert body["figures_generated"] is False
+    assert body["figures_generated"] is True
     assert body["figures_ready"] is False
     assert body["table_rows_generated"] is True
     assert body["table_rows_ready"] is False

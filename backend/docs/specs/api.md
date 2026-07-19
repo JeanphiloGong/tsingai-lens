@@ -1191,8 +1191,9 @@ figure 仍应保留图注文本。
 - collection、document 或当前 document 下的 figure 无法解析时返回 `404`
 - figure 存在但 image asset 缺失、路径不安全或无法读取时返回 `409`
   structured detail
-- endpoint 不接受任何 request path；文件路径只能来自当前 collection/document
-  下已登记的 Source figure `image_path`，且必须位于 collection output 目录内
+- endpoint 不接受任何 request path；对象 key 只能来自当前 active build、当前
+  collection/document 下已登记的 Source figure，并同时校验 collection/build
+  scope 与 SHA-256。collection output 和 `output/image_assets` 不参与产品读取
 
 文档页语义要求：
 

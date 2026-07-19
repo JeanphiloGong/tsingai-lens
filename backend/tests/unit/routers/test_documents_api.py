@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 from hashlib import sha256
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -238,7 +237,6 @@ def document_services(tmp_path):
     document_markdown_service = DocumentMarkdownService(
         collection_service,
         source_artifact_repository=source_repository,
-        source_reference_repository=source_repository,
     )
 
     return (
@@ -833,10 +831,15 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
     ) = document_services
     record = collection_service.create_collection(name="Figure Image Collection")
     collection_id = record["collection_id"]
-    paths = collection_service.get_paths(collection_id)
-    asset_path = paths.output_dir / "image_assets" / "fig-1.png"
-    asset_path.parent.mkdir(parents=True, exist_ok=True)
-    asset_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture\n")
+    content = b"\x89PNG\r\n\x1a\nfixture\n"
+    asset_sha256 = sha256(content).hexdigest()
+    storage_key = collection_service.write_figure_asset(
+        collection_id,
+        "build-figure",
+        "image_assets/fig-1.png",
+        content,
+        asset_sha256,
+    )
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -848,8 +851,10 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
                     "figure_order": 1,
                     "figure_label": "Fig. 1",
                     "caption_text": "Fig. 1. Microstructure.",
-                    "image_path": "image_assets/fig-1.png",
+                    "image_path": storage_key,
                     "image_mime_type": "image/png",
+                    "asset_sha256": asset_sha256,
+                    "image_size_bytes": len(content),
                 }
             ],
         ),
@@ -864,9 +869,9 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
         )
     )
 
-    assert Path(response.path).read_bytes() == b"\x89PNG\r\n\x1a\nfixture\n"
+    assert response.body == content
     assert response.media_type == "image/png"
-    assert response.headers["content-disposition"].startswith("inline;")
+    assert response.headers["content-disposition"] == 'inline; filename="fig-1.png"'
 
 
 def test_document_figure_image_route_rejects_figure_from_other_document(
@@ -962,6 +967,116 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     assert exc.status_code == 409
     assert exc.detail["code"] == "figure_image_path_invalid"
     assert "outside.png" not in str(exc.detail)
+
+
+def test_document_figure_image_route_rejects_another_collections_object_key(
+    document_services,
+):
+    (
+        collection_service,
+        _document_profile_service,
+        _comparison_service,
+        markdown_service,
+    ) = document_services
+    first = collection_service.create_collection(name="First Figure Collection")
+    second = collection_service.create_collection(name="Second Figure Collection")
+    content = b"figure"
+    digest = sha256(content).hexdigest()
+    foreign_key = collection_service.write_figure_asset(
+        second["collection_id"],
+        "build-figure",
+        "image_assets/figure.png",
+        content,
+        digest,
+    )
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        first["collection_id"],
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "image_path": foreign_key,
+                    "image_mime_type": "image/png",
+                    "asset_sha256": digest,
+                    "image_size_bytes": len(content),
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                first["collection_id"],
+                "paper-1",
+                "fig-1",
+                _document_request(document_services),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "figure_image_path_invalid"
+
+
+@pytest.mark.parametrize("failure", ["missing", "hash_mismatch"])
+def test_document_figure_image_route_reports_unavailable_object_bytes(
+    document_services,
+    failure,
+):
+    (
+        collection_service,
+        _document_profile_service,
+        _comparison_service,
+        markdown_service,
+    ) = document_services
+    record = collection_service.create_collection(name="Unavailable Figure Collection")
+    collection_id = record["collection_id"]
+    content = b"figure"
+    digest = sha256(content).hexdigest()
+    storage_key = collection_service.write_figure_asset(
+        collection_id,
+        "build-figure",
+        "image_assets/figure.png",
+        content,
+        digest,
+    )
+    if failure == "missing":
+        collection_service.object_store.delete(storage_key)
+    else:
+        (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "image_path": storage_key,
+                    "image_mime_type": "image/png",
+                    "asset_sha256": digest,
+                    "image_size_bytes": len(content),
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                collection_id,
+                "paper-1",
+                "fig-1",
+                _document_request(document_services),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "figure_image_unavailable"
 
 
 def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(

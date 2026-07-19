@@ -245,7 +245,9 @@ class SourceLayoutBlock:
     heading_path: str | None
 
     @classmethod
-    def from_value(cls, value: "SourceBlock | Mapping[str, Any]") -> "SourceLayoutBlock":
+    def from_value(
+        cls, value: "SourceBlock | Mapping[str, Any]"
+    ) -> "SourceLayoutBlock":
         if isinstance(value, SourceBlock):
             return cls(
                 block_id=value.block_id,
@@ -427,6 +429,7 @@ class SourceFigure:
     image_width: int | None
     image_height: int | None
     asset_sha256: str | None
+    image_size_bytes: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -446,6 +449,7 @@ class SourceFigure:
             image_width=safe_int(value.get("image_width")),
             image_height=safe_int(value.get("image_height")),
             asset_sha256=normalize_optional_text(value.get("asset_sha256")),
+            image_size_bytes=safe_int(value.get("image_size_bytes")),
             metadata=_mapping(value.get("metadata")),
         )
 
@@ -465,6 +469,7 @@ class SourceFigure:
             "image_width": self.image_width,
             "image_height": self.image_height,
             "asset_sha256": self.asset_sha256,
+            "image_size_bytes": self.image_size_bytes,
             "metadata": dict(self.metadata),
         }
 
@@ -497,7 +502,9 @@ class SourceArtifactSet:
             blocks=tuple(SourceBlock.from_record(item) for item in blocks),
             tables=tuple(SourceTable.from_record(item) for item in tables),
             table_rows=tuple(SourceTableRow.from_record(item) for item in table_rows),
-            table_cells=tuple(SourceTableCell.from_record(item) for item in table_cells),
+            table_cells=tuple(
+                SourceTableCell.from_record(item) for item in table_cells
+            ),
             figures=tuple(SourceFigure.from_record(item) for item in figures),
         )
 
@@ -903,9 +910,7 @@ def resolve_heading_path_for_page(
         for item in blocks
         if item.heading_path
         and (
-            normalized_page is None
-            or item.page is None
-            or item.page <= normalized_page
+            normalized_page is None or item.page is None or item.page <= normalized_page
         )
     ]
     if not eligible:
@@ -1013,7 +1018,9 @@ def build_source_document_tree(
     return builder.build()
 
 
-def render_markdown_table(matrix: list[list[str]], column_headers: list[str]) -> str | None:
+def render_markdown_table(
+    matrix: list[list[str]], column_headers: list[str]
+) -> str | None:
     if not matrix:
         return None
 
@@ -1188,7 +1195,9 @@ def _coerce_layout_blocks(
     blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
 ) -> list[SourceLayoutBlock]:
     return [
-        block if isinstance(block, SourceLayoutBlock) else SourceLayoutBlock.from_value(block)
+        block
+        if isinstance(block, SourceLayoutBlock)
+        else SourceLayoutBlock.from_value(block)
         for block in blocks
     ]
 
@@ -1343,7 +1352,9 @@ class _SourceDocumentTreeBuilder:
             if table.document_id != self.document.document_id:
                 continue
             parent_id = self._parent_for_heading_path(table.heading_path)
-            node_id = _source_node_id(self.document.document_id, "table", table.table_id)
+            node_id = _source_node_id(
+                self.document.document_id, "table", table.table_id
+            )
             node = SourceDocumentNode(
                 node_id=node_id,
                 document_id=self.document.document_id,
@@ -1384,11 +1395,15 @@ class _SourceDocumentTreeBuilder:
                 )
 
     def add_figures(self, figures: Iterable[SourceFigure]) -> None:
-        for figure in sorted(figures, key=lambda item: (item.figure_order, item.figure_id)):
+        for figure in sorted(
+            figures, key=lambda item: (item.figure_order, item.figure_id)
+        ):
             if figure.document_id != self.document.document_id:
                 continue
             parent_id = self._parent_for_heading_path(figure.heading_path)
-            node_id = _source_node_id(self.document.document_id, "figure", figure.figure_id)
+            node_id = _source_node_id(
+                self.document.document_id, "figure", figure.figure_id
+            )
             node = SourceDocumentNode(
                 node_id=node_id,
                 document_id=self.document.document_id,
@@ -1481,7 +1496,9 @@ class _SourceDocumentTreeBuilder:
         level = max(1, block.heading_level or len(self.section_stack) + 1)
         while self.section_stack and self.section_stack[-1][0] >= level:
             self.section_stack.pop()
-        parent_id = self.section_stack[-1][1] if self.section_stack else self.root_node_id
+        parent_id = (
+            self.section_stack[-1][1] if self.section_stack else self.root_node_id
+        )
         node_id = _source_node_id(self.document.document_id, "block", block.block_id)
         node = SourceDocumentNode(
             node_id=node_id,

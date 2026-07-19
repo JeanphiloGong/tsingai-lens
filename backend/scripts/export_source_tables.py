@@ -31,7 +31,6 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -164,16 +163,13 @@ def _load_existing_artifacts(
         ).read_collection_artifacts(collection_id)
     finally:
         engine.dispose()
-    figures = SqliteSourceArtifactRepository(
-        backend_root / "data" / "lens.sqlite"
-    ).list_figures(collection_id)
     if not artifacts.documents:
         raise SystemExit(f"source artifacts not found: {collection_id}")
     return {
         "documents": _records_to_frame(artifacts.documents),
         "text_units": _records_to_frame(artifacts.text_units),
         "blocks": _records_to_frame(artifacts.blocks),
-        "figures": _records_to_frame(figures),
+        "figures": _records_to_frame(artifacts.figures),
         "tables": _records_to_frame(artifacts.tables),
         "table_rows": _records_to_frame(artifacts.table_rows),
         "table_cells": _records_to_frame(artifacts.table_cells),

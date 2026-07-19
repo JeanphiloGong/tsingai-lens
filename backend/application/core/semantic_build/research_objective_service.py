@@ -32,7 +32,6 @@ from domain.core import (
 from domain.ports import (
     CoreFactRepository,
     SourceArtifactRepository,
-    SourceReferenceRepository,
 )
 from domain.source import SourceArtifactSet, SourceDocumentTree
 from infra.persistence.factory import (
@@ -347,7 +346,6 @@ class ResearchObjectiveService:
         self,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
-        source_reference_repository: SourceReferenceRepository,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         document_profile_service: DocumentProfileService | None = None,
@@ -362,7 +360,6 @@ class ResearchObjectiveService:
             )
         )
         self.source_artifact_repository = source_artifact_repository
-        self.source_reference_repository = source_reference_repository
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             structured_extractor=structured_extractor,
@@ -1226,7 +1223,6 @@ class ResearchObjectiveService:
                     collection_id,
                     document.document_id,
                     self.source_artifact_repository,
-                    self.source_reference_repository,
                     build_id=build_id,
                 )
                 for document in artifacts.documents
@@ -10370,7 +10366,7 @@ class ResearchObjectiveService:
             tables=artifacts.tables,
             table_rows=artifacts.table_rows,
             table_cells=artifacts.table_cells,
-            figures=tuple(self.source_reference_repository.list_figures(collection_id)),
+            figures=artifacts.figures,
         )
 
     def _build_paper_skim_payload(

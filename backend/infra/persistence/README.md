@@ -35,24 +35,23 @@ The stable data ownership and identity contract lives in
   canonical documents and versions, collection-document membership, collection
   file provenance, import provenance, Goal-intake handoffs, tasks, collection
   builds, stage state, artifact versions, active-build selection, and
-  build-versioned Source document structure through SQLAlchemy mappings and
-  direct aggregate repositories.
+  build-versioned Source structure, figures, and references through SQLAlchemy
+  mappings and one direct aggregate repository.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
   Handwritten repositories share `backend/data/lens.sqlite` for Goal sessions
-  and plans, Source figures and references, Core and Goal workflow records, and
-  evaluation/review state. These remaining repositories currently create
-  schema at runtime. SQLite Source structure methods are legacy implementation
-  residue and are not composed into maintained runtime readers or writers.
+  and plans, Core and Goal workflow records, and evaluation/review state. These
+  remaining repositories currently create schema at runtime. SQLite Source
+  methods are isolated test/legacy residue and are not composed into maintained
+  runtime readers, writers, or supported scripts.
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
 `factory.py` constructs SQLite repositories only for the remaining Goal, Core,
 and evaluation families. Auth, collection, build, and Source structure
 aggregates are composed directly in `main.py`; none has a repository factory or
-runtime fallback. The Source figure/reference repository is also composed
-explicitly while its cutover remains pending. Source pipeline JSON and Parquet
+runtime fallback. Source pipeline JSON and Parquet
 outputs live under `infra/source/` runtime storage and are rebuildable
 intermediates, not a second persistence authority.
 
@@ -93,10 +92,14 @@ aggregate only for isolated tests. No maintained caller reads or writes task
 JSON or `artifacts.json`.
 
 `PostgresSourceArtifactRepository` is the single structured owner for Source
-documents, text units, blocks, tables, rows, cells, and their associations. A
-write names one pending build; a normal read resolves only the active successful
-build. Exact stored-filename matching links every Source document to canonical
-collection membership and its immutable document version.
+documents, text units, blocks, tables, rows, cells, figures, references, and
+their associations. A write names one pending build; a normal read resolves
+only the active successful build. Exact stored-filename matching links every
+Source document to canonical collection membership and its immutable document
+version. Figure rows store object keys and verification metadata; figure bytes
+remain in the existing object store. References are extracted and persisted
+before activation, so the public reference POST is an idempotent active-build
+read rather than a post-build mutation.
 
 ## Target Boundary
 

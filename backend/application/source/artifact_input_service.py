@@ -4,8 +4,8 @@ import ast
 import math
 from typing import Any, Iterable, Mapping
 
-from domain.ports import SourceArtifactRepository, SourceReferenceRepository
-from domain.source import SourceArtifactSet, SourceDocumentTree, build_source_document_tree
+from domain.ports import SourceArtifactRepository
+from domain.source import SourceArtifactSet, SourceDocumentTree
 
 
 SourceRecord = dict[str, Any]
@@ -63,11 +63,11 @@ def load_table_cells_artifact(
 
 def load_figures_artifact(
     collection_id: str,
-    source_reference_repository: SourceReferenceRepository,
+    source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     return _records(
         figure.to_record()
-        for figure in source_reference_repository.list_figures(collection_id)
+        for figure in source_artifact_repository.list_figures(collection_id)
     )
 
 
@@ -87,30 +87,19 @@ def load_document_tree(
     collection_id: str,
     document_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    source_reference_repository: SourceReferenceRepository,
     *,
     build_id: str | None = None,
 ) -> SourceDocumentTree:
-    artifacts = _load_source_artifacts(
-        collection_id, source_artifact_repository, build_id=build_id
-    )
-    document = next(
-        (item for item in artifacts.documents if item.document_id == document_id),
-        None,
-    )
-    if document is None:
-        raise FileNotFoundError(
-            f"source document not found: {collection_id}/{document_id}"
+    if build_id is None:
+        return source_artifact_repository.read_document_tree(
+            collection_id,
+            document_id,
         )
-    tree = build_source_document_tree(
-        collection_id=collection_id,
-        document=document,
-        blocks=(item for item in artifacts.blocks if item.document_id == document_id),
-        tables=(item for item in artifacts.tables if item.document_id == document_id),
-        figures=source_reference_repository.list_figures(collection_id, document_id),
-        references=source_reference_repository.read_collection_references(collection_id),
+    return source_artifact_repository.read_document_tree(
+        collection_id,
+        document_id,
+        build_id=build_id,
     )
-    return tree
 
 
 def _load_source_artifacts(

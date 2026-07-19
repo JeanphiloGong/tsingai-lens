@@ -83,7 +83,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
-        source_reference_repository=source_repository,
     )
     core_repository = SqliteCoreFactRepository(db_path)
     goal_session_repository = SqliteGoalSessionRepository(db_path)

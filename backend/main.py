@@ -55,12 +55,13 @@ from infra.persistence.database import (
 )
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
-from domain.ports import SourceArtifactRepository, SourceReferenceRepository
+from domain.ports import SourceArtifactRepository
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -94,7 +95,6 @@ def create_app(
     collection_service: CollectionService | None = None,
     task_service: TaskService | None = None,
     source_artifact_repository: SourceArtifactRepository | None = None,
-    source_reference_repository: SourceReferenceRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -127,14 +127,9 @@ def create_app(
                 source_artifact_repository
                 or PostgresSourceArtifactRepository(session_factory)
             )
-            active_source_reference_repository = (
-                source_reference_repository
-                or SqliteSourceArtifactRepository(DATA_DIR / "lens.sqlite")
-            )
             artifact_registry_service = ArtifactRegistryService(
                 active_task_service.repository,
                 active_source_artifact_repository,
-                active_source_reference_repository,
             )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
@@ -153,7 +148,6 @@ def create_app(
             research_objective_service = ResearchObjectiveService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
-                source_reference_repository=active_source_reference_repository,
                 document_profile_service=document_profile_service,
             )
             workspace_service = WorkspaceService(
@@ -175,11 +169,11 @@ def create_app(
             application.state.document_markdown_service = DocumentMarkdownService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
-                source_reference_repository=active_source_reference_repository,
             )
-            application.state.reference_workflow_service = SourceReferenceWorkflowService(
-                source_artifact_repository=active_source_artifact_repository,
-                source_reference_repository=active_source_reference_repository,
+            application.state.reference_workflow_service = (
+                SourceReferenceWorkflowService(
+                    source_artifact_repository=active_source_artifact_repository,
+                )
             )
             application.state.paper_facts_service = paper_facts_service
             application.state.comparison_service = comparison_service
@@ -191,7 +185,6 @@ def create_app(
                 task_service=active_task_service,
                 artifact_registry_service=artifact_registry_service,
                 source_artifact_repository=active_source_artifact_repository,
-                source_reference_repository=active_source_reference_repository,
                 document_profile_service=document_profile_service,
                 research_objective_service=research_objective_service,
             )
@@ -331,7 +324,9 @@ def create_app(
     app.include_router(confirmed_goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goal_analysis.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(
+        research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX
+    )
     app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)

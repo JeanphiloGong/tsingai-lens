@@ -10,14 +10,19 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    build_source_document_tree,
 )
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from application.source import artifact_input_service
 
 
 class _SourceRepository:
-    def __init__(self, artifacts: SourceArtifactSet) -> None:
+    def __init__(
+        self,
+        artifacts: SourceArtifactSet,
+        references: SourceReferenceSet = SourceReferenceSet(),
+    ) -> None:
         self.artifacts = artifacts
+        self.references = references
 
     def read_collection_artifacts(
         self,
@@ -25,6 +30,36 @@ class _SourceRepository:
         build_id: str | None = None,
     ) -> SourceArtifactSet:
         return self.artifacts
+
+    def read_document_tree(
+        self,
+        collection_id: str,
+        document_id: str,
+        build_id: str | None = None,
+    ):
+        document = next(
+            item for item in self.artifacts.documents if item.document_id == document_id
+        )
+        return build_source_document_tree(
+            collection_id=collection_id,
+            document=document,
+            blocks=tuple(
+                item
+                for item in self.artifacts.blocks
+                if item.document_id == document_id
+            ),
+            tables=tuple(
+                item
+                for item in self.artifacts.tables
+                if item.document_id == document_id
+            ),
+            figures=tuple(
+                item
+                for item in self.artifacts.figures
+                if item.document_id == document_id
+            ),
+            references=self.references,
+        )
 
 
 def test_artifact_input_service_uses_explicit_source_repository():
@@ -117,7 +152,7 @@ def test_artifact_input_service_uses_explicit_source_repository():
     assert table_cells[0]["header_path"] == "Value"
 
 
-def test_artifact_input_service_loads_document_tree(tmp_path):
+def test_artifact_input_service_loads_document_tree():
     source_repository = _SourceRepository(
         SourceArtifactSet(
             documents=(
@@ -148,10 +183,6 @@ def test_artifact_input_service_loads_document_tree(tmp_path):
                 ),
             ),
         ),
-    )
-    reference_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    reference_repository.replace_collection_references(
-        "col_source",
         SourceReferenceSet(
             entries=(
                 SourceReferenceEntry(
@@ -166,7 +197,6 @@ def test_artifact_input_service_loads_document_tree(tmp_path):
         "col_source",
         "doc-1",
         source_repository,
-        reference_repository,
     ).to_record()
 
     assert tree["document_id"] == "doc-1"

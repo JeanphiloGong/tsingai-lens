@@ -108,9 +108,6 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
         PostgresSourceArtifactRepository,
     )
-    from infra.persistence.sqlite import (  # noqa: PLC0415
-        SqliteSourceArtifactRepository,
-    )
 
     engine = build_database_engine(DatabaseSettings())
     try:
@@ -120,23 +117,17 @@ def check_collection_frontend_projection(
             workspace=FileCollectionWorkspace(),
         )
         source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
-        source_reference_repository = SqliteSourceArtifactRepository(
-            backend_root / "data" / "lens.sqlite"
-        )
         objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
-            source_reference_repository=source_reference_repository,
         )
         objectives = objective_service.list_objective_workspaces(collection_id)
-        material_profile = (
-            ResearchViewAggregationService(
-                collection_service=collection_service,
-                source_artifact_repository=source_artifact_repository,
-            ).get_collection_material_research_view(
-                collection_id,
-                material_id,
-            )
+        material_profile = ResearchViewAggregationService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+        ).get_collection_material_research_view(
+            collection_id,
+            material_id,
         )
         objective_details = [
             objective_service.get_objective_research_view(

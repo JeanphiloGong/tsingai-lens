@@ -5,51 +5,55 @@ import pytest
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowService,
 )
+from application.source.reference_extraction_service import (
+    SourceReferenceExtractionService,
+)
 from domain.source import SourceArtifactSet, SourceBlock, SourceDocument
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
 def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    repository.replace_collection_artifacts(
-        "col_refs",
-        SourceArtifactSet(
-            documents=(
-                SourceDocument(
-                    document_id="doc-1",
-                    human_readable_id=0,
-                    title="Paper",
-                    text="Prior work [1] matters.\nReferences\n[1] Smith A. Paper. Journal. 2024.",
-                ),
+    artifacts = SourceArtifactSet(
+        documents=(
+            SourceDocument(
+                document_id="doc-1",
+                human_readable_id=0,
+                title="Paper",
+                text="Prior work [1] matters.\nReferences\n[1] Smith A. Paper. Journal. 2024.",
             ),
-            blocks=(
-                SourceBlock(
-                    block_id="blk-body",
-                    document_id="doc-1",
-                    block_type="paragraph",
-                    text="Prior work [1] matters.",
-                    block_order=1,
-                ),
-                SourceBlock(
-                    block_id="blk-ref-heading",
-                    document_id="doc-1",
-                    block_type="heading",
-                    text="References",
-                    block_order=2,
-                ),
-                SourceBlock(
-                    block_id="blk-ref",
-                    document_id="doc-1",
-                    block_type="paragraph",
-                    text="[1] Smith A. Paper. Journal. 2024.",
-                    block_order=3,
-                ),
+        ),
+        blocks=(
+            SourceBlock(
+                block_id="blk-body",
+                document_id="doc-1",
+                block_type="paragraph",
+                text="Prior work [1] matters.",
+                block_order=1,
+            ),
+            SourceBlock(
+                block_id="blk-ref-heading",
+                document_id="doc-1",
+                block_type="heading",
+                text="References",
+                block_order=2,
+            ),
+            SourceBlock(
+                block_id="blk-ref",
+                document_id="doc-1",
+                block_type="paragraph",
+                text="[1] Smith A. Paper. Journal. 2024.",
+                block_order=3,
             ),
         ),
     )
+    repository.replace_collection_artifacts("col_refs", artifacts)
+    repository.replace_collection_references(
+        "col_refs",
+        SourceReferenceExtractionService().extract(artifacts),
+    )
     service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
-        source_reference_repository=repository,
     )
 
     result = service.build_collection_references("col_refs")
@@ -71,7 +75,6 @@ def test_source_reference_workflow_requires_source_artifacts(tmp_path):
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
-        source_reference_repository=repository,
     )
 
     with pytest.raises(FileNotFoundError, match="source artifacts not ready"):

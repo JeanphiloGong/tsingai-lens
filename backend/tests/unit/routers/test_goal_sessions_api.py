@@ -85,7 +85,6 @@ def goal_session_services(tmp_path):
     research_objective_service = ResearchObjectiveService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
-        source_reference_repository=source_repository,
     )
     service = GoalSessionService(
         collection_service=collection_service,

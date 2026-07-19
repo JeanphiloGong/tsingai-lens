@@ -7,7 +7,6 @@ from domain.ports import (
     CollectionPaths,
     CollectionRepository,
     SourceArtifactRepository,
-    SourceReferenceRepository,
 )
 
 __all__ = [
@@ -20,6 +19,5 @@ __all__ = [
     "GoalSessionRecord",
     "GoalSourceLink",
     "SourceArtifactRepository",
-    "SourceReferenceRepository",
     "empty_import_manifest",
 ]

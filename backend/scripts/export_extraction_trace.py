@@ -28,8 +28,8 @@ from infra.persistence.postgres.source_artifact_repository import (
 )
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
-    SqliteSourceArtifactRepository,
 )
+
 SOURCE_ARTIFACTS = (
     "documents",
     "text_units",
@@ -191,7 +191,6 @@ def _load_artifacts(
         ).read_collection_artifacts(collection_id)
     finally:
         engine.dispose()
-    figures = SqliteSourceArtifactRepository(db_path).list_figures(collection_id)
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
     projection = build_core_fact_projection_records(core_facts)
     frames: dict[str, pd.DataFrame] = {}
@@ -199,7 +198,7 @@ def _load_artifacts(
         "documents": source_artifacts.documents,
         "text_units": source_artifacts.text_units,
         "blocks": source_artifacts.blocks,
-        "figures": figures,
+        "figures": source_artifacts.figures,
         "tables": source_artifacts.tables,
         "table_rows": source_artifacts.table_rows,
         "table_cells": source_artifacts.table_cells,
@@ -226,7 +225,9 @@ def _load_artifacts(
             pd.DataFrame([record.to_record() for record in records])
         )
     frames["evidence_cards"] = _normalize_frame(pd.DataFrame(projection.evidence_cards))
-    frames["comparison_rows"] = _normalize_frame(pd.DataFrame(projection.comparison_rows))
+    frames["comparison_rows"] = _normalize_frame(
+        pd.DataFrame(projection.comparison_rows)
+    )
     return frames
 
 
@@ -260,9 +261,7 @@ def _build_summary(
         "source_output_dir": str(source_output_dir),
         "trace_dir": str(trace_dir),
         "artifact_rows": {
-            name: int(len(frame))
-            for name, frame in frames.items()
-            if not frame.empty
+            name: int(len(frame)) for name, frame in frames.items() if not frame.empty
         },
         "generated_files": [
             "README.md",
@@ -348,8 +347,7 @@ def _render_source_tables(
             lines.append(
                 "| "
                 + " | ".join(
-                    _md_cell(row.get(key))
-                    for key in ("row_index", "row_text", "page")
+                    _md_cell(row.get(key)) for key in ("row_index", "row_text", "page")
                 )
                 + " |"
             )
@@ -362,9 +360,13 @@ def _render_extraction_trace(
     *,
     document_id: str | None,
 ) -> str:
-    documents = _filter_by_document(frames.get("documents"), document_id, id_column="id")
+    documents = _filter_by_document(
+        frames.get("documents"), document_id, id_column="id"
+    )
     evidence_cards = _filter_by_document(frames.get("evidence_cards"), document_id)
-    measurement_results = _filter_by_document(frames.get("measurement_results"), document_id)
+    measurement_results = _filter_by_document(
+        frames.get("measurement_results"), document_id
+    )
     evidence_anchors = _filter_by_document(frames.get("evidence_anchors"), document_id)
     anchor_by_id = {
         str(row.get("anchor_id") or ""): row
@@ -404,7 +406,9 @@ def _render_extraction_trace(
                 lines.extend(_render_fact_block(card, anchor_by_id))
 
         lines.extend(["### Measurement Results", ""])
-        measurements = _records_where(measurement_results, "document_id", current_document_id)
+        measurements = _records_where(
+            measurement_results, "document_id", current_document_id
+        )
         if not measurements:
             lines.append("_No measurement results._")
             lines.append("")
@@ -507,7 +511,9 @@ def _collect_document_ids(*frames: pd.DataFrame) -> list[str]:
         column = "document_id" if "document_id" in frame.columns else "id"
         if column not in frame.columns:
             continue
-        values.extend(str(value) for value in frame[column].tolist() if str(value).strip())
+        values.extend(
+            str(value) for value in frame[column].tolist() if str(value).strip()
+        )
     return sorted(dict.fromkeys(values))
 
 
@@ -612,7 +618,9 @@ def _csv_value(value: Any) -> str:
 
 def _safe_name(value: Any) -> str:
     text = str(value or "trace").strip()
-    cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in text)
+    cleaned = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "-" for char in text
+    )
     return cleaned.strip("-_") or "trace"
 
 

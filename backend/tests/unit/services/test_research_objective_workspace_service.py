@@ -123,7 +123,6 @@ def _seed_objective_collection(tmp_path):
         collection_service=collection_service,
         core_fact_repository=repository,
         source_artifact_repository=source_repository,
-        source_reference_repository=source_repository,
     )
     service.persist_objective_understandings(collection_id)
     return collection_id, objective.objective_id, service
@@ -201,8 +200,7 @@ def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
             "sample_context": {"sample": "135 W-750 mm/s"},
             "value_payload": {
                 "source_value_text": (
-                    "The ductility of the 135 W-750 mm/s sample increased "
-                    "by about 10%."
+                    "The ductility of the 135 W-750 mm/s sample increased by about 10%."
                 )
             },
             "resolution_status": "resolved",
@@ -509,8 +507,7 @@ def test_objective_workspace_detail_filters_relative_change_interpretation(
             "value_payload": {
                 "source_value_numeric": 10,
                 "source_value_text": (
-                    "The ductility of the 135 W-750 mm/s sample increased "
-                    "by about 10%."
+                    "The ductility of the 135 W-750 mm/s sample increased by about 10%."
                 ),
             },
             "unit": "%",

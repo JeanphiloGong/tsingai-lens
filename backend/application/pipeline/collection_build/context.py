@@ -14,7 +14,6 @@ class CollectionBuildContext:
     collection_service: Any
     artifact_registry_service: Any
     source_artifact_repository: Any
-    source_reference_repository: Any
     config: Any | None = None
     output_dir: Path | None = None
     method: Any | None = None

@@ -8,7 +8,6 @@ from domain.ports import (
     BuildRepository,
     CoreFactRepository,
     SourceArtifactRepository,
-    SourceReferenceRepository,
 )
 from domain.source import ArtifactStatusRecord, ArtifactVersionRecord
 from infra.persistence.factory import (
@@ -109,12 +108,10 @@ class ArtifactRegistryService:
         self,
         repository: BuildRepository,
         source_artifact_repository: SourceArtifactRepository,
-        source_reference_repository: SourceReferenceRepository,
         core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
         self.repository = repository
         self.source_artifact_repository = source_artifact_repository
-        self.source_reference_repository = source_reference_repository
         self.core_fact_repository = core_fact_repository or build_core_fact_repository()
 
     def build_registry(
@@ -135,7 +132,6 @@ class ArtifactRegistryService:
                 collection_id
             )
         )
-        figures = self.source_reference_repository.list_figures(collection_id)
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         source_artifacts_generated = not source_artifacts.is_empty()
         payload = ArtifactStatusRecord.build(
@@ -181,7 +177,7 @@ class ArtifactRegistryService:
             blocks_generated=source_artifacts_generated,
             blocks_ready=bool(source_artifacts.blocks),
             figures_generated=source_artifacts_generated,
-            figures_ready=bool(figures),
+            figures_ready=bool(source_artifacts.figures),
             table_rows_generated=source_artifacts_generated,
             table_rows_ready=bool(source_artifacts.table_rows),
             table_cells_generated=source_artifacts_generated,

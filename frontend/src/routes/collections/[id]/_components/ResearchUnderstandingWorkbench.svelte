@@ -1,22 +1,39 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { tick } from 'svelte';
+	import { isHttpStatusError } from '../../../_shared/api';
+	import { authState } from '../../../_shared/auth';
 	import { t } from '../../../_shared/i18n';
 	import {
 		createResearchUnderstandingCuration,
 		createResearchUnderstandingFeedback,
+		fetchResearchUnderstandingCollectionDataset,
+		fetchResearchUnderstandingDataset,
 		fetchResearchUnderstandingFeedback,
 		fetchResearchUnderstandingCurations,
 		formatShortIdentifier,
+		importResearchUnderstandingReviewDecisions,
+		researchUnderstandingDatasetUrl,
 		type ResearchUnderstanding,
 		type ResearchUnderstandingClaim,
 		type ResearchUnderstandingCuration,
+		type ResearchUnderstandingDataset,
+		type ResearchUnderstandingDatasetLabelStatus,
+		type ResearchUnderstandingAcceptanceGate,
+		type ResearchUnderstandingProtocolReadiness,
+		type ResearchUnderstandingReviewDecisionHint,
+		type ResearchUnderstandingDatasetSample,
+		type ResearchUnderstandingDatasetUseStatus,
+		type ResearchUnderstandingAxisCoverageItem,
 		type ResearchUnderstandingPresentationEffect,
 		type ResearchUnderstandingPresentationEvidence,
+		type ResearchUnderstandingPresentationFinding,
 		type ResearchUnderstandingPresentationContext,
 		type ResearchUnderstandingRelation,
 		type ResearchUnderstandingFeedbackIssueType,
 		type ResearchUnderstandingFeedback,
-		type ResearchUnderstandingFeedbackStatus
+		type ResearchUnderstandingFeedbackStatus,
+		type ResearchUnderstandingReviewDecisionImportResponse
 	} from '../../../_shared/researchView';
 
 	export let understanding: ResearchUnderstanding | null = null;
@@ -24,6 +41,8 @@
 	export let returnTo = '';
 	export let bodyKey = 'research.understanding.objectiveBody';
 	export let titleId = 'research-understanding-title';
+	export let initialFocus: '' | 'review_queue' | 'training_ready' = '';
+	export let initialFindingId = '';
 
 	const CLAIM_TYPE_ORDER = [
 		'all',
@@ -35,6 +54,8 @@
 		'context'
 	];
 	const CLAIM_STATUS_ORDER = ['all', 'supported', 'limited', 'conflicted', 'unsupported'];
+	const SUPPORT_GRADE_ORDER = ['all', 'strong', 'partial', 'weak', 'conflict', 'insufficient'];
+	const FINDING_CONTEXT_DISPLAY_LIMIT = 3;
 	const FEEDBACK_STATUS_OPTIONS: ResearchUnderstandingFeedbackStatus[] = [
 		'correct',
 		'partial',
@@ -45,6 +66,10 @@
 		'none',
 		'evidence_not_grounded',
 		'missing_evidence',
+		'insufficient_evidence',
+		'wrong_variable',
+		'wrong_outcome',
+		'wrong_direction',
 		'wrong_context',
 		'wrong_relation',
 		'overclaim',
@@ -53,40 +78,175 @@
 	];
 	const CURATION_CLAIM_TYPE_OPTIONS = CLAIM_TYPE_ORDER.filter((type) => type !== 'all');
 	const CURATION_STATUS_OPTIONS = CLAIM_STATUS_ORDER.filter((status) => status !== 'all');
+	const DATASET_LABEL_STATUS_ORDER: ResearchUnderstandingDatasetLabelStatus[] = [
+		'candidate',
+		'silver',
+		'gold',
+		'rejected'
+	];
+	type FindingDatasetUseFilter = 'all' | ResearchUnderstandingDatasetUseStatus;
+	const DATASET_USE_STATUS_FILTER_ORDER: FindingDatasetUseFilter[] = [
+		'all',
+		'training_ready',
+		'review_candidate',
+		'rejected'
+	];
+	const REJECTING_FEEDBACK_ISSUES = new Set<ResearchUnderstandingFeedbackIssueType>([
+		'evidence_not_grounded',
+		'missing_evidence',
+		'insufficient_evidence',
+		'wrong_variable',
+		'wrong_outcome',
+		'wrong_direction',
+		'wrong_context',
+		'wrong_relation',
+		'overclaim',
+		'unclear_statement'
+	]);
+	type FindingDatasetTrust = {
+		labelStatus: ResearchUnderstandingDatasetLabelStatus;
+		datasetUseStatus: ResearchUnderstandingDatasetUseStatus;
+		source: 'human_curation' | 'human_feedback' | 'ai_curation' | 'ai_feedback' | 'rejected' | 'candidate';
+	};
+	type FindingEvidenceRole = keyof ResearchUnderstandingPresentationFinding['evidence_bundle'];
+	const FINDING_MAIN_EVIDENCE_ROLES: FindingEvidenceRole[] = [
+		'direct_result',
+		'mechanism',
+		'condition_context',
+		'conflict'
+	];
+	const FINDING_SECONDARY_EVIDENCE_ROLES: FindingEvidenceRole[] = [
+		'background',
+		'noise',
+		'uncategorized'
+	];
+	const FINDING_CONTEXT_AXIS_TERMS = [
+		'fatigue',
+		'hip',
+		'hot isostatic pressing',
+		'as built',
+		'preheating',
+		'build platform preheating',
+		'microhardness',
+		'corrosion',
+		'pitting corrosion'
+	];
+	const FINDING_CONTEXT_GENERIC_FRAGMENTS = [
+		'variable',
+		'test specimen',
+		'source object ids',
+		'source_object_ids',
+		'evidence ref ids',
+		'evidence_ref_ids'
+	];
 
 	let selectedClaimType = 'all';
 	let selectedClaimStatus = 'all';
+	let selectedDatasetUseStatus: FindingDatasetUseFilter = 'all';
 	let selectedEffectId = '';
+	let selectedFindingId = '';
 	let detailMode = false;
+	let detailView: HTMLElement | null = null;
+	let detailBackButton: HTMLButtonElement | null = null;
 	let activeReviewPanel: 'feedback' | 'curation' | '' = '';
+	let datasetReviewCandidatesOnly = false;
 	let curationClaimType = 'finding';
 	let curationStatus = 'limited';
+	let curationSupportGrade = 'partial';
 	let curationStatement = '';
+	let curationVariables = '';
+	let curationMediators = '';
+	let curationOutcomes = '';
+	let curationDirection = '';
+	let curationScopeSummary = '';
+	let curationEvidenceRefIds: string[] = [];
+	let curationContextIds: string[] = [];
 	let curationNote = '';
-	let curationReviewer = '';
 	let curationSubmitting = false;
 	let curationMessage = '';
 	let curationError = '';
 	let curationLoadError = '';
-	let curationsByClaimId = new Map<string, ResearchUnderstandingCuration>();
+	let curationsByTargetId = new Map<string, ResearchUnderstandingCuration>();
+	let alignedCurationsByTargetId = new Map<string, ResearchUnderstandingCuration>();
 	let loadedCurationScopeKey = '';
-	let lastCurationClaimId = '';
-	let feedbackByClaimId = new Map<string, ResearchUnderstandingFeedback[]>();
+	let lastCurationTargetId = '';
+	let feedbackByTargetId = new Map<string, ResearchUnderstandingFeedback[]>();
+	let alignedFeedbackByTargetId = new Map<string, ResearchUnderstandingFeedback[]>();
 	let loadedFeedbackScopeKey = '';
 	let feedbackLoadError = '';
 	let reviewQueueOnly = false;
 	let feedbackStatus: ResearchUnderstandingFeedbackStatus = 'correct';
 	let feedbackIssue: ResearchUnderstandingFeedbackIssueType = 'none';
 	let feedbackNote = '';
-	let feedbackReviewer = '';
 	let feedbackSubmitting = false;
 	let feedbackMessage = '';
 	let feedbackError = '';
-	let lastFeedbackClaimId = '';
+	let lastFeedbackTargetId = '';
+	let lastUsesFindings = false;
+	let datasetSummary: ResearchUnderstandingDataset | null = null;
+	let datasetScopeKey = '';
+	let datasetLoading = false;
+	let datasetError = '';
+	let datasetRequestSequence = 0;
+	let datasetPanelOpen = false;
+	let reviewImportPanel: HTMLDivElement | null = null;
+	let collectionDatasetSummary: ResearchUnderstandingDataset | null = null;
+	let collectionDatasetScopeKey = '';
+	let collectionDatasetLoading = false;
+	let collectionDatasetError = '';
+	let collectionDatasetRequestSequence = 0;
+	let reviewImportText = '';
+	let reviewImportSubmitting = false;
+	let reviewImportMode: 'dry_run' | 'import' = 'dry_run';
+	let reviewImportMessage = '';
+	let reviewImportError = '';
+	let reviewImportSummary: ResearchUnderstandingReviewDecisionImportResponse | null = null;
+	let appliedInitialFocusKey = '';
+	let appliedInitialFindingKey = '';
 
 	$: presentation = understanding?.presentation ?? null;
 	$: presentationSummary = presentation?.summary ?? null;
 	$: effectRows = presentation?.effects ?? [];
+	$: allFindingRows = presentation?.findings ?? [];
+	$: primaryFindingRows = presentation?.primary_findings ?? [];
+	$: reviewQueueFindingRows = presentation?.review_queue_findings ?? [];
+	$: hasReviewQueueFindingProjection = Array.isArray(presentation?.review_queue_findings);
+	$: allDisplayFindingRows = allFindingRows.length
+		? allFindingRows
+		: dedupeFindings([...primaryFindingRows, ...reviewQueueFindingRows]);
+	$: alignedFeedbackByTargetId = alignFeedbackToCurrentFindings(
+		feedbackByTargetId,
+		datasetSummary,
+		allDisplayFindingRows
+	);
+	$: alignedCurationsByTargetId = alignCurationsToCurrentFindings(
+		curationsByTargetId,
+		datasetSummary,
+		allDisplayFindingRows
+	);
+	$: reviewableFindingRows = hasReviewQueueFindingProjection
+		? reviewQueueFindingRows
+		: allDisplayFindingRows.filter((finding) =>
+				findingNeedsReview(finding, alignedFeedbackByTargetId, reviewQueueClaimIds)
+			);
+	$: if (!primaryFindingRows.length && reviewableFindingRows.length && !reviewQueueOnly) {
+		reviewQueueOnly = true;
+	}
+	$: findingRows = datasetReviewCandidatesOnly
+		? allDisplayFindingRows
+		: reviewQueueOnly
+			? reviewableFindingRows
+			: primaryFindingRows;
+	$: usesFindings =
+		allFindingRows.length > 0 ||
+		primaryFindingRows.length > 0 ||
+		reviewQueueFindingRows.length > 0;
+	$: hasUnprojectedEffects = !usesFindings && effectRows.length > 0;
+	$: if (usesFindings !== lastUsesFindings) {
+		lastUsesFindings = usesFindings;
+		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = 'all';
+	}
 	$: presentationEvidenceById = new Map(
 		(presentation?.evidence_items ?? []).map((item) => [item.evidence_ref_id, item])
 	);
@@ -103,44 +263,340 @@
 	);
 	$: reviewQueueClaimIds = new Set(
 		claims
-			.filter((claim) => shouldReviewClaim(claim, feedbackByClaimId))
+			.filter((claim) => shouldReviewClaim(claim, alignedFeedbackByTargetId))
 			.map((claim) => claim.claim_id)
 	);
+	$: reviewQueueFindingIds = new Set(reviewableFindingRows.map((finding) => finding.finding_id));
+	$: reviewQueueFindingCount = usesFindings
+		? (presentationSummary?.review_queue_finding_count ?? reviewableFindingRows.length)
+		: 0;
+	$: reviewLoopFindingCount = usesFindings ? allDisplayFindingRows.length : 0;
+	$: reviewLoopMissingDirectEvidenceCount = usesFindings
+		? allDisplayFindingRows.filter((finding) => findingDirectEvidenceCount(finding) === 0).length
+		: 0;
+	$: reviewQueueCount = usesFindings
+		? reviewQueueFindingCount
+		: effectRows.filter(
+				(effect) => effect.needs_review || reviewQueueClaimIds.has(effect.claim_id)
+			).length;
+	$: primaryFindingCount = usesFindings ? primaryFindingRows.length : 0;
+	$: primaryFindingPaperCount = usesFindings ? countUniqueFindingPapers(primaryFindingRows) : 0;
+	$: collectionDocumentCount = presentationSummary?.collection_document_count ?? 0;
+	$: primaryFindingPaperCoverage = primaryFindingCoverageLabel(primaryFindingPaperCount);
+	$: primaryFindingDirectEvidenceCount = usesFindings
+		? primaryFindingRows.reduce((count, finding) => count + findingDirectEvidenceCount(finding), 0)
+		: 0;
+	$: axisCoverage = presentationSummary?.axis_coverage ?? { variables: [], properties: [] };
+	$: hasAxisCoverage = Boolean(axisCoverage.variables.length || axisCoverage.properties.length);
+	$: axisCoverageGapGroups = hasAxisCoverage ? buildAxisCoverageGapGroups(axisCoverage) : [];
+	$: answerBoundary = hasAxisCoverage
+		? buildAnswerBoundary(
+				axisCoverage,
+				primaryFindingRows,
+				alignedFeedbackByTargetId,
+				alignedCurationsByTargetId
+			)
+		: null;
+	$: datasetTrainingReadySampleCount =
+		datasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: datasetTrainingMessageSampleCount =
+		datasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: datasetProtocolReadySampleCount =
+		datasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
+	$: datasetReviewCandidateSampleCount =
+		datasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: expertReviewCandidateCount = datasetSummary
+		? datasetReviewCandidateSampleCount
+		: reviewQueueFindingCount;
+	$: datasetLabelCounts = datasetSummary?.label_counts ?? {
+		candidate: 0,
+		silver: 0,
+		gold: 0,
+		rejected: 0
+	};
+	$: datasetErrorCategories = datasetSummary
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_error_categories,
+				datasetSummary.quality_summary.by_error_category
+			).filter(([category]) => !['none', 'unreviewed'].includes(category))
+		: [];
+	$: datasetIssueTypes = datasetSummary
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_issue_types,
+				datasetSummary.quality_summary.by_issue_type
+			).filter(([issue]) => !['none', 'unreviewed'].includes(issue))
+		: [];
+	$: datasetReviewReasons = datasetSummary
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_review_reasons,
+				preferredReviewRiskCounts(
+					datasetSummary.quality_summary.by_review_candidate_reason,
+					datasetSummary.quality_summary.by_review_reason,
+					datasetReviewCandidateSampleCount
+				)
+			)
+		: [];
+	$: datasetSystemWarnings = datasetSummary
+		? preferredTopDiagnostics(
+				datasetSummary.quality_summary.top_system_warnings,
+				preferredReviewRiskCounts(
+					datasetSummary.quality_summary.by_review_candidate_warning,
+					datasetSummary.quality_summary.by_system_warning,
+					datasetReviewCandidateSampleCount
+				)
+			)
+		: [];
+	$: datasetOptimizationHotspots = datasetSummary
+		? datasetHotspotRows(datasetSummary).slice(0, 8)
+		: [];
+	$: collectionDatasetTrainingReadySampleCount =
+		collectionDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: collectionDatasetTrainingMessageSampleCount =
+		collectionDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: collectionDatasetProtocolReadySampleCount =
+		collectionDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
+	$: collectionDatasetReviewCandidateSampleCount =
+		collectionDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: collectionDatasetLabelCounts = collectionDatasetSummary?.label_counts ?? {
+		candidate: 0,
+		silver: 0,
+		gold: 0,
+		rejected: 0
+	};
+	$: collectionDatasetErrorCategories = collectionDatasetSummary
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_error_categories,
+				collectionDatasetSummary.quality_summary.by_error_category
+			).filter(([category]) => !['none', 'unreviewed'].includes(category))
+		: [];
+	$: collectionDatasetIssueTypes = collectionDatasetSummary
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_issue_types,
+				collectionDatasetSummary.quality_summary.by_issue_type
+			).filter(([issue]) => !['none', 'unreviewed'].includes(issue))
+		: [];
+	$: collectionDatasetBucketCounts = collectionDatasetSummary
+		? Object.entries(collectionDatasetSummary.quality_summary.by_presentation_bucket)
+				.filter(([, count]) => count > 0)
+				.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		: [];
+	$: collectionDatasetReviewReasons = collectionDatasetSummary
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_review_reasons,
+				preferredReviewRiskCounts(
+					collectionDatasetSummary.quality_summary.by_review_candidate_reason,
+					collectionDatasetSummary.quality_summary.by_review_reason,
+					collectionDatasetReviewCandidateSampleCount
+				)
+			)
+		: [];
+	$: collectionDatasetSystemWarnings = collectionDatasetSummary
+		? preferredTopDiagnostics(
+				collectionDatasetSummary.quality_summary.top_system_warnings,
+				preferredReviewRiskCounts(
+					collectionDatasetSummary.quality_summary.by_review_candidate_warning,
+					collectionDatasetSummary.quality_summary.by_system_warning,
+					collectionDatasetReviewCandidateSampleCount
+				)
+			)
+		: [];
+	$: collectionDatasetOptimizationHotspots = collectionDatasetSummary
+		? datasetHotspotRows(collectionDatasetSummary).slice(0, 8)
+		: [];
+	$: expertSummary = usesFindings
+		? expertReadinessSummary(
+				primaryFindingRows,
+				expertReviewCandidateCount,
+				datasetTrainingReadySampleCount,
+				datasetReviewCandidateSampleCount
+			)
+		: null;
+	$: reviewLoopStatus = expertSummary
+		? reviewLoopStatusValue(
+				expertSummary,
+				datasetLoading,
+				Boolean(datasetSummary),
+				reviewerReady,
+				datasetTrainingReadySampleCount,
+				datasetTrainingMessageSampleCount,
+				datasetProtocolReadySampleCount,
+				datasetReviewCandidateSampleCount
+			)
+		: '';
+	$: reviewLoopSteps = expertSummary
+		? reviewLoopStepItems(
+				expertSummary,
+				reviewerReady,
+				datasetTrainingReadySampleCount,
+				datasetTrainingMessageSampleCount,
+				datasetProtocolReadySampleCount,
+				datasetReviewCandidateSampleCount
+			)
+		: [];
+	$: reviewLoopChecklist = expertSummary
+		? reviewLoopChecklistItems(
+				reviewerReady,
+				Boolean(datasetSummary),
+				datasetTrainingReadySampleCount,
+				datasetTrainingMessageSampleCount,
+				datasetProtocolReadySampleCount,
+				datasetReviewCandidateSampleCount,
+				reviewLoopFindingCount,
+				reviewLoopMissingDirectEvidenceCount
+			)
+		: [];
+	$: reviewLoopErrorItems = datasetErrorCategories.slice(0, 3);
 	$: filteredEffects = effectRows.filter(
 		(effect) =>
 			(selectedClaimType === 'all' || effect.claim_type === selectedClaimType) &&
 			(selectedClaimStatus === 'all' || effect.support_status === selectedClaimStatus) &&
 			(!reviewQueueOnly || effect.needs_review || reviewQueueClaimIds.has(effect.claim_id))
 	);
+	$: filteredFindings = findingRows.filter(
+		(finding) =>
+			(selectedClaimStatus === 'all' ||
+				findingForDisplay(
+					finding,
+					findingCurationFor(finding, alignedCurationsByTargetId)
+				).support_grade === selectedClaimStatus) &&
+			(selectedDatasetUseStatus === 'all' ||
+				findingDatasetTrust(
+					finding,
+					alignedFeedbackByTargetId,
+					alignedCurationsByTargetId,
+					datasetSummary
+				).datasetUseStatus === selectedDatasetUseStatus) &&
+			(!reviewQueueOnly ||
+				finding.review_status === 'needs_review' ||
+				reviewQueueFindingIds.has(finding.finding_id) ||
+				reviewQueueClaimIds.has(finding.claim_id))
+	);
+	$: visibleFindingRows = usesFindings ? filteredFindings : [];
+	$: reviewCandidateFindingRows = reviewCandidateFindings(datasetSummary);
+	$: nextReviewCandidateFinding =
+		(datasetSummary?.quality_summary.next_review_finding_id
+			? reviewCandidateFindingRows.find(
+					(finding) =>
+						finding.finding_id === datasetSummary?.quality_summary.next_review_finding_id
+				)
+			: null) ??
+		reviewCandidateFindingRows[0] ??
+		null;
+	$: nextReviewCandidateSample = nextReviewCandidateFinding
+		? findingDatasetSampleFor(nextReviewCandidateFinding, datasetSummary)
+		: null;
+	$: visibleEffectRows = usesFindings ? [] : filteredEffects;
+	$: selectableEffects = usesFindings
+		? filteredFindings
+				.map((finding) => findingEffectFor(finding))
+				.filter((effect): effect is ResearchUnderstandingPresentationEffect => Boolean(effect))
+		: visibleEffectRows;
+	$: selectedFinding = detailMode && selectedFindingId
+		? (allDisplayFindingRows.find((finding) => finding.finding_id === selectedFindingId) ?? null)
+		: null;
+	$: selectedReviewCandidateIndex = selectedFinding
+		? reviewCandidateFindingRows.findIndex(
+				(finding) => finding.finding_id === selectedFinding.finding_id
+			)
+		: -1;
+	$: selectedReviewQueuePosition =
+		selectedReviewCandidateIndex >= 0
+			? $t('research.understanding.reviewQueuePosition', {
+					current: selectedReviewCandidateIndex + 1,
+					total: reviewCandidateFindingRows.length
+				})
+			: '';
 	$: claimTypeCounts = countEffectsBy(effectRows, 'claim_type');
-	$: claimStatusCounts = countEffectsBy(effectRows, 'support_status');
-	$: if (
-		understanding &&
-		detailMode &&
-		filteredEffects.length &&
-		!filteredEffects.some((effect) => effect.effect_id === selectedEffectId)
-	) {
-		selectedEffectId = filteredEffects[0].effect_id;
-	}
-	$: if ((!filteredEffects.length || !detailMode) && selectedEffectId) {
+	$: claimStatusCounts = (() => {
+		if (!usesFindings) return countEffectsBy(effectRows, 'support_status');
+		const counts = new Map<string, number>([['all', findingRows.length]]);
+		for (const finding of findingRows) {
+			const grade = findingForDisplay(
+				finding,
+				findingCurationFor(finding, alignedCurationsByTargetId)
+			).support_grade;
+			counts.set(grade, (counts.get(grade) ?? 0) + 1);
+		}
+		return counts;
+	})();
+	$: findingDatasetUseCounts = usesFindings
+		? countFindingsByDatasetUse(
+				findingRows,
+				alignedFeedbackByTargetId,
+				alignedCurationsByTargetId,
+				datasetSummary
+			)
+		: new Map();
+	$: if (selectedFindingId && selectedEffectId) {
 		selectedEffectId = '';
 	}
+	$: if (understanding && detailMode && !selectedFindingId && selectableEffects.length && !selectableEffects.some((effect) => effect.effect_id === selectedEffectId)) {
+		selectedEffectId = selectableEffects[0]?.effect_id ?? '';
+	}
+	$: if ((!selectableEffects.length || !detailMode || selectedFindingId) && selectedEffectId) {
+		selectedEffectId = '';
+	}
+	$: if (!usesFindings && detailMode) {
+		detailMode = false;
+		selectedFindingId = '';
+		selectedEffectId = '';
+		activeReviewPanel = '';
+	}
 	$: selectedEffect =
-		detailMode ? (filteredEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null) : null;
-	$: selectedClaim = selectedEffect ? (claimById.get(selectedEffect.claim_id) ?? null) : null;
+		detailMode && !selectedFindingId
+			? (selectableEffects.find((effect) => effect.effect_id === selectedEffectId) ?? null)
+			: null;
+	$: selectedClaim = selectedFinding
+		? (claimById.get(selectedFinding.claim_id) ?? null)
+		: selectedEffect
+			? (claimById.get(selectedEffect.claim_id) ?? null)
+			: null;
 	$: selectedRelations = selectedEffect
-		? selectedEffect.relation_ids
+		? (selectedFinding?.relation_ids.length ? selectedFinding.relation_ids : selectedEffect.relation_ids)
 				.map((relationId) => relationById.get(relationId))
 				.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
-		: [];
+		: selectedFinding
+			? selectedFinding.relation_ids
+					.map((relationId) => relationById.get(relationId))
+					.filter((relation): relation is ResearchUnderstandingRelation => Boolean(relation))
+			: [];
 	$: selectedReadableRelations = selectedRelations.filter((relation) => isReadableRelation(relation));
+	$: selectedFindingRelationChain = selectedFinding?.relation_chain ?? [];
 	$: selectedHiddenRelationCount = Math.max(
 		0,
 		selectedRelations.length - selectedReadableRelations.length
 	);
 	$: selectedScopeId = scopeId(understanding);
-	$: selectedCuration = selectedClaim ? curationsByClaimId.get(selectedClaim.claim_id) : null;
-	$: selectedFeedback = selectedClaim ? (feedbackByClaimId.get(selectedClaim.claim_id) ?? []) : [];
+	$: selectedReviewTargetId = selectedFinding?.finding_id ?? selectedClaim?.claim_id ?? '';
+	$: selectedReviewFallbackId =
+		selectedFinding && selectedFinding.claim_id !== selectedReviewTargetId
+			? selectedFinding.claim_id
+			: '';
+	$: selectedFindingDatasetSample = selectedFinding
+		? findingDatasetSampleFor(selectedFinding, datasetSummary)
+		: null;
+	$: selectedCuration = selectedFinding
+		? findingCurationFor(selectedFinding, alignedCurationsByTargetId)
+		: selectedReviewTargetId
+			? (alignedCurationsByTargetId.get(selectedReviewTargetId) ??
+				(selectedReviewFallbackId
+					? alignedCurationsByTargetId.get(selectedReviewFallbackId)
+					: null) ??
+				null)
+			: null;
+	$: selectedDisplayFinding = selectedFinding
+		? findingForDisplay(selectedFinding, selectedCuration)
+		: null;
+	$: selectedFeedback = selectedFinding
+		? findingFeedbackFor(selectedFinding, alignedFeedbackByTargetId)
+		: selectedReviewTargetId
+			? [
+					...(alignedFeedbackByTargetId.get(selectedReviewTargetId) ?? []),
+					...(selectedReviewFallbackId
+						? (alignedFeedbackByTargetId.get(selectedReviewFallbackId) ?? [])
+						: [])
+				]
+			: [];
 	$: displayClaim = selectedClaim
 		? {
 				claim_type: selectedCuration?.curated_claim_type ?? selectedClaim.claim_type,
@@ -150,10 +606,96 @@
 				context_ids: selectedCuration?.curated_context_ids ?? selectedClaim.context_ids
 			}
 		: null;
-	$: selectedEvidenceRefs = displayClaim ? presentationEvidenceForIds(displayClaim.evidence_ref_ids) : [];
-	$: selectedContextRefs = displayClaim ? presentationContextsForIds(displayClaim.context_ids) : [];
-	$: if ((selectedClaim?.claim_id ?? '') !== lastCurationClaimId) {
-		lastCurationClaimId = selectedClaim?.claim_id ?? '';
+	$: selectedEvidenceRefs = displayClaim
+		? presentationEvidenceForIds(displayClaim.evidence_ref_ids)
+		: selectedEffect
+			? presentationEvidenceForIds(selectedEffect.evidence_ref_ids)
+			: selectedFinding
+			? presentationEvidenceForIds(selectedFinding.evidence_ref_ids)
+			: [];
+	$: selectedContextRefs = displayClaim
+		? presentationContextsForIds(displayClaim.context_ids)
+		: selectedEffect
+			? presentationContextsForIds(selectedEffect.context_ids)
+			: selectedFinding
+			? presentationContextsForIds(selectedFinding.context_ids)
+			: [];
+	$: selectedFindingContextRefs = selectedFinding
+		? presentationContextsForIds(selectedFinding.context_ids)
+		: [];
+	$: selectedFindingDisplayContextRefs = selectedDisplayFinding
+		? compactFindingContextDisplay(selectedFindingContextRefs, selectedDisplayFinding)
+		: [];
+	$: selectedFindingDecision = selectedDisplayFinding ? findingDecision(selectedDisplayFinding) : null;
+	$: selectedFindingUsagePath = selectedDisplayFinding
+		? findingUsagePath(selectedDisplayFinding, selectedFeedback, selectedCuration)
+		: null;
+	$: selectedFindingTrust = selectedFinding
+		? findingDatasetTrust(
+				selectedFinding,
+				alignedFeedbackByTargetId,
+				alignedCurationsByTargetId,
+				datasetSummary
+			)
+		: null;
+	$: selectedOutdatedReviewCount = selectedFindingDatasetSample
+		? selectedFindingDatasetSample.metadata.ignored_feedback_refs.length +
+			selectedFindingDatasetSample.metadata.ignored_curation_refs.length
+		: 0;
+	$: selectedFindingExpertNotePrompt = selectedFinding
+		? findingExpertNotePrompt(selectedFinding, selectedFindingDatasetSample)
+		: '';
+	$: feedbackNoteRequired = Boolean(
+		selectedFindingExpertNotePrompt && feedbackStatus === 'correct'
+	);
+	$: feedbackNoteMissing = feedbackNoteRequired && !feedbackNote.trim();
+	$: selectedTrainingMessageDiagnostics = selectedFindingDatasetSample
+		? trainingMessageDiagnosticsForSample(selectedFindingDatasetSample)
+		: [];
+	$: selectedFindingProtocolReadiness = selectedFindingDatasetSample?.protocol_readiness ?? null;
+	$: selectedFindingAcceptanceGate = selectedFindingDatasetSample?.acceptance_gate ?? null;
+	$: selectedFindingReviewDecisionHint =
+		selectedFindingDatasetSample?.dataset_use_status === 'review_candidate'
+			? (selectedFindingDatasetSample.review_decision_hint ?? null)
+			: null;
+	$: selectedFindingCanAccept = findingAcceptanceGateAllowsAccept(selectedFindingAcceptanceGate);
+	$: selectedFindingProtocolReadinessUnavailable = Boolean(
+		selectedFindingDatasetSample && !selectedFindingProtocolReadiness
+	);
+	$: selectedFindingReviewReasons = selectedDisplayFinding
+		? findingReviewReasonValues(selectedDisplayFinding)
+		: [];
+	$: selectedFindingWarnings =
+		selectedFinding && selectedFindingTrust
+			? selectedFinding.warnings.filter((warning) =>
+					findingReviewReasonIsVisible(selectedFinding, warning, selectedFindingTrust)
+				)
+			: [];
+	$: selectedDetailWarnings = selectedFinding
+		? selectedFindingWarnings
+		: (selectedClaim?.warnings ?? []);
+	$: currentReviewer = currentReviewerLabel($authState.user);
+	$: reviewerReady = Boolean(currentReviewer);
+	$: selectedRelatedReviewFindings = selectedFinding
+		? relatedReviewFindings(selectedFinding, allDisplayFindingRows)
+		: [];
+	$: selectedHiddenFindingContextCount = selectedFinding
+		? Math.max(0, selectedFindingContextRefs.length - selectedFindingDisplayContextRefs.length)
+		: 0;
+	$: selectedCurationEvidenceOptions = selectedClaim || selectedFinding
+		? presentationEvidenceForIds([
+				...(selectedFinding?.evidence_ref_ids ?? selectedClaim?.evidence_ref_ids ?? []),
+				...(selectedCuration?.curated_evidence_ref_ids ?? [])
+			])
+		: [];
+	$: selectedCurationContextOptions = selectedClaim || selectedFinding
+		? presentationContextsForIds([
+				...(selectedFinding?.context_ids ?? selectedClaim?.context_ids ?? []),
+				...(selectedCuration?.curated_context_ids ?? [])
+			])
+		: [];
+	$: if (selectedReviewTargetId !== lastCurationTargetId) {
+		lastCurationTargetId = selectedReviewTargetId;
 		activeReviewPanel = '';
 		resetCurationForm();
 		curationMessage = '';
@@ -163,14 +705,54 @@
 		understanding && selectedScopeId
 			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
 			: '';
+	$: currentDatasetScopeKey =
+		understanding && collectionId && selectedScopeId
+			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
+			: '';
+	$: if (
+		initialFocus &&
+		!initialFindingId &&
+		currentDatasetScopeKey &&
+		appliedInitialFocusKey !== `${currentDatasetScopeKey}:${initialFocus}`
+	) {
+		appliedInitialFocusKey = `${currentDatasetScopeKey}:${initialFocus}`;
+		applyInitialFocus(initialFocus);
+	}
+	$: if (
+		initialFindingId &&
+		currentDatasetScopeKey &&
+		allDisplayFindingRows.length &&
+		appliedInitialFindingKey !== `${currentDatasetScopeKey}:${initialFindingId}`
+	) {
+		appliedInitialFindingKey = `${currentDatasetScopeKey}:${initialFindingId}`;
+		void applyInitialFindingFocus(initialFindingId);
+	}
+	$: currentCollectionDatasetScopeKey =
+		understanding?.scope.scope_type === 'goal' && collectionId ? `${collectionId}:goal` : '';
+	$: goalCopilotHref =
+		understanding?.scope.scope_type === 'goal' && collectionId && selectedScopeId
+			? `${resolve('/collections/[id]/assistant', {
+					id: collectionId
+				})}?goal_id=${encodeURIComponent(selectedScopeId)}`
+			: '';
+	$: if (currentDatasetScopeKey && currentDatasetScopeKey !== datasetScopeKey) {
+		void loadDatasetSummary(currentDatasetScopeKey);
+	}
+	$: if (
+		datasetPanelOpen &&
+		currentCollectionDatasetScopeKey &&
+		currentCollectionDatasetScopeKey !== collectionDatasetScopeKey
+	) {
+		void loadCollectionDatasetSummary(currentCollectionDatasetScopeKey);
+	}
 	$: if (curationScopeKey && curationScopeKey !== loadedCurationScopeKey) {
 		void loadCurationsForScope(curationScopeKey);
 	}
 	$: if (curationScopeKey && curationScopeKey !== loadedFeedbackScopeKey) {
 		void loadFeedbackForScope(curationScopeKey);
 	}
-	$: if ((selectedClaim?.claim_id ?? '') !== lastFeedbackClaimId) {
-		lastFeedbackClaimId = selectedClaim?.claim_id ?? '';
+	$: if (selectedReviewTargetId !== lastFeedbackTargetId) {
+		lastFeedbackTargetId = selectedReviewTargetId;
 		feedbackMessage = '';
 		feedbackError = '';
 	}
@@ -200,6 +782,43 @@
 		return translatedCatalogLabel('research.understanding.statuses', status);
 	}
 
+	function supportGradeLabel(grade: string) {
+		if (grade === 'all') return $t('research.understanding.allSupportGrades');
+		return translatedCatalogLabel('research.understanding.supportGrades', grade);
+	}
+
+	function findingReviewStatusLabel(status: string) {
+		return translatedCatalogLabel('research.understanding.findingReviewStatuses', status);
+	}
+
+	function findingReviewStatusForDisplay(
+		finding: ResearchUnderstandingPresentationFinding,
+		trust: FindingDatasetTrust = findingDatasetTrust(finding)
+	) {
+		if (trust.datasetUseStatus === 'training_ready' && trust.source === 'human_feedback') return 'accepted';
+		if (trust.datasetUseStatus === 'training_ready' && trust.source === 'human_curation') return 'curated';
+		return finding.review_status;
+	}
+
+	function findingIsUnreviewedForDisplay(
+		finding: ResearchUnderstandingPresentationFinding,
+		trust: FindingDatasetTrust = findingDatasetTrust(finding)
+	) {
+		const displayStatus = findingReviewStatusForDisplay(finding, trust);
+		return displayStatus === 'needs_review' || displayStatus === 'pending_review';
+	}
+
+	function findingReviewReasonIsVisible(
+		finding: ResearchUnderstandingPresentationFinding,
+		reason: string,
+		trust: FindingDatasetTrust = findingDatasetTrust(finding)
+	) {
+		if (reason === 'needs_expert_review' && !findingIsUnreviewedForDisplay(finding, trust)) {
+			return false;
+		}
+		return true;
+	}
+
 	function relationLabel(type: string) {
 		return translatedCatalogLabel('research.understanding.relations', type);
 	}
@@ -214,6 +833,130 @@
 
 	function feedbackIssueLabel(issue: string) {
 		return translatedCatalogLabel('research.understanding.feedbackIssues', issue);
+	}
+
+	function feedbackIssueCategory(issue: ResearchUnderstandingFeedbackIssueType) {
+		if (issue === 'none') return 'none';
+		if (issue === 'wrong_variable') return 'variable_error';
+		if (issue === 'wrong_outcome') return 'outcome_error';
+		if (issue === 'wrong_direction') return 'direction_error';
+		if (issue === 'wrong_context') return 'context_error';
+		if (issue === 'wrong_relation') return 'relation_error';
+		if (
+			issue === 'evidence_not_grounded' ||
+			issue === 'missing_evidence' ||
+			issue === 'insufficient_evidence'
+		) {
+			return 'evidence_error';
+		}
+		if (issue === 'overclaim') return 'claim_scope_error';
+		if (issue === 'unclear_statement') return 'statement_error';
+		return 'other_error';
+	}
+
+	function feedbackIssueGuidance(issue: ResearchUnderstandingFeedbackIssueType) {
+		return $t(`research.understanding.feedbackIssueGuidance.${issue}`);
+	}
+
+	function datasetLabelStatusLabel(status: ResearchUnderstandingDatasetLabelStatus) {
+		return translatedCatalogLabel('research.understanding.datasetLabelStatuses', status);
+	}
+
+	function datasetUseStatusLabel(status: ResearchUnderstandingDatasetUseStatus) {
+		return translatedCatalogLabel('research.understanding.datasetUseStatuses', status);
+	}
+
+	function datasetUseStatusFilterLabel(status: FindingDatasetUseFilter) {
+		if (status === 'all') return $t('research.understanding.allDatasetUseStatuses');
+		return datasetUseStatusLabel(status);
+	}
+
+	function datasetErrorCategoryLabel(category: string) {
+		return translatedCatalogLabel('research.understanding.datasetErrorCategories', category);
+	}
+
+	function datasetIssueTypeLabel(issue: string) {
+		return translatedCatalogLabel('research.understanding.feedbackIssues', issue);
+	}
+
+	function datasetReviewReasonLabel(reason: string) {
+		return translatedCatalogLabel('research.understanding.datasetReviewReasons', reason);
+	}
+
+	function datasetSystemWarningLabel(warning: string) {
+		return translatedCatalogLabel('research.understanding.datasetSystemWarnings', warning);
+	}
+
+	function datasetPresentationBucketLabel(bucket: string) {
+		return translatedCatalogLabel('research.understanding.datasetPresentationBuckets', bucket);
+	}
+
+	function datasetHotspotDimensionLabel(dimension: string) {
+		return translatedCatalogLabel('research.understanding.datasetHotspotDimensions', dimension);
+	}
+
+	function datasetHotspotMetricLabel(metric: string) {
+		if (
+			metric === 'single_paper_evidence' ||
+			metric === 'partial_support' ||
+			metric === 'missing_mechanism_evidence' ||
+			metric === 'table_row_needs_expert_review' ||
+			metric === 'needs_cross_paper_confirmation' ||
+			metric === 'needs_expert_review'
+		) {
+			return datasetReviewReasonLabel(metric);
+		}
+		if (
+			metric === 'wrong_variable' ||
+			metric === 'wrong_outcome' ||
+			metric === 'wrong_direction' ||
+			metric === 'wrong_context' ||
+			metric === 'wrong_relation' ||
+			metric === 'evidence_not_grounded' ||
+			metric === 'missing_evidence' ||
+			metric === 'insufficient_evidence' ||
+			metric === 'overclaim' ||
+			metric === 'unclear_statement'
+		) {
+			return datasetIssueTypeLabel(metric);
+		}
+		return translatedCatalogLabel('research.understanding.datasetErrorCategories', metric);
+	}
+
+	function datasetHotspotRows(currentDatasetSummary: ResearchUnderstandingDataset) {
+		const summary = currentDatasetSummary.quality_summary;
+		return [
+			...datasetHotspotEntries('variable', summary.top_variable_issue_types),
+			...datasetHotspotEntries('outcome', summary.top_outcome_issue_types),
+			...datasetHotspotEntries('direction', summary.top_direction_issue_types),
+			...datasetHotspotEntries('evidence_role', summary.top_evidence_role_issue_types),
+			...datasetHotspotEntries('variable', summary.top_variable_review_reasons),
+			...datasetHotspotEntries('outcome', summary.top_outcome_review_reasons),
+			...datasetHotspotEntries('direction', summary.top_direction_review_reasons),
+			...datasetHotspotEntries('evidence_role', summary.top_evidence_role_review_reasons)
+		].sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+	}
+
+	function datasetHotspotEntries(
+		dimension: string,
+		entries: Array<{ name: string; metric: string; count: number }>
+	) {
+		return entries
+			.filter((entry) => entry.name && entry.metric && entry.count > 0)
+			.map((entry) => ({
+				dimension,
+				name: entry.name,
+				metric: entry.metric,
+				count: entry.count
+			}));
+	}
+
+	function trainingMessageDiagnosticLabel(diagnostic: string) {
+		return translatedCatalogLabel('research.understanding.trainingMessageDiagnostics', diagnostic);
+	}
+
+	function findingTrustSourceLabel(source: FindingDatasetTrust['source']) {
+		return translatedCatalogLabel('research.understanding.findingTrustSources', source);
 	}
 
 	function hasDisplayValue(value: unknown): boolean {
@@ -246,9 +989,1143 @@
 		return String(value);
 	}
 
+	function topPositiveCounts(counts: Record<string, number>, limit: number) {
+		return Object.entries(counts)
+			.filter(([, count]) => count > 0)
+			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+			.slice(0, limit);
+	}
+
+	function preferredTopDiagnostics(
+		topEntries: Array<{ name: string; count: number }>,
+		fallbackCounts: Record<string, number>
+	) {
+		if (topEntries.length) {
+			return topEntries
+				.filter((entry) => entry.name && entry.count > 0)
+				.map((entry) => [entry.name, entry.count] as [string, number]);
+		}
+		return topPositiveCounts(fallbackCounts, 5);
+	}
+
+	function preferredReviewRiskCounts(
+		candidateCounts: Record<string, number>,
+		allCounts: Record<string, number>,
+		reviewCandidateCount: number
+	) {
+		if (reviewCandidateCount <= 0) return {};
+		return Object.keys(candidateCounts).length ? candidateCounts : allCounts;
+	}
+
+	function reviewCandidateFindings(currentDatasetSummary: ResearchUnderstandingDataset | null) {
+		if (!currentDatasetSummary) {
+			return allDisplayFindingRows.filter(
+				(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
+			);
+		}
+		if (currentDatasetSummary.quality_summary.review_candidate_sample_count <= 0) return [];
+		const ids = new Set(
+			currentDatasetSummary.items
+				.filter((sample) => sample.dataset_use_status === 'review_candidate')
+				.map((sample) => sample.finding_id)
+				.filter(Boolean)
+		);
+		if (ids.size) {
+			return allDisplayFindingRows.filter((finding) => ids.has(finding.finding_id));
+		}
+		return allDisplayFindingRows.filter(
+			(finding) => findingDatasetTrust(finding).datasetUseStatus === 'review_candidate'
+		);
+	}
+
 	function listLabel(values: string[]) {
 		const cleaned = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 		return cleaned.length ? cleaned.join(', ') : $t('research.emptyValue');
+	}
+
+	function findingListLabel(values: string[]) {
+		return listLabel(values);
+	}
+
+	function findingChainText(values: string[]) {
+		return listLabel(values);
+	}
+
+	function findingEvidenceGroupLabel(role: FindingEvidenceRole) {
+		return translatedCatalogLabel('research.understanding.findingEvidenceGroups', role);
+	}
+
+	function findingEvidenceRoleCoverageLabel(role: FindingEvidenceRole) {
+		return translatedCatalogLabel('research.understanding.findingEvidenceRoleLabels', role);
+	}
+
+	function dedupeFindings(findings: ResearchUnderstandingPresentationFinding[]) {
+		const seen = new Set<string>();
+		const result: ResearchUnderstandingPresentationFinding[] = [];
+		for (const finding of findings) {
+			if (seen.has(finding.finding_id)) continue;
+			seen.add(finding.finding_id);
+			result.push(finding);
+		}
+		return result;
+	}
+
+	function findingNeedsReview(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		currentReviewQueueClaimIds: Set<string>
+	) {
+		const feedback = [
+			...(currentFeedbackByTargetId.get(finding.finding_id) ?? []),
+			...(currentFeedbackByTargetId.get(finding.claim_id) ?? [])
+		];
+		return (
+			finding.review_status === 'needs_review' ||
+			currentReviewQueueClaimIds.has(finding.claim_id) ||
+			feedback.some((item) => item.review_status !== 'correct' || item.issue_type !== 'none')
+		);
+	}
+
+	function findingDirectEvidenceCount(finding: ResearchUnderstandingPresentationFinding) {
+		return uniquePresentationEvidenceForIds(finding.evidence_bundle.direct_result ?? []).length;
+	}
+
+	function findingRoleEvidenceCount(
+		finding: ResearchUnderstandingPresentationFinding,
+		role: FindingEvidenceRole
+	) {
+		return uniquePresentationEvidenceForIds(finding.evidence_bundle[role] ?? []).length;
+	}
+
+	function findingHasMechanismSupport(finding: ResearchUnderstandingPresentationFinding) {
+		if (!finding.mediators.length) return false;
+		return !finding.review_reasons.includes('missing_mechanism_evidence');
+	}
+
+	function findingEvidenceRoleSummary(finding: ResearchUnderstandingPresentationFinding) {
+		return FINDING_MAIN_EVIDENCE_ROLES.map((role) => ({
+			role,
+			count:
+				role === 'mechanism' && findingHasMechanismSupport(finding)
+					? Math.max(1, findingRoleEvidenceCount(finding, role))
+					: findingRoleEvidenceCount(finding, role),
+			label: findingEvidenceRoleCoverageLabel(role)
+		}));
+	}
+
+	function findingEvidenceGapNotes(finding: ResearchUnderstandingPresentationFinding) {
+		const notes: string[] = [];
+		if (findingRoleEvidenceCount(finding, 'direct_result') === 0) {
+			notes.push($t('research.understanding.findingGapDirectResult'));
+		}
+		if (finding.mediators.length && !findingHasMechanismSupport(finding)) {
+			notes.push($t('research.understanding.findingGapMechanism'));
+		}
+		if (!finding.scope_summary && findingRoleEvidenceCount(finding, 'condition_context') === 0) {
+			notes.push($t('research.understanding.findingGapContext'));
+		}
+		if (finding.paper_count <= 1) {
+			notes.push($t('research.understanding.findingGapCrossPaper'));
+		}
+		if (finding.support_grade === 'strong' && findingRoleEvidenceCount(finding, 'conflict') === 0) {
+			notes.push($t('research.understanding.findingGapConflictCheck'));
+		}
+		if (!notes.length) notes.push($t('research.understanding.findingGapNone'));
+		return notes;
+	}
+
+	function countUniqueFindingPapers(findings: ResearchUnderstandingPresentationFinding[]) {
+		const documentIds = new Set<string>();
+		let fallbackPaperCount = 0;
+		for (const finding of findings) {
+			for (const evidenceId of finding.evidence_ref_ids) {
+				const documentId =
+					presentationEvidenceById.get(evidenceId)?.document_id ||
+					evidenceById.get(evidenceId)?.document_id ||
+					'';
+				if (documentId) documentIds.add(documentId);
+			}
+			if (!finding.evidence_ref_ids.length) {
+				fallbackPaperCount += finding.paper_count;
+			}
+		}
+		return documentIds.size || fallbackPaperCount;
+	}
+
+	function paperCoverageLabel(count: number) {
+		const total = collectionDocumentCount;
+		if (total > 0) {
+			return $t('research.understanding.paperCoverage', {
+				count,
+				total
+			});
+		}
+		return $t('research.understanding.paperCount', { count });
+	}
+
+	function primaryFindingCoverageLabel(count: number) {
+		const total = collectionDocumentCount;
+		if (total > 0) {
+			return $t('research.understanding.primaryFindingPaperCoverage', {
+				count,
+				total
+			});
+		}
+		return $t('research.understanding.paperCount', { count });
+	}
+
+	function findingPaperCoverageLabel(finding: ResearchUnderstandingPresentationFinding) {
+		return paperCoverageLabel(finding.paper_count);
+	}
+
+	function findingEvidenceBasisLabel(finding: ResearchUnderstandingPresentationFinding) {
+		if (finding.paper_count <= 1) return $t('research.understanding.singlePaperFinding');
+		return $t('research.understanding.crossPaperFinding', { count: finding.paper_count });
+	}
+
+	function findingSynthesisStatusLabel(status: string) {
+		if (status === 'agreement') return $t('research.understanding.synthesisAgreement');
+		if (status === 'conflict') return $t('research.understanding.synthesisConflict');
+		if (status === 'condition_dependent') {
+			return $t('research.understanding.synthesisConditionDependent');
+		}
+		return $t('research.understanding.synthesisInsufficientConfirmation');
+	}
+
+	function findingSynthesisStatusBody(status: string) {
+		if (status === 'agreement') return $t('research.understanding.synthesisAgreementBody');
+		if (status === 'conflict') return $t('research.understanding.synthesisConflictBody');
+		if (status === 'condition_dependent') {
+			return $t('research.understanding.synthesisConditionDependentBody');
+		}
+		return $t('research.understanding.synthesisInsufficientConfirmationBody');
+	}
+
+	function paperContributionRoleLabel(role: string) {
+		if (role === 'conflicting') return $t('research.understanding.paperContributionConflicting');
+		if (role === 'mixed') return $t('research.understanding.paperContributionMixed');
+		return $t('research.understanding.paperContributionSupporting');
+	}
+
+	function paperContributionEvidence(
+		contribution: ResearchUnderstandingPresentationFinding['paper_contributions'][number]
+	) {
+		return uniquePresentationEvidenceForIds(contribution.evidence_ref_ids);
+	}
+
+	function paperContributionLabel(
+		contribution: ResearchUnderstandingPresentationFinding['paper_contributions'][number],
+		index: number
+	) {
+		if (contribution.title) return compactText(contribution.title, 140);
+		if (contribution.source_filename) return readableEvidenceTitle(contribution.source_filename, 140);
+		const evidence = paperContributionEvidence(contribution)[0];
+		if (evidence) return readableEvidenceTitle(evidence.source_label || evidence.title, 140);
+		return $t('research.understanding.paperContributionFallback', { count: index + 1 });
+	}
+
+	function findingComparisonTitle(finding: ResearchUnderstandingPresentationFinding) {
+		const summary = finding.comparison_summary;
+		if (!summary) return '';
+		return [summary.variable, summary.outcome].filter(Boolean).join(' -> ');
+	}
+
+	function findingComparisonValueLabel(finding: ResearchUnderstandingPresentationFinding) {
+		const summary = finding.comparison_summary;
+		if (!summary) return '';
+		return [summary.baseline.value, summary.observed.value].filter(Boolean).join(' -> ');
+	}
+
+	function findingComparisonContextLabel(finding: ResearchUnderstandingPresentationFinding) {
+		const summary = finding.comparison_summary;
+		if (!summary?.controlled_conditions.length) return '';
+		const conditions = summary.controlled_conditions
+			.map((condition) => [condition.axis, condition.value].filter(Boolean).join(' '))
+			.filter(Boolean)
+			.join('; ');
+		return conditions ? `Fixed: ${conditions}` : '';
+	}
+
+	function findingComparisonGroupLabel(finding: ResearchUnderstandingPresentationFinding) {
+		const summary = finding.comparison_summary;
+		if (!summary) return '';
+		const baseline = [summary.baseline.label, summary.baseline.value].filter(Boolean).join(': ');
+		const observed = [summary.observed.label, summary.observed.value].filter(Boolean).join(': ');
+		return [baseline, observed].filter(Boolean).join(' vs ');
+	}
+
+	function findingScopeTableLabel(finding: ResearchUnderstandingPresentationFinding) {
+		if (!finding.scope_summary) return $t('research.emptyValue');
+		const terms = finding.scope_summary
+			.split(',')
+			.map((term) => term.trim())
+			.filter(Boolean);
+		if (terms.length <= 3) return finding.scope_summary;
+		return `${terms.slice(0, 3).join(', ')} +${terms.length - 3} ${$t('research.understanding.moreScopeTerms')}`;
+	}
+
+	function findingSummaryId(finding: ResearchUnderstandingPresentationFinding) {
+		return `${titleId}-finding-${finding.finding_id.replace(/[^A-Za-z0-9_-]/g, '-')}-summary`;
+	}
+
+	function findingDirectEvidenceLabel(finding: ResearchUnderstandingPresentationFinding) {
+		return $t('research.understanding.directEvidenceCount', {
+			count: findingDirectEvidenceCount(finding)
+		});
+	}
+
+	function findingReviewReasonLabel(reason: string) {
+		return translatedCatalogLabel('research.understanding.reviewReasons', reason);
+	}
+
+	function findingReviewReasonValues(finding: ResearchUnderstandingPresentationFinding) {
+		const priority = [
+			'confounded_table_row_comparison',
+			'model_validation_finding',
+			'missing_direct_result_evidence',
+			'table_row_alignment_uncertain',
+			'missing_mechanism_evidence',
+			'conflicting_direction',
+			'partial_support',
+			'weak_support',
+			'insufficient_support',
+			'needs_cross_paper_confirmation',
+			'single_paper_evidence',
+			'needs_expert_review'
+		];
+		const trust = findingDatasetTrust(finding);
+		const values = [...(finding.warnings ?? []), ...(finding.review_reasons ?? [])]
+			.map((reason) => reason.trim())
+			.filter((reason) => reason && findingReviewReasonIsVisible(finding, reason, trust));
+		return [...new Set(values)].sort((left, right) => {
+			const leftIndex = priority.indexOf(left);
+			const rightIndex = priority.indexOf(right);
+			return (
+				(leftIndex < 0 ? priority.length : leftIndex) -
+				(rightIndex < 0 ? priority.length : rightIndex)
+			);
+		});
+	}
+
+	function findingAuditNotes(finding: ResearchUnderstandingPresentationFinding) {
+		const reviewReasons = findingReviewReasonValues(finding);
+		const notes = [
+			findingEvidenceBasisLabel(finding),
+			findingPaperCoverageLabel(finding),
+			findingDirectEvidenceLabel(finding),
+			$t('research.understanding.evidenceCount', { count: finding.evidence_count })
+		];
+		if (reviewReasons.length) {
+			notes.push(...reviewReasons.map(findingReviewReasonLabel));
+		}
+		if (finding.paper_count <= 1) notes.push($t('research.understanding.singlePaperLimitation'));
+		if (findingDirectEvidenceCount(finding) === 0) {
+			notes.push($t('research.understanding.noDirectResultEvidence'));
+		}
+		if (findingIsUnreviewedForDisplay(finding)) {
+			notes.push($t('research.understanding.findingNeedsExpertReview'));
+		}
+		return [...new Set(notes)];
+	}
+
+	function findingUseBoundaryNotes(finding: ResearchUnderstandingPresentationFinding) {
+		const notes = [];
+		if (finding.generalization_note) notes.push(finding.generalization_note);
+		const evidenceGapSummary = findingEvidenceGapSummaryForDisplay(finding);
+		if (evidenceGapSummary) notes.push(evidenceGapSummary);
+		notes.push(
+			finding.paper_count <= 1
+				? $t('research.understanding.useBoundaryPaperLevel')
+				: $t('research.understanding.useBoundaryCrossPaper', { count: finding.paper_count })
+		);
+		if (finding.support_grade !== 'strong') {
+			notes.push($t('research.understanding.useBoundaryNeedsConfirmation'));
+		}
+		if (findingIsUnreviewedForDisplay(finding)) {
+			notes.push($t('research.understanding.useBoundaryBeforeModelUse'));
+		}
+		return [...new Set(notes)];
+	}
+
+	function findingEvidenceGapSummaryForDisplay(finding: ResearchUnderstandingPresentationFinding) {
+		if (!finding.evidence_gap_summary || findingIsUnreviewedForDisplay(finding)) {
+			return finding.evidence_gap_summary;
+		}
+		return finding.evidence_gap_summary
+			.split(',')
+			.map((item) => item.trim())
+			.filter((item) => item && !/expert review/i.test(item))
+			.join(', ');
+	}
+
+	function findingGeneralizationStatusLabel(finding: ResearchUnderstandingPresentationFinding) {
+		return translatedCatalogLabel(
+			'research.understanding.findingGeneralizationStatus',
+			finding.generalization_status || 'cross_paper_candidate'
+		);
+	}
+
+	function findingReviewReasonSummary(finding: ResearchUnderstandingPresentationFinding) {
+		const reviewReasons = findingReviewReasonValues(finding);
+		if (!reviewReasons.length) return '';
+		return reviewReasons.slice(0, 2).map(findingReviewReasonLabel).join(' · ');
+	}
+
+	function findingDatasetSampleFor(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentDatasetSummary: ResearchUnderstandingDataset | null = datasetSummary
+	): ResearchUnderstandingDatasetSample | null {
+		return (
+			currentDatasetSummary?.items.find((item) => item.finding_id === finding.finding_id) ??
+			currentDatasetSummary?.items.find((item) => item.claim_id === finding.claim_id) ??
+			null
+		);
+	}
+
+	function datasetReviewActionLabel(sample: ResearchUnderstandingDatasetSample | null) {
+		const label = sample?.review_action.label.trim() ?? '';
+		if (label) return label;
+		const code = sample?.review_action.code.trim() ?? '';
+		if (!code) return '';
+		return translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', code);
+	}
+
+	function trainingMessageDiagnosticsForSample(sample: ResearchUnderstandingDatasetSample) {
+		const diagnostics = [...new Set(sample.metadata.training_message_diagnostic)];
+		if (sample.dataset_use_status !== 'training_ready') {
+			return diagnostics.filter((diagnostic) => diagnostic !== 'missing_message_pair');
+		}
+		return diagnostics;
+	}
+
+	function trainingMessageReadinessBody(
+		sample: ResearchUnderstandingDatasetSample,
+		diagnostics: string[]
+	) {
+		if (sample.dataset_use_status !== 'training_ready') {
+			return $t('research.understanding.trainingMessageReadinessNeedsReviewBody');
+		}
+		return diagnostics.length
+			? $t('research.understanding.trainingMessageReadinessBlockedBody')
+			: $t('research.understanding.trainingMessageReadinessReadyBody');
+	}
+
+	function protocolReadinessStatusLabel(readiness: ResearchUnderstandingProtocolReadiness) {
+		const label = $t(`research.understanding.findingProtocolReadinessStatuses.${readiness.status}`);
+		if (!label.startsWith('research.')) return label;
+		return $t('research.understanding.findingProtocolReadinessStatusFallback');
+	}
+
+	function protocolReadinessBody(readiness: ResearchUnderstandingProtocolReadiness) {
+		if (readiness.status === 'protocol_ready') {
+			return $t('research.understanding.findingProtocolReadinessReadyBody');
+		}
+		if (readiness.ready_after_review || readiness.status === 'ready_after_review') {
+			return $t('research.understanding.findingProtocolReadinessAfterReviewBody');
+		}
+		return readiness.guidance || $t('research.understanding.findingProtocolReadinessCorrectionBody');
+	}
+
+	function protocolReadinessGaps(readiness: ResearchUnderstandingProtocolReadiness) {
+		return readiness.blocking_missing.length ? readiness.blocking_missing : readiness.missing;
+	}
+
+	function protocolReadinessGapLabel(gap: string) {
+		return translatedCatalogLabel('research.understanding.findingProtocolReadinessGapLabels', gap);
+	}
+
+	function acceptanceGateBlockerLabel(blocker: string) {
+		const actionLabel = translatedCatalogLabel('research.objectives.goalReviewRecommendedActions', blocker);
+		if (actionLabel !== blocker) return actionLabel;
+		return translatedCatalogLabel('research.understanding.datasetSystemWarnings', blocker);
+	}
+
+	function acceptanceGateStatusLabel(gate: ResearchUnderstandingAcceptanceGate) {
+		const label = $t(`research.understanding.findingAcceptanceGateStatuses.${gate.status}`);
+		if (!label.startsWith('research.')) return label;
+		return $t('research.understanding.findingAcceptanceGateStatusFallback');
+	}
+
+	function acceptanceGateBody(gate: ResearchUnderstandingAcceptanceGate) {
+		if (gate.guidance) return gate.guidance;
+		if (gate.requires_correction) {
+			return $t('research.understanding.findingAcceptanceGateCorrectionBody');
+		}
+		if (gate.accept_allowed) {
+			return $t('research.understanding.findingAcceptanceGateReviewBody');
+		}
+		return $t('research.understanding.findingAcceptanceGateAcceptedBody');
+	}
+
+	function acceptanceGateCheckLabels(gate: ResearchUnderstandingAcceptanceGate) {
+		return [
+			...gate.accept_blockers.map(acceptanceGateBlockerLabel),
+			...gate.review_checks,
+			...gate.blocking_missing.map(protocolReadinessGapLabel)
+		];
+	}
+
+	function reviewDecisionHintStatusLabel(hint: ResearchUnderstandingReviewDecisionHint) {
+		if (hint.blocked_actions.includes('accept')) {
+			return $t('research.understanding.reviewDecisionHintAcceptBlocked');
+		}
+		if (hint.preferred_next_action === 'verify_then_accept_or_correct') {
+			return $t('research.understanding.reviewDecisionHintVerifyFirst');
+		}
+		if (hint.preferred_next_action === 'correct_or_reject') {
+			return $t('research.understanding.reviewDecisionHintCorrectOrReject');
+		}
+		return $t('research.understanding.reviewDecisionHintAcceptAfterChecks');
+	}
+
+	function reviewDecisionBlockedActionLabel(action: string) {
+		return translatedCatalogLabel('research.understanding.reviewDecisionActions', action);
+	}
+
+	function reviewDecisionBlockedReasonLabel(reason: string) {
+		const [kind, values = ''] = reason.split('=', 2);
+		const valueLabels = values
+			.split(',')
+			.map((value) => value.trim())
+			.filter(Boolean)
+			.map((value) =>
+				kind === 'blocking_missing' ? protocolReadinessGapLabel(value) : acceptanceGateBlockerLabel(value)
+			);
+		if (kind === 'blocking_missing' && valueLabels.length) {
+			return $t('research.understanding.reviewDecisionBlockedMissing', {
+				items: valueLabels.join(', ')
+			});
+		}
+		if (kind === 'accept_blockers' && valueLabels.length) {
+			return $t('research.understanding.reviewDecisionBlockedRisks', {
+				items: valueLabels.join(', ')
+			});
+		}
+		return reason;
+	}
+
+	function expertNotePromptForAction(code: string) {
+		if (code === 'accept_as_paper_level') {
+			return $t('research.understanding.expertNotePromptPaperLevel');
+		}
+		if (code === 'review_table_rows') {
+			return $t('research.understanding.expertNotePromptTableRows');
+		}
+		if (code === 'verify_table_rows') {
+			return $t('research.understanding.expertNotePromptVerifyTableRows');
+		}
+		if (code === 'review_table_variables') {
+			return $t('research.understanding.expertNotePromptTableVariables');
+		}
+		if (code === 'check_mechanism_requirement') {
+			return $t('research.understanding.expertNotePromptMechanism');
+		}
+		if (code === 'resolve_conflict') {
+			return $t('research.understanding.expertNotePromptConflict');
+		}
+		return '';
+	}
+
+	function expertAcceptNoteForAction(code: string) {
+		if (code === 'accept_as_paper_level') {
+			return 'Confirmed as paper-level evidence only; not accepted as a cross-paper conclusion.';
+		}
+		if (code === 'review_table_rows') {
+			return 'Confirmed selected table rows, variable column, and outcome values were checked.';
+		}
+		if (code === 'verify_table_rows') {
+			return 'Confirmed parsed table-row alignment was checked against the source table.';
+		}
+		if (code === 'review_table_variables') {
+			return 'Confirmed the variable interpretation remains valid despite other changing table variables.';
+		}
+		if (code === 'check_mechanism_requirement') {
+			return 'Confirmed the mechanism-evidence requirement for this label.';
+		}
+		if (code === 'resolve_conflict') {
+			return 'Confirmed conflicting evidence was reviewed and resolved for this label.';
+		}
+		return '';
+	}
+
+	function findingExpertNotePrompt(
+		finding: ResearchUnderstandingPresentationFinding,
+		sample: ResearchUnderstandingDatasetSample | null = findingDatasetSampleFor(finding)
+	) {
+		const actionPrompt = expertNotePromptForAction(sample?.review_action.code ?? '');
+		if (actionPrompt) return actionPrompt;
+		const gate = sample?.acceptance_gate ?? null;
+		if (gate?.review_checks.length) {
+			return $t('research.understanding.expertNotePromptChecks', {
+				checks: gate.review_checks.join('; ')
+			});
+		}
+		if (isPaperLevelAccept(finding)) {
+			return $t('research.understanding.expertNotePromptPaperLevel');
+		}
+		return '';
+	}
+
+	function isPaperLevelAccept(finding: ResearchUnderstandingPresentationFinding) {
+		const actionCode = findingDatasetSampleFor(finding)?.review_action.code.trim() ?? '';
+		const reviewReasons = new Set(findingReviewReasonValues(finding));
+		return (
+			actionCode === 'accept_as_paper_level' ||
+			reviewReasons.has('single_paper_evidence') ||
+			reviewReasons.has('needs_cross_paper_confirmation') ||
+			finding.paper_count <= 1
+		);
+	}
+
+	function findingAcceptNote(finding: ResearchUnderstandingPresentationFinding) {
+		const sample = findingDatasetSampleFor(finding);
+		const actionNote = expertAcceptNoteForAction(sample?.review_action.code ?? '');
+		if (actionNote) return actionNote;
+		const gate = sample?.acceptance_gate ?? null;
+		if (gate?.review_checks.length) {
+			return `Confirmed acceptance checks: ${gate.review_checks.join('; ')}`;
+		}
+		return isPaperLevelAccept(finding)
+			? 'Human expert accepted the source-backed paper-level finding.'
+			: 'Human expert accepted the source-grounded finding.';
+	}
+
+	function findingAcceptLabel(
+		finding: ResearchUnderstandingPresentationFinding,
+		andNext = false
+	) {
+		if (findingNeedsManualAcceptNote(finding)) {
+			return andNext
+				? $t('research.understanding.quickReviewAcceptAndNext')
+				: $t('research.understanding.quickReviewAccept');
+		}
+		if (isPaperLevelAccept(finding)) {
+			return andNext
+				? $t('research.understanding.quickAcceptPaperLevelAndNext')
+				: $t('research.understanding.quickAcceptPaperLevel');
+		}
+		return andNext
+			? $t('research.understanding.quickAcceptAndNext')
+			: $t('research.understanding.quickAccept');
+	}
+
+	function findingCanAccept(finding: ResearchUnderstandingPresentationFinding) {
+		const gate = findingDatasetSampleFor(finding, datasetSummary)?.acceptance_gate ?? null;
+		return findingAcceptanceGateAllowsAccept(gate);
+	}
+
+	function findingAcceptanceGateAllowsAccept(
+		gate: ResearchUnderstandingAcceptanceGate | null
+	) {
+		return (
+			!gate ||
+			(gate.accept_allowed && !gate.requires_correction && gate.accept_blockers.length === 0)
+		);
+	}
+
+	function findingNeedsManualAcceptNote(finding: ResearchUnderstandingPresentationFinding) {
+		const sample = findingDatasetSampleFor(finding);
+		if (sample) {
+			if (expertNotePromptForAction(sample.review_action.code)) return true;
+			if (sample.acceptance_gate?.review_checks.length) return true;
+		}
+		return (
+			findingDatasetTrust(finding).datasetUseStatus === 'review_candidate' &&
+			findingReviewReasonValues(finding).length > 0
+		);
+	}
+
+	function findingReviewReasonActionLabel(
+		finding: ResearchUnderstandingPresentationFinding,
+		datasetSample: ResearchUnderstandingDatasetSample | null = findingDatasetSampleFor(finding)
+	) {
+		const datasetActionLabel = datasetReviewActionLabel(datasetSample);
+		if (datasetActionLabel) return datasetActionLabel;
+		const trust = findingDatasetTrust(finding);
+		const reasons = new Set(findingReviewReasonValues(finding));
+		if (trust.datasetUseStatus === 'training_ready') {
+			return $t('research.understanding.findingReviewReasonActionReady');
+		}
+		if (reasons.has('table_row_alignment_uncertain')) {
+			return $t('research.understanding.findingReviewReasonActionVerifyTableRows');
+		}
+		if (reasons.has('confounded_table_row_comparison')) {
+			return $t('research.understanding.findingReviewReasonActionReviewTableVariables');
+		}
+		if (
+			reasons.has('conflicting_direction') ||
+			finding.support_grade === 'conflict' ||
+			finding.evidence_bundle.conflict.length
+		) {
+			return $t('research.understanding.findingReviewReasonActionResolve');
+		}
+		if (reasons.has('missing_direct_result_evidence') || findingDirectEvidenceCount(finding) === 0) {
+			return $t('research.understanding.findingReviewReasonActionRepair');
+		}
+		if (reasons.has('missing_mechanism_evidence')) {
+			return $t('research.understanding.findingReviewReasonActionCheckMechanism');
+		}
+		if (reasons.has('model_validation_finding')) {
+			return $t('research.understanding.findingReviewReasonActionValidateModel');
+		}
+		if (
+			reasons.has('needs_cross_paper_confirmation') ||
+			reasons.has('single_paper_evidence') ||
+			finding.paper_count <= 1
+		) {
+			return $t('research.understanding.findingReviewReasonActionPaperLevel');
+		}
+		return $t('research.understanding.findingReviewReasonActionReview');
+	}
+
+	function findingReviewReasonLabels(
+		finding: ResearchUnderstandingPresentationFinding,
+		limit = 3
+	) {
+		return findingReviewReasonValues(finding).slice(0, limit).map(findingReviewReasonLabel);
+	}
+
+	function protocolReadinessBlockingLabels(
+		readiness: ResearchUnderstandingProtocolReadiness | null | undefined,
+		limit = 3
+	) {
+		if (!readiness || readiness.status === 'protocol_ready') return [];
+		return protocolReadinessGaps(readiness).slice(0, limit).map(protocolReadinessGapLabel);
+	}
+
+	function relatedReviewFindings(
+		finding: ResearchUnderstandingPresentationFinding,
+		findings: ResearchUnderstandingPresentationFinding[]
+	) {
+		const byId = new Map(findings.map((item) => [item.finding_id, item]));
+		return finding.related_review_finding_ids
+			.map((findingId) => byId.get(findingId))
+			.filter((item): item is ResearchUnderstandingPresentationFinding => Boolean(item));
+	}
+
+	function openRelatedReviewFinding(findingId: string) {
+		reviewQueueOnly = true;
+		openFindingDetail(findingId);
+	}
+
+	function alignFeedbackToCurrentFindings(
+		rawFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		currentDataset: ResearchUnderstandingDataset | null,
+		findings: ResearchUnderstandingPresentationFinding[]
+	) {
+		const findingTargetIds = new Set(
+			findings.flatMap((finding) => [finding.finding_id, finding.claim_id]).filter(Boolean)
+		);
+		const aligned = new Map<string, ResearchUnderstandingFeedback[]>();
+		for (const [targetId, records] of rawFeedbackByTargetId) {
+			if (!findingTargetIds.has(targetId)) aligned.set(targetId, records);
+		}
+		for (const sample of currentDataset?.items ?? []) {
+			for (const feedback of sample.feedback_refs) {
+				if (feedback.finding_fingerprint !== sample.finding_fingerprint) continue;
+				const targetId = reviewTargetKey(feedback);
+				if (!targetId) continue;
+				const existing = aligned.get(targetId) ?? [];
+				if (existing.some((item) => item.feedback_id === feedback.feedback_id)) continue;
+				aligned.set(targetId, [...existing, feedback]);
+			}
+		}
+		return aligned;
+	}
+
+	function alignCurationsToCurrentFindings(
+		rawCurationsByTargetId: Map<string, ResearchUnderstandingCuration>,
+		currentDataset: ResearchUnderstandingDataset | null,
+		findings: ResearchUnderstandingPresentationFinding[]
+	) {
+		const findingTargetIds = new Set(
+			findings.flatMap((finding) => [finding.finding_id, finding.claim_id]).filter(Boolean)
+		);
+		const aligned = new Map<string, ResearchUnderstandingCuration>();
+		const curationsById = new Map<string, ResearchUnderstandingCuration>();
+		for (const [targetId, curation] of rawCurationsByTargetId) {
+			curationsById.set(curation.curation_id, curation);
+			if (!findingTargetIds.has(targetId)) aligned.set(targetId, curation);
+		}
+		for (const sample of currentDataset?.items ?? []) {
+			const curationId = sample.metadata.curation_id;
+			const curation = curationId ? curationsById.get(curationId) : null;
+			if (!curation || curation.finding_fingerprint !== sample.finding_fingerprint) continue;
+			const targetId = reviewTargetKey(curation);
+			if (targetId) aligned.set(targetId, curation);
+		}
+		return aligned;
+	}
+
+	function findingFeedbackFor(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentFeedbackByTargetId = alignedFeedbackByTargetId
+	) {
+		return [
+			...(currentFeedbackByTargetId.get(finding.finding_id) ?? []),
+			...(currentFeedbackByTargetId.get(finding.claim_id) ?? [])
+		];
+	}
+
+	function findingCurationFor(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentCurationsByTargetId = alignedCurationsByTargetId
+	) {
+		return (
+			currentCurationsByTargetId.get(finding.finding_id) ??
+			currentCurationsByTargetId.get(finding.claim_id) ??
+			null
+		);
+	}
+
+	function curatedListOrOriginal(
+		curatedValues: string[] | undefined,
+		originalValues: string[]
+	) {
+		const cleaned = [...new Set((curatedValues ?? []).map((value) => value.trim()).filter(Boolean))];
+		return cleaned.length ? cleaned : originalValues;
+	}
+
+	function curatedTextOrOriginal(
+		curatedValue: string | null | undefined,
+		originalValue: string
+	) {
+		const cleaned = curatedValue?.trim() ?? '';
+		return cleaned || originalValue;
+	}
+
+	function findingForDisplay(
+		finding: ResearchUnderstandingPresentationFinding,
+		curation: ResearchUnderstandingCuration | null = findingCurationFor(finding)
+	): ResearchUnderstandingPresentationFinding {
+		if (!curation) return finding;
+		return {
+			...finding,
+			statement: curatedTextOrOriginal(curation.curated_statement, finding.statement),
+			variables: curatedListOrOriginal(curation.curated_variables, finding.variables),
+			mediators: curatedListOrOriginal(curation.curated_mediators, finding.mediators),
+			outcomes: curatedListOrOriginal(curation.curated_outcomes, finding.outcomes),
+			direction: curatedTextOrOriginal(curation.curated_direction, finding.direction),
+			scope_summary: curatedTextOrOriginal(curation.curated_scope_summary, finding.scope_summary),
+			support_grade: curatedTextOrOriginal(curation.curated_support_grade, finding.support_grade)
+		};
+	}
+
+	function findingHasAcceptedReview(feedback: ResearchUnderstandingFeedback[]) {
+		return feedback.some(
+			(item) =>
+				(item.review_status === 'correct' || item.review_status === 'partial') &&
+				item.issue_type === 'none' &&
+				isHumanReviewer(item.reviewer)
+		);
+	}
+
+	function findingHasSilverReview(feedback: ResearchUnderstandingFeedback[]) {
+		return feedback.some(
+			(item) =>
+				(item.review_status === 'correct' || item.review_status === 'partial') &&
+				item.issue_type === 'none'
+		);
+	}
+
+	function findingHasRejectingReview(feedback: ResearchUnderstandingFeedback[]) {
+		return feedback.some(
+			(item) => item.review_status === 'incorrect' || REJECTING_FEEDBACK_ISSUES.has(item.issue_type)
+		);
+	}
+
+	function isAiReviewer(reviewer: string | null | undefined) {
+		const normalized = reviewer?.trim().toLowerCase() ?? '';
+		return normalized.startsWith('ai-reviewer') || normalized.startsWith('agent-');
+	}
+
+	function isHumanReviewer(reviewer: string | null | undefined) {
+		const normalized = reviewer?.trim() ?? '';
+		return Boolean(normalized) && !isAiReviewer(normalized);
+	}
+
+	function findingDatasetTrust(
+		finding: ResearchUnderstandingPresentationFinding,
+		currentFeedbackByTargetId = alignedFeedbackByTargetId,
+		currentCurationsByTargetId = alignedCurationsByTargetId,
+		currentDataset: ResearchUnderstandingDataset | null = datasetSummary
+	): FindingDatasetTrust {
+		const curation = findingCurationFor(finding, currentCurationsByTargetId);
+		const feedback = findingFeedbackFor(finding, currentFeedbackByTargetId);
+		const sample = findingDatasetSampleFor(finding, currentDataset);
+		const hasRejected = findingHasRejectingReview(feedback);
+		let source: FindingDatasetTrust['source'] = 'candidate';
+		if (sample?.label_status === 'rejected' || sample?.dataset_use_status === 'rejected') {
+			source = 'rejected';
+		} else if (curation && isHumanReviewer(curation.reviewer)) {
+			source = 'human_curation';
+		} else if (curation) {
+			source = isAiReviewer(curation.reviewer) ? 'ai_curation' : 'candidate';
+		} else if (
+			feedback.some(
+				(item) =>
+					item.review_status === 'correct' &&
+					item.issue_type === 'none' &&
+					isHumanReviewer(item.reviewer)
+			)
+		) {
+			source = 'human_feedback';
+		} else if (feedback.length) {
+			source = hasRejected ? 'rejected' : 'ai_feedback';
+		}
+		if (sample?.label_status && sample.dataset_use_status) {
+			return {
+				labelStatus: sample.label_status,
+				datasetUseStatus: sample.dataset_use_status,
+				source
+			};
+		}
+		if (curation && isHumanReviewer(curation.reviewer)) {
+			return {
+				labelStatus: 'gold',
+				datasetUseStatus: 'training_ready',
+				source: 'human_curation'
+			};
+		}
+		if (curation) {
+			return {
+				labelStatus: 'silver',
+				datasetUseStatus: 'review_candidate',
+				source: isAiReviewer(curation.reviewer) ? 'ai_curation' : 'candidate'
+			};
+		}
+		if (hasRejected) {
+			return {
+				labelStatus: 'rejected',
+				datasetUseStatus: 'rejected',
+				source: 'rejected'
+			};
+		}
+		if (
+			feedback.some(
+				(item) =>
+					item.review_status === 'correct' &&
+					item.issue_type === 'none' &&
+					isHumanReviewer(item.reviewer)
+			)
+		) {
+			return {
+				labelStatus: 'gold',
+				datasetUseStatus: 'training_ready',
+				source: 'human_feedback'
+			};
+		}
+		if (
+			feedback.some(
+				(item) =>
+					(item.review_status === 'correct' || item.review_status === 'partial') &&
+					item.issue_type === 'none'
+			)
+		) {
+			return {
+				labelStatus: 'silver',
+				datasetUseStatus: 'review_candidate',
+				source: 'ai_feedback'
+			};
+		}
+		return {
+			labelStatus: 'candidate',
+			datasetUseStatus:
+				finding.dataset_use_status === 'rejected' ? 'rejected' : 'review_candidate',
+			source: 'candidate'
+		};
+	}
+
+	function findingDatasetTrustSubtitle(trust: FindingDatasetTrust) {
+		return [
+			datasetUseStatusLabel(trust.datasetUseStatus),
+			findingTrustSourceLabel(trust.source)
+		].join(' · ');
+	}
+
+	function findingUsagePathForDisplay(finding: ResearchUnderstandingPresentationFinding) {
+		return findingUsagePath(finding, findingFeedbackFor(finding), findingCurationFor(finding));
+	}
+
+	function findingUsagePreview(finding: ResearchUnderstandingPresentationFinding) {
+		const usagePath = findingUsagePathForDisplay(finding);
+		return {
+			...usagePath,
+			nextAction:
+				datasetReviewActionLabel(findingDatasetSampleFor(finding, datasetSummary)) ||
+				usagePath.checklist[0] ||
+				''
+		};
+	}
+
+	function findingUsagePath(
+		finding: ResearchUnderstandingPresentationFinding,
+		feedback: ResearchUnderstandingFeedback[] = [],
+		curation: ResearchUnderstandingCuration | null = null
+	) {
+		const directEvidenceCount = findingDirectEvidenceCount(finding);
+		const hasDirectEvidence = directEvidenceCount > 0;
+		const hasSinglePaperEvidence = finding.paper_count <= 1;
+		const hasAcceptedReview =
+			findingHasAcceptedReview(feedback) || Boolean(curation && isHumanReviewer(curation.reviewer));
+		const hasSilverReview = findingHasSilverReview(feedback) || Boolean(curation);
+		const hasRejectingReview = findingHasRejectingReview(feedback);
+		const hasConflict =
+			finding.support_grade === 'conflict' || Boolean(finding.evidence_bundle.conflict?.length);
+		const needsReview =
+			findingIsUnreviewedForDisplay(finding) || finding.support_grade !== 'strong' || hasRejectingReview;
+		const status = findingUsageStatus(finding, {
+			hasDirectEvidence,
+			hasSinglePaperEvidence,
+			hasAcceptedReview,
+			hasRejectingReview
+		});
+		const checklist = findingUpgradeChecklist(finding, {
+			directEvidenceCount,
+			hasAcceptedReview,
+			needsReview,
+			hasConflict
+		});
+		return {
+			status,
+			title: $t(`research.understanding.findingUsageStatus.${status}`),
+			body: $t(`research.understanding.findingUsageBody.${status}`),
+			datasetNote: $t(
+				hasAcceptedReview
+					? 'research.understanding.findingUsageDatasetReady'
+					: hasSilverReview
+						? 'research.understanding.findingUsageDatasetSilver'
+					: 'research.understanding.findingUsageDatasetReview'
+			),
+			checklist
+		};
+	}
+
+	function findingUsageStatus(
+		finding: ResearchUnderstandingPresentationFinding,
+		flags: {
+			hasDirectEvidence: boolean;
+			hasSinglePaperEvidence: boolean;
+			hasAcceptedReview: boolean;
+			hasRejectingReview: boolean;
+		}
+	) {
+		const mapped = findingUsageStatusFromBackend(finding.expert_use_status);
+		if (mapped) return mapped;
+		if (!flags.hasDirectEvidence) return 'repair';
+		if (flags.hasSinglePaperEvidence) return 'paper';
+		if (findingIsExpertReady(finding) || (flags.hasAcceptedReview && !flags.hasRejectingReview)) {
+			return 'ready';
+		}
+		return 'review';
+	}
+
+	function findingUsageStatusFromBackend(status: string) {
+		if (status === 'scoped_expert_finding') return 'ready';
+		if (status === 'paper_level_finding') return 'paper';
+		if (status === 'evidence_repair_needed') return 'repair';
+		if (status === 'review_candidate') return 'review';
+		return '';
+	}
+
+	function findingUpgradeChecklist(
+		finding: ResearchUnderstandingPresentationFinding,
+		flags: {
+			directEvidenceCount: number;
+			hasAcceptedReview: boolean;
+			needsReview: boolean;
+			hasConflict: boolean;
+		}
+	) {
+		const backendActions = Array.isArray(finding.upgrade_actions) ? finding.upgrade_actions : [];
+		const actions = backendActions.length
+			? backendActions
+			: inferredFindingUpgradeActions(finding, flags.hasConflict, flags.needsReview);
+		const checklist = actions
+			.filter((action) => action !== 'record_expert_review' || !flags.hasAcceptedReview)
+			.map((action) => findingUpgradeActionLabel(action, flags.directEvidenceCount))
+			.filter(Boolean);
+		if (
+			flags.needsReview &&
+			!flags.hasAcceptedReview &&
+			!actions.includes('record_expert_review')
+		) {
+			checklist.push($t('research.understanding.findingUsageRecordReview'));
+		}
+		return checklist.length ? checklist : [$t('research.understanding.findingUsageKeepScope')];
+	}
+
+	function inferredFindingUpgradeActions(
+		finding: ResearchUnderstandingPresentationFinding,
+		hasConflict: boolean,
+		needsReview: boolean
+	) {
+		const actions: string[] = [];
+		if (findingDirectEvidenceCount(finding)) actions.push('verify_direct_evidence');
+		else actions.push('repair_direct_evidence');
+		if (finding.paper_count <= 1) actions.push('add_cross_paper_evidence');
+		if (finding.support_grade !== 'strong') actions.push('curate_support_grade');
+		if (hasConflict) actions.push('resolve_conflict');
+		if (needsReview) actions.push('record_expert_review');
+		if (!actions.length) actions.push('keep_scope_conditions');
+		return actions;
+	}
+
+	function findingUpgradeActionLabel(action: string, directEvidenceCount: number) {
+		if (action === 'verify_direct_evidence') {
+			return $t('research.understanding.findingUsageVerifyEvidence', {
+				count: directEvidenceCount
+			});
+		}
+		if (action === 'repair_direct_evidence') {
+			return $t('research.understanding.findingUsageRepairEvidence');
+		}
+		if (action === 'add_cross_paper_evidence') {
+			return $t('research.understanding.findingUsageAddPaper');
+		}
+		if (action === 'curate_support_grade') {
+			return $t('research.understanding.findingUsageResolveSupport');
+		}
+		if (action === 'resolve_conflict') {
+			return $t('research.understanding.findingUsageResolveConflict');
+		}
+		if (action === 'record_expert_review') {
+			return $t('research.understanding.findingUsageRecordReview');
+		}
+		if (action === 'keep_scope_conditions') {
+			return $t('research.understanding.findingUsageKeepScope');
+		}
+		return '';
+	}
+
+	function selectedFindingEvidenceGroups() {
+		if (!selectedFinding) return [];
+		const usedEvidenceTargets = new Set<string>();
+		return FINDING_MAIN_EVIDENCE_ROLES
+			.map((role) => {
+				const items = presentationEvidenceForIds(selectedFinding.evidence_bundle[role] ?? []).filter(
+					(item) => {
+						const key = evidenceStableTargetKey(item);
+						if (usedEvidenceTargets.has(key)) return false;
+						usedEvidenceTargets.add(key);
+						return true;
+					}
+				);
+				return { role, items };
+			})
+			.filter((group) => group.items.length);
+	}
+
+	function selectedSecondaryFindingEvidenceCount() {
+		if (!selectedFinding) return 0;
+		const usedMainEvidenceTargets = new Set(
+			uniquePresentationEvidenceForIds(
+				FINDING_MAIN_EVIDENCE_ROLES.flatMap((role) => selectedFinding.evidence_bundle[role] ?? [])
+			).map(evidenceStableTargetKey)
+		);
+		return uniquePresentationEvidenceForIds(
+			FINDING_SECONDARY_EVIDENCE_ROLES.flatMap((role) => selectedFinding.evidence_bundle[role] ?? [])
+		).filter((item) => !usedMainEvidenceTargets.has(evidenceStableTargetKey(item))).length;
 	}
 
 	function compactText(value: string, limit = 160) {
@@ -303,19 +2180,166 @@
 		return summary !== $t('research.understanding.relationNeedsNormalization');
 	}
 
+	function findingEffectFor(finding: ResearchUnderstandingPresentationFinding) {
+		return effectRows.find((effect) => effect.claim_id === finding.claim_id) ?? null;
+	}
+
 	function openClaimDetail(effectId: string) {
+		selectedFindingId = '';
 		selectedEffectId = effectId;
 		detailMode = true;
+		void revealDetailView();
+	}
+
+	function openFindingDetail(findingId: string) {
+		selectedEffectId = '';
+		selectedFindingId = findingId;
+		detailMode = true;
+		void revealDetailView();
+	}
+
+	async function revealDetailView() {
+		await tick();
+		detailView?.scrollIntoView({ block: 'start' });
+		detailBackButton?.focus({ preventScroll: true });
+	}
+
+	async function openFindingFeedback(findingId: string) {
+		openFindingDetail(findingId);
+		await tick();
+		activeReviewPanel = 'feedback';
+	}
+
+	async function openFindingReject(findingId: string) {
+		openFindingDetail(findingId);
+		await tick();
+		rejectSelectedFinding();
+	}
+
+	async function openFindingCorrection(findingId: string) {
+		openFindingDetail(findingId);
+		await tick();
+		correctSelectedFinding();
 	}
 
 	function closeClaimDetail() {
 		detailMode = false;
 		selectedEffectId = '';
+		selectedFindingId = '';
 		activeReviewPanel = '';
 	}
 
 	function toggleReviewPanel(panel: 'feedback' | 'curation') {
 		activeReviewPanel = activeReviewPanel === panel ? '' : panel;
+	}
+
+	async function acceptSelectedFinding() {
+		if (!selectedFinding) return;
+		activeReviewPanel = 'feedback';
+		if (findingNeedsManualAcceptNote(selectedFinding)) {
+			feedbackStatus = 'correct';
+			feedbackIssue = 'none';
+			return;
+		}
+		await acceptFinding(selectedFinding);
+	}
+
+	async function acceptSelectedFindingAndOpenNext() {
+		if (!selectedFinding) return;
+		activeReviewPanel = 'feedback';
+		if (findingNeedsManualAcceptNote(selectedFinding)) {
+			feedbackStatus = 'correct';
+			feedbackIssue = 'none';
+			return;
+		}
+		await acceptFinding(selectedFinding, { openNext: true });
+	}
+
+	async function acceptFinding(
+		finding: ResearchUnderstandingPresentationFinding,
+		options: { openNext?: boolean } = {}
+	) {
+		if (
+			!understanding ||
+			!collectionId ||
+			!selectedScopeId ||
+			!reviewerReady ||
+			!findingCanAccept(finding)
+		)
+			return;
+		feedbackSubmitting = true;
+		feedbackMessage = '';
+		feedbackError = '';
+		try {
+			const feedback = await createResearchUnderstandingFeedback(collectionId, {
+				scope_type: understanding.scope.scope_type,
+				scope_id: selectedScopeId,
+				finding_id: finding.finding_id,
+				claim_id: finding.claim_id,
+				review_status: 'correct',
+				issue_type: 'none',
+				note: findingAcceptNote(finding)
+			});
+			const targetId = reviewTargetKey(feedback);
+			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
+				feedback,
+				...(feedbackByTargetId.get(targetId) ?? [])
+			]);
+			feedbackByTargetId = nextFeedbackByTargetId;
+			if (options.openNext) {
+				const nextFinding = nextReviewCandidateAfter(finding.finding_id, nextFeedbackByTargetId);
+				if (nextFinding) {
+					openFindingDetail(nextFinding.finding_id);
+				}
+			}
+			const refreshed = await refreshDatasetSummaryForCurrentScope();
+			feedbackMessage = reviewSaveMessage(
+				'feedback',
+				formatShortIdentifier(feedback.feedback_id),
+				refreshed
+			);
+		} catch (error) {
+			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
+		} finally {
+			feedbackSubmitting = false;
+		}
+	}
+
+	function nextReviewCandidateAfter(
+		currentFindingId: string,
+		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]> = feedbackByTargetId,
+		currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration> = curationsByTargetId
+	) {
+		const candidates = datasetSummary
+			? reviewCandidateFindings(datasetSummary).filter(
+					(finding) => finding.finding_id !== currentFindingId
+				)
+			: allDisplayFindingRows.filter(
+					(finding) =>
+						finding.finding_id !== currentFindingId &&
+						findingDatasetTrust(
+							finding,
+							currentFeedbackByTargetId,
+							currentCurationsByTargetId
+						).datasetUseStatus === 'review_candidate'
+				);
+		return candidates[0] ?? null;
+	}
+
+	function rejectSelectedFinding() {
+		feedbackStatus = 'incorrect';
+		feedbackIssue = 'evidence_not_grounded';
+		feedbackNote = '';
+		activeReviewPanel = 'feedback';
+	}
+
+	function correctSelectedFinding() {
+		resetCurationForm();
+		activeReviewPanel = 'curation';
+	}
+
+	function currentReviewerLabel(user: { email?: string | null; display_name?: string | null } | null) {
+		return user?.email?.trim() || user?.display_name?.trim() || '';
 	}
 
 	function confidenceLabel(value: number | null) {
@@ -332,25 +2356,59 @@
 		return query ? `?${query}` : '';
 	}
 
+	function evidenceQuote(ref: ResearchUnderstandingPresentationEvidence) {
+		return ref.quote || ref.source_text || '';
+	}
+
+	function evidenceHrefWithQuote(href: string, ref: ResearchUnderstandingPresentationEvidence) {
+		const quote = evidenceQuote(ref);
+		if (!href || !quote) return href;
+		const [path, query = ''] = href.split('?');
+		const params = new URLSearchParams(query);
+		if (!params.get('quote')) {
+			params.set('quote', quote);
+		}
+		const encoded = params.toString();
+		return encoded ? `${path}?${encoded}` : path;
+	}
+
 	function evidenceHref(ref: ResearchUnderstandingPresentationEvidence) {
 		const rawRef = evidenceById.get(ref.evidence_ref_id);
-		if (ref.href) return ref.href;
-		if (rawRef?.href) return rawRef.href;
+		if (ref.href) return evidenceHrefWithQuote(ref.href, ref);
+		if (rawRef?.href) return evidenceHrefWithQuote(rawRef.href, ref);
 		if (!collectionId || !ref.document_id) return '';
 		const params: [string, string][] = [];
 		const pageValue = ref.page || displayValue(rawRef?.locator.page);
-		const sourceRef = displayValue(rawRef?.locator.source_ref);
+		const sourceRef = ref.source_ref || displayValue(rawRef?.locator.source_ref);
 		const anchorId = rawRef?.anchor_ids[0] ?? '';
 		params.push(['view', 'parsed-paper']);
 		if (pageValue) params.push(['page', pageValue]);
 		if (sourceRef) params.push(['source_ref', sourceRef]);
 		if (ref.evidence_ref_id) params.push(['evidence_id', ref.evidence_ref_id]);
 		if (anchorId) params.push(['anchor_id', anchorId]);
+		if (evidenceQuote(ref)) params.push(['quote', evidenceQuote(ref)]);
 		if (returnTo) params.push(['return_to', returnTo]);
 		return `${resolve('/collections/[id]/documents/[document_id]', {
 			id: collectionId,
 			document_id: ref.document_id
 		})}${queryString(params)}`;
+	}
+
+	function evidenceStableTargetKey(ref: ResearchUnderstandingPresentationEvidence) {
+		const rawRef = evidenceById.get(ref.evidence_ref_id);
+		const sourceRef = ref.source_ref || displayValue(rawRef?.locator.source_ref);
+		const page = ref.page || displayValue(rawRef?.locator.page);
+		if (ref.document_id && sourceRef) {
+			return [ref.document_id, sourceRef, page].join('|');
+		}
+		const href = evidenceHref(ref);
+		if (href) {
+			const url = new URL(href, 'http://localhost');
+			url.searchParams.delete('quote');
+			url.searchParams.delete('evidence_id');
+			return url.pathname + url.search;
+		}
+		return ref.evidence_ref_id;
 	}
 
 	function evidenceMeta(ref: ResearchUnderstandingPresentationEvidence) {
@@ -366,6 +2424,41 @@
 
 	function evidenceSourceText(ref: ResearchUnderstandingPresentationEvidence) {
 		return ref.source_text || ref.quote || '';
+	}
+
+	function evidenceSourceBlock(ref: ResearchUnderstandingPresentationEvidence) {
+		return ref.source_text || '';
+	}
+
+	function hasDistinctEvidenceSourceBlock(ref: ResearchUnderstandingPresentationEvidence) {
+		const quote = evidenceQuote(ref).replace(/\s+/g, ' ').trim();
+		const sourceBlock = evidenceSourceBlock(ref).replace(/\s+/g, ' ').trim();
+		return Boolean(sourceBlock && sourceBlock !== quote);
+	}
+
+	function tableAuditColumns(ref: ResearchUnderstandingPresentationEvidence) {
+		return ref.table_audit?.columns.join(' | ') ?? '';
+	}
+
+	function tableAuditRows(ref: ResearchUnderstandingPresentationEvidence) {
+		return ref.table_audit?.relevant_rows ?? [];
+	}
+
+	function tableAuditHasUnalignedRows(ref: ResearchUnderstandingPresentationEvidence) {
+		return tableAuditRows(ref).some((row) => !row.aligned);
+	}
+
+	function tableAuditRowText(ref: ResearchUnderstandingPresentationEvidence, row: { cells: string[]; aligned?: boolean }) {
+		const columns = ref.table_audit?.columns ?? [];
+		if (!columns.length) return row.cells.join(' | ');
+		if (row.aligned === false || columns.length !== row.cells.length) {
+			return $t('research.understanding.unalignedTableRow', {
+				cells: row.cells.join(' | ')
+			});
+		}
+		return row.cells
+			.map((cell, index) => (columns[index] ? `${columns[index]}: ${cell}` : cell))
+			.join('; ');
 	}
 
 	function evidenceLabelsForIds(evidenceIds: string[], limit = 3) {
@@ -404,20 +2497,294 @@
 		return counts;
 	}
 
+	function countFindingsByDatasetUse(
+		currentFindings: ResearchUnderstandingPresentationFinding[],
+		currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration>,
+		currentDataset: ResearchUnderstandingDataset | null
+	) {
+		const counts = new Map<FindingDatasetUseFilter, number>([['all', currentFindings.length]]);
+		for (const finding of currentFindings) {
+			const status = findingDatasetTrust(
+				finding,
+				currentFeedbackByTargetId,
+				currentCurationsByTargetId,
+				currentDataset
+			).datasetUseStatus;
+			counts.set(status, (counts.get(status) ?? 0) + 1);
+		}
+		return counts;
+	}
+
 	function optionLabel(label: string, count: number) {
 		return `${label} ${count}`;
 	}
 
 	function presentationEvidenceForIds(ids: string[]) {
-		return ids
+		return [...new Set(ids)]
 			.map((id) => presentationEvidenceById.get(id))
 			.filter((ref): ref is ResearchUnderstandingPresentationEvidence => Boolean(ref));
 	}
 
+	function uniquePresentationEvidenceForIds(ids: string[]) {
+		const seen = new Set<string>();
+		const items: ResearchUnderstandingPresentationEvidence[] = [];
+		for (const item of presentationEvidenceForIds(ids)) {
+			const key = evidenceStableTargetKey(item);
+			if (seen.has(key)) continue;
+			seen.add(key);
+			items.push(item);
+		}
+		return items;
+	}
+
 	function presentationContextsForIds(ids: string[]) {
-		return ids
+		return [...new Set(ids)]
 			.map((id) => presentationContextById.get(id))
 			.filter((context): context is ResearchUnderstandingPresentationContext => Boolean(context));
+	}
+
+	function isGenericFindingContextLabel(label: string) {
+		return /^(claim applicability|context)$/i.test(label.trim());
+	}
+
+	function isMostlyNumericContextText(value: string) {
+		const parts = value
+			.split(/[,;]/)
+			.map((part) => part.trim())
+			.filter(Boolean);
+		if (parts.length < 3) return false;
+		const noisyParts = parts.filter(
+			(part) =>
+				part === '-' ||
+				/^oeu_[a-z0-9]+$/i.test(part) ||
+				/^[A-Z]$/.test(part) ||
+				/^[-+]?\d+(\.\d+)?\s*(%|degc|c|mpa|w|mm\/s|j\/mm3|j\/mm³)?$/i.test(part)
+		);
+		return noisyParts.length / parts.length >= 0.65;
+	}
+
+	function isNoisyFindingContextText(value: string) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (!normalized) return true;
+		if (/\boeu_[a-z0-9]+\b/i.test(normalized)) return true;
+		if (/\bdensity_porosity_microstructure\b/i.test(normalized)) return true;
+		if (/^SEM\s*\/\s*ImageJ$/i.test(normalized)) return true;
+		if (isMostlyNumericContextText(normalized)) return true;
+		if (
+			normalized.length > 220 &&
+			/(samples were|characterized|polished|magnification|figure legend|interpretation of the references)/i.test(
+				normalized
+			)
+		) {
+			return true;
+		}
+		return false;
+	}
+
+	function readableFindingContextText(value: string, limit = 140) {
+		const normalized = cleanFindingContextText(value);
+		if (!normalized || isNoisyFindingContextText(normalized)) return '';
+		return compactText(normalized, limit);
+	}
+
+	function cleanFindingContextText(value: string) {
+		const normalized = value.replace(/\s+/g, ' ').trim();
+		if (!normalized) return '';
+		const fragments = normalized
+			.split(/[,;]/)
+			.map((fragment) => fragment.trim())
+			.filter(Boolean);
+		if (fragments.length <= 1) {
+			return isGenericFindingContextFragment(normalized) ? '' : normalized;
+		}
+		return fragments
+			.filter((fragment) => !isGenericFindingContextFragment(fragment))
+			.join(', ');
+	}
+
+	function isGenericFindingContextFragment(value: string) {
+		const normalized = normalizedFindingContextToken(value);
+		return FINDING_CONTEXT_GENERIC_FRAGMENTS.some(
+			(fragment) => normalized === normalizedFindingContextToken(fragment)
+		);
+	}
+
+	function readableFindingContextList(values: string[], limit = 4) {
+		const cleaned: string[] = [];
+		for (const value of values) {
+			const text = readableFindingContextText(value, 90);
+			if (text && !cleaned.includes(text)) cleaned.push(text);
+			if (cleaned.length >= limit) break;
+		}
+		return cleaned;
+	}
+
+	function normalizedFindingContextToken(value: string) {
+		return value
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	function findingContextAxisTerms(finding: ResearchUnderstandingPresentationFinding) {
+		return [
+			...finding.variables,
+			...finding.mediators,
+			...finding.outcomes,
+			finding.scope_summary
+		]
+			.map(normalizedFindingContextToken)
+			.filter(Boolean);
+	}
+
+	function contextValueMatchesFinding(value: string, finding: ResearchUnderstandingPresentationFinding) {
+		const normalized = normalizedFindingContextToken(value);
+		if (!normalized) return false;
+		return findingContextAxisTerms(finding).some(
+			(term) =>
+				term &&
+				(normalized.includes(term) || term.includes(normalized))
+		);
+	}
+
+	function contextDescriptionMatchesFinding(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		return [
+			context.process_summary,
+			context.test_summary,
+			...context.limitations
+		].some((value) => contextValueMatchesFinding(value, finding));
+	}
+
+	function contextHasOffAxisTerms(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		const text = normalizedFindingContextToken(
+			[
+				context.process_summary,
+				context.test_summary,
+				...context.property_scope,
+				...context.limitations
+			].join(' ')
+		);
+		if (!text) return false;
+		const axisTerms = findingContextAxisTerms(finding);
+		return FINDING_CONTEXT_AXIS_TERMS.some((term) => {
+			const normalizedTerm = normalizedFindingContextToken(term);
+			if (!normalizedTerm || !text.includes(normalizedTerm)) return false;
+			return !axisTerms.some(
+				(axisTerm) =>
+					axisTerm &&
+					(axisTerm.includes(normalizedTerm) || normalizedTerm.includes(axisTerm))
+			);
+		});
+	}
+
+	function contextMatchesFinding(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		if (!isGenericFindingContextLabel(context.label)) return true;
+		if (!context.property_scope.length) return true;
+		if (contextHasOffAxisTerms(context, finding)) return false;
+		if (context.property_scope.some((value) => contextValueMatchesFinding(value, finding))) {
+			return true;
+		}
+		if (contextDescriptionMatchesFinding(context, finding)) return true;
+		if (context.process_summary || context.test_summary || context.limitations.length) return false;
+		return false;
+	}
+
+	function compactFindingContext(
+		context: ResearchUnderstandingPresentationContext,
+		finding: ResearchUnderstandingPresentationFinding
+	): ResearchUnderstandingPresentationContext | null {
+		if (!contextMatchesFinding(context, finding)) return null;
+		const material_scope = readableFindingContextList(context.material_scope);
+		const property_scope = readableFindingContextList(context.property_scope);
+		const process_summary = readableFindingContextText(context.process_summary);
+		const test_summary = readableFindingContextText(context.test_summary);
+		const limitations = readableFindingContextList(context.limitations, 3);
+		const hasSpecificContext = Boolean(process_summary || test_summary || limitations.length);
+		if (isGenericFindingContextLabel(context.label) && !hasSpecificContext) return null;
+		if (
+			!material_scope.length &&
+			!property_scope.length &&
+			!process_summary &&
+			!test_summary &&
+			!limitations.length
+		) {
+			return null;
+		}
+		return {
+			...context,
+			label: compactText(context.label || 'Context', 80),
+			material_scope,
+			property_scope,
+			process_summary,
+			test_summary,
+			limitations
+		};
+	}
+
+	function findingContextScore(
+		original: ResearchUnderstandingPresentationContext,
+		context: ResearchUnderstandingPresentationContext
+	) {
+		let score = isGenericFindingContextLabel(original.label) ? -2 : 5;
+		if (context.process_summary) score += 3;
+		if (context.test_summary) score += 2;
+		if (context.material_scope.length) score += 1;
+		if (context.property_scope.length) score += 1;
+		if (context.limitations.length) score += 1;
+		if (isNoisyFindingContextText(original.process_summary)) score -= 1;
+		if (isNoisyFindingContextText(original.test_summary)) score -= 1;
+		return score;
+	}
+
+	function compactFindingContextDisplay(
+		contexts: ResearchUnderstandingPresentationContext[],
+		finding: ResearchUnderstandingPresentationFinding
+	) {
+		return contexts
+			.map((context, index) => {
+				const compacted = compactFindingContext(context, finding);
+				if (!compacted) return null;
+				return {
+					context: compacted,
+					index,
+					score: findingContextScore(context, compacted)
+				};
+			})
+			.filter(
+				(
+					item
+				): item is {
+					context: ResearchUnderstandingPresentationContext;
+					index: number;
+					score: number;
+				} => Boolean(item)
+			)
+			.sort((left, right) => right.score - left.score || left.index - right.index)
+			.slice(0, FINDING_CONTEXT_DISPLAY_LIMIT)
+			.sort((left, right) => left.index - right.index)
+			.map((item) => item.context);
+	}
+
+	function contextCurationMeta(context: ResearchUnderstandingPresentationContext) {
+		return [
+			listLabel(context.material_scope),
+			listLabel(context.property_scope),
+			context.process_summary,
+			context.test_summary
+		]
+			.filter((value) => value && value !== $t('research.emptyValue'))
+			.join(' · ');
 	}
 
 	function scopeId(currentUnderstanding: ResearchUnderstanding | null) {
@@ -432,13 +2799,595 @@
 		);
 	}
 
+	function datasetFilters() {
+		if (!understanding || !selectedScopeId) return null;
+		return {
+			scope_type: understanding.scope.scope_type,
+			scope_id: selectedScopeId
+		};
+	}
+
+	function trainingDatasetDownloadUrl() {
+		const filters = datasetFilters();
+		if (!collectionId || !filters) return '';
+		return researchUnderstandingDatasetUrl(
+			collectionId,
+			{ ...filters, dataset_use_status: 'training_ready' },
+			'training_jsonl'
+		);
+	}
+
+	function findingIsExpertReady(finding: ResearchUnderstandingPresentationFinding) {
+		return (
+			finding.support_grade === 'strong' &&
+			finding.review_status !== 'needs_review' &&
+			finding.review_status !== 'pending_review' &&
+			finding.paper_count > 1 &&
+			findingDirectEvidenceCount(finding) > 0
+		);
+	}
+
+	function findingIsReviewCandidate(finding: ResearchUnderstandingPresentationFinding) {
+		return finding.expert_use_status === 'review_candidate';
+	}
+
+	function expertReadinessSummary(
+		findings: ResearchUnderstandingPresentationFinding[],
+		reviewQueueCandidates: number,
+		trainingReady: number,
+		reviewCandidateSamples: number
+	) {
+		const total = findings.length;
+		const strong = findings.filter((finding) => finding.support_grade === 'strong').length;
+		const partial = findings.filter((finding) => finding.support_grade === 'partial').length;
+		const weakOrConflict = findings.filter((finding) =>
+			['weak', 'conflict', 'insufficient'].includes(finding.support_grade)
+		).length;
+		const singlePaper = findings.filter((finding) => finding.paper_count <= 1).length;
+		const missingDirect = findings.filter((finding) => findingDirectEvidenceCount(finding) === 0).length;
+		const paperLevelFindings = findings.filter(
+			(finding) => finding.expert_use_status === 'paper_level_finding'
+		).length;
+		const readyFindings = findings.filter(findingIsExpertReady).length;
+		const status =
+			total === 0 && reviewQueueCandidates > 0
+				? 'review'
+				: total === 0
+					? 'empty'
+				: readyFindings === total
+					? 'ready'
+					: trainingReady > 0 && reviewCandidateSamples === 0
+						? 'training_ready'
+						: trainingReady > 0
+						? 'mixed'
+						: 'review';
+		return {
+			status,
+			total,
+			strong,
+			partial,
+			weakOrConflict,
+			singlePaper,
+			missingDirect,
+			paperLevelFindings,
+			reviewCandidates: reviewQueueCandidates,
+			readyFindings,
+			trainingReady,
+			reviewCandidateSamples
+		};
+	}
+
+	function expertSummaryTitle(summary: ReturnType<typeof expertReadinessSummary>) {
+		if (summary.status === 'ready') return $t('research.understanding.expertSummaryReady');
+		if (summary.status === 'training_ready') {
+			return $t('research.understanding.expertSummaryTrainingReady');
+		}
+		if (summary.status === 'mixed') return $t('research.understanding.expertSummaryMixed');
+		if (summary.paperLevelFindings > 0) {
+			return $t('research.understanding.expertSummaryPaperLevel');
+		}
+		if (summary.status === 'review') return $t('research.understanding.expertSummaryReviewOnly');
+		return $t('research.understanding.expertSummaryEmpty');
+	}
+
+	function headingStatusLabel(
+		currentUnderstanding: ResearchUnderstanding,
+		summary: ReturnType<typeof expertReadinessSummary> | null
+	) {
+		if (summary) return expertSummaryTitle(summary);
+		return stateLabel(currentUnderstanding.state);
+	}
+
+	function expertSummaryBody(summary: ReturnType<typeof expertReadinessSummary>) {
+		if (summary.status === 'ready') {
+			return $t('research.understanding.expertSummaryReadyBody', {
+				count: summary.readyFindings
+			});
+		}
+		if (summary.status === 'training_ready') {
+			return $t('research.understanding.expertSummaryTrainingReadyBody', {
+				count: summary.trainingReady
+			});
+		}
+		if (summary.trainingReady > 0) {
+			return $t('research.understanding.expertSummaryMixedBody', {
+				training: summary.trainingReady,
+				review: summary.reviewCandidateSamples
+			});
+		}
+		if (summary.paperLevelFindings > 0) {
+			return $t('research.understanding.expertSummaryPaperLevelBody', {
+				count: summary.paperLevelFindings
+			});
+		}
+		return $t('research.understanding.expertSummaryReviewOnlyBody', {
+			count: summary.reviewCandidates
+		});
+	}
+
+	function expertSummaryGaps(summary: ReturnType<typeof expertReadinessSummary>) {
+		const gaps: string[] = [];
+		if (summary.singlePaper) {
+			gaps.push($t('research.understanding.expertGapSinglePaper', { count: summary.singlePaper }));
+		}
+		if (summary.partial) {
+			gaps.push($t('research.understanding.expertGapPartial', { count: summary.partial }));
+		}
+		if (summary.weakOrConflict) {
+			gaps.push($t('research.understanding.expertGapWeakOrConflict', { count: summary.weakOrConflict }));
+		}
+		if (summary.missingDirect) {
+			gaps.push($t('research.understanding.expertGapMissingDirect', { count: summary.missingDirect }));
+		}
+		if (summary.reviewCandidates) {
+			gaps.push(
+				$t('research.understanding.expertGapReviewQueue', {
+					count: summary.reviewCandidates
+				})
+			);
+		}
+		if (!gaps.length) gaps.push($t('research.understanding.expertGapNone'));
+		return gaps;
+	}
+
+	function reviewLoopStatusValue(
+		summary: ReturnType<typeof expertReadinessSummary>,
+		isDatasetLoading: boolean,
+		hasDatasetSummary: boolean,
+		hasReviewer: boolean,
+		trainingReady: number,
+		trainingMessages: number,
+		protocolReady: number,
+		reviewCandidates: number
+	) {
+		if (isDatasetLoading) return 'loading';
+		if (!summary.total && !summary.reviewCandidates) return 'empty';
+		if (!hasDatasetSummary) return 'dataset_unavailable';
+		if (!hasReviewer) return 'needs_reviewer';
+		if (reviewCandidates > 0 && trainingReady === 0) return 'needs_review';
+		if (reviewCandidates > 0) return 'continue_review';
+		if (protocolReady > 0) return 'export_ready';
+		if (trainingMessages > 0) return 'protocol_inputs_pending';
+		if (trainingReady > 0) return 'messages_pending';
+		return 'needs_review';
+	}
+
+	function reviewLoopTitle(status: string) {
+		return translatedCatalogLabel('research.understanding.reviewLoopStatuses', status);
+	}
+
+	function reviewLoopBody(
+		status: string,
+		trainingReady: number,
+		trainingMessages: number,
+		protocolReady: number,
+		reviewCandidates: number
+	) {
+		return $t(`research.understanding.reviewLoopBodies.${status}`, {
+			training: trainingReady,
+			messages: trainingMessages,
+			protocol: protocolReady,
+			review: reviewCandidates
+		});
+	}
+
+	function reviewLoopStepItems(
+		summary: ReturnType<typeof expertReadinessSummary>,
+		hasReviewer: boolean,
+		trainingReady: number,
+		trainingMessages: number,
+		protocolReady: number,
+		reviewCandidates: number
+	) {
+		const steps: string[] = [];
+		if (!hasReviewer) {
+			steps.push($t('research.understanding.reviewLoopStepLogin'));
+		}
+		if (summary.missingDirect) {
+			steps.push(
+				$t('research.understanding.reviewLoopStepEvidence', {
+					count: summary.missingDirect
+				})
+			);
+		}
+		if (reviewCandidates) {
+			steps.push(
+				$t('research.understanding.reviewLoopStepReview', {
+					count: reviewCandidates
+				})
+			);
+		}
+		if (trainingReady && trainingMessages < trainingReady) {
+			steps.push(
+				$t('research.understanding.reviewLoopStepMessages', {
+					training: trainingReady,
+					messages: trainingMessages
+				})
+			);
+		}
+		if (trainingMessages && protocolReady === 0) {
+			steps.push(
+				$t('research.understanding.reviewLoopStepProtocolInputs', {
+					messages: trainingMessages,
+					protocol: protocolReady
+				})
+			);
+		}
+		if (protocolReady) {
+			steps.push(
+				$t('research.understanding.reviewLoopStepExport', {
+					count: protocolReady
+				})
+			);
+		}
+		if (!steps.length) steps.push($t('research.understanding.reviewLoopStepDone'));
+		return steps;
+	}
+
+	function reviewLoopChecklistItems(
+		hasReviewer: boolean,
+		hasDatasetSummary: boolean,
+		trainingReady: number,
+		trainingMessages: number,
+		protocolReady: number,
+		reviewCandidates: number,
+		findingCount: number,
+		missingDirectEvidenceCount: number
+	) {
+		const hasReadableFindings = findingCount > 0;
+		const hasEvidence = missingDirectEvidenceCount === 0 && findingCount > 0;
+		const reviewComplete = hasDatasetSummary && reviewCandidates === 0 && trainingReady > 0;
+		const messagesReady = trainingMessages > 0 && trainingMessages >= trainingReady;
+		const protocolInputsReady = protocolReady > 0;
+		return [
+			{
+				key: 'findings',
+				status: hasReadableFindings ? 'done' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistFindings'),
+				detail: hasReadableFindings
+					? $t('research.understanding.reviewLoopChecklistFindingsDone', {
+							count: findingCount
+						})
+					: $t('research.understanding.reviewLoopChecklistFindingsBlocked')
+			},
+			{
+				key: 'evidence',
+				status: hasEvidence ? 'done' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistEvidence'),
+				detail: hasEvidence
+					? $t('research.understanding.reviewLoopChecklistEvidenceDone')
+					: $t('research.understanding.reviewLoopChecklistEvidenceBlocked', {
+							count: missingDirectEvidenceCount
+						})
+			},
+			{
+				key: 'review',
+				status: reviewComplete ? 'done' : hasReviewer && hasDatasetSummary ? 'active' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistReview'),
+				detail: reviewComplete
+					? $t('research.understanding.reviewLoopChecklistReviewDone', {
+							count: trainingReady
+						})
+					: $t('research.understanding.reviewLoopChecklistReviewBlocked', {
+							count: reviewCandidates
+						})
+			},
+			{
+				key: 'training',
+				status: messagesReady ? 'done' : trainingReady > 0 ? 'active' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistTraining'),
+				detail: messagesReady
+					? $t('research.understanding.reviewLoopChecklistTrainingDone', {
+							count: trainingMessages
+						})
+					: $t('research.understanding.reviewLoopChecklistTrainingBlocked', {
+							training: trainingReady,
+							messages: trainingMessages
+						})
+			},
+			{
+				key: 'protocol',
+				status: protocolInputsReady ? 'done' : 'blocked',
+				label: $t('research.understanding.reviewLoopChecklistProtocol'),
+				detail: protocolInputsReady
+					? $t('research.understanding.reviewLoopChecklistProtocolDone', {
+							count: protocolReady
+						})
+					: $t('research.understanding.reviewLoopChecklistProtocolBlocked', {
+							protocol: protocolReady
+						})
+			}
+		];
+	}
+
+	function showReviewQueue() {
+		datasetReviewCandidatesOnly = true;
+		reviewQueueOnly = false;
+		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = 'review_candidate';
+		closeClaimDetail();
+	}
+
+	function applyInitialFocus(focus: typeof initialFocus) {
+		if (focus === 'review_queue') {
+			showReviewQueue();
+		} else if (focus === 'training_ready') {
+			showTrainingReady();
+			openDatasetExport();
+		}
+	}
+
+	async function applyInitialFindingFocus(findingId: string) {
+		const finding = allDisplayFindingRows.find((item) => item.finding_id === findingId);
+		if (!finding) return;
+		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = findingDatasetTrust(finding).datasetUseStatus;
+		datasetReviewCandidatesOnly = true;
+		reviewQueueOnly = false;
+		await tick();
+		openFindingDetail(finding.finding_id);
+	}
+
+	function showTrainingReady() {
+		datasetReviewCandidatesOnly = true;
+		reviewQueueOnly = false;
+		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = 'training_ready';
+		closeClaimDetail();
+	}
+
+	function showAllFindings() {
+		datasetReviewCandidatesOnly = false;
+		reviewQueueOnly = false;
+		selectedClaimStatus = 'all';
+		selectedDatasetUseStatus = 'all';
+		closeClaimDetail();
+	}
+
+	function openDatasetExport() {
+		datasetPanelOpen = true;
+		if (currentCollectionDatasetScopeKey && currentCollectionDatasetScopeKey !== collectionDatasetScopeKey) {
+			void loadCollectionDatasetSummary(currentCollectionDatasetScopeKey);
+		}
+		void tick().then(() => reviewImportPanel?.scrollIntoView({ block: 'start' }));
+	}
+
+	function axisCoverageStatusLabel(status: ResearchUnderstandingAxisCoverageItem['status']) {
+		if (status === 'primary') return $t('research.understanding.axisCoveragePrimary');
+		if (status === 'review_queue') return $t('research.understanding.axisCoverageReviewQueue');
+		if (status === 'mechanism') return $t('research.understanding.axisCoverageMechanism');
+		if (status === 'context') return $t('research.understanding.axisCoverageContext');
+		return $t('research.understanding.axisCoverageMissing');
+	}
+
+	function axisCoverageStatusClass(status: ResearchUnderstandingAxisCoverageItem['status']) {
+		if (status === 'primary') return 'research-understanding-workbench__axis-status--primary';
+		if (status === 'review_queue') {
+			return 'research-understanding-workbench__axis-status--review';
+		}
+		if (status === 'mechanism') {
+			return 'research-understanding-workbench__axis-status--mechanism';
+		}
+		if (status === 'context') {
+			return 'research-understanding-workbench__axis-status--context';
+		}
+		return 'research-understanding-workbench__axis-status--missing';
+	}
+
+	function axisCoverageStatusCount(
+		items: ResearchUnderstandingAxisCoverageItem[],
+		status: ResearchUnderstandingAxisCoverageItem['status']
+	) {
+		return items.filter((item) => item.status === status).length;
+	}
+
+	function axisCoverageTerms(
+		items: ResearchUnderstandingAxisCoverageItem[],
+		statuses: ResearchUnderstandingAxisCoverageItem['status'][]
+	) {
+		const statusSet = new Set(statuses);
+		return items.filter((item) => statusSet.has(item.status)).map((item) => item.axis);
+	}
+
+	function buildAxisCoverageGapGroups(currentAxisCoverage: typeof axisCoverage) {
+		const items = [
+			...currentAxisCoverage.variables.map((item) => ({ ...item, group: 'variables' as const })),
+			...currentAxisCoverage.properties.map((item) => ({ ...item, group: 'properties' as const }))
+		];
+		const missing = axisCoverageTerms(items, ['missing']);
+		const review = axisCoverageTerms(items, ['review_queue']);
+		const contextOnly = axisCoverageTerms(items, ['context', 'mechanism']);
+		return [
+			{
+				key: 'missing',
+				label: $t('research.understanding.coverageMissing'),
+				terms: missing
+			},
+			{
+				key: 'review',
+				label: $t('research.understanding.coverageReviewCandidates'),
+				terms: review
+			},
+			{
+				key: 'context',
+				label: $t('research.understanding.coverageContextOnly'),
+				terms: contextOnly
+			}
+		].filter((group) => group.terms.length);
+	}
+
+	function findingBoundaryLabel(finding: ResearchUnderstandingPresentationFinding) {
+		const variables = finding.variables.map((value) => value.trim()).filter(Boolean);
+		const outcomes = finding.outcomes.map((value) => value.trim()).filter(Boolean);
+		if (variables.length && outcomes.length) return `${variables.join(', ')} -> ${outcomes.join(', ')}`;
+		return finding.title || finding.statement || finding.finding_id;
+	}
+
+	function buildAnswerBoundary(
+		currentAxisCoverage: typeof axisCoverage,
+		currentPrimaryFindings: ResearchUnderstandingPresentationFinding[],
+		_currentFeedbackByTargetId: Map<string, ResearchUnderstandingFeedback[]>,
+		_currentCurationsByTargetId: Map<string, ResearchUnderstandingCuration>
+	) {
+		const variableTotal = currentAxisCoverage.variables.length;
+		const propertyTotal = currentAxisCoverage.properties.length;
+		const variablePrimary = axisCoverageStatusCount(currentAxisCoverage.variables, 'primary');
+		const propertyPrimary = axisCoverageStatusCount(currentAxisCoverage.properties, 'primary');
+		const primaryFindingById = new Map(
+			currentPrimaryFindings.map((finding) => [finding.finding_id, finding])
+		);
+		const primaryCoverageItems = [
+			...currentAxisCoverage.variables,
+			...currentAxisCoverage.properties
+		].filter((item) => item.status === 'primary' && item.finding_id);
+		const coveredPrimaryFindingIds = [
+			...new Set(primaryCoverageItems.map((item) => item.finding_id).filter(Boolean))
+		];
+		const draftFindingLabels: string[] = [];
+		for (const findingId of coveredPrimaryFindingIds) {
+			const finding = primaryFindingById.get(findingId);
+			const trust = finding
+				? findingDatasetTrust(finding, _currentFeedbackByTargetId, _currentCurationsByTargetId)
+				: null;
+			if (
+				finding &&
+				trust?.datasetUseStatus !== 'training_ready' &&
+				!findingIsExpertReady(finding)
+			) {
+				draftFindingLabels.push(findingBoundaryLabel(finding));
+			}
+		}
+		const blockedTerms = axisCoverageTerms(
+			[...currentAxisCoverage.variables, ...currentAxisCoverage.properties],
+			['missing', 'review_queue']
+		);
+		const contextTerms = axisCoverageTerms(
+			[...currentAxisCoverage.variables, ...currentAxisCoverage.properties],
+			['context', 'mechanism']
+		);
+		return {
+			variablePrimary,
+			variableTotal,
+			propertyPrimary,
+			propertyTotal,
+			draftFindingLabels,
+			blockedTerms,
+			contextTerms,
+			status:
+				blockedTerms.length === 0 && variableTotal > 0 && propertyTotal > 0
+					? draftFindingLabels.length === 0
+						? 'expert_ready'
+						: 'draft'
+					: 'limited'
+		};
+	}
+
+	function openAxisCoverageFinding(item: ResearchUnderstandingAxisCoverageItem) {
+		if (!item.finding_id) return;
+		openFindingDetail(item.finding_id);
+	}
+
+	function findingDecision(finding: ResearchUnderstandingPresentationFinding) {
+		if (findingIsExpertReady(finding)) {
+			return {
+				title: $t('research.understanding.findingDecisionReady'),
+				body: $t('research.understanding.findingDecisionReadyBody')
+			};
+		}
+		if (findingDirectEvidenceCount(finding) === 0) {
+			return {
+				title: $t('research.understanding.findingDecisionDoNotUse'),
+				body: $t('research.understanding.findingDecisionMissingDirectBody')
+			};
+		}
+		if (finding.paper_count <= 1) {
+			return {
+				title: $t('research.understanding.findingDecisionPaperLevel'),
+				body: $t('research.understanding.findingDecisionSinglePaperBody')
+			};
+		}
+		return {
+			title: $t('research.understanding.findingDecisionNeedsReview'),
+			body: $t('research.understanding.findingDecisionNeedsReviewBody')
+		};
+	}
+
 	function resetCurationForm() {
 		const curation = selectedCuration;
 		curationClaimType = curation?.curated_claim_type ?? selectedClaim?.claim_type ?? 'finding';
-		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'limited';
-		curationStatement = curation?.curated_statement ?? selectedClaim?.statement ?? '';
+		curationStatus = curation?.curated_status ?? selectedClaim?.status ?? 'supported';
+		curationSupportGrade = curation?.curated_support_grade ?? selectedFinding?.support_grade ?? 'partial';
+		curationStatement =
+			curation?.curated_statement ?? selectedFinding?.statement ?? selectedClaim?.statement ?? '';
+		curationVariables = listEditorValue(curation?.curated_variables ?? selectedFinding?.variables ?? []);
+		curationMediators = listEditorValue(curation?.curated_mediators ?? selectedFinding?.mediators ?? []);
+		curationOutcomes = listEditorValue(curation?.curated_outcomes ?? selectedFinding?.outcomes ?? []);
+		curationDirection = curation?.curated_direction ?? selectedFinding?.direction ?? '';
+		curationScopeSummary = curation?.curated_scope_summary ?? selectedFinding?.scope_summary ?? '';
+		curationEvidenceRefIds = [
+			...(curation?.curated_evidence_ref_ids ??
+				selectedFinding?.evidence_ref_ids ??
+				selectedClaim?.evidence_ref_ids ??
+				[])
+		];
+		curationContextIds = [
+			...(curation?.curated_context_ids ??
+				selectedFinding?.context_ids ??
+				selectedClaim?.context_ids ??
+				[])
+		];
 		curationNote = curation?.note ?? '';
-		curationReviewer = curation?.reviewer ?? '';
+	}
+
+	function listEditorValue(values: string[]) {
+		return values.map((value) => value.trim()).filter(Boolean).join(', ');
+	}
+
+	function listEditorItems(value: string) {
+		return [
+			...new Set(
+				value
+					.split(',')
+					.map((item) => item.trim())
+					.filter(Boolean)
+			)
+		];
+	}
+
+	function toggleCurationEvidence(evidenceId: string) {
+		curationEvidenceRefIds = curationEvidenceRefIds.includes(evidenceId)
+			? curationEvidenceRefIds.filter((id) => id !== evidenceId)
+			: [...curationEvidenceRefIds, evidenceId];
+	}
+
+	function toggleCurationContext(contextId: string) {
+		curationContextIds = curationContextIds.includes(contextId)
+			? curationContextIds.filter((id) => id !== contextId)
+			: [...curationContextIds, contextId];
+	}
+
+	function reviewTargetKey(record: ResearchUnderstandingFeedback | ResearchUnderstandingCuration) {
+		return record.finding_id || record.claim_id || '';
 	}
 
 	async function loadCurationsForScope(scopeKey: string) {
@@ -450,7 +3399,16 @@
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId
 			});
-			curationsByClaimId = new Map(curations.map((curation) => [curation.claim_id, curation]));
+			curationsByTargetId = new Map(
+				curations
+					.map(
+						(curation): [string, ResearchUnderstandingCuration] => [
+							reviewTargetKey(curation),
+							curation
+						]
+					)
+					.filter(([id]) => Boolean(id))
+			);
 			resetCurationForm();
 		} catch (error) {
 			curationLoadError = error instanceof Error ? error.message : $t('error.unexpected');
@@ -468,16 +3426,391 @@
 			});
 			const next = new Map<string, ResearchUnderstandingFeedback[]>();
 			for (const item of feedback) {
-				next.set(item.claim_id, [...(next.get(item.claim_id) ?? []), item]);
+				const targetId = reviewTargetKey(item);
+				if (!targetId) continue;
+				next.set(targetId, [...(next.get(targetId) ?? []), item]);
 			}
-			feedbackByClaimId = next;
+			feedbackByTargetId = next;
 		} catch (error) {
 			feedbackLoadError = error instanceof Error ? error.message : $t('error.unexpected');
 		}
 	}
 
-	async function submitClaimFeedback() {
-		if (!understanding || !selectedClaim || !collectionId || !selectedScopeId) return;
+	async function loadDatasetSummary(scopeKey: string, force = false) {
+		const filters = datasetFilters();
+		if (!understanding || !collectionId || !filters) return null;
+		if (force) {
+			datasetScopeKey = '';
+		}
+		datasetScopeKey = scopeKey;
+		const requestSequence = ++datasetRequestSequence;
+		datasetLoading = true;
+		datasetError = '';
+		try {
+			const nextDatasetSummary = await fetchResearchUnderstandingDataset(collectionId, filters);
+			if (requestSequence === datasetRequestSequence) {
+				datasetSummary = nextDatasetSummary;
+			}
+			return nextDatasetSummary;
+		} catch (error) {
+			if (requestSequence === datasetRequestSequence) {
+				datasetSummary = null;
+				datasetError = isHttpStatusError(error, 404)
+					? ''
+					: error instanceof Error
+						? error.message
+						: $t('error.unexpected');
+			}
+			return null;
+		} finally {
+			if (requestSequence === datasetRequestSequence) {
+				datasetLoading = false;
+			}
+		}
+	}
+
+	async function loadCollectionDatasetSummary(scopeKey: string, force = false) {
+		if (!collectionId || understanding?.scope.scope_type !== 'goal') return;
+		if (force) {
+			collectionDatasetScopeKey = '';
+		}
+		collectionDatasetScopeKey = scopeKey;
+		const requestSequence = ++collectionDatasetRequestSequence;
+		collectionDatasetLoading = true;
+		collectionDatasetError = '';
+		try {
+			const nextDatasetSummary = await fetchResearchUnderstandingCollectionDataset(collectionId, {
+				scope_type: 'goal'
+			});
+			if (requestSequence === collectionDatasetRequestSequence) {
+				collectionDatasetSummary = nextDatasetSummary;
+			}
+		} catch (error) {
+			if (requestSequence === collectionDatasetRequestSequence) {
+				collectionDatasetSummary = null;
+				collectionDatasetError = isHttpStatusError(error, 404)
+					? $t('research.understanding.collectionDatasetRouteUnavailable')
+					: error instanceof Error
+						? error.message
+						: $t('error.unexpected');
+			}
+		} finally {
+			if (requestSequence === collectionDatasetRequestSequence) {
+				collectionDatasetLoading = false;
+			}
+		}
+	}
+
+	async function refreshDatasetSummaryForCurrentScope() {
+		if (!currentDatasetScopeKey) return null;
+		const refreshed = await loadDatasetSummary(currentDatasetScopeKey, true);
+		if (datasetPanelOpen && currentCollectionDatasetScopeKey) {
+			await loadCollectionDatasetSummary(currentCollectionDatasetScopeKey, true);
+		}
+		return refreshed;
+	}
+
+	function reviewSaveMessage(kind: 'feedback' | 'curation', id: string, dataset: ResearchUnderstandingDataset | null) {
+		const fallbackKey =
+			kind === 'feedback'
+				? 'research.understanding.feedbackSaved'
+				: 'research.understanding.curationSaved';
+		const saved = $t(fallbackKey, { id });
+		if (!dataset) {
+			return saved;
+		}
+		return `${saved}. ${$t('research.understanding.reviewSaveDatasetStatus', {
+			id,
+			training: dataset.quality_summary.training_ready_sample_count,
+			messages: dataset.quality_summary.training_message_sample_count,
+			protocol: dataset.quality_summary.protocol_ready_sample_count,
+			review: dataset.quality_summary.review_candidate_sample_count
+		})}`;
+	}
+
+	function handleDatasetToggle(event: Event) {
+		const details = event.currentTarget as HTMLDetailsElement | null;
+		datasetPanelOpen = details?.open ?? false;
+		if (
+			datasetPanelOpen &&
+			currentCollectionDatasetScopeKey &&
+			currentCollectionDatasetScopeKey !== collectionDatasetScopeKey
+		) {
+			void loadCollectionDatasetSummary(currentCollectionDatasetScopeKey);
+		}
+	}
+
+	function parseReviewImportRows(text: string): Record<string, unknown>[] {
+		const rows: Record<string, unknown>[] = [];
+		for (const [index, line] of text.split(/\r?\n/).entries()) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+			try {
+				const parsed = JSON.parse(trimmed);
+				if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+					throw new Error($t('research.understanding.reviewImportInvalidRow'));
+				}
+				rows.push(parsed as Record<string, unknown>);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : $t('error.unexpected');
+				throw new Error(
+					$t('research.understanding.reviewImportParseError', {
+						line: index + 1,
+						message
+					})
+				);
+			}
+		}
+		return rows;
+	}
+
+	function reviewImportLooksLikeDecisionBoardTsv(text: string) {
+		const firstLine = text
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.find(Boolean);
+		return Boolean(
+			firstLine &&
+				!firstLine.startsWith('{') &&
+				firstLine.includes('\t') &&
+				firstLine.split('\t').includes('expert_action')
+		);
+	}
+
+	function reviewImportContainsAgentDraftOnly(rows: Record<string, unknown>[]) {
+		return (
+			rows.some((row) => Boolean(row.agent_review)) &&
+			rows.every((row) => {
+				if (String(row.action ?? '').trim().toLowerCase() !== 'skip') return false;
+				const agentReview = objectValue(row.agent_review);
+				return !agentReview || agentReview.human_confirmed !== true;
+			})
+		);
+	}
+
+	function objectValue(value: unknown): Record<string, unknown> | null {
+		return value && typeof value === 'object' && !Array.isArray(value)
+			? (value as Record<string, unknown>)
+			: null;
+	}
+
+	function reviewImportProgressText(summary: ResearchUnderstandingReviewDecisionImportResponse) {
+		const progress = summary.review_progress;
+		return $t('research.understanding.reviewImportProgress', {
+			actionable: Number(progress.actionable_count ?? 0),
+			skipped: Number(progress.skipped_count ?? 0),
+			written: summary.written_count
+		});
+	}
+
+	function reviewImportIssueText(record: Record<string, unknown>) {
+		const parts = [
+			record.line ? `line ${record.line}` : '',
+			typeof record.action === 'string' ? record.action : '',
+			typeof record.message === 'string' ? record.message : ''
+		].filter(Boolean);
+		return parts.length ? parts.join(' · ') : JSON.stringify(record);
+	}
+
+	function reviewImportGoalProgressText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportGoalProgress', {
+			actionable: Number(record.actionable_count ?? 0),
+			skipped: Number(record.skipped_count ?? 0),
+			accept: Number(record.accept_count ?? 0),
+			reject: Number(record.reject_count ?? 0),
+			correct: Number(record.correct_count ?? 0)
+		});
+	}
+
+	function reviewImportAffectedGoalReadinessText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedGoalReadiness', {
+			training: Number(record.training_ready_count ?? 0),
+			messages: Number(record.training_message_count ?? 0),
+			protocol: Number(record.protocol_ready_count ?? 0),
+			review: Number(record.review_candidate_count ?? 0),
+			rejected: Number(record.rejected_count ?? 0)
+		});
+	}
+
+	function reviewImportAffectedGoalPendingText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedGoalPending', {
+			actionable: Number(record.pending_actionable_count ?? 0),
+			accept: Number(record.pending_accept_count ?? 0),
+			reject: Number(record.pending_reject_count ?? 0),
+			correct: Number(record.pending_correct_count ?? 0)
+		});
+	}
+
+	function reviewImportAffectedGoalProjectedText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedGoalProjected', {
+			training: Number(record.projected_training_ready_count ?? record.training_ready_count ?? 0),
+			review: Number(record.projected_review_candidate_count ?? record.review_candidate_count ?? 0),
+			rejected: Number(record.projected_rejected_count ?? record.rejected_count ?? 0)
+		});
+	}
+
+	function reviewImportHasReadinessSummary(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		return Object.keys(summary.readiness_summary ?? {}).length > 0;
+	}
+
+	function reviewImportReadinessCountsText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.readiness_summary;
+		return $t('research.understanding.reviewImportReadinessCounts', {
+			goals: Number(record.goal_count ?? 0),
+			training: Number(record.projected_training_ready_goal_count ?? 0),
+			messages: Number(record.projected_training_message_goal_count ?? 0),
+			protocol: Number(record.projected_protocol_ready_goal_count ?? 0),
+			review: Number(record.projected_review_candidate_count ?? 0),
+			rejected: Number(record.projected_rejected_count ?? 0)
+		});
+	}
+
+	function reviewImportReadinessGateText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.readiness_summary;
+		return $t('research.understanding.reviewImportReadinessGates', {
+			trainingStatus: record.ready_for_training_export
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady'),
+			protocolStatus: record.ready_for_protocol_drafting
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady')
+		});
+	}
+
+	function reviewImportHasScopeGate(summary: ResearchUnderstandingReviewDecisionImportResponse) {
+		return Object.keys(summary.review_scope_gate ?? {}).length > 0;
+	}
+
+	function reviewImportScopeGateStatusText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.review_scope_gate;
+		const ready = Boolean(record.ready_for_expert_satisfaction_gate);
+		return $t('research.understanding.reviewImportScopeGateStatus', {
+			status: ready
+				? $t('research.understanding.reviewImportScopeGateReady')
+				: $t('research.understanding.reviewImportScopeGateBlocked')
+		});
+	}
+
+	function reviewImportScopeGateCountsText(
+		summary: ResearchUnderstandingReviewDecisionImportResponse
+	) {
+		const record = summary.review_scope_gate;
+		return $t('research.understanding.reviewImportScopeGateCounts', {
+			actionable: Number(record.actionable_count ?? 0),
+			skipped: Number(record.skipped_count ?? 0),
+			trainingStatus: record.ready_for_training_export
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady'),
+			protocolStatus: record.ready_for_protocol_drafting
+				? $t('research.understanding.reviewImportReady')
+				: $t('research.understanding.reviewImportNotReady')
+		});
+	}
+
+	function reviewImportScopeGateReasonLabel(reason: string) {
+		switch (reason) {
+			case 'no_actionable_decisions':
+				return $t('research.understanding.reviewImportScopeGateReasonNoActionable');
+			case 'unchecked_rows_remain':
+				return $t('research.understanding.reviewImportScopeGateReasonUncheckedRows');
+			case 'review_candidates_remain':
+				return $t('research.understanding.reviewImportScopeGateReasonReviewCandidates');
+			case 'training_export_not_ready':
+				return $t('research.understanding.reviewImportScopeGateReasonTraining');
+			case 'protocol_drafting_not_ready':
+				return $t('research.understanding.reviewImportScopeGateReasonProtocol');
+			default:
+				return humanizeCode(reason);
+		}
+	}
+
+	function reviewImportScopeGateReasons(summary: ResearchUnderstandingReviewDecisionImportResponse) {
+		const reasons = summary.review_scope_gate.blocking_reasons;
+		return Array.isArray(reasons)
+			? reasons
+					.filter((reason): reason is string => typeof reason === 'string' && reason.length > 0)
+					.map((reason) => reviewImportScopeGateReasonLabel(reason))
+			: [];
+	}
+
+	function reviewImportGoalLabel(record: Record<string, unknown>) {
+		return typeof record.goal_id === 'string' && record.goal_id
+			? formatShortIdentifier(record.goal_id)
+			: $t('research.understanding.reviewImportUnknownGoal');
+	}
+
+	function reviewImportNextFindingLabel(record: Record<string, unknown>) {
+		const finding = reviewImportNextFinding(record);
+		if (finding) return finding.statement || finding.title;
+		const findingId = reviewImportNextFindingId(record);
+		return findingId ? formatShortIdentifier(findingId) : '';
+	}
+
+	function reviewImportNextFindingId(record: Record<string, unknown>) {
+		return typeof record.next_review_finding_id === 'string'
+			? record.next_review_finding_id
+			: '';
+	}
+
+	function reviewImportNextFinding(record: Record<string, unknown>) {
+		const findingId = reviewImportNextFindingId(record);
+		return allDisplayFindingRows.find((finding) => finding.finding_id === findingId) ?? null;
+	}
+
+	async function submitReviewImport(dryRun: boolean) {
+		if (!collectionId || !reviewerReady) return;
+		reviewImportSubmitting = true;
+		reviewImportMode = dryRun ? 'dry_run' : 'import';
+		reviewImportMessage = '';
+		reviewImportError = '';
+		reviewImportSummary = null;
+		try {
+			const isDecisionBoardTsv = reviewImportLooksLikeDecisionBoardTsv(reviewImportText);
+			const rows = isDecisionBoardTsv ? [] : parseReviewImportRows(reviewImportText);
+			if (!isDecisionBoardTsv && !rows.length) {
+				throw new Error($t('research.understanding.reviewImportEmpty'));
+			}
+			if (!isDecisionBoardTsv && reviewImportContainsAgentDraftOnly(rows)) {
+				throw new Error($t('research.understanding.reviewImportAgentDraftOnly'));
+			}
+			const summary = await importResearchUnderstandingReviewDecisions(collectionId, {
+				...(isDecisionBoardTsv ? { decision_board_tsv: reviewImportText } : { rows }),
+				reviewer: currentReviewer,
+				dry_run: dryRun,
+				fail_on_warnings: dryRun
+			});
+			reviewImportSummary = summary;
+			if (!dryRun && summary.written_count > 0) {
+				await refreshDatasetSummaryForCurrentScope();
+				if (curationScopeKey) {
+					await loadFeedbackForScope(curationScopeKey);
+					await loadCurationsForScope(curationScopeKey);
+				}
+			}
+			reviewImportMessage = reviewImportProgressText(summary);
+		} catch (error) {
+			reviewImportError = error instanceof Error ? error.message : $t('error.unexpected');
+		} finally {
+			reviewImportSubmitting = false;
+		}
+	}
+
+	async function submitClaimFeedback(options: { openNext?: boolean } = {}) {
+		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
+		if (!reviewerReady) return;
+		if (feedbackNoteMissing) {
+			feedbackError = $t('research.understanding.feedbackNoteRequiredError');
+			return;
+		}
+		const currentFindingId = selectedFinding?.finding_id ?? '';
 		feedbackSubmitting = true;
 		feedbackMessage = '';
 		feedbackError = '';
@@ -485,20 +3818,31 @@
 			const feedback = await createResearchUnderstandingFeedback(collectionId, {
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId,
-				claim_id: selectedClaim.claim_id,
+				finding_id: selectedReviewTargetId,
+				claim_id: selectedClaim?.claim_id ?? selectedFinding?.claim_id ?? null,
 				review_status: feedbackStatus,
 				issue_type: feedbackIssue,
-				note: feedbackNote.trim() || null,
-				reviewer: feedbackReviewer.trim() || null
+				note: feedbackNote.trim() || null
 			});
-			feedbackMessage = $t('research.understanding.feedbackSaved', {
-				id: formatShortIdentifier(feedback.feedback_id)
-			});
-			feedbackByClaimId = new Map(feedbackByClaimId).set(feedback.claim_id, [
+			const targetId = reviewTargetKey(feedback);
+			const nextFeedbackByTargetId = new Map(feedbackByTargetId).set(targetId, [
 				feedback,
-				...(feedbackByClaimId.get(feedback.claim_id) ?? [])
+				...(feedbackByTargetId.get(targetId) ?? [])
 			]);
+			feedbackByTargetId = nextFeedbackByTargetId;
 			feedbackNote = '';
+			if (options.openNext && currentFindingId) {
+				const nextFinding = nextReviewCandidateAfter(currentFindingId, nextFeedbackByTargetId);
+				if (nextFinding) {
+					openFindingDetail(nextFinding.finding_id);
+				}
+			}
+			const refreshed = await refreshDatasetSummaryForCurrentScope();
+			feedbackMessage = reviewSaveMessage(
+				'feedback',
+				formatShortIdentifier(feedback.feedback_id),
+				refreshed
+			);
 		} catch (error) {
 			feedbackError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
@@ -506,8 +3850,10 @@
 		}
 	}
 
-	async function submitClaimCuration() {
-		if (!understanding || !selectedClaim || !collectionId || !selectedScopeId) return;
+	async function submitClaimCuration(options: { openNext?: boolean } = {}) {
+		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
+		if (!curationStatement.trim() || !reviewerReady) return;
+		const currentFindingId = selectedFinding?.finding_id ?? '';
 		curationSubmitting = true;
 		curationMessage = '';
 		curationError = '';
@@ -515,19 +3861,43 @@
 			const curation = await createResearchUnderstandingCuration(collectionId, {
 				scope_type: understanding.scope.scope_type,
 				scope_id: selectedScopeId,
-				claim_id: selectedClaim.claim_id,
+				finding_id: selectedReviewTargetId,
+				claim_id: selectedClaim?.claim_id ?? selectedFinding?.claim_id ?? null,
 				curated_claim_type: curationClaimType,
 				curated_status: curationStatus,
 				curated_statement: curationStatement.trim(),
-				curated_evidence_ref_ids: selectedClaim.evidence_ref_ids,
-				curated_context_ids: selectedClaim.context_ids,
-				note: curationNote.trim() || null,
-				reviewer: curationReviewer.trim() || null
+				curated_support_grade: curationSupportGrade || null,
+				curated_review_status: 'accepted',
+				curated_variables: listEditorItems(curationVariables),
+				curated_mediators: listEditorItems(curationMediators),
+				curated_outcomes: listEditorItems(curationOutcomes),
+				curated_direction: curationDirection.trim() || null,
+				curated_scope_summary: curationScopeSummary.trim() || null,
+				curated_evidence_ref_ids: curationEvidenceRefIds,
+				curated_context_ids: curationContextIds,
+				note: curationNote.trim() || null
 			});
-			curationMessage = $t('research.understanding.curationSaved', {
-				id: formatShortIdentifier(curation.curation_id)
-			});
-			curationsByClaimId = new Map(curationsByClaimId).set(curation.claim_id, curation);
+			const nextCurationsByTargetId = new Map(curationsByTargetId).set(
+				reviewTargetKey(curation),
+				curation
+			);
+			curationsByTargetId = nextCurationsByTargetId;
+			if (options.openNext && currentFindingId) {
+				const nextFinding = nextReviewCandidateAfter(
+					currentFindingId,
+					feedbackByTargetId,
+					nextCurationsByTargetId
+				);
+				if (nextFinding) {
+					openFindingDetail(nextFinding.finding_id);
+				}
+			}
+			const refreshed = await refreshDatasetSummaryForCurrentScope();
+			curationMessage = reviewSaveMessage(
+				'curation',
+				formatShortIdentifier(curation.curation_id),
+				refreshed
+			);
 		} catch (error) {
 			curationError = error instanceof Error ? error.message : $t('error.unexpected');
 		} finally {
@@ -543,72 +3913,633 @@
 			<p>{$t(bodyKey)}</p>
 		</div>
 		{#if understanding}
-			<span>{stateLabel(understanding.state)}</span>
+			<span>{headingStatusLabel(understanding, expertSummary)}</span>
 		{/if}
 	</div>
 
 	{#if understanding}
-		<div
-			class="research-understanding-workbench__summary"
-			aria-label={$t('research.understanding.summary')}
-		>
-			<div>
-				<strong>{presentationSummary?.claim_count ?? understanding.summary.claim_count}</strong>
-				<span>{$t('research.understanding.claims')}</span>
-			</div>
-			<div>
-				<strong>{presentationSummary?.relation_count ?? understanding.summary.relation_count}</strong>
-				<span>{$t('research.understanding.relationsLabel')}</span>
-			</div>
-			<div>
-				<strong>{presentationSummary?.evidence_count ?? understanding.summary.evidence_ref_count}</strong>
-				<span>{$t('research.understanding.evidenceRefs')}</span>
-			</div>
-			<div>
-				<strong>{presentationSummary?.review_queue_count ?? reviewQueueClaimIds.size}</strong>
-				<span>{$t('research.understanding.reviewQueue')}</span>
-			</div>
-		</div>
+		{#if usesFindings || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
 
-		{#if effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
-			{#if effectRows.length}
+			{#if !detailMode}
+				<section
+					class="research-understanding-workbench__column research-understanding-workbench__column--list"
+					aria-label={$t('research.understanding.findingsWorkspace')}
+				>
+					<div class="research-understanding-workbench__column-heading">
+						<h4>{$t('research.understanding.findingsWorkspace')}</h4>
+						{#if usesFindings}
+							<span>
+								{$t('research.understanding.filteredClaimCount', {
+									shown: visibleFindingRows.length,
+									total: findingRows.length
+								})}
+							</span>
+						{/if}
+					</div>
+					{#if usesFindings}
+						{#if visibleFindingRows.length}
+							<div
+								class="research-understanding-workbench__table-wrap"
+								aria-label={$t('research.understanding.findingsTable')}
+							>
+								<table class="research-understanding-workbench__findings-table">
+									<thead>
+										<tr>
+											<th scope="col">{$t('research.understanding.findingColumn')}</th>
+											<th scope="col">{$t('research.understanding.variablesColumn')}</th>
+											<th scope="col">{$t('research.understanding.mechanismColumn')}</th>
+											<th scope="col">{$t('research.understanding.resultColumn')}</th>
+											<th scope="col">{$t('research.understanding.scopeColumn')}</th>
+											<th scope="col">{$t('research.understanding.evidenceGradeColumn')}</th>
+											<th scope="col">{$t('research.understanding.evidenceBasisColumn')}</th>
+											<th scope="col">{$t('research.understanding.datasetTrustColumn')}</th>
+											<th scope="col">{$t('research.understanding.actionsColumn')}</th>
+										</tr>
+									</thead>
+										<tbody>
+											{#each visibleFindingRows as finding (finding.finding_id)}
+												{@const curation = findingCurationFor(
+													finding,
+													alignedCurationsByTargetId
+												)}
+												{@const displayFinding = findingForDisplay(finding, curation)}
+												{@const findingFeedback = findingFeedbackFor(
+													finding,
+													alignedFeedbackByTargetId
+												)}
+												{@const usagePreview = findingUsagePreview(displayFinding)}
+												{@const trust = findingDatasetTrust(
+													finding,
+													alignedFeedbackByTargetId,
+													alignedCurationsByTargetId,
+													datasetSummary
+												)}
+												<tr>
+													<td class="research-understanding-workbench__finding-main">
+														<button
+															type="button"
+															on:click={() => openFindingDetail(finding.finding_id)}
+														>
+															<strong id={findingSummaryId(displayFinding)}>
+																{displayFinding.statement || displayFinding.title}
+															</strong>
+															{#if displayFinding.title && displayFinding.title !== displayFinding.statement}
+																<span>{displayFinding.title}</span>
+															{/if}
+																{#if curation || findingFeedback.length}
+																	<span>
+																		{[
+																			curation ? findingTrustSourceLabel(trust.source) : '',
+																			findingFeedback.length
+																				? $t('research.understanding.feedbackCount', {
+																						count: findingFeedback.length
+																					})
+																			: ''
+																	]
+																		.filter(Boolean)
+																		.join(' · ')}
+																</span>
+															{/if}
+														</button>
+													</td>
+													<td>{findingListLabel(displayFinding.variables)}</td>
+													<td>{findingListLabel(displayFinding.mediators)}</td>
+													<td>
+														{#if displayFinding.direction}
+															<span>{relationLabel(displayFinding.direction)}</span>
+														{/if}
+														{#if displayFinding.outcomes.length}
+															<span>{findingListLabel(displayFinding.outcomes)}</span>
+														{:else}
+															<span>{findingListLabel([])}</span>
+														{/if}
+														{#if finding.comparison_summary}
+															<div class="research-understanding-workbench__comparison-mini">
+																{#if findingComparisonValueLabel(finding)}
+																	<strong>{findingComparisonValueLabel(finding)}</strong>
+																{/if}
+																{#if findingComparisonContextLabel(finding)}
+																	<span>{findingComparisonContextLabel(finding)}</span>
+																{/if}
+															</div>
+														{/if}
+													</td>
+													<td title={displayFinding.scope_summary || ''}>{findingScopeTableLabel(displayFinding)}</td>
+													<td>
+														<span class="research-understanding-workbench__grade">
+															{supportGradeLabel(displayFinding.support_grade)}
+														</span>
+													</td>
+													<td>
+														<div class="research-understanding-workbench__basis">
+															<strong>{usagePreview.title}</strong>
+															<span>{findingDirectEvidenceLabel(displayFinding)}</span>
+															<span>{findingPaperCoverageLabel(displayFinding)}</span>
+															<span>{usagePreview.datasetNote}</span>
+															{#if usagePreview.nextAction}
+																<span>{usagePreview.nextAction}</span>
+															{/if}
+																{#if findingReviewReasonSummary(displayFinding)}
+																	<span>{findingReviewReasonSummary(displayFinding)}</span>
+																{/if}
+															</div>
+														</td>
+														<td>
+															<div class="research-understanding-workbench__trust">
+																<span
+																	class={`research-understanding-workbench__trust-badge research-understanding-workbench__trust-badge--${trust.labelStatus}`}
+																>
+																	{datasetLabelStatusLabel(trust.labelStatus)}
+																</span>
+																<small>{findingDatasetTrustSubtitle(trust)}</small>
+																<small>{findingReviewStatusLabel(findingReviewStatusForDisplay(finding, trust))}</small>
+															</div>
+														</td>
+													<td>
+														<div class="research-understanding-workbench__finding-actions">
+															<button
+																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
+																on:click={() => openFindingDetail(finding.finding_id)}
+															>
+																{$t('research.understanding.openFindingDetail')}
+															</button>
+															<button
+																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
+																on:click={() => openFindingReject(finding.finding_id)}
+															>
+																{$t('research.understanding.quickReject')}
+															</button>
+															<button
+																type="button"
+																aria-describedby={findingSummaryId(displayFinding)}
+																on:click={() => openFindingCorrection(finding.finding_id)}
+															>
+																{$t('research.understanding.quickCorrect')}
+															</button>
+														</div>
+													</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{:else}
+							<div class="research-understanding-workbench__empty">
+								{$t('research.understanding.noFindings')}
+							</div>
+						{/if}
+					{:else}
+						<div class="research-understanding-workbench__empty">
+							{#if hasUnprojectedEffects}
+								{$t('research.understanding.noExpertFindings')}
+							{:else}
+								{$t('research.understanding.noFindings')}
+							{/if}
+						</div>
+					{/if}
+					</section>
+			{/if}
+		{/if}
+		{#if usesFindings}
+			<div
+				class="research-understanding-workbench__summary"
+				aria-label={$t('research.understanding.summary')}
+			>
+				<div>
+					<strong>{primaryFindingCount}</strong>
+					<span>{$t('research.understanding.primaryFindings')}</span>
+				</div>
+				<div>
+					<strong>{primaryFindingPaperCount}</strong>
+					<span>{primaryFindingPaperCoverage}</span>
+				</div>
+				<div>
+					<strong>{primaryFindingDirectEvidenceCount}</strong>
+					<span>{$t('research.understanding.directEvidence')}</span>
+				</div>
+				<div>
+					<strong>{expertReviewCandidateCount}</strong>
+					<span>{$t('research.understanding.candidateQueue')}</span>
+				</div>
+			</div>
+			{#if expertSummary}
+				<section
+					class="research-understanding-workbench__expert-summary"
+					aria-label={$t('research.understanding.expertSummary')}
+				>
+					<div>
+						<strong>{expertSummaryTitle(expertSummary)}</strong>
+						<p>{expertSummaryBody(expertSummary)}</p>
+					</div>
+					<div class="research-understanding-workbench__expert-metrics">
+						<span>
+							{$t('research.understanding.expertMetricStrong')}
+							<strong>{expertSummary.strong}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.expertMetricPartial')}
+							<strong>{expertSummary.partial}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.expertMetricSinglePaper')}
+							<strong>{expertSummary.singlePaper}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.expertMetricTrainingReady')}
+							<strong>{expertSummary.trainingReady}</strong>
+						</span>
+					</div>
+					<ul>
+						{#each expertSummaryGaps(expertSummary) as gap}
+							<li>{gap}</li>
+						{/each}
+					</ul>
+				</section>
+				<section
+					class={`research-understanding-workbench__review-loop research-understanding-workbench__review-loop--${reviewLoopStatus}`}
+					aria-label={$t('research.understanding.reviewLoop')}
+				>
+					<div>
+						<span>{$t('research.understanding.reviewLoop')}</span>
+						<strong>{reviewLoopTitle(reviewLoopStatus)}</strong>
+						<p>
+							{reviewLoopBody(
+								reviewLoopStatus,
+								datasetTrainingReadySampleCount,
+								datasetTrainingMessageSampleCount,
+								datasetProtocolReadySampleCount,
+								datasetReviewCandidateSampleCount
+							)}
+						</p>
+					</div>
+					<div class="research-understanding-workbench__review-loop-metrics">
+						<span>
+							{$t('research.understanding.datasetTrainingReady')}
+							<strong>{datasetTrainingReadySampleCount}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.datasetTrainingMessages')}
+							<strong>{datasetTrainingMessageSampleCount}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.datasetProtocolReady')}
+							<strong>{datasetProtocolReadySampleCount}</strong>
+						</span>
+						<span>
+							{$t('research.understanding.datasetReviewCandidate')}
+							<strong>{datasetReviewCandidateSampleCount}</strong>
+						</span>
+					</div>
+					<div class="research-understanding-workbench__review-loop-actions">
+						<button
+							type="button"
+							disabled={datasetReviewCandidateSampleCount === 0}
+							on:click={showReviewQueue}
+						>
+							{$t('research.understanding.reviewLoopOpenQueue')}
+						</button>
+						<button
+							type="button"
+							disabled={!nextReviewCandidateFinding}
+							on:click={() =>
+								nextReviewCandidateFinding &&
+								openFindingDetail(nextReviewCandidateFinding.finding_id)}
+						>
+							{$t('research.understanding.reviewLoopOpenNextFinding')}
+						</button>
+						<button
+							type="button"
+							disabled={datasetTrainingReadySampleCount === 0}
+							on:click={showTrainingReady}
+						>
+							{$t('research.understanding.reviewLoopOpenTraining')}
+						</button>
+						<button type="button" on:click={showAllFindings}>
+							{$t('research.understanding.reviewLoopOpenAll')}
+						</button>
+						<button type="button" on:click={openDatasetExport}>
+							{$t('research.understanding.reviewLoopOpenDataset')}
+						</button>
+						{#if goalCopilotHref}
+							{#if datasetProtocolReadySampleCount > 0}
+								<a class="research-understanding-workbench__review-loop-link" href={goalCopilotHref}>
+									{$t('research.understanding.reviewLoopDraftProtocol')}
+								</a>
+							{:else}
+								<span class="research-understanding-workbench__review-loop-link research-understanding-workbench__review-loop-link--disabled">
+									{$t(
+										datasetTrainingMessageSampleCount > 0
+											? 'research.understanding.reviewLoopDraftProtocolInputsBlocked'
+										: datasetTrainingReadySampleCount > 0
+											? 'research.understanding.reviewLoopDraftProtocolMessagesBlocked'
+											: 'research.understanding.reviewLoopDraftProtocolBlocked'
+									)}
+								</span>
+							{/if}
+						{/if}
+					</div>
+					{#if datasetSummary && nextReviewCandidateFinding && !reviewQueueOnly && !datasetReviewCandidatesOnly}
+						{@const nextDisplayFinding = findingForDisplay(
+							nextReviewCandidateFinding,
+							findingCurationFor(nextReviewCandidateFinding, alignedCurationsByTargetId)
+						)}
+						{@const nextUsagePreview = findingUsagePreview(nextDisplayFinding)}
+						{@const nextReviewReasonLabels = findingReviewReasonLabels(nextDisplayFinding)}
+						{@const nextProtocolBlockingLabels = protocolReadinessBlockingLabels(
+							nextReviewCandidateSample?.protocol_readiness
+						)}
+						<div
+							class="research-understanding-workbench__review-loop-next"
+							aria-label={$t('research.understanding.reviewLoopNextCandidate')}
+						>
+							<div>
+								<span>{$t('research.understanding.reviewLoopNextCandidate')}</span>
+								<strong>{nextDisplayFinding.statement || nextDisplayFinding.title}</strong>
+								<p>{findingReviewReasonActionLabel(nextDisplayFinding, nextReviewCandidateSample)}</p>
+							</div>
+							<div class="research-understanding-workbench__review-loop-next-fields">
+								<span>
+									{$t('research.understanding.variablesColumn')}
+									<strong>{findingListLabel(nextDisplayFinding.variables)}</strong>
+								</span>
+								<span>
+									{$t('research.understanding.resultColumn')}
+									<strong>
+										{[
+											nextDisplayFinding.direction
+												? relationLabel(nextDisplayFinding.direction)
+												: '',
+											findingListLabel(nextDisplayFinding.outcomes)
+										]
+											.filter(Boolean)
+											.join(' · ')}
+									</strong>
+								</span>
+								<span>
+									{$t('research.understanding.evidenceGradeColumn')}
+									<strong>{supportGradeLabel(nextDisplayFinding.support_grade)}</strong>
+								</span>
+								<span>
+									{$t('research.understanding.evidenceBasisColumn')}
+									<strong>{nextUsagePreview.title}</strong>
+								</span>
+							</div>
+							<div class="research-understanding-workbench__review-loop-next-reasons">
+								<span>
+									{$t('research.understanding.reviewLoopNextReasonCount', {
+										count: findingReviewReasonValues(nextDisplayFinding).length
+									})}
+								</span>
+								{#if nextReviewReasonLabels.length}
+									<ul>
+										{#each nextReviewReasonLabels as reason (reason)}
+											<li>{reason}</li>
+										{/each}
+									</ul>
+								{/if}
+								{#if nextProtocolBlockingLabels.length}
+									<span>{$t('research.understanding.reviewLoopNextProtocolBlockers')}</span>
+									<ul>
+										{#each nextProtocolBlockingLabels as gap (gap)}
+											<li>{gap}</li>
+										{/each}
+									</ul>
+								{/if}
+							</div>
+							<div class="research-understanding-workbench__review-loop-next-actions">
+								<button
+									type="button"
+									on:click={() => openFindingDetail(nextReviewCandidateFinding.finding_id)}
+								>
+									{$t('research.understanding.openFindingDetail')}
+								</button>
+							</div>
+						</div>
+					{/if}
+					{#if feedbackMessage}
+						<p class="research-understanding-workbench__feedback-state" role="status">
+							{feedbackMessage}
+						</p>
+					{/if}
+					{#if feedbackError}
+						<p
+							class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+							role="alert"
+						>
+							{feedbackError}
+						</p>
+					{/if}
+					<div
+						class="research-understanding-workbench__review-loop-checklist"
+						aria-label={$t('research.understanding.reviewLoopChecklist')}
+					>
+						{#each reviewLoopChecklist as item (item.key)}
+							<div
+								class={`research-understanding-workbench__review-loop-check research-understanding-workbench__review-loop-check--${item.status}`}
+							>
+								<span>{item.label}</span>
+								<strong>{translatedCatalogLabel('research.understanding.reviewLoopChecklistStatuses', item.status)}</strong>
+								<p>{item.detail}</p>
+							</div>
+						{/each}
+					</div>
+					<ul>
+						{#each reviewLoopSteps as step}
+							<li>{step}</li>
+						{/each}
+					</ul>
+					{#if reviewLoopErrorItems.length}
+						<div class="research-understanding-workbench__review-loop-errors">
+							<strong>{$t('research.understanding.datasetErrorCategoriesTitle')}</strong>
+							<div>
+								{#each reviewLoopErrorItems as [category, count] (category)}
+									<span>
+										{datasetErrorCategoryLabel(category)}
+										<strong>{count}</strong>
+									</span>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</section>
+			{/if}
+			{#if hasAxisCoverage}
+				<section
+					class="research-understanding-workbench__axis-coverage"
+					aria-label={$t('research.understanding.goalCoverage')}
+				>
+					<div class="research-understanding-workbench__axis-coverage-heading">
+						<div>
+							<h4>{$t('research.understanding.goalCoverage')}</h4>
+							<p>{$t('research.understanding.goalCoverageBody')}</p>
+						</div>
+					</div>
+					{#if answerBoundary}
+						<div
+							class="research-understanding-workbench__answer-boundary"
+							aria-label={$t('research.understanding.answerBoundary')}
+						>
+							<div>
+								<strong>
+									{answerBoundary.status === 'expert_ready'
+										? $t('research.understanding.answerBoundaryExpertReady')
+										: answerBoundary.status === 'draft'
+											? $t('research.understanding.answerBoundaryDraft')
+											: $t('research.understanding.answerBoundaryLimited')}
+								</strong>
+								<p>
+									{$t('research.understanding.answerBoundaryBody', {
+										variablePrimary: answerBoundary.variablePrimary,
+										variableTotal: answerBoundary.variableTotal,
+										propertyPrimary: answerBoundary.propertyPrimary,
+										propertyTotal: answerBoundary.propertyTotal
+									})}
+								</p>
+							</div>
+							{#if answerBoundary.draftFindingLabels.length}
+								<span>
+									{$t('research.understanding.answerBoundaryDraftCuration', {
+										findings: listLabel(answerBoundary.draftFindingLabels)
+									})}
+								</span>
+							{/if}
+							{#if answerBoundary.blockedTerms.length}
+								<span>
+									{$t('research.understanding.answerBoundaryBlocked', {
+										terms: listLabel(answerBoundary.blockedTerms)
+									})}
+								</span>
+							{/if}
+							{#if answerBoundary.contextTerms.length}
+								<span>
+									{$t('research.understanding.answerBoundaryContextOnly', {
+										terms: listLabel(answerBoundary.contextTerms)
+									})}
+								</span>
+							{/if}
+						</div>
+					{/if}
+					{#if axisCoverageGapGroups.length}
+						<div
+							class="research-understanding-workbench__coverage-gaps"
+							aria-label={$t('research.understanding.coverageGaps')}
+						>
+							<div>
+								<strong>{$t('research.understanding.coverageGaps')}</strong>
+								<p>{$t('research.understanding.coverageGapsBody')}</p>
+							</div>
+							<ul>
+								{#each axisCoverageGapGroups as group (group.key)}
+									<li>
+										<strong>{group.label}</strong>
+										<span>{listLabel(group.terms)}</span>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+					<div class="research-understanding-workbench__axis-coverage-grid">
+						{#if axisCoverage.variables.length}
+							<div class="research-understanding-workbench__axis-group">
+								<div class="research-understanding-workbench__axis-group-heading">
+									<strong>{$t('research.understanding.goalCoverageVariables')}</strong>
+									<span>
+										{$t('research.understanding.axisCoverageSummary', {
+											primary: axisCoverageStatusCount(axisCoverage.variables, 'primary'),
+											review: axisCoverageStatusCount(axisCoverage.variables, 'review_queue'),
+											mechanism: axisCoverageStatusCount(axisCoverage.variables, 'mechanism'),
+											context: axisCoverageStatusCount(axisCoverage.variables, 'context'),
+											missing: axisCoverageStatusCount(axisCoverage.variables, 'missing')
+										})}
+									</span>
+								</div>
+								<ul>
+									{#each axisCoverage.variables as item (`variable-${item.axis}`)}
+										<li>
+											{#if item.finding_id}
+												<button type="button" on:click={() => openAxisCoverageFinding(item)}>
+													<span>{item.axis}</span>
+													<small class={axisCoverageStatusClass(item.status)}>
+														{axisCoverageStatusLabel(item.status)}
+													</small>
+												</button>
+											{:else}
+												<span>
+													<span>{item.axis}</span>
+													<small class={axisCoverageStatusClass(item.status)}>
+														{axisCoverageStatusLabel(item.status)}
+													</small>
+												</span>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
+						{#if axisCoverage.properties.length}
+							<div class="research-understanding-workbench__axis-group">
+								<div class="research-understanding-workbench__axis-group-heading">
+									<strong>{$t('research.understanding.goalCoverageProperties')}</strong>
+									<span>
+										{$t('research.understanding.axisCoverageSummary', {
+											primary: axisCoverageStatusCount(axisCoverage.properties, 'primary'),
+											review: axisCoverageStatusCount(axisCoverage.properties, 'review_queue'),
+											mechanism: axisCoverageStatusCount(axisCoverage.properties, 'mechanism'),
+											context: axisCoverageStatusCount(axisCoverage.properties, 'context'),
+											missing: axisCoverageStatusCount(axisCoverage.properties, 'missing')
+										})}
+									</span>
+								</div>
+								<ul>
+									{#each axisCoverage.properties as item (`property-${item.axis}`)}
+										<li>
+											{#if item.finding_id}
+												<button type="button" on:click={() => openAxisCoverageFinding(item)}>
+													<span>{item.axis}</span>
+													<small class={axisCoverageStatusClass(item.status)}>
+														{axisCoverageStatusLabel(item.status)}
+													</small>
+												</button>
+											{:else}
+												<span>
+													<span>{item.axis}</span>
+													<small class={axisCoverageStatusClass(item.status)}>
+														{axisCoverageStatusLabel(item.status)}
+													</small>
+												</span>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
+					</div>
+				</section>
+			{/if}
+		{/if}
+
+		{#if usesFindings || effectRows.length || understanding.claims.length || understanding.evidence_refs.length}
+			{#if usesFindings}
 				<div
 					class="research-understanding-workbench__filters"
 					aria-label={$t('research.understanding.claimFilters')}
 				>
 					<div class="research-understanding-workbench__filter-group">
-						<span>{$t('research.understanding.filterByType')}</span>
+						<span>{$t('research.understanding.filterByEvidenceGrade')}</span>
 						<div class="research-understanding-workbench__segmented" role="list">
-							{#each CLAIM_TYPE_ORDER as type (type)}
-								{@const count = claimTypeCounts.get(type) ?? 0}
-								{#if count || type === 'all'}
-									<button
-										type="button"
-										class:research-understanding-workbench__segment--active={selectedClaimType ===
-											type}
-										aria-pressed={selectedClaimType === type}
-										on:click={() => (selectedClaimType = type)}
-									>
-										{optionLabel(claimTypeLabel(type), count)}
-									</button>
-								{/if}
-							{/each}
-						</div>
-					</div>
-					<div class="research-understanding-workbench__filter-group">
-						<span>{$t('research.understanding.filterByStatus')}</span>
-						<div class="research-understanding-workbench__segmented" role="list">
-							{#each CLAIM_STATUS_ORDER as status (status)}
-								{@const count = claimStatusCounts.get(status) ?? 0}
-								{#if count || status === 'all'}
+							{#each SUPPORT_GRADE_ORDER as grade (grade)}
+								{@const count = claimStatusCounts.get(grade) ?? 0}
+								{#if count || grade === 'all'}
 									<button
 										type="button"
 										class:research-understanding-workbench__segment--active={selectedClaimStatus ===
-											status}
-										aria-pressed={selectedClaimStatus === status}
-										on:click={() => (selectedClaimStatus = status)}
+											grade}
+										aria-pressed={selectedClaimStatus === grade}
+										on:click={() => (selectedClaimStatus = grade)}
 									>
-										{optionLabel(statusLabel(status), count)}
+										{optionLabel(supportGradeLabel(grade), count)}
 									</button>
 								{/if}
 							{/each}
@@ -621,12 +4552,37 @@
 								type="button"
 								class:research-understanding-workbench__segment--active={reviewQueueOnly}
 								aria-pressed={reviewQueueOnly}
-								on:click={() => (reviewQueueOnly = !reviewQueueOnly)}
+								on:click={() => {
+									datasetReviewCandidatesOnly = false;
+									reviewQueueOnly = !reviewQueueOnly;
+								}}
 							>
 								{$t('research.understanding.reviewQueueCount', {
-									count: presentationSummary?.review_queue_count ?? reviewQueueClaimIds.size
+									count: reviewQueueCount
 								})}
 							</button>
+						</div>
+					</div>
+					<div class="research-understanding-workbench__filter-group">
+						<span>{$t('research.understanding.filterByDatasetUse')}</span>
+						<div class="research-understanding-workbench__segmented" role="list">
+							{#each DATASET_USE_STATUS_FILTER_ORDER as status (status)}
+								{@const count = findingDatasetUseCounts.get(status) ?? 0}
+								{#if count || status === 'all'}
+									<button
+										type="button"
+										class:research-understanding-workbench__segment--active={selectedDatasetUseStatus ===
+											status}
+										aria-pressed={selectedDatasetUseStatus === status}
+										on:click={() => {
+											datasetReviewCandidatesOnly = false;
+											selectedDatasetUseStatus = status;
+										}}
+									>
+										{optionLabel(datasetUseStatusFilterLabel(status), count)}
+									</button>
+								{/if}
+							{/each}
 						</div>
 					</div>
 					{#if curationLoadError || feedbackLoadError}
@@ -638,144 +4594,593 @@
 						</p>
 					{/if}
 				</div>
+				{#if currentDatasetScopeKey}
+					<details
+						class="research-understanding-workbench__dataset"
+						aria-busy={datasetLoading || collectionDatasetLoading}
+						bind:open={datasetPanelOpen}
+						on:toggle={handleDatasetToggle}
+					>
+						<summary>
+							<span>{$t('research.understanding.datasetSummary')}</span>
+							<small>
+								{#if datasetLoading}
+									{$t('research.understanding.datasetLoading')}
+								{:else if datasetSummary}
+									{$t('research.understanding.datasetReady', {
+										count: datasetSummary.item_count
+									})}
+								{:else}
+									{$t('research.understanding.datasetUnavailable')}
+								{/if}
+							</small>
+						</summary>
+						{#if datasetSummary}
+							<div class="research-understanding-workbench__dataset-body">
+								<div class="research-understanding-workbench__dataset-counts">
+									<span>
+										{$t('research.understanding.datasetTrainingReady')}
+										<strong>{datasetTrainingReadySampleCount}</strong>
+									</span>
+									<span>
+										{$t('research.understanding.datasetTrainingMessages')}
+										<strong>{datasetTrainingMessageSampleCount}</strong>
+									</span>
+									<span>
+										{$t('research.understanding.datasetProtocolReady')}
+										<strong>{datasetProtocolReadySampleCount}</strong>
+									</span>
+									<span>
+										{$t('research.understanding.datasetReviewCandidate')}
+										<strong>{datasetReviewCandidateSampleCount}</strong>
+									</span>
+									{#each DATASET_LABEL_STATUS_ORDER as status (status)}
+										<span>
+											{datasetLabelStatusLabel(status)}
+											<strong>{datasetLabelCounts[status]}</strong>
+										</span>
+									{/each}
+								</div>
+								<p class="research-understanding-workbench__dataset-note">
+									{$t('research.understanding.datasetLabelBoundaryNote')}
+								</p>
+								<div class="research-understanding-workbench__dataset-actions">
+									{#if datasetTrainingMessageSampleCount > 0}
+										<a href={trainingDatasetDownloadUrl()} download>
+											{$t('research.understanding.datasetDownloadTrainingData')}
+										</a>
+									{:else}
+										<span
+											class="research-understanding-workbench__dataset-action-disabled"
+											aria-disabled="true"
+										>
+											{$t(
+												datasetTrainingReadySampleCount > 0
+													? 'research.understanding.datasetNoValidatedTrainingData'
+													: 'research.understanding.datasetNoTrainingReady'
+											)}
+										</span>
+									{/if}
+								</div>
+								<div
+									class="research-understanding-workbench__review-import"
+									bind:this={reviewImportPanel}
+								>
+									<div class="research-understanding-workbench__review-import-heading">
+										<div>
+											<strong>{$t('research.understanding.reviewImportTitle')}</strong>
+											<p>{$t('research.understanding.reviewImportBody')}</p>
+										</div>
+										<span>
+											{$t('research.understanding.reviewImportReviewer')}
+											<strong>{currentReviewer || $t('research.understanding.reviewerUnavailable')}</strong>
+										</span>
+									</div>
+									<label>
+										<span>{$t('research.understanding.reviewImportTextareaLabel')}</span>
+										<textarea
+											id={`${titleId}-review-import-jsonl`}
+											name="review_import_jsonl"
+											rows="5"
+											bind:value={reviewImportText}
+											placeholder={$t('research.understanding.reviewImportTextareaPlaceholder')}
+											disabled={reviewImportSubmitting}
+										></textarea>
+									</label>
+									<div class="research-understanding-workbench__review-import-actions">
+										<button
+											type="button"
+											disabled={reviewImportSubmitting || !reviewImportText.trim() || !reviewerReady}
+											on:click={() => submitReviewImport(true)}
+										>
+											{reviewImportSubmitting && reviewImportMode === 'dry_run'
+												? $t('research.understanding.reviewImportSubmitting')
+												: $t('research.understanding.reviewImportDryRun')}
+										</button>
+										<button
+											type="button"
+											disabled={reviewImportSubmitting || !reviewImportText.trim() || !reviewerReady}
+											on:click={() => submitReviewImport(false)}
+										>
+											{reviewImportSubmitting && reviewImportMode === 'import'
+												? $t('research.understanding.reviewImportSubmitting')
+												: $t('research.understanding.reviewImportSubmit')}
+										</button>
+										{#if !reviewerReady}
+											<small>{$t('research.understanding.reviewImportRequiresReviewer')}</small>
+										{/if}
+									</div>
+									{#if reviewImportMessage}
+										<p class="research-understanding-workbench__feedback-state" role="status">
+											{reviewImportMessage}
+										</p>
+									{/if}
+									{#if reviewImportError}
+										<p
+											class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+											role="alert"
+										>
+											{reviewImportError}
+										</p>
+									{/if}
+									{#if reviewImportSummary}
+										<div class="research-understanding-workbench__review-import-summary">
+											<span>
+												{$t('research.understanding.reviewImportRows')}
+												<strong>{reviewImportSummary.total_rows}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportWritten')}
+												<strong>{reviewImportSummary.written_count}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportSkipped')}
+												<strong>{reviewImportSummary.skipped_count}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportWarnings')}
+												<strong>{reviewImportSummary.warnings.length}</strong>
+											</span>
+											<span>
+												{$t('research.understanding.reviewImportErrors')}
+												<strong>{reviewImportSummary.errors.length}</strong>
+											</span>
+										</div>
+										{#if reviewImportHasReadinessSummary(reviewImportSummary)}
+											<div
+												class="research-understanding-workbench__review-import-readiness"
+												aria-label={$t('research.understanding.reviewImportReadinessTitle')}
+											>
+												<strong>{$t('research.understanding.reviewImportReadinessTitle')}</strong>
+												<small>{reviewImportReadinessCountsText(reviewImportSummary)}</small>
+												<small>{reviewImportReadinessGateText(reviewImportSummary)}</small>
+											</div>
+										{/if}
+										{#if reviewImportHasScopeGate(reviewImportSummary)}
+											<div
+												class="research-understanding-workbench__review-import-scope-gate"
+												aria-label={$t('research.understanding.reviewImportScopeGateTitle')}
+											>
+												<strong>{$t('research.understanding.reviewImportScopeGateTitle')}</strong>
+												<small>{reviewImportScopeGateStatusText(reviewImportSummary)}</small>
+												<small>{reviewImportScopeGateCountsText(reviewImportSummary)}</small>
+												{#if reviewImportScopeGateReasons(reviewImportSummary).length}
+													<ul aria-label={$t('research.understanding.reviewImportScopeGateReasonsTitle')}>
+														{#each reviewImportScopeGateReasons(reviewImportSummary) as reason (reason)}
+															<li>{reason}</li>
+														{/each}
+													</ul>
+												{/if}
+											</div>
+										{/if}
+										{#if reviewImportSummary.decision_progress_by_goal.length}
+											<div class="research-understanding-workbench__review-import-progress">
+												<strong>{$t('research.understanding.reviewImportGoalProgressTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.decision_progress_by_goal as goalProgress, index (`goal-progress-${index}`)}
+														<li>
+															<span>{reviewImportGoalLabel(goalProgress)}</span>
+															<small>{reviewImportGoalProgressText(goalProgress)}</small>
+															{#if reviewImportNextFindingLabel(goalProgress)}
+																<small>
+																	{$t('research.understanding.reviewImportNextFinding', {
+																		finding: reviewImportNextFindingLabel(goalProgress)
+																	})}
+																</small>
+																{#if reviewImportNextFinding(goalProgress)}
+																	<button
+																		type="button"
+																		class="research-understanding-workbench__review-import-next"
+																		aria-label={$t(
+																			'research.understanding.reviewImportOpenNextFinding',
+																			{
+																				finding: reviewImportNextFindingLabel(goalProgress)
+																			}
+																		)}
+																		on:click={() =>
+																			openFindingDetail(reviewImportNextFindingId(goalProgress))}
+																	>
+																		{$t('research.understanding.reviewLoopOpenNextFinding')}
+																	</button>
+																{/if}
+															{/if}
+														</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if reviewImportSummary.affected_goals.length}
+											<div class="research-understanding-workbench__review-import-progress">
+												<strong>{$t('research.understanding.reviewImportAffectedGoalsTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.affected_goals as goalReadiness, index (`goal-readiness-${index}`)}
+														<li>
+															<span>{reviewImportGoalLabel(goalReadiness)}</span>
+															<small>{reviewImportAffectedGoalReadinessText(goalReadiness)}</small>
+															<small>{reviewImportAffectedGoalPendingText(goalReadiness)}</small>
+															<small>{reviewImportAffectedGoalProjectedText(goalReadiness)}</small>
+														</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if reviewImportSummary.warnings.length}
+											<div class="research-understanding-workbench__review-import-issues">
+												<strong>{$t('research.understanding.reviewImportWarningsTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.warnings as warning, index (`warning-${index}`)}
+														<li>{reviewImportIssueText(warning)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if reviewImportSummary.errors.length}
+											<div class="research-understanding-workbench__review-import-issues">
+												<strong>{$t('research.understanding.reviewImportErrorsTitle')}</strong>
+												<ul>
+													{#each reviewImportSummary.errors as error, index (`error-${index}`)}
+														<li>{reviewImportIssueText(error)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									{/if}
+								</div>
+								{#if datasetTrainingMessageSampleCount > 0}
+									<p class="research-understanding-workbench__dataset-note">
+										{$t('research.understanding.datasetTrainingMessagesNote')}
+									</p>
+								{/if}
+								{#if understanding.scope.scope_type === 'goal'}
+									<div class="research-understanding-workbench__dataset-collection">
+										<strong>{$t('research.understanding.collectionDatasetSummary')}</strong>
+										{#if collectionDatasetLoading}
+											<p>{$t('research.understanding.datasetLoading')}</p>
+										{:else if collectionDatasetSummary}
+											<p>
+												{$t('research.understanding.collectionDatasetReady', {
+													training: collectionDatasetTrainingReadySampleCount,
+													messages: collectionDatasetTrainingMessageSampleCount,
+													protocol: collectionDatasetProtocolReadySampleCount,
+													review: collectionDatasetReviewCandidateSampleCount
+												})}
+											</p>
+											<div>
+												<span>
+													{$t('research.understanding.datasetTrainingReady')}
+													<strong>{collectionDatasetTrainingReadySampleCount}</strong>
+												</span>
+												<span>
+													{$t('research.understanding.datasetTrainingMessages')}
+													<strong>{collectionDatasetTrainingMessageSampleCount}</strong>
+												</span>
+												<span>
+													{$t('research.understanding.datasetProtocolReady')}
+													<strong>{collectionDatasetProtocolReadySampleCount}</strong>
+												</span>
+												<span>
+													{$t('research.understanding.datasetReviewCandidate')}
+													<strong>{collectionDatasetReviewCandidateSampleCount}</strong>
+												</span>
+												{#each DATASET_LABEL_STATUS_ORDER as status (status)}
+													<span>
+														{datasetLabelStatusLabel(status)}
+														<strong>{collectionDatasetLabelCounts[status]}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetErrorCategories as [category, count] (category)}
+													<span>
+														{datasetErrorCategoryLabel(category)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetIssueTypes as [issue, count] (issue)}
+													<span>
+														{datasetIssueTypeLabel(issue)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetBucketCounts as [bucket, count] (bucket)}
+													<span>
+														{datasetPresentationBucketLabel(bucket)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetReviewReasons as [reason, count] (reason)}
+													<span>
+														{datasetReviewReasonLabel(reason)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+												{#each collectionDatasetSystemWarnings as [warning, count] (warning)}
+													<span>
+														{datasetSystemWarningLabel(warning)}
+														<strong>{count}</strong>
+													</span>
+												{/each}
+											</div>
+											{#if collectionDatasetOptimizationHotspots.length}
+												<div class="research-understanding-workbench__dataset-hotspots">
+													<div>
+														<strong>{$t('research.understanding.datasetOptimizationHotspotsTitle')}</strong>
+														<p>{$t('research.understanding.datasetOptimizationHotspotsBody')}</p>
+													</div>
+													<ul>
+														{#each collectionDatasetOptimizationHotspots as hotspot, index (`collection-${hotspot.dimension}-${hotspot.name}-${hotspot.metric}-${index}`)}
+															<li>
+																<span>{datasetHotspotDimensionLabel(hotspot.dimension)}</span>
+																<strong>{hotspot.name}</strong>
+																<small>{datasetHotspotMetricLabel(hotspot.metric)}</small>
+																<em>{hotspot.count}</em>
+															</li>
+														{/each}
+													</ul>
+												</div>
+											{/if}
+										{:else if collectionDatasetError}
+											<p
+												class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+												role="alert"
+											>
+												{$t('research.understanding.datasetError', {
+													message: collectionDatasetError
+												})}
+											</p>
+										{:else}
+											<p>{$t('research.understanding.datasetUnavailable')}</p>
+										{/if}
+									</div>
+								{/if}
+								{#if datasetOptimizationHotspots.length}
+									<div class="research-understanding-workbench__dataset-hotspots">
+										<div>
+											<strong>{$t('research.understanding.datasetOptimizationHotspotsTitle')}</strong>
+											<p>{$t('research.understanding.datasetOptimizationHotspotsBody')}</p>
+										</div>
+										<ul>
+											{#each datasetOptimizationHotspots as hotspot, index (`scope-${hotspot.dimension}-${hotspot.name}-${hotspot.metric}-${index}`)}
+												<li>
+													<span>{datasetHotspotDimensionLabel(hotspot.dimension)}</span>
+													<strong>{hotspot.name}</strong>
+													<small>{datasetHotspotMetricLabel(hotspot.metric)}</small>
+													<em>{hotspot.count}</em>
+												</li>
+											{/each}
+										</ul>
+									</div>
+								{/if}
+								{#if datasetErrorCategories.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetErrorCategoriesTitle')}</strong>
+										<div>
+											{#each datasetErrorCategories as [category, count] (category)}
+												<span>
+													{datasetErrorCategoryLabel(category)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if datasetIssueTypes.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetIssueTypesTitle')}</strong>
+										<div>
+											{#each datasetIssueTypes as [issue, count] (issue)}
+												<span>
+													{datasetIssueTypeLabel(issue)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if datasetReviewReasons.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetReviewReasonsTitle')}</strong>
+										<div>
+											{#each datasetReviewReasons as [reason, count] (reason)}
+												<span>
+													{datasetReviewReasonLabel(reason)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if datasetSystemWarnings.length}
+									<div class="research-understanding-workbench__dataset-errors">
+										<strong>{$t('research.understanding.datasetSystemWarningsTitle')}</strong>
+										<div>
+											{#each datasetSystemWarnings as [warning, count] (warning)}
+												<span>
+													{datasetSystemWarningLabel(warning)}
+													<strong>{count}</strong>
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
+						{#if datasetError}
+							<p
+								class="research-understanding-workbench__feedback-state research-understanding-workbench__feedback-state--error"
+								role="alert"
+							>
+								{$t('research.understanding.datasetError', { message: datasetError })}
+							</p>
+						{/if}
+					</details>
+				{/if}
 			{/if}
 
-			{#if !detailMode}
-				<section
-					class="research-understanding-workbench__column research-understanding-workbench__column--list"
-					aria-label={$t('research.understanding.claimWorkspace')}
-				>
-					<div class="research-understanding-workbench__column-heading">
-						<h4>{$t('research.understanding.claimWorkspace')}</h4>
-						<span>
-							{$t('research.understanding.filteredClaimCount', {
-								shown: filteredEffects.length,
-								total: effectRows.length
-							})}
-						</span>
-					</div>
-					{#each filteredEffects as effect (effect.effect_id)}
-						{@const claim = claimById.get(effect.claim_id)}
-						{@const curation = claim ? curationsByClaimId.get(claim.claim_id) : null}
-						{@const claimFeedback = claim ? (feedbackByClaimId.get(claim.claim_id) ?? []) : []}
-						{@const displayType = curation?.curated_claim_type ?? effect.claim_type}
-						{@const displayStatus = curation?.curated_status ?? effect.support_status}
-						{@const displayStatement = curation?.curated_statement ?? effect.statement}
-						{@const displayEvidenceIds = curation?.curated_evidence_ref_ids ?? effect.evidence_ref_ids}
-						{@const labels = evidenceLabelsForIds(displayEvidenceIds)}
-						<button
-							type="button"
-							class="research-understanding-workbench__card research-understanding-workbench__card--claim"
-							on:click={() => openClaimDetail(effect.effect_id)}
-						>
-							<div class="research-understanding-workbench__meta">
-								<span>{claimTypeLabel(displayType)}</span>
-								<span>{statusLabel(displayStatus)}</span>
-								{#if effect.confidence !== null}
-									<span>{confidenceLabel(effect.confidence)}</span>
-								{/if}
-								{#if curation}
-									<span>{$t('research.understanding.curatedBadge')}</span>
-								{/if}
-								{#if claimFeedback.length}
-									<span>
-										{$t('research.understanding.feedbackCount', {
-											count: claimFeedback.length
-										})}
-									</span>
-								{/if}
-							</div>
-							<strong>{displayStatement}</strong>
-							{#if effect.title && effect.title !== displayStatement}
-								<p>{effect.title}</p>
-							{/if}
-							<div class="research-understanding-workbench__claim-stats">
-								<span>
-									{$t('research.understanding.paperCount', {
-										count: effect.paper_count
-									})}
-								</span>
-								<span>
-									{$t('research.understanding.evidenceCount', {
-										count: effect.evidence_count
-									})}
-								</span>
-							</div>
-							{#if curation && claim && curation.curated_statement !== claim.statement}
-								<small>
-									{$t('research.understanding.originalClaimPrefix')}
-									{claim.statement}
-								</small>
-							{/if}
-							{#if labels.length}
-								<div class="research-understanding-workbench__source-list">
-									<span>{$t('research.understanding.keyEvidence')}</span>
-									<ul>
-										{#each labels as label, index (`${effect.effect_id}-${index}-${label}`)}
-											<li>{label}</li>
-										{/each}
-									</ul>
-								</div>
-							{/if}
-							{#if effect.context_summary}
-								<small>
-									{$t('research.understanding.contextPrefix')}
-									{effect.context_summary}
-								</small>
-							{/if}
-						</button>
-					{:else}
-						<div class="research-understanding-workbench__empty">
-							{$t('research.understanding.noEffects')}
-						</div>
-					{/each}
-				</section>
-			{:else}
+			{#if detailMode}
 				<section
 					class="research-understanding-workbench__detail-view"
-					aria-label={$t('research.understanding.claimDetail')}
+					bind:this={detailView}
+					aria-label={selectedFinding
+						? $t('research.understanding.findingDetail')
+						: $t('research.understanding.claimDetail')}
 				>
 					<div class="research-understanding-workbench__column-heading">
 						<button
 							type="button"
 							class="research-understanding-workbench__back"
+							bind:this={detailBackButton}
 							on:click={closeClaimDetail}
 						>
-							{$t('research.understanding.backToClaims')}
+							{selectedFinding
+								? $t('research.understanding.backToFindings')
+								: $t('research.understanding.backToClaims')}
 						</button>
-						<h4>{$t('research.understanding.claimDetail')}</h4>
+						<h4>
+							{selectedFinding
+								? $t('research.understanding.findingDetail')
+								: $t('research.understanding.claimDetail')}
+						</h4>
 					</div>
-					{#if selectedEffect && selectedClaim}
-						<article class="research-understanding-workbench__detail">
-							<header class="research-understanding-workbench__claim-header">
-								<div class="research-understanding-workbench__meta">
-									<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
-									<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
-									{#if selectedClaim.confidence !== null}
-										<span>{confidenceLabel(selectedClaim.confidence)}</span>
-									{/if}
-									{#if selectedClaim.strength}
-										<span>{selectedClaim.strength}</span>
-									{/if}
-									{#if selectedCuration}
-										<span>{$t('research.understanding.curatedBadge')}</span>
-									{/if}
+					{#if selectedFinding || (selectedEffect && selectedClaim)}
+							<article class="research-understanding-workbench__detail">
+								<header class="research-understanding-workbench__claim-header">
+									<div class="research-understanding-workbench__meta">
+										{#if selectedFinding}
+											{#if selectedReviewQueuePosition}
+												<span>{selectedReviewQueuePosition}</span>
+											{/if}
+											{#if selectedFindingTrust}
+												<span
+													class={`research-understanding-workbench__trust-badge research-understanding-workbench__trust-badge--${selectedFindingTrust.labelStatus}`}
+												>
+													{datasetLabelStatusLabel(selectedFindingTrust.labelStatus)}
+												</span>
+											{/if}
+											<span>{supportGradeLabel(selectedDisplayFinding?.support_grade ?? selectedFinding.support_grade)}</span>
+											{#if selectedFindingTrust}
+												<span>
+													{findingReviewStatusLabel(
+														findingReviewStatusForDisplay(selectedFinding, selectedFindingTrust)
+													)}
+												</span>
+												<span>{datasetUseStatusLabel(selectedFindingTrust.datasetUseStatus)}</span>
+												<span>{findingTrustSourceLabel(selectedFindingTrust.source)}</span>
+											{/if}
+											{#if selectedFinding.confidence !== null}
+												<span>{confidenceLabel(selectedFinding.confidence)}</span>
+											{/if}
+											<span>{findingPaperCoverageLabel(selectedFinding)}</span>
+											<span>
+												{$t('research.understanding.evidenceCount', {
+													count: selectedFinding.evidence_count
+												})}
+											</span>
+										{:else if selectedClaim}
+											<span>{claimTypeLabel(displayClaim?.claim_type ?? selectedClaim.claim_type)}</span>
+											<span>{statusLabel(displayClaim?.status ?? selectedClaim.status)}</span>
+											{#if selectedClaim.confidence !== null}
+												<span>{confidenceLabel(selectedClaim.confidence)}</span>
+											{/if}
+											{#if selectedClaim.strength}
+												<span>{selectedClaim.strength}</span>
+											{/if}
+										{/if}
+										{#if selectedCuration}
+											<span>{$t('research.understanding.curatedBadge')}</span>
+										{/if}
 									{#if selectedFeedback.length}
 										<span>
 											{$t('research.understanding.feedbackCount', {
 												count: selectedFeedback.length
 											})}
-										</span>
+											</span>
+										{/if}
+									</div>
+									<strong>
+										{selectedDisplayFinding?.statement ||
+											selectedDisplayFinding?.title ||
+											displayClaim?.statement ||
+											selectedClaim?.statement ||
+											''}
+									</strong>
+									{#if selectedDisplayFinding?.title && selectedDisplayFinding.title !== selectedDisplayFinding.statement}
+										<p>{selectedDisplayFinding.title}</p>
+									{:else if !selectedFinding && selectedEffect && selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim?.statement)}
+										<p>{selectedEffect.title}</p>
 									{/if}
-								</div>
-								<strong>{displayClaim?.statement ?? selectedClaim.statement}</strong>
-								{#if selectedEffect.title && selectedEffect.title !== (displayClaim?.statement ?? selectedClaim.statement)}
-									<p>{selectedEffect.title}</p>
-								{/if}
 								<div
 									class="research-understanding-workbench__review-actions"
 									aria-label={$t('research.understanding.reviewActions')}
 								>
+									{#if selectedFinding}
+										<button
+											type="button"
+											class="research-understanding-workbench__review-action--accept"
+											disabled={feedbackSubmitting ||
+												!collectionId ||
+												!reviewerReady ||
+												!selectedFindingCanAccept}
+											on:click={acceptSelectedFinding}
+										>
+											{feedbackSubmitting
+												? $t('research.understanding.quickAcceptSaving')
+												: findingAcceptLabel(selectedFinding)}
+										</button>
+										<button
+											type="button"
+											disabled={feedbackSubmitting ||
+												!collectionId ||
+												!reviewerReady ||
+												!selectedFindingCanAccept ||
+												!nextReviewCandidateAfter(selectedFinding.finding_id, feedbackByTargetId)}
+											on:click={acceptSelectedFindingAndOpenNext}
+										>
+											{feedbackSubmitting
+												? $t('research.understanding.quickAcceptSaving')
+												: findingAcceptLabel(selectedFinding, true)}
+										</button>
+										<button
+											type="button"
+											class:research-understanding-workbench__review-action--active={activeReviewPanel ===
+												'feedback' &&
+												feedbackStatus === 'incorrect' &&
+												feedbackIssue !== 'none'}
+											aria-pressed={activeReviewPanel === 'feedback' &&
+												feedbackStatus === 'incorrect' &&
+												feedbackIssue !== 'none'}
+											on:click={rejectSelectedFinding}
+										>
+											{$t('research.understanding.quickReject')}
+										</button>
+										<button
+											type="button"
+											class:research-understanding-workbench__review-action--active={activeReviewPanel ===
+												'curation'}
+											aria-pressed={activeReviewPanel === 'curation'}
+											on:click={correctSelectedFinding}
+										>
+											{$t('research.understanding.quickCorrect')}
+										</button>
+									{/if}
 									<button
 										type="button"
 										class:research-understanding-workbench__review-action--active={activeReviewPanel ===
@@ -797,10 +5202,405 @@
 								</div>
 							</header>
 
+							{#if selectedFinding}
+								{#if selectedOutdatedReviewCount}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-decision"
+										role="status"
+									>
+										<strong>{$t('research.understanding.outdatedReviewTitle')}</strong>
+										<p>
+											{$t('research.understanding.outdatedReviewBody', {
+												count: selectedOutdatedReviewCount
+											})}
+										</p>
+									</section>
+								{/if}
+								{#if selectedFindingDecision}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--decision"
+										aria-label={$t('research.understanding.findingDecision')}
+									>
+										<strong>{selectedFindingDecision.title}</strong>
+										<p>{selectedFindingDecision.body}</p>
+									</section>
+								{/if}
+								<details
+									class="research-understanding-workbench__review-audit"
+									aria-label={$t('research.understanding.findingReviewAudit')}
+								>
+									<summary>{$t('research.understanding.findingReviewAudit')}</summary>
+								{#if selectedFindingUsagePath}
+									<section
+										class="research-understanding-workbench__usage-path"
+										aria-label={$t('research.understanding.findingUsagePath')}
+									>
+										<div>
+											<span>{$t('research.understanding.findingUsageCurrent')}</span>
+											<strong>{selectedFindingUsagePath.title}</strong>
+											<p>{selectedFindingUsagePath.body}</p>
+										</div>
+										<div>
+											<span>{$t('research.understanding.findingUsageDataset')}</span>
+											{#if selectedFindingTrust}
+												<strong>{datasetLabelStatusLabel(selectedFindingTrust.labelStatus)}</strong>
+												<p>{findingDatasetTrustSubtitle(selectedFindingTrust)}</p>
+											{/if}
+											<p>{selectedFindingUsagePath.datasetNote}</p>
+										</div>
+										<div>
+											<span>{$t('research.understanding.findingUsageUpgrade')}</span>
+												<ul>
+													{#each selectedFindingUsagePath.checklist as item}
+														<li>{item}</li>
+													{/each}
+												</ul>
+											</div>
+										</section>
+								{/if}
+								{#if selectedFindingReviewDecisionHint}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-decision"
+										aria-label={$t('research.understanding.reviewDecisionHint')}
+									>
+										<div>
+											<strong>{$t('research.understanding.reviewDecisionHint')}</strong>
+											<span>{reviewDecisionHintStatusLabel(selectedFindingReviewDecisionHint)}</span>
+										</div>
+										{#if selectedFindingReviewDecisionHint.summary}
+											<p>{selectedFindingReviewDecisionHint.summary}</p>
+										{/if}
+										{#if selectedFindingReviewDecisionHint.blocked_actions.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.reviewDecisionBlockedActions')}</span>
+												<ul>
+													{#each selectedFindingReviewDecisionHint.blocked_actions as action (action)}
+														<li>{reviewDecisionBlockedActionLabel(action)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFindingReviewDecisionHint.why_accept_blocked.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.reviewDecisionWhyAcceptBlocked')}</span>
+												<ul>
+													{#each selectedFindingReviewDecisionHint.why_accept_blocked as reason (reason)}
+														<li>{reviewDecisionBlockedReasonLabel(reason)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFindingReviewDecisionHint.required_checks.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.reviewDecisionRequiredChecks')}</span>
+												<ul>
+													{#each selectedFindingReviewDecisionHint.required_checks as check (check)}
+														<li>{check}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</section>
+								{/if}
+								{#if selectedFindingDatasetSample}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--training-messages"
+										aria-label={$t('research.understanding.trainingMessageReadiness')}
+									>
+										<div>
+											<strong>{$t('research.understanding.trainingMessageReadiness')}</strong>
+											<span>
+												{selectedTrainingMessageDiagnostics.length
+													? $t('research.understanding.trainingMessageReadinessBlocked')
+													: $t('research.understanding.trainingMessageReadinessReady')}
+											</span>
+										</div>
+										<p>
+											{trainingMessageReadinessBody(
+												selectedFindingDatasetSample,
+												selectedTrainingMessageDiagnostics
+											)}
+										</p>
+										{#if selectedTrainingMessageDiagnostics.length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.trainingMessageDiagnosticTitle')}</span>
+												<ul>
+													{#each selectedTrainingMessageDiagnostics as diagnostic (diagnostic)}
+														<li>{trainingMessageDiagnosticLabel(diagnostic)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</section>
+								{/if}
+								{#if selectedFindingAcceptanceGate}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--acceptance"
+										aria-label={$t('research.understanding.findingAcceptanceGate')}
+									>
+										<div>
+											<strong>
+												{$t('research.understanding.findingAcceptanceGate')}
+											</strong>
+											<span>{acceptanceGateStatusLabel(selectedFindingAcceptanceGate)}</span>
+										</div>
+										<p>{acceptanceGateBody(selectedFindingAcceptanceGate)}</p>
+										{#if acceptanceGateCheckLabels(selectedFindingAcceptanceGate).length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.findingAcceptanceGateChecks')}</span>
+												<ul>
+													{#each acceptanceGateCheckLabels(selectedFindingAcceptanceGate) as check (check)}
+														<li>{check}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFindingExpertNotePrompt}
+											<p class="research-understanding-workbench__readiness-note">
+												{selectedFindingExpertNotePrompt}
+											</p>
+										{/if}
+									</section>
+								{/if}
+								{#if selectedFindingProtocolReadiness}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--protocol"
+										aria-label={$t('research.understanding.findingProtocolReadiness')}
+									>
+										<div>
+											<strong>
+												{$t('research.understanding.findingProtocolReadiness')}
+											</strong>
+											<span>{protocolReadinessStatusLabel(selectedFindingProtocolReadiness)}</span>
+										</div>
+										<p>{protocolReadinessBody(selectedFindingProtocolReadiness)}</p>
+										{#if protocolReadinessGaps(selectedFindingProtocolReadiness).length}
+											<div class="research-understanding-workbench__protocol-gaps">
+												<span>{$t('research.understanding.findingProtocolReadinessMissing')}</span>
+												<ul>
+													{#each protocolReadinessGaps(selectedFindingProtocolReadiness) as gap (gap)}
+														<li>{protocolReadinessGapLabel(gap)}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</section>
+								{:else if selectedFindingProtocolReadinessUnavailable}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--protocol"
+										aria-label={$t('research.understanding.findingProtocolReadiness')}
+									>
+										<div>
+											<strong>
+												{$t('research.understanding.findingProtocolReadiness')}
+											</strong>
+											<span>
+												{$t('research.understanding.findingProtocolReadinessUnavailableStatus')}
+											</span>
+										</div>
+										<p>{$t('research.understanding.findingProtocolReadinessUnavailableBody')}</p>
+									</section>
+								{/if}
+								{#if selectedFindingReviewReasons.length}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--review-reasons"
+										aria-label={$t('research.understanding.findingReviewReasonPanel')}
+									>
+										<div>
+											<strong>{$t('research.understanding.findingReviewReasonPanel')}</strong>
+											<span>{findingReviewReasonActionLabel(selectedDisplayFinding ?? selectedFinding, selectedFindingDatasetSample)}</span>
+										</div>
+										<ul>
+											{#each selectedFindingReviewReasons as reason (reason)}
+												<li>{findingReviewReasonLabel(reason)}</li>
+											{/each}
+										</ul>
+									</section>
+								{/if}
+								<section
+									class="research-understanding-workbench__basis-panel"
+									aria-label={$t('research.understanding.evidenceBasis')}
+								>
+									<strong>{$t('research.understanding.evidenceBasis')}</strong>
+									<ul>
+										{#each findingAuditNotes(selectedFinding) as note}
+											<li>{note}</li>
+										{/each}
+									</ul>
+								</section>
+								<section
+									class="research-understanding-workbench__basis-panel"
+									aria-label={$t('research.understanding.findingEvidenceRoleCoverage')}
+								>
+									<strong>{$t('research.understanding.findingEvidenceRoleCoverage')}</strong>
+									<div class="research-understanding-workbench__role-grid">
+										{#each findingEvidenceRoleSummary(selectedFinding) as roleSummary (roleSummary.role)}
+											<div
+												class:research-understanding-workbench__role-grid-item--empty={roleSummary.count === 0}
+											>
+												<span>{roleSummary.label}</span>
+												<strong>{roleSummary.count}</strong>
+											</div>
+										{/each}
+									</div>
+									<ul>
+										{#each findingEvidenceGapNotes(selectedFinding) as note}
+											<li>{note}</li>
+										{/each}
+									</ul>
+								</section>
+								<section
+									class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--boundary"
+									aria-label={$t('research.understanding.conclusionUseBoundary')}
+								>
+									<strong>{$t('research.understanding.conclusionUseBoundary')}</strong>
+									<p>{findingGeneralizationStatusLabel(selectedFinding)}</p>
+									<ul>
+										{#each findingUseBoundaryNotes(selectedFinding) as note}
+											<li>{note}</li>
+										{/each}
+									</ul>
+								</section>
+								</details>
+								{#if selectedRelatedReviewFindings.length}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--related-review"
+										aria-label={$t('research.understanding.relatedReviewFindings')}
+									>
+										<strong>{$t('research.understanding.relatedReviewFindings')}</strong>
+										<p>{$t('research.understanding.relatedReviewFindingsBody')}</p>
+										<div class="research-understanding-workbench__related-review-list">
+											{#each selectedRelatedReviewFindings as relatedFinding (relatedFinding.finding_id)}
+												<button
+													type="button"
+													on:click={() => openRelatedReviewFinding(relatedFinding.finding_id)}
+												>
+													<span>{relatedFinding.statement || relatedFinding.title}</span>
+													<small>
+														{[
+															supportGradeLabel(relatedFinding.support_grade),
+															findingDirectEvidenceLabel(relatedFinding),
+															findingPaperCoverageLabel(relatedFinding)
+														].join(' · ')}
+													</small>
+												</button>
+											{/each}
+										</div>
+									</section>
+								{/if}
+								<div class="research-understanding-workbench__context research-understanding-workbench__context--finding-chain">
+									<div>
+										<span>{$t('research.understanding.findingVariables')}</span>
+										<p>{findingChainText(selectedDisplayFinding?.variables ?? selectedFinding.variables)}</p>
+									</div>
+									<div>
+										<span>{$t('research.understanding.findingMechanism')}</span>
+										<p>{findingChainText(selectedDisplayFinding?.mediators ?? selectedFinding.mediators)}</p>
+									</div>
+									<div>
+										<span>{$t('research.understanding.findingOutcomes')}</span>
+										<p>{findingChainText(selectedDisplayFinding?.outcomes ?? selectedFinding.outcomes)}</p>
+									</div>
+									{#if selectedDisplayFinding?.direction || selectedFinding.direction}
+										<div>
+											<span>{$t('research.understanding.relationDirection')}</span>
+											<p>{relationLabel(selectedDisplayFinding?.direction ?? selectedFinding.direction)}</p>
+										</div>
+									{/if}
+									{#if selectedDisplayFinding?.scope_summary || selectedFinding.scope_summary}
+										<div>
+											<span>{$t('research.understanding.findingScope')}</span>
+											<p>{selectedDisplayFinding?.scope_summary ?? selectedFinding.scope_summary}</p>
+										</div>
+									{/if}
+								</div>
+								{#if selectedFinding.synthesis_status}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--synthesis"
+										aria-label={$t('research.understanding.crossPaperSynthesis')}
+									>
+										<div class="research-understanding-workbench__synthesis-heading">
+											<strong>{$t('research.understanding.crossPaperSynthesis')}</strong>
+											<span>{findingSynthesisStatusLabel(selectedFinding.synthesis_status)}</span>
+										</div>
+										<p>{findingSynthesisStatusBody(selectedFinding.synthesis_status)}</p>
+										{#if selectedFinding.common_conditions.length}
+											<div class="research-understanding-workbench__synthesis-conditions">
+												<span>{$t('research.understanding.commonConditions')}</span>
+												<ul>
+													{#each selectedFinding.common_conditions as condition (condition)}
+														<li>{condition}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFinding.incomparable_conditions.length}
+											<div class="research-understanding-workbench__synthesis-conditions">
+												<span>{$t('research.understanding.incomparableConditions')}</span>
+												<ul>
+													{#each selectedFinding.incomparable_conditions as condition (condition)}
+														<li>{condition}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if selectedFinding.paper_contributions.length}
+											<div class="research-understanding-workbench__paper-contributions">
+												<span>{$t('research.understanding.paperContributions')}</span>
+												<ol>
+													{#each selectedFinding.paper_contributions as contribution, index (contribution.document_id)}
+														<li>
+															<div>
+																<strong>{paperContributionLabel(contribution, index)}</strong>
+																<span>{paperContributionRoleLabel(contribution.role)}</span>
+															</div>
+															{#if contribution.statement}
+																<p>{contribution.statement}</p>
+															{/if}
+															{#if paperContributionEvidence(contribution).length}
+																<div class="research-understanding-workbench__contribution-links">
+																	{#each paperContributionEvidence(contribution) as ref (ref.evidence_ref_id)}
+																		{#if evidenceHref(ref)}
+																			<a href={evidenceHref(ref)}>
+																				{readableEvidenceTitle(ref.source_label || ref.title)}
+																			</a>
+																		{/if}
+																	{/each}
+																</div>
+															{/if}
+														</li>
+													{/each}
+												</ol>
+											</div>
+										{/if}
+									</section>
+								{/if}
+								{#if selectedFinding.comparison_summary}
+									<section
+										class="research-understanding-workbench__basis-panel research-understanding-workbench__basis-panel--comparison"
+										aria-label="Comparison"
+									>
+										<strong>Comparison</strong>
+										{#if findingComparisonTitle(selectedFinding)}
+											<p>{findingComparisonTitle(selectedFinding)}</p>
+										{/if}
+										{#if findingComparisonValueLabel(selectedFinding)}
+											<p>{findingComparisonValueLabel(selectedFinding)}</p>
+										{/if}
+										{#if findingComparisonGroupLabel(selectedFinding)}
+											<small>{findingComparisonGroupLabel(selectedFinding)}</small>
+										{/if}
+										{#if findingComparisonContextLabel(selectedFinding)}
+											<small>{findingComparisonContextLabel(selectedFinding)}</small>
+										{/if}
+									</section>
+								{/if}
+							{/if}
+
 							{#if activeReviewPanel === 'feedback'}
 								<form
 									class="research-understanding-workbench__feedback research-understanding-workbench__feedback--primary"
-									on:submit|preventDefault={submitClaimFeedback}
+									on:submit|preventDefault={() => submitClaimFeedback()}
 								>
 									<h5>{$t('research.understanding.feedbackTitle')}</h5>
 									<label>
@@ -828,6 +5628,12 @@
 												<option value={issue}>{feedbackIssueLabel(issue)}</option>
 											{/each}
 										</select>
+										<small class="research-understanding-workbench__feedback-guidance">
+											{$t('research.understanding.feedbackIssueCategory', {
+												category: datasetErrorCategoryLabel(feedbackIssueCategory(feedbackIssue))
+											})}
+											{feedbackIssueGuidance(feedbackIssue)}
+										</small>
 									</label>
 									<label>
 										<span>{$t('research.understanding.feedbackNote')}</span>
@@ -837,23 +5643,35 @@
 											bind:value={feedbackNote}
 											disabled={feedbackSubmitting}
 											maxlength="2000"
+											required={feedbackNoteRequired}
 											rows="3"
 										></textarea>
+										{#if feedbackNoteRequired}
+											<small class="research-understanding-workbench__feedback-guidance">
+												{selectedFindingExpertNotePrompt}
+											</small>
+										{/if}
 									</label>
-									<label>
+									<div class="research-understanding-workbench__reviewer-chip">
 										<span>{$t('research.understanding.feedbackReviewer')}</span>
-										<input
-											id={`${titleId}-feedback-reviewer`}
-											name="feedback_reviewer"
-											bind:value={feedbackReviewer}
-											disabled={feedbackSubmitting}
-											maxlength="120"
-										/>
-									</label>
-									<button type="submit" disabled={feedbackSubmitting || !collectionId}>
+										<strong>{currentReviewer || $t('research.understanding.reviewerUnavailable')}</strong>
+									</div>
+									<button
+										type="submit"
+										disabled={feedbackSubmitting || !collectionId || !reviewerReady || feedbackNoteMissing}
+									>
 										{feedbackSubmitting
 											? $t('research.understanding.feedbackSaving')
 											: $t('research.understanding.feedbackSubmit')}
+									</button>
+									<button
+										type="button"
+										disabled={feedbackSubmitting || !collectionId || !reviewerReady || feedbackNoteMissing || !selectedFinding || !nextReviewCandidateAfter(selectedFinding.finding_id)}
+										on:click={() => submitClaimFeedback({ openNext: true })}
+									>
+										{feedbackSubmitting
+											? $t('research.understanding.feedbackSaving')
+											: $t('research.understanding.feedbackSubmitAndNext')}
 									</button>
 									{#if feedbackMessage}
 										<p class="research-understanding-workbench__feedback-state" role="status">
@@ -872,7 +5690,7 @@
 							{:else if activeReviewPanel === 'curation'}
 								<form
 									class="research-understanding-workbench__feedback research-understanding-workbench__feedback--primary"
-									on:submit|preventDefault={submitClaimCuration}
+									on:submit|preventDefault={() => submitClaimCuration()}
 								>
 									<h5>{$t('research.understanding.curationTitle')}</h5>
 									<label>
@@ -902,6 +5720,19 @@
 										</select>
 									</label>
 									<label>
+										<span>{$t('research.understanding.curationSupportGrade')}</span>
+										<select
+											id={`${titleId}-curation-support-grade`}
+											name="curation_support_grade"
+											bind:value={curationSupportGrade}
+											disabled={curationSubmitting}
+										>
+											{#each SUPPORT_GRADE_ORDER.filter((grade) => grade !== 'all') as grade (grade)}
+												<option value={grade}>{supportGradeLabel(grade)}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
 										<span>{$t('research.understanding.curationStatement')}</span>
 										<textarea
 											id={`${titleId}-curation-statement`}
@@ -914,6 +5745,112 @@
 										></textarea>
 									</label>
 									<label>
+										<span>{$t('research.understanding.curationVariables')}</span>
+										<input
+											id={`${titleId}-curation-variables`}
+											name="curation_variables"
+											bind:value={curationVariables}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationMediators')}</span>
+										<input
+											id={`${titleId}-curation-mediators`}
+											name="curation_mediators"
+											bind:value={curationMediators}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationOutcomes')}</span>
+										<input
+											id={`${titleId}-curation-outcomes`}
+											name="curation_outcomes"
+											bind:value={curationOutcomes}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationDirection')}</span>
+										<input
+											id={`${titleId}-curation-direction`}
+											name="curation_direction"
+											bind:value={curationDirection}
+											disabled={curationSubmitting}
+										/>
+									</label>
+									<label>
+										<span>{$t('research.understanding.curationScope')}</span>
+										<textarea
+											id={`${titleId}-curation-scope`}
+											name="curation_scope"
+											bind:value={curationScopeSummary}
+											disabled={curationSubmitting}
+											maxlength="1000"
+											rows="2"
+										></textarea>
+									</label>
+									<fieldset class="research-understanding-workbench__curation-picker">
+										<legend>{$t('research.understanding.curationEvidenceRefs')}</legend>
+										{#if selectedCurationEvidenceOptions.length}
+											<div class="research-understanding-workbench__check-list">
+												{#each selectedCurationEvidenceOptions as ref (ref.evidence_ref_id)}
+													{@const sourceText = evidenceSourceText(ref)}
+													<label class="research-understanding-workbench__check-item">
+														<input
+															type="checkbox"
+															checked={curationEvidenceRefIds.includes(ref.evidence_ref_id)}
+															disabled={curationSubmitting}
+															on:change={() => toggleCurationEvidence(ref.evidence_ref_id)}
+														/>
+														<span>
+															<strong>{readableEvidenceTitle(ref.title)}</strong>
+															<small>{evidenceMeta(ref)}</small>
+															{#if sourceText}
+																<em>{compactText(sourceText, 220)}</em>
+															{:else}
+																<em>{$t('research.understanding.noEvidenceSourceText')}</em>
+															{/if}
+														</span>
+													</label>
+												{/each}
+											</div>
+										{:else}
+											<p class="research-understanding-workbench__picker-empty">
+												{$t('research.understanding.curationNoEvidenceRefs')}
+											</p>
+										{/if}
+									</fieldset>
+									<fieldset class="research-understanding-workbench__curation-picker">
+										<legend>{$t('research.understanding.curationContextRefs')}</legend>
+										{#if selectedCurationContextOptions.length}
+											<div class="research-understanding-workbench__check-list">
+												{#each selectedCurationContextOptions as context (context.context_id)}
+													<label class="research-understanding-workbench__check-item">
+														<input
+															type="checkbox"
+															checked={curationContextIds.includes(context.context_id)}
+															disabled={curationSubmitting}
+															on:change={() => toggleCurationContext(context.context_id)}
+														/>
+														<span>
+															<strong>{context.label}</strong>
+															<small>{contextCurationMeta(context)}</small>
+															{#if context.limitations.length}
+																<em>{listLabel(context.limitations)}</em>
+															{/if}
+														</span>
+													</label>
+												{/each}
+											</div>
+										{:else}
+											<p class="research-understanding-workbench__picker-empty">
+												{$t('research.understanding.curationNoContextRefs')}
+											</p>
+										{/if}
+									</fieldset>
+									<label>
 										<span>{$t('research.understanding.curationNote')}</span>
 										<textarea
 											id={`${titleId}-curation-note`}
@@ -924,23 +5861,34 @@
 											rows="3"
 										></textarea>
 									</label>
-									<label>
+									<div class="research-understanding-workbench__reviewer-chip">
 										<span>{$t('research.understanding.curationReviewer')}</span>
-										<input
-											id={`${titleId}-curation-reviewer`}
-											name="curation_reviewer"
-											bind:value={curationReviewer}
-											disabled={curationSubmitting}
-											maxlength="120"
-										/>
-									</label>
+										<strong>{currentReviewer || $t('research.understanding.reviewerUnavailable')}</strong>
+									</div>
 									<button
 										type="submit"
-										disabled={curationSubmitting || !collectionId || !curationStatement.trim()}
+										disabled={curationSubmitting ||
+											!collectionId ||
+											!curationStatement.trim() ||
+											!reviewerReady}
 									>
 										{curationSubmitting
 											? $t('research.understanding.curationSaving')
 											: $t('research.understanding.curationSubmit')}
+									</button>
+									<button
+										type="button"
+										disabled={curationSubmitting ||
+											!collectionId ||
+											!curationStatement.trim() ||
+											!reviewerReady ||
+											!selectedFinding ||
+											!nextReviewCandidateAfter(selectedFinding.finding_id)}
+										on:click={() => submitClaimCuration({ openNext: true })}
+									>
+										{curationSubmitting
+											? $t('research.understanding.curationSaving')
+											: $t('research.understanding.curationSubmitAndNext')}
 									</button>
 									{#if curationMessage}
 										<p class="research-understanding-workbench__feedback-state" role="status">
@@ -958,7 +5906,7 @@
 								</form>
 							{/if}
 
-							{#if selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction}
+							{#if !selectedFinding && selectedEffect && (selectedEffect.variable_axis || selectedEffect.target_property || selectedEffect.effect_direction)}
 								<div class="research-understanding-workbench__context research-understanding-workbench__context--compact">
 									{#if selectedEffect.variable_axis}
 										<div>
@@ -981,42 +5929,157 @@
 								</div>
 							{/if}
 
-							<div class="research-understanding-workbench__detail-section">
-								<h5>{$t('research.understanding.evidenceRefs')}</h5>
-								{#each selectedEvidenceRefs as ref (ref.evidence_ref_id)}
-									{@const href = evidenceHref(ref)}
-									{@const sourceText = evidenceSourceText(ref)}
-									{#if href}
-										<a class="research-understanding-workbench__evidence" {href}>
-											<strong>{readableEvidenceTitle(ref.title)}</strong>
-											<span>{evidenceMeta(ref)}</span>
-											{#if sourceText}
-												<p>{sourceText}</p>
-											{:else}
-												<small>{$t('research.understanding.noEvidenceSourceText')}</small>
-											{/if}
-										</a>
+							{#if selectedFinding}
+								<div class="research-understanding-workbench__detail-section">
+									<h5>{$t('research.understanding.findingEvidence')}</h5>
+									{#each selectedFindingEvidenceGroups() as group (group.role)}
+										<section class="research-understanding-workbench__evidence-group">
+											<h6>{findingEvidenceGroupLabel(group.role)}</h6>
+											{#each group.items as ref (ref.evidence_ref_id)}
+												{@const href = evidenceHref(ref)}
+												{@const selectedQuote = evidenceQuote(ref)}
+												{@const sourceBlock = evidenceSourceBlock(ref)}
+												<article class="research-understanding-workbench__evidence">
+													<div class="research-understanding-workbench__evidence-header">
+														<div>
+															<strong>{readableEvidenceTitle(ref.title)}</strong>
+															<span>{evidenceMeta(ref)}</span>
+														</div>
+														{#if href}
+															<a class="research-understanding-workbench__evidence-link" {href}>
+																{$t('research.understanding.openEvidenceSource')}
+															</a>
+														{/if}
+													</div>
+													{#if selectedQuote}
+														<div class="research-understanding-workbench__evidence-quote">
+															<span>{$t('research.understanding.selectedEvidenceQuote')}</span>
+															<p>{selectedQuote}</p>
+														</div>
+													{:else}
+														<small>{$t('research.understanding.noEvidenceSourceText')}</small>
+													{/if}
+													{#if ref.table_audit && (tableAuditColumns(ref) || tableAuditRows(ref).length)}
+														<div class="research-understanding-workbench__table-audit">
+															<span>{$t('research.understanding.relevantTableRows')}</span>
+															{#if tableAuditColumns(ref)}
+																<p>{tableAuditColumns(ref)}</p>
+															{/if}
+															{#if tableAuditHasUnalignedRows(ref)}
+																<p class="research-understanding-workbench__table-audit-warning">
+																	{$t('research.understanding.unalignedTableRowsWarning')}
+																</p>
+															{/if}
+															{#if tableAuditRows(ref).length}
+																<ul>
+																	{#each tableAuditRows(ref) as row (row.row_index)}
+																		<li>
+																			<small>
+																				{$t('research.understanding.tableRowLabel', {
+																					row: row.row_index
+																				})}
+																			</small>
+																			<span>{tableAuditRowText(ref, row)}</span>
+																		</li>
+																	{/each}
+																</ul>
+															{/if}
+														</div>
+													{/if}
+													{#if hasDistinctEvidenceSourceBlock(ref)}
+														<details class="research-understanding-workbench__evidence-source">
+															<summary>{$t('research.understanding.parsedSourceBlock')}</summary>
+															<p>{sourceBlock}</p>
+														</details>
+													{/if}
+												</article>
+											{/each}
+										</section>
 									{:else}
-										<div class="research-understanding-workbench__evidence">
-											<strong>{readableEvidenceTitle(ref.title)}</strong>
-											<span>{evidenceMeta(ref)}</span>
-											{#if sourceText}
-												<p>{sourceText}</p>
+										<div class="research-understanding-workbench__empty">
+											{$t('research.understanding.noFindingEvidence')}
+										</div>
+									{/each}
+									{#if selectedSecondaryFindingEvidenceCount() > 0}
+										<p class="research-understanding-workbench__audit-note">
+											{$t('research.understanding.secondaryFindingEvidenceCount', {
+												count: selectedSecondaryFindingEvidenceCount()
+											})}
+										</p>
+									{/if}
+								</div>
+							{:else}
+								<div class="research-understanding-workbench__detail-section">
+									<h5>{$t('research.understanding.evidenceRefs')}</h5>
+									{#each selectedEvidenceRefs as ref (ref.evidence_ref_id)}
+										{@const href = evidenceHref(ref)}
+										{@const selectedQuote = evidenceQuote(ref)}
+										{@const sourceBlock = evidenceSourceBlock(ref)}
+										<article class="research-understanding-workbench__evidence">
+											<div class="research-understanding-workbench__evidence-header">
+												<div>
+													<strong>{readableEvidenceTitle(ref.title)}</strong>
+													<span>{evidenceMeta(ref)}</span>
+												</div>
+												{#if href}
+													<a class="research-understanding-workbench__evidence-link" {href}>
+														{$t('research.understanding.openEvidenceSource')}
+													</a>
+												{/if}
+											</div>
+											{#if selectedQuote}
+												<div class="research-understanding-workbench__evidence-quote">
+													<span>{$t('research.understanding.selectedEvidenceQuote')}</span>
+													<p>{selectedQuote}</p>
+												</div>
 											{:else}
 												<small>{$t('research.understanding.noEvidenceSourceText')}</small>
 											{/if}
+											{#if ref.table_audit && (tableAuditColumns(ref) || tableAuditRows(ref).length)}
+												<div class="research-understanding-workbench__table-audit">
+													<span>{$t('research.understanding.relevantTableRows')}</span>
+													{#if tableAuditColumns(ref)}
+														<p>{tableAuditColumns(ref)}</p>
+													{/if}
+													{#if tableAuditHasUnalignedRows(ref)}
+														<p class="research-understanding-workbench__table-audit-warning">
+															{$t('research.understanding.unalignedTableRowsWarning')}
+														</p>
+													{/if}
+													{#if tableAuditRows(ref).length}
+														<ul>
+															{#each tableAuditRows(ref) as row (row.row_index)}
+																<li>
+																	<small>
+																		{$t('research.understanding.tableRowLabel', {
+																			row: row.row_index
+																		})}
+																	</small>
+																	<span>{tableAuditRowText(ref, row)}</span>
+																</li>
+															{/each}
+														</ul>
+													{/if}
+												</div>
+											{/if}
+											{#if hasDistinctEvidenceSourceBlock(ref)}
+												<details class="research-understanding-workbench__evidence-source">
+													<summary>{$t('research.understanding.parsedSourceBlock')}</summary>
+													<p>{sourceBlock}</p>
+												</details>
+											{/if}
+										</article>
+									{:else}
+										<div class="research-understanding-workbench__empty">
+											{$t('research.understanding.noEvidence')}
 										</div>
-									{/if}
-								{:else}
-									<div class="research-understanding-workbench__empty">
-										{$t('research.understanding.noEvidence')}
-									</div>
-								{/each}
-							</div>
+									{/each}
+								</div>
+							{/if}
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.contexts')}</h5>
-								{#each selectedContextRefs as context (context.context_id)}
+								{#each (selectedFinding ? selectedFindingDisplayContextRefs : selectedContextRefs) as context (context.context_id)}
 									<div class="research-understanding-workbench__context">
 										<strong>{context.label}</strong>
 										{#if context.material_scope.length}
@@ -1055,40 +6118,61 @@
 										{$t('research.understanding.noContexts')}
 									</div>
 								{/each}
+								{#if selectedFinding && selectedHiddenFindingContextCount > 0}
+									<p class="research-understanding-workbench__context-note">
+										{$t('research.understanding.hiddenFindingContextCount', {
+											count: selectedHiddenFindingContextCount
+										})}
+									</p>
+								{/if}
 							</div>
 
 							<div class="research-understanding-workbench__detail-section">
 								<h5>{$t('research.understanding.relatedRelations')}</h5>
-								{#each selectedReadableRelations.slice(0, 5) as relation (relation.relation_id)}
-									<div class="research-understanding-workbench__context">
-										<div class="research-understanding-workbench__meta">
-											<span>{relationLabel(relation.relation_type)}</span>
-											<span>{relationStatusLabel(relation.status)}</span>
-											{#if relation.confidence !== null}
-												<span>{confidenceLabel(relation.confidence)}</span>
+								{#if selectedFindingRelationChain.length}
+									{#each selectedFindingRelationChain as segment, index (`${segment.relation_id}-${index}`)}
+										<div class="research-understanding-workbench__context">
+											<div class="research-understanding-workbench__meta">
+												<span>{relationLabel(segment.direction)}</span>
+											</div>
+											<p>{segment.statement}</p>
+											<small>
+												{listLabel([segment.variable, ...segment.mediators, segment.outcome])}
+											</small>
+										</div>
+									{/each}
+								{:else}
+									{#each selectedReadableRelations.slice(0, 5) as relation (relation.relation_id)}
+										<div class="research-understanding-workbench__context">
+											<div class="research-understanding-workbench__meta">
+												<span>{relationLabel(relation.relation_type)}</span>
+												<span>{relationStatusLabel(relation.status)}</span>
+												{#if relation.confidence !== null}
+													<span>{confidenceLabel(relation.confidence)}</span>
+												{/if}
+											</div>
+											<p>{relationSummary(relation)}</p>
+											{#if relation.conditions.length}
+												<small>
+													{$t('research.understanding.contextPrefix')}
+													{listLabel(relation.conditions)}
+												</small>
+											{/if}
+											{#if relation.warnings.length}
+												<div class="research-understanding-workbench__chips">
+													{#each relation.warnings as warning (`${relation.relation_id}-${warning}`)}
+														<span>{humanizeCode(warning)}</span>
+													{/each}
+												</div>
 											{/if}
 										</div>
-										<p>{relationSummary(relation)}</p>
-										{#if relation.conditions.length}
-											<small>
-												{$t('research.understanding.contextPrefix')}
-												{listLabel(relation.conditions)}
-											</small>
-										{/if}
-										{#if relation.warnings.length}
-											<div class="research-understanding-workbench__chips">
-												{#each relation.warnings as warning (`${relation.relation_id}-${warning}`)}
-													<span>{humanizeCode(warning)}</span>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								{:else}
-									<div class="research-understanding-workbench__empty">
-										{$t('research.understanding.noRelations')}
-									</div>
-								{/each}
-								{#if selectedHiddenRelationCount || selectedReadableRelations.length > 5}
+									{:else}
+										<div class="research-understanding-workbench__empty">
+											{$t('research.understanding.noRelations')}
+										</div>
+									{/each}
+								{/if}
+								{#if !selectedFindingRelationChain.length && (selectedHiddenRelationCount || selectedReadableRelations.length > 5)}
 									<small>
 										{$t('research.understanding.hiddenRelationCount', {
 											count:
@@ -1103,17 +6187,23 @@
 								<div class="research-understanding-workbench__detail-section">
 									<h5>{$t('research.understanding.curationApplied')}</h5>
 									<div class="research-understanding-workbench__context">
+										{#if selectedClaim}
+											<div>
+												<span>{$t('research.understanding.originalClaim')}</span>
+												<p>{selectedClaim.statement}</p>
+											</div>
+											<div>
+												<span>{$t('research.understanding.originalClassification')}</span>
+												<p>
+													{claimTypeLabel(selectedClaim.claim_type)}
+													·
+													{statusLabel(selectedClaim.status)}
+												</p>
+											</div>
+										{/if}
 										<div>
-											<span>{$t('research.understanding.originalClaim')}</span>
-											<p>{selectedClaim.statement}</p>
-										</div>
-										<div>
-											<span>{$t('research.understanding.originalClassification')}</span>
-											<p>
-												{claimTypeLabel(selectedClaim.claim_type)}
-												·
-												{statusLabel(selectedClaim.status)}
-											</p>
+											<span>{$t('research.understanding.curationStatement')}</span>
+											<p>{selectedCuration.curated_statement}</p>
 										</div>
 										{#if selectedCuration.note}
 											<div>
@@ -1159,12 +6249,12 @@
 								{/each}
 							</div>
 
-							{#if selectedClaim.warnings.length || selectedClaim.source_object_ids.length}
+							{#if selectedClaim && (selectedDetailWarnings.length || (!selectedFinding && selectedClaim.source_object_ids.length))}
 								<div class="research-understanding-workbench__detail-section">
 									<h5>{$t('research.warnings')}</h5>
-									{#if selectedClaim.warnings.length}
+									{#if selectedDetailWarnings.length}
 										<div class="research-understanding-workbench__chips">
-											{#each selectedClaim.warnings as warning (`${selectedClaim.claim_id}-${warning}`)}
+											{#each selectedDetailWarnings as warning (`${selectedClaim.claim_id}-${warning}`)}
 												<span>{humanizeCode(warning)}</span>
 											{/each}
 										</div>
@@ -1200,6 +6290,7 @@
 <style>
 	.research-understanding-workbench {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 14px;
 		min-width: 0;
 		max-width: 100%;
@@ -1219,9 +6310,9 @@
 	}
 
 	.research-understanding-workbench__heading div,
-	.research-understanding-workbench__column,
-	.research-understanding-workbench__card {
+	.research-understanding-workbench__column {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 12px;
 		min-width: 0;
 	}
@@ -1286,9 +6377,998 @@
 		line-height: 30px;
 	}
 
+	.research-understanding-workbench__expert-summary {
+		display: grid;
+		grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__expert-summary > div:first-child {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__expert-summary strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__expert-summary p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__expert-summary ul {
+		grid-column: 1 / -1;
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__expert-metrics {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__expert-metrics span {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__expert-metrics strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(230px, 0.75fr);
+		gap: 12px;
+		border: 1px solid var(--accent-border);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__review-loop--needs_review,
+	.research-understanding-workbench__review-loop--continue_review,
+	.research-understanding-workbench__review-loop--needs_reviewer {
+		border-color: rgba(217, 119, 6, 0.36);
+		background: rgba(217, 119, 6, 0.08);
+	}
+
+	.research-understanding-workbench__review-loop--export_ready {
+		border-color: rgba(22, 163, 74, 0.34);
+		background: rgba(22, 163, 74, 0.08);
+	}
+
+	.research-understanding-workbench__review-loop > div:first-child,
+	.research-understanding-workbench__review-loop-errors {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop > div:first-child > span,
+	.research-understanding-workbench__review-loop-errors > strong {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__review-loop strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__review-loop p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__review-loop-metrics,
+	.research-understanding-workbench__review-loop-actions,
+	.research-understanding-workbench__review-loop-errors div {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-metrics span,
+	.research-understanding-workbench__review-loop-errors span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 28px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__review-loop-actions button,
+	.research-understanding-workbench__review-loop-next-actions button,
+	.research-understanding-workbench__review-loop-link {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+		text-decoration: none;
+	}
+
+	.research-understanding-workbench__review-loop-actions button:hover,
+	.research-understanding-workbench__review-loop-actions button:focus-visible,
+	.research-understanding-workbench__review-loop-next-actions button:hover,
+	.research-understanding-workbench__review-loop-next-actions button:focus-visible,
+	.research-understanding-workbench__review-loop-link:hover,
+	.research-understanding-workbench__review-loop-link:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__review-loop-actions button:disabled,
+	.research-understanding-workbench__review-loop-next-actions button:disabled,
+	.research-understanding-workbench__review-loop-link--disabled {
+		color: var(--text-secondary);
+		cursor: not-allowed;
+		opacity: 0.62;
+	}
+
+	.research-understanding-workbench__review-loop-link--disabled {
+		pointer-events: none;
+	}
+
+	.research-understanding-workbench__review-loop-next {
+		grid-column: 1 / -1;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
+		gap: 10px;
+		min-width: 0;
+		border: 1px solid rgba(217, 119, 6, 0.28);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-loop-next > div:first-child {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-next > div:first-child > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__review-loop-next strong,
+	.research-understanding-workbench__review-loop-next p {
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields,
+	.research-understanding-workbench__review-loop-next-reasons,
+	.research-understanding-workbench__review-loop-next-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields {
+		justify-content: flex-end;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields span,
+	.research-understanding-workbench__review-loop-next-reasons span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		max-width: 100%;
+		min-height: 28px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 4px 8px;
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-next-fields strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-next-reasons {
+		grid-column: 1 / -1;
+	}
+
+	.research-understanding-workbench__review-loop-next-actions {
+		grid-column: 1 / -1;
+	}
+
+	.research-understanding-workbench__review-loop-checklist {
+		grid-column: 1 / -1;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-loop-check {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 9px 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-loop-check span,
+	.research-understanding-workbench__review-loop-check strong {
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-check span {
+		color: var(--text-primary);
+		font-weight: 750;
+	}
+
+	.research-understanding-workbench__review-loop-check strong {
+		width: fit-content;
+		border-radius: 999px;
+		padding: 1px 7px;
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__review-loop-check p {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__review-loop-check--done {
+		border-color: rgba(22, 163, 74, 0.28);
+	}
+
+	.research-understanding-workbench__review-loop-check--done strong {
+		background: rgba(22, 163, 74, 0.12);
+		color: #166534;
+	}
+
+	.research-understanding-workbench__review-loop-check--active {
+		border-color: rgba(217, 119, 6, 0.28);
+	}
+
+	.research-understanding-workbench__review-loop-check--active strong {
+		background: rgba(217, 119, 6, 0.13);
+		color: #92400e;
+	}
+
+	.research-understanding-workbench__review-loop-check--blocked {
+		border-color: rgba(100, 116, 139, 0.28);
+	}
+
+	.research-understanding-workbench__review-loop-check--blocked strong {
+		background: rgba(100, 116, 139, 0.14);
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__review-loop ul {
+		grid-column: 1 / -1;
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-loop-errors {
+		grid-column: 1 / -1;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__axis-coverage {
+		display: grid;
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__axis-coverage-heading h4,
+	.research-understanding-workbench__axis-group-heading strong {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__axis-coverage-heading p,
+	.research-understanding-workbench__axis-group-heading span {
+		margin: 3px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__coverage-gaps {
+		display: grid;
+		gap: 10px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__coverage-gaps strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__coverage-gaps p {
+		margin: 2px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__coverage-gaps ul {
+		display: grid;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__coverage-gaps li {
+		display: grid;
+		grid-template-columns: minmax(110px, 0.28fr) minmax(0, 1fr);
+		gap: 8px;
+		align-items: start;
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__coverage-gaps li span {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__answer-boundary {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.8fr);
+		gap: 10px;
+		align-items: start;
+		border: 1px solid var(--accent-border);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__answer-boundary div {
+		display: grid;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__answer-boundary strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__answer-boundary p,
+	.research-understanding-workbench__answer-boundary span {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__answer-boundary span {
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__axis-coverage-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.research-understanding-workbench__axis-group {
+		display: grid;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__axis-group ul {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__axis-group li > button,
+	.research-understanding-workbench__axis-group li > span {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 7px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		line-height: 18px;
+		text-align: left;
+	}
+
+	.research-understanding-workbench__axis-group li > button {
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__axis-group li > button:hover {
+		border-color: var(--accent-border);
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__axis-group li > button > span,
+	.research-understanding-workbench__axis-group li > span > span {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__axis-group small {
+		flex: 0 0 auto;
+		border-radius: var(--radius-sm);
+		padding: 1px 5px;
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 15px;
+	}
+
+	.research-understanding-workbench__axis-status--primary {
+		background: rgba(22, 163, 74, 0.12);
+		color: #166534;
+	}
+
+	.research-understanding-workbench__axis-status--review {
+		background: rgba(217, 119, 6, 0.13);
+		color: #92400e;
+	}
+
+	.research-understanding-workbench__axis-status--mechanism {
+		background: rgba(37, 99, 235, 0.12);
+		color: #1d4ed8;
+	}
+
+	.research-understanding-workbench__axis-status--context {
+		background: rgba(71, 85, 105, 0.12);
+		color: #475569;
+	}
+
+	.research-understanding-workbench__axis-status--missing {
+		background: rgba(100, 116, 139, 0.14);
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__dataset {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__dataset summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__dataset summary span {
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 750;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__dataset summary small,
+	.research-understanding-workbench__dataset p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-body {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 12px;
+		border-top: 1px solid var(--border-default);
+		padding: 10px 12px 12px;
+	}
+
+	.research-understanding-workbench__dataset-counts,
+	.research-understanding-workbench__dataset-actions,
+	.research-understanding-workbench__dataset-errors div {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__dataset-errors {
+		display: grid;
+		flex-basis: 100%;
+		gap: 6px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots {
+		display: grid;
+		flex-basis: 100%;
+		gap: 8px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots > div {
+		display: grid;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__dataset-hotspots strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots ul {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li {
+		display: grid;
+		grid-template-columns: minmax(58px, max-content) minmax(0, 1fr) max-content;
+		grid-template-areas:
+			"dimension name count"
+			"dimension metric count";
+		gap: 2px 8px;
+		align-items: center;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 6px 8px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > span {
+		grid-area: dimension;
+		color: var(--text-secondary);
+		font-size: 11px;
+		line-height: 16px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > strong {
+		grid-area: name;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > small {
+		grid-area: metric;
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-hotspots li > em {
+		grid-area: count;
+		min-width: 26px;
+		border-radius: 999px;
+		padding: 2px 7px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-style: normal;
+		font-weight: 750;
+		line-height: 18px;
+		text-align: center;
+	}
+
+	.research-understanding-workbench__review-import {
+		display: grid;
+		flex-basis: 100%;
+		gap: 10px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__review-import-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-heading > div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-heading strong,
+	.research-understanding-workbench__review-import label span,
+	.research-understanding-workbench__review-import-progress strong,
+	.research-understanding-workbench__review-import-scope-gate strong,
+	.research-understanding-workbench__review-import-issues strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-heading > span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		max-width: 46%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-heading > span strong {
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+	}
+
+	.research-understanding-workbench__review-import label {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import textarea {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 8px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+		font-size: 12px;
+		line-height: 18px;
+		resize: vertical;
+	}
+
+	.research-understanding-workbench__review-import-actions,
+	.research-understanding-workbench__review-import-summary {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-actions button {
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__review-import-actions button:hover:not(:disabled),
+	.research-understanding-workbench__review-import-actions button:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__review-import-actions button:disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
+	}
+
+	.research-understanding-workbench__review-import-actions small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-summary span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 26px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-summary strong {
+		color: var(--text-primary);
+	}
+
+	.research-understanding-workbench__review-import-progress {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-scope-gate {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 8px 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-import-scope-gate small {
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-scope-gate ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-progress ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__review-import-progress li {
+		display: grid;
+		grid-template-columns: minmax(92px, 0.35fr) minmax(180px, 1fr) minmax(120px, 0.6fr);
+		gap: 8px;
+		align-items: center;
+		min-width: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 6px 8px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-import-progress li > span {
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-progress li > small {
+		overflow-wrap: anywhere;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-import-next {
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__review-import-next:hover,
+	.research-understanding-workbench__review-import-next:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__review-import-issues {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__review-import-issues ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-collection {
+		display: grid;
+		flex-basis: 100%;
+		gap: 6px;
+		min-width: 0;
+		border-top: 1px solid var(--border-default);
+		padding-top: 10px;
+	}
+
+	.research-understanding-workbench__dataset-errors > strong,
+	.research-understanding-workbench__dataset-collection > strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-collection > div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__dataset-counts span,
+	.research-understanding-workbench__dataset-collection span,
+	.research-understanding-workbench__dataset-errors span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 26px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__dataset-counts strong,
+	.research-understanding-workbench__dataset-collection span strong,
+	.research-understanding-workbench__dataset-errors span strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__dataset-actions a,
+	.research-understanding-workbench__dataset-action-disabled {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__dataset-action-disabled {
+		border-style: dashed;
+		color: var(--text-secondary);
+		cursor: not-allowed;
+	}
+
+	.research-understanding-workbench__dataset-actions a:hover,
+	.research-understanding-workbench__dataset-actions a:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
 	.research-understanding-workbench__summary span,
 	.research-understanding-workbench__meta span,
-	.research-understanding-workbench__card small,
 	.research-understanding-workbench__evidence span,
 	.research-understanding-workbench__evidence small,
 	.research-understanding-workbench__column-heading span,
@@ -1362,32 +7442,18 @@
 	}
 
 	.research-understanding-workbench__column-heading h4,
-	.research-understanding-workbench__detail-section h5 {
+	.research-understanding-workbench__detail-section h5,
+	.research-understanding-workbench__evidence-group h6 {
 		margin: 0;
 		color: var(--text-primary);
 	}
 
-	.research-understanding-workbench__card,
 	.research-understanding-workbench__evidence {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		padding: 13px;
 		background: var(--bg-subtle);
 		text-decoration: none;
-	}
-
-	.research-understanding-workbench__card--claim {
-		width: 100%;
-		color: inherit;
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.research-understanding-workbench__card--claim:hover,
-	.research-understanding-workbench__card--claim:focus-visible {
-		border-color: var(--color-accent);
-		background: var(--surface-card);
 	}
 
 	.research-understanding-workbench__meta,
@@ -1403,15 +7469,6 @@
 		padding: 3px 8px;
 	}
 
-	.research-understanding-workbench__card p {
-		margin: 0;
-		color: var(--text-primary);
-		font-size: 14px;
-		line-height: 22px;
-		overflow-wrap: anywhere;
-	}
-
-	.research-understanding-workbench__card > strong,
 	.research-understanding-workbench__claim-header > strong {
 		color: var(--text-primary);
 		font-size: 14px;
@@ -1429,42 +7486,272 @@
 		min-width: 0;
 	}
 
-	.research-understanding-workbench__claim-stats {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 18px;
+	.research-understanding-workbench__table-wrap {
+		overflow-x: auto;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
 	}
 
-	.research-understanding-workbench__source-list {
-		display: grid;
-		gap: 4px;
-		min-width: 0;
+	.research-understanding-workbench__findings-table {
+		width: 100%;
+		min-width: 1200px;
+		border-collapse: collapse;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
 	}
 
-	.research-understanding-workbench__source-list > span {
+	.research-understanding-workbench__findings-table th,
+	.research-understanding-workbench__findings-table td {
+		border-bottom: 1px solid var(--border-default);
+		padding: 10px;
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.research-understanding-workbench__findings-table th {
+		background: var(--bg-subtle);
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 750;
 		line-height: 18px;
+		white-space: nowrap;
 	}
 
-	.research-understanding-workbench__source-list ul {
+	.research-understanding-workbench__findings-table tr:last-child td {
+		border-bottom: 0;
+	}
+
+	.research-understanding-workbench__findings-table td {
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__findings-table td:nth-child(2),
+	.research-understanding-workbench__findings-table td:nth-child(3),
+	.research-understanding-workbench__findings-table td:nth-child(4),
+	.research-understanding-workbench__findings-table td:nth-child(5),
+	.research-understanding-workbench__findings-table td:nth-child(7),
+	.research-understanding-workbench__findings-table td:nth-child(8) {
+		color: var(--text-secondary);
+	}
+
+	.research-understanding-workbench__finding-main {
+		width: 28%;
+		min-width: 260px;
+	}
+
+	.research-understanding-workbench__finding-main button {
 		display: grid;
-		gap: 3px;
-		margin: 0;
+		gap: 4px;
+		width: 100%;
+		border: 0;
 		padding: 0;
-		list-style: none;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__finding-main button:hover strong,
+	.research-understanding-workbench__finding-main button:focus-visible strong {
+		color: var(--color-accent);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.research-understanding-workbench__finding-main button:disabled {
+		cursor: not-allowed;
+		opacity: 0.65;
+	}
+
+	.research-understanding-workbench__finding-actions {
+		display: grid;
+		gap: 6px;
+		min-width: 112px;
+	}
+
+	.research-understanding-workbench__finding-actions button {
+		min-height: 30px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 5px 9px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__finding-actions button:hover,
+	.research-understanding-workbench__finding-actions button:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__finding-main strong {
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__finding-main span {
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
 	}
 
-	.research-understanding-workbench__source-list li {
-		overflow: hidden;
-		text-overflow: ellipsis;
+	.research-understanding-workbench__basis {
+		display: grid;
+		gap: 3px;
+		min-width: 220px;
+	}
+
+	.research-understanding-workbench__basis strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__basis span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 17px;
+	}
+
+	.research-understanding-workbench__trust {
+		display: grid;
+		gap: 3px;
+		min-width: 128px;
+	}
+
+	.research-understanding-workbench__trust small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 17px;
+	}
+
+	.research-understanding-workbench__trust-badge {
+		display: inline-flex;
+		align-items: center;
+		width: fit-content;
+		min-height: 24px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 2px 8px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__trust-badge--gold {
+		border-color: rgba(150, 110, 20, 0.45);
+		background: rgba(246, 198, 82, 0.16);
+		color: #7a5400;
+	}
+
+	.research-understanding-workbench__trust-badge--silver {
+		border-color: rgba(88, 103, 122, 0.38);
+		background: rgba(115, 132, 155, 0.12);
+		color: #465265;
+	}
+
+	.research-understanding-workbench__trust-badge--candidate {
+		border-color: rgba(57, 114, 178, 0.36);
+		background: rgba(73, 133, 202, 0.1);
+		color: #245b95;
+	}
+
+	.research-understanding-workbench__trust-badge--rejected {
+		border-color: rgba(177, 72, 72, 0.45);
+		background: rgba(210, 82, 82, 0.1);
+		color: #983737;
+	}
+
+	.research-understanding-workbench__related-review-list {
+		display: grid;
+		gap: 8px;
+	}
+
+	.research-understanding-workbench__related-review-list button {
+		display: grid;
+		gap: 4px;
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 9px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__related-review-list button:hover,
+	.research-understanding-workbench__related-review-list button:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__related-review-list small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 17px;
+	}
+
+	.research-understanding-workbench__role-grid > div {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		border: 1px solid var(--border-default);
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 11px;
+		line-height: 16px;
+		white-space: nowrap;
+	}
+
+	.research-understanding-workbench__role-grid strong {
+		color: var(--text-primary);
+		font-size: 11px;
+		line-height: 16px;
+	}
+
+	.research-understanding-workbench__role-grid-item--empty {
+		color: var(--text-muted);
+		opacity: 0.7;
+	}
+
+	.research-understanding-workbench__role-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__role-grid > div {
+		justify-content: space-between;
+		border-radius: var(--radius-md);
+		padding: 7px 9px;
+	}
+
+	.research-understanding-workbench__grade {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 2px 8px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
 		white-space: nowrap;
 	}
 
@@ -1482,6 +7769,294 @@
 		font-size: 14px;
 		line-height: 22px;
 		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__basis-panel {
+		display: grid;
+		gap: 7px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px 12px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__basis-panel strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__basis-panel ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--decision p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--synthesis {
+		border-color: var(--accent-border);
+	}
+
+	.research-understanding-workbench__basis-panel--synthesis > p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__synthesis-heading,
+	.research-understanding-workbench__paper-contributions li > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 5px 12px;
+	}
+
+	.research-understanding-workbench__synthesis-heading span,
+	.research-understanding-workbench__synthesis-conditions > span,
+	.research-understanding-workbench__paper-contributions > span,
+	.research-understanding-workbench__paper-contributions li > div:first-child span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__synthesis-conditions,
+	.research-understanding-workbench__paper-contributions {
+		display: grid;
+		gap: 5px;
+	}
+
+	.research-understanding-workbench__paper-contributions ol {
+		display: grid;
+		gap: 0;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__paper-contributions li {
+		display: grid;
+		gap: 4px;
+		border-top: 1px solid var(--border-default);
+		padding: 8px 0;
+	}
+
+	.research-understanding-workbench__paper-contributions li p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__contribution-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+	}
+
+	.research-understanding-workbench__contribution-links a {
+		color: var(--color-accent);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__review-audit {
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__review-audit[open] {
+		display: grid;
+		gap: 10px;
+		padding: 0 10px 10px;
+	}
+
+	.research-understanding-workbench__review-audit > summary {
+		padding: 10px 12px;
+		cursor: pointer;
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 750;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__review-audit[open] > summary {
+		margin: 0 -10px;
+		border-bottom: 1px solid var(--border-default);
+	}
+
+	.research-understanding-workbench__basis-panel--review-reasons {
+		border-color: var(--accent-border);
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__basis-panel--review-reasons > div {
+		display: grid;
+		gap: 3px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-reasons span {
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision {
+		border-color: var(--accent-border);
+		background: var(--accent-subtle);
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__basis-panel--review-decision p {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol {
+		border-color: var(--accent-border);
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages {
+		border-color: var(--border-default);
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__basis-panel--training-messages p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__readiness-note {
+		margin: 0;
+		border-left: 3px solid var(--color-accent);
+		padding: 6px 9px;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol > div:first-child {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__basis-panel--protocol p,
+	.research-understanding-workbench__protocol-gaps {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__protocol-gaps {
+		display: grid;
+		gap: 4px;
+	}
+
+	.research-understanding-workbench__usage-path {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(180px, 0.8fr) minmax(240px, 1fr);
+		gap: 10px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__usage-path > div {
+		display: grid;
+		align-content: start;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__usage-path span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.research-understanding-workbench__usage-path strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.research-understanding-workbench__usage-path p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.research-understanding-workbench__usage-path ul {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding-left: 18px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.research-understanding-workbench__review-actions {
@@ -1512,6 +8087,22 @@
 		color: var(--color-accent);
 	}
 
+	.research-understanding-workbench__review-action--accept {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+		color: var(--color-on-accent, #fff);
+	}
+
+	.research-understanding-workbench__review-action--accept:hover,
+	.research-understanding-workbench__review-action--accept:focus-visible {
+		color: var(--color-on-accent, #fff);
+	}
+
+	.research-understanding-workbench__review-action--accept:disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
+	}
+
 	.research-understanding-workbench__detail-section {
 		padding-top: 10px;
 		border-top: 1px solid var(--border-default);
@@ -1520,6 +8111,19 @@
 	.research-understanding-workbench__detail-section h5 {
 		font-size: 13px;
 		line-height: 19px;
+	}
+
+	.research-understanding-workbench__evidence-group {
+		display: grid;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__evidence-group h6 {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
 	}
 
 	.research-understanding-workbench__feedback {
@@ -1573,6 +8177,87 @@
 		resize: vertical;
 	}
 
+	.research-understanding-workbench__feedback-guidance {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__curation-picker {
+		display: grid;
+		gap: 8px;
+		margin: 0;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__curation-picker legend {
+		padding: 0 4px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__check-list {
+		display: grid;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__check-item {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: start;
+		gap: 9px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px;
+		background: var(--surface-card);
+	}
+
+	.research-understanding-workbench__feedback .research-understanding-workbench__check-item input {
+		width: 16px;
+		min-width: 16px;
+		height: 16px;
+		margin-top: 2px;
+		padding: 0;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__check-item > span {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__check-item strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__check-item small,
+	.research-understanding-workbench__check-item em,
+	.research-understanding-workbench__picker-empty {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__check-item em {
+		display: block;
+		font-style: normal;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__picker-empty {
+		margin: 0;
+	}
+
 	.research-understanding-workbench__feedback button {
 		justify-self: start;
 		min-height: 34px;
@@ -1591,6 +8276,28 @@
 	.research-understanding-workbench__feedback button:disabled {
 		cursor: not-allowed;
 		opacity: 0.62;
+	}
+
+	.research-understanding-workbench__reviewer-chip {
+		display: grid;
+		gap: 4px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px 12px;
+		background: var(--bg-subtle);
+	}
+
+	.research-understanding-workbench__reviewer-chip span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__reviewer-chip strong {
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.research-understanding-workbench__back {
@@ -1619,6 +8326,13 @@
 		line-height: 18px;
 	}
 
+	.research-understanding-workbench__context-note {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
 	.research-understanding-workbench__feedback-state--error {
 		color: var(--color-danger);
 	}
@@ -1634,15 +8348,14 @@
 		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 	}
 
+	.research-understanding-workbench__context--finding-chain {
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	}
+
 	.research-understanding-workbench__evidence {
 		display: grid;
 		gap: 7px;
 		color: inherit;
-	}
-
-	.research-understanding-workbench__evidence[href]:hover {
-		border-color: var(--color-accent);
-		background: var(--surface-card);
 	}
 
 	.research-understanding-workbench__context strong,
@@ -1651,6 +8364,39 @@
 		font-size: 13px;
 		line-height: 19px;
 		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__evidence-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__evidence-header > div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.research-understanding-workbench__evidence-link {
+		flex: 0 0 auto;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 4px 9px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		text-decoration: none;
+	}
+
+	.research-understanding-workbench__evidence-link:hover,
+	.research-understanding-workbench__evidence-link:focus-visible {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
 	}
 
 	.research-understanding-workbench__context div {
@@ -1665,7 +8411,62 @@
 		line-height: 18px;
 	}
 
-	.research-understanding-workbench__evidence p {
+	.research-understanding-workbench__evidence-quote {
+		display: grid;
+		gap: 5px;
+	}
+
+	.research-understanding-workbench__evidence-quote > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__table-audit {
+		display: grid;
+		gap: 6px;
+		border-top: 1px solid var(--border-subtle);
+		padding-top: 7px;
+	}
+
+	.research-understanding-workbench__table-audit > span,
+	.research-understanding-workbench__table-audit small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__table-audit-warning {
+		color: var(--warning-text);
+		font-size: 12px;
+		font-weight: 650;
+		line-height: 18px;
+	}
+
+	.research-understanding-workbench__table-audit ul {
+		display: grid;
+		gap: 5px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-understanding-workbench__table-audit li {
+		display: grid;
+		gap: 2px;
+	}
+
+	.research-understanding-workbench__table-audit li > span {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 20px;
+		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__evidence p,
+	.research-understanding-workbench__evidence-source p {
 		margin: 0;
 		border-left: 3px solid var(--border-default);
 		padding-left: 10px;
@@ -1674,6 +8475,30 @@
 		line-height: 21px;
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
+	}
+
+	.research-understanding-workbench__evidence-source {
+		border-top: 1px solid var(--border-default);
+		padding-top: 7px;
+	}
+
+	.research-understanding-workbench__evidence-source summary {
+		width: fit-content;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		cursor: pointer;
+	}
+
+	.research-understanding-workbench__evidence-source summary:hover,
+	.research-understanding-workbench__evidence-source summary:focus-visible {
+		color: var(--color-accent);
+	}
+
+	.research-understanding-workbench__evidence-source p {
+		margin-top: 8px;
+		color: var(--text-secondary);
 	}
 
 	.research-understanding-workbench__empty {
@@ -1693,6 +8518,16 @@
 		background: rgba(120, 140, 180, 0.16);
 	}
 
+	:global(:root[data-theme='dark'])
+		.research-understanding-workbench__axis-status--primary {
+		color: #86efac;
+	}
+
+	:global(:root[data-theme='dark'])
+		.research-understanding-workbench__axis-status--review {
+		color: #fbbf24;
+	}
+
 	@media (max-width: 760px) {
 		.research-understanding-workbench {
 			padding: 16px;
@@ -1706,5 +8541,45 @@
 			grid-template-columns: 1fr;
 		}
 
+		.research-understanding-workbench__answer-boundary,
+		.research-understanding-workbench__review-loop,
+		.research-understanding-workbench__review-loop-next,
+		.research-understanding-workbench__axis-coverage-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.research-understanding-workbench__dataset {
+			align-items: stretch;
+		}
+
+		.research-understanding-workbench__dataset summary,
+		.research-understanding-workbench__dataset-body {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.research-understanding-workbench__review-import-heading {
+			flex-direction: column;
+		}
+
+		.research-understanding-workbench__review-import-heading > span {
+			max-width: none;
+		}
+
+		.research-understanding-workbench__usage-path {
+			grid-template-columns: 1fr;
+		}
+
+		.research-understanding-workbench__role-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.research-understanding-workbench__dataset-counts,
+		.research-understanding-workbench__dataset-actions,
+		.research-understanding-workbench__review-loop-metrics,
+		.research-understanding-workbench__review-loop-actions,
+		.research-understanding-workbench__review-loop-next-fields {
+			justify-content: flex-start;
+		}
 	}
 </style>

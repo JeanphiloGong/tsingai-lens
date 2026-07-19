@@ -58,6 +58,8 @@ class GoalMessageRecord:
     warnings: tuple[str, ...] = ()
     links: Mapping[str, str] | None = None
     source_links: tuple[GoalSourceLink, ...] = ()
+    review_gate: str | None = None
+    source_finding_refs: tuple[Mapping[str, Any], ...] = ()
 
     @classmethod
     def user(
@@ -89,13 +91,21 @@ class GoalMessageRecord:
         warnings: Any = None,
         links: Mapping[str, Any] | None = None,
         source_links: Any = None,
+        review_gate: Any = None,
+        source_finding_refs: Any = None,
     ) -> "GoalMessageRecord":
         normalized_source_mode = normalize_source_mode(source_mode)
         evidence_ids = _stable_strings(used_evidence_ids)
         public_source_links = _normalize_source_links(source_links)
+        normalized_review_gate = _normalize_optional_text(review_gate)
+        normalized_source_finding_refs = _normalize_source_finding_refs(
+            source_finding_refs
+        )
         if normalized_source_mode != "collection_grounded":
             evidence_ids = ()
             public_source_links = ()
+            normalized_review_gate = None
+            normalized_source_finding_refs = ()
         return cls(
             message_id=_normalize_required_text(message_id, "message_id"),
             session_id=_normalize_required_text(session_id, "session_id"),
@@ -106,6 +116,8 @@ class GoalMessageRecord:
             warnings=_stable_strings(warnings),
             links=_normalize_string_mapping(links),
             source_links=public_source_links,
+            review_gate=normalized_review_gate,
+            source_finding_refs=normalized_source_finding_refs,
             created_at=str(created_at),
         )
 
@@ -122,6 +134,8 @@ class GoalMessageRecord:
                 warnings=payload.get("warnings"),
                 links=payload.get("links"),
                 source_links=payload.get("source_links"),
+                review_gate=payload.get("review_gate"),
+                source_finding_refs=payload.get("source_finding_refs"),
                 created_at=payload.get("created_at") or "",
             )
         return cls.user(
@@ -150,6 +164,11 @@ class GoalMessageRecord:
                     "source_links": [
                         source_link.to_record() for source_link in self.source_links
                     ],
+                    "review_gate": self.review_gate,
+                    "source_finding_refs": [
+                        dict(source_finding_ref)
+                        for source_finding_ref in self.source_finding_refs
+                    ],
                 }
             )
         return record
@@ -163,6 +182,7 @@ class GoalSessionRecord:
     focused_material_id: str | None
     focused_paper_id: str | None
     focused_objective_id: str | None
+    focused_goal_id: str | None
     goal_text: str | None
     goal_brief_json: Mapping[str, Any]
     answer_mode: GoalAnswerMode
@@ -184,6 +204,7 @@ class GoalSessionRecord:
         focused_material_id: Any = None,
         focused_paper_id: Any = None,
         focused_objective_id: Any = None,
+        focused_goal_id: Any = None,
         goal_text: Any = None,
         goal_brief_json: Mapping[str, Any] | None = None,
         answer_mode: Any = "hybrid",
@@ -197,6 +218,7 @@ class GoalSessionRecord:
             focused_material_id=_normalize_optional_text(focused_material_id),
             focused_paper_id=_normalize_optional_text(focused_paper_id),
             focused_objective_id=_normalize_optional_text(focused_objective_id),
+            focused_goal_id=_normalize_optional_text(focused_goal_id),
             goal_text=_normalize_optional_text(goal_text),
             goal_brief_json=dict(goal_brief_json or {}),
             answer_mode=normalize_answer_mode(answer_mode),
@@ -226,6 +248,7 @@ class GoalSessionRecord:
             focused_objective_id=_normalize_optional_text(
                 payload.get("focused_objective_id")
             ),
+            focused_goal_id=_normalize_optional_text(payload.get("focused_goal_id")),
             goal_text=_normalize_optional_text(payload.get("goal_text")),
             goal_brief_json=_normalize_mapping(payload.get("goal_brief_json")),
             answer_mode=normalize_answer_mode(payload.get("answer_mode")),
@@ -256,6 +279,7 @@ class GoalSessionRecord:
                 focused_material_id=None,
                 focused_paper_id=None,
                 focused_objective_id=None,
+                focused_goal_id=None,
             )
         return next_record
 
@@ -265,6 +289,7 @@ class GoalSessionRecord:
         material_id: Any = None,
         paper_id: Any = None,
         objective_id: Any = None,
+        goal_id: Any = None,
     ) -> "GoalSessionRecord":
         next_record = self
         material_text = _normalize_optional_text(material_id)
@@ -276,6 +301,9 @@ class GoalSessionRecord:
         objective_text = _normalize_optional_text(objective_id)
         if objective_text:
             next_record = replace(next_record, focused_objective_id=objective_text)
+        goal_text = _normalize_optional_text(goal_id)
+        if goal_text:
+            next_record = replace(next_record, focused_goal_id=goal_text)
         return next_record
 
     def with_focus(
@@ -284,12 +312,14 @@ class GoalSessionRecord:
         focused_material_id: Any,
         focused_paper_id: Any,
         focused_objective_id: Any,
+        focused_goal_id: Any,
     ) -> "GoalSessionRecord":
         return replace(
             self,
             focused_material_id=_normalize_optional_text(focused_material_id),
             focused_paper_id=_normalize_optional_text(focused_paper_id),
             focused_objective_id=_normalize_optional_text(focused_objective_id),
+            focused_goal_id=_normalize_optional_text(focused_goal_id),
         )
 
     def with_goal_text(self, goal_text: Any) -> "GoalSessionRecord":
@@ -357,6 +387,7 @@ class GoalSessionRecord:
             "focused_material_id": self.focused_material_id,
             "focused_paper_id": self.focused_paper_id,
             "focused_objective_id": self.focused_objective_id,
+            "focused_goal_id": self.focused_goal_id,
             "goal_text": self.goal_text,
             "goal_brief_json": dict(self.goal_brief_json),
             "answer_mode": self.answer_mode,
@@ -441,6 +472,40 @@ def _normalize_source_links(value: Any) -> tuple[GoalSourceLink, ...]:
         seen_hrefs.add(source_link.href)
         links.append(source_link)
     return tuple(links)
+
+
+def _normalize_source_finding_refs(value: Any) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    refs: list[Mapping[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        finding_id = _normalize_optional_text(item.get("finding_id"))
+        finding_fingerprint = _normalize_optional_text(
+            item.get("finding_fingerprint")
+        )
+        protocol_source_fingerprint = _normalize_optional_text(
+            item.get("protocol_source_fingerprint")
+        )
+        if not finding_id or not finding_fingerprint or not protocol_source_fingerprint:
+            continue
+        key = (finding_id, protocol_source_fingerprint)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(
+            {
+                "finding_id": finding_id,
+                "finding_fingerprint": finding_fingerprint,
+                "protocol_source_fingerprint": protocol_source_fingerprint,
+                "evidence_ref_ids": list(
+                    _stable_strings(item.get("evidence_ref_ids"))
+                ),
+            }
+        )
+    return tuple(refs)
 
 
 def _stable_strings(values: Any) -> tuple[str, ...]:

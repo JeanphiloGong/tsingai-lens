@@ -64,6 +64,7 @@ from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from tests.support.collection_service import build_test_collection_service
 
 
 def _build_test_comparable_result(
@@ -208,8 +209,10 @@ class CountingEvidenceExtractor(EvidenceOnlyExtractor):
         return StructuredTableBatchMentions()
 
 
-def test_paper_facts_prompt_payloads_exclude_internal_ids():
-    service = PaperFactsService()
+def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     text_window_payload = service._build_text_window_extraction_payload(
         title="Prompt Boundary Paper",
@@ -338,8 +341,10 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids():
     assert '"result_claims": [' in table_batch_prompt
 
 
-def test_paper_facts_payloads_include_sanitized_objective_context():
-    service = PaperFactsService()
+def test_paper_facts_payloads_include_sanitized_objective_context(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     objective_context = ObjectiveContext.from_mapping(
         {
             "objective_id": "obj-internal-1",
@@ -349,6 +354,16 @@ def test_paper_facts_payloads_include_sanitized_objective_context():
             "process_context_axes": ["LPBF"],
             "target_property_axes": ["yield strength"],
             "excluded_property_axes": ["relative density"],
+            "objective_evidence_lens": {
+                "target_outcome_axes": ["yield strength"],
+                "mediator_axes": [],
+                "variable_process_axes": ["scanning speed"],
+                "context_axes": ["316L stainless steel", "LPBF"],
+                "excluded_axes": ["relative density"],
+                "direct_support_rules": [
+                    "Direct support must explicitly report a target outcome."
+                ],
+            },
             "routing_hints": [
                 {
                     "table_id": "tbl-internal-1",
@@ -387,6 +402,16 @@ def test_paper_facts_payloads_include_sanitized_objective_context():
         "process_context_axes": ["LPBF"],
         "target_property_axes": ["yield strength"],
         "excluded_property_axes": ["relative density"],
+        "objective_evidence_lens": {
+            "target_outcome_axes": ["yield strength"],
+            "mediator_axes": [],
+            "variable_process_axes": ["scanning speed"],
+            "context_axes": ["316L stainless steel", "LPBF"],
+            "excluded_axes": ["relative density"],
+            "direct_support_rules": [
+                "Direct support must explicitly report a target outcome."
+            ],
+        },
         "routing_hints": [],
         "extraction_guidance": {"focus": "Extract mechanical current-work evidence."},
         "confidence": 0.9,
@@ -435,8 +460,10 @@ def test_paper_facts_payloads_include_sanitized_objective_context():
     assert '"document_id"' not in table_batch_prompt
 
 
-def test_paper_facts_selects_objective_context_by_text_and_table_route():
-    service = PaperFactsService()
+def test_paper_facts_selects_objective_context_by_text_and_table_route(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     structural_context = ObjectiveContext.from_mapping(
         {
             "objective_id": "obj-structural",
@@ -534,10 +561,9 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     from application.core.semantic_build.document_profile_service import (
         DocumentProfileService,
     )
-    from application.source.collection_service import CollectionService
     from domain.source import SourceArtifactSet
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Route Gated Facts")
     collection_id = collection["collection_id"]
     core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
@@ -848,9 +874,8 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
 
 
 def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
-    from application.source.collection_service import CollectionService
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Evidence Cards")
     collection_id = collection["collection_id"]
     core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
@@ -917,8 +942,10 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
     assert card["evidence_anchors"][0]["figure_or_table"] == "table-1"
 
 
-def test_document_method_family_conditions_bind_table_results():
-    service = PaperFactsService()
+def test_document_method_family_conditions_bind_table_results(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     text_windows = [
         {
             "window_id": "win-tensile",
@@ -1050,8 +1077,10 @@ def test_document_method_family_conditions_bind_table_results():
     ]
 
 
-def test_characterization_observations_include_table_derived_pbf_context():
-    service = PaperFactsService()
+def test_characterization_observations_include_table_derived_pbf_context(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     sample_variants = (
         {
             "variant_id": "var-1",
@@ -1132,8 +1161,10 @@ def test_characterization_observations_include_table_derived_pbf_context():
     assert highest_density["variant_id"] == "var-2"
 
 
-def test_table_row_process_context_uses_cell_header_bindings():
-    service = PaperFactsService()
+def test_table_row_process_context_uses_cell_header_bindings(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     context = service._build_table_row_process_context(
         [],
@@ -1152,8 +1183,10 @@ def test_table_row_process_context_uses_cell_header_bindings():
     assert context.energy_density_j_mm3 == 150.0
 
 
-def test_table_row_process_context_keeps_p001_process_columns_separate():
-    service = PaperFactsService()
+def test_table_row_process_context_keeps_p001_process_columns_separate(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     context = service._build_table_row_process_context(
         [],
@@ -1172,8 +1205,10 @@ def test_table_row_process_context_keeps_p001_process_columns_separate():
     assert context.energy_density_j_mm3 == 70.0
 
 
-def test_text_window_test_conditions_skip_empty_payload():
-    service = PaperFactsService()
+def test_text_window_test_conditions_skip_empty_payload(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     text_window = {
         "text": "Yield strength reached 560 MPa.",
         "window_id": "window-1",
@@ -1198,8 +1233,10 @@ def test_text_window_test_conditions_skip_empty_payload():
     assert conditions == []
 
 
-def test_generic_text_samples_are_removed_when_table_samples_exist():
-    service = PaperFactsService()
+def test_generic_text_samples_are_removed_when_table_samples_exist(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     samples = service._normalize_sample_variant_records(
         [
             {
@@ -1269,8 +1306,12 @@ def test_generic_text_samples_are_removed_when_table_samples_exist():
     assert cleared[0]["variant_id"] is None
 
 
-def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics():
-    service = PaperFactsService()
+def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics(
+    tmp_path,
+):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     measurements = service._normalize_measurement_result_records(
         [
             {
@@ -1405,10 +1446,15 @@ def test_pbf_fact_schema_accepts_process_test_and_value_provenance_fields():
     assert bundle.measurement_results[0].value_payload.source_value_text == "940"
 
 
-def test_paper_facts_service_reads_extraction_concurrency_from_env(monkeypatch):
+def test_paper_facts_service_reads_extraction_concurrency_from_env(
+    monkeypatch,
+    tmp_path,
+):
     monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "8")
 
-    service = PaperFactsService()
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     assert service._get_max_extraction_concurrency() == 8
 
@@ -1416,10 +1462,13 @@ def test_paper_facts_service_reads_extraction_concurrency_from_env(monkeypatch):
 def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
     monkeypatch,
     caplog,
+    tmp_path,
 ):
     monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "invalid")
 
-    service = PaperFactsService()
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     with caplog.at_level("WARNING"):
         assert service._get_max_extraction_concurrency() == 4
@@ -1430,8 +1479,10 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
     )
 
 
-def test_table_batch_payload_truncates_supporting_window_text():
-    service = PaperFactsService()
+def test_table_batch_payload_truncates_supporting_window_text(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     payload = service._build_table_batch_extraction_payload(
         title="Prompt Boundary Paper",
@@ -1473,8 +1524,10 @@ def test_table_batch_payload_truncates_supporting_window_text():
     assert len(payload["supporting_text_windows"][0]["text"]) == 1200
 
 
-def test_table_batch_payload_includes_source_table_context():
-    service = PaperFactsService()
+def test_table_batch_payload_includes_source_table_context(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     payload = service._build_table_batch_extraction_payload(
         title="Prompt Boundary Paper",
@@ -1536,8 +1589,10 @@ def test_table_batch_payload_includes_source_table_context():
     assert payload["target_rows"][0]["row_index"] == 1
 
 
-def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables():
-    service = PaperFactsService()
+def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     small_rows = [
         {"table_id": "tbl-small", "row_index": index, "row_text": f"A{index} | {index}"}
@@ -1564,8 +1619,10 @@ def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables():
     ]
 
 
-def test_table_batch_payload_bounds_large_table_matrix_to_target_rows():
-    service = PaperFactsService()
+def test_table_batch_payload_bounds_large_table_matrix_to_target_rows(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     matrix = [["Sample", "Strength"]]
     matrix.extend([[f"A{index}", str(index)] for index in range(1, 50)])
 
@@ -1605,8 +1662,10 @@ def test_table_batch_payload_bounds_large_table_matrix_to_target_rows():
     assert ["A10", "10"] not in bounded_matrix
 
 
-def test_table_row_binding_repairs_split_lpbf_variant_labels():
-    service = PaperFactsService()
+def test_table_row_binding_repairs_split_lpbf_variant_labels(tmp_path):
+    service = PaperFactsService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
     row_cells = [
         {
             "header_path": None,
@@ -1681,11 +1740,10 @@ def test_table_row_binding_repairs_split_lpbf_variant_labels():
 
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
-    from application.source.collection_service import CollectionService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
     paper_facts_service = PaperFactsService(
         collection_service=collection_service,
@@ -2320,9 +2378,8 @@ def test_comparison_service_collapses_duplicate_comparable_results(tmp_path):
 def test_comparison_service_lists_corpus_results_without_manifest_cache_artifacts(
     tmp_path,
 ):
-    from application.source.collection_service import CollectionService
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
     )
@@ -2359,9 +2416,8 @@ def test_comparison_service_lists_corpus_results_without_manifest_cache_artifact
 def test_comparison_service_reflects_repository_updates_without_manifest_cache(
     tmp_path,
 ):
-    from application.source.collection_service import CollectionService
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     comparison_service = ComparisonService(
         collection_service=collection_service,
     )

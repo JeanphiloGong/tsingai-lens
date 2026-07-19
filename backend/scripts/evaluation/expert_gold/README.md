@@ -219,6 +219,391 @@ python3 scripts/evaluation/expert_gold/evaluate_research_objective_target.py \
   --quality-gate
 ```
 
+## Check Runtime Goal Readiness
+
+For the local six-goal 316L validation collection, run the two read-only
+runtime checks against a running frontend/API origin:
+
+```bash
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_findings_projection.py \
+  --api-base-url http://localhost:5173
+
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --api-base-url http://localhost:5173
+```
+
+`check_goal_findings_projection.py` verifies the expert-facing finding rows,
+evidence roles, boundaries, and source traceback. `check_goal_dataset_quality.py`
+verifies the dataset preparation side: each confirmed goal has at least one
+active sample for review or training, no failed or unavailable trace warnings,
+text input blocks, and traceable training evidence. `training_ready` is reserved
+for curated or accepted samples with an explicit non-AI reviewer id. AI-authored
+or anonymous feedback/curation remains `silver` and `review_candidate` until a
+human expert confirms it.
+
+To print a compact expert review packet with each pending candidate finding,
+its variables/outcomes/direction, evidence quote, source link, and direct
+frontend finding review entry, run:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/prepare_goal_review_workspace.py \
+  --collection-id <collection_id>
+```
+
+This creates one read-only handoff directory with `review-packet.txt`,
+`review-candidates.jsonl`, `reviewed-findings.template.jsonl`,
+`agent-review-prompts.jsonl`, `review-dashboard.md`,
+`review-priority.md`, `expert-decision-board.tsv`, `review-checklist.md`,
+`review-unlock-plan.md`,
+`dataset-readiness.md`, `expert-satisfaction.md`, `training-ready.messages.jsonl`,
+`training-ready.dataset.jsonl`, `optimization-summary.md`,
+`error-statistics.tsv`,
+`review-commands.sh`, `dataset-quality-summary.json`, `manifest.json`, and
+`README.txt`. It does not
+import labels or mutate collection data; it only packages the current Findings
+review queue, current training-ready exports, and error/risk statistics so an
+expert can inspect source links, see which goals are not yet training-ready,
+and fill explicit decisions.
+Use `review-priority.md` to decide which candidates to inspect first, then use
+`expert-decision-board.tsv` when the reviewer wants a spreadsheet-style board
+with priority, allowed actions, required checks, source quote, and open links.
+The board includes empty `expert_action`, `issue_type`, `expert_note`, and
+`corrected_*` columns for human input, plus `fill_instruction`, `accept_rule`,
+and `reject_issue_options` columns that explain how to complete each row. Read-only
+`label_status` and `ai_review_*` columns expose the current Agent review so the
+expert can confirm or override it; they never prefill `expert_action`.
+In the browser review workspace, paste the filled TSV directly into Reviewed
+decisions and run Dry run before Import decisions. For offline CLI workflows,
+merge it back into the JSONL template first:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/merge_expert_decision_board.py \
+  reviewed-findings.template.jsonl \
+  expert-decision-board.tsv \
+  --output-path reviewed-findings.from-board.jsonl
+```
+
+Use `review-unlock-plan.md` to see which decision unlocks training export or
+protocol inputs. Run `review-commands.sh` from the workspace directory for the
+matching TSV merge, dry-run, gate, and export commands. The real import command
+in that script is commented out and must be enabled only after a human expert
+approves the dry-run.
+Use `error-statistics.tsv` after expert labels exist to sort issue types,
+review risks, system warnings, and optimization hotspots in a spreadsheet or
+dataset registry. Unconfirmed review risks are not yet model-quality failures.
+By default, the script creates a unique directory under `/tmp`; pass
+`--output-dir <empty_dir>` only when a fixed destination is required.
+
+To print the packet directly instead of preparing a workspace, run:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format review-packet
+```
+
+This packet is read-only. It is meant to help a human expert decide whether to
+accept, reject, or correct each candidate in the goal review UI; it does not
+promote any sample to `training_ready`.
+For batch handoff to an independent reviewer or review agent, emit one pending
+candidate per line:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format review-jsonl
+
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format decision-template \
+  > reviewed-findings.jsonl
+```
+
+Use `review-jsonl` when the reviewer needs the full candidate payload and
+evidence records. Use `decision-template` when the reviewer needs a compact
+editable import file. Each decision-template row also carries `acceptance_gate`
+with `accept_allowed`, `blocking_missing`, and expert `review_checks`, plus an
+expert-facing `review_decision_hint` that summarizes whether direct accept is
+allowed, which actions remain valid, and why accept is blocked when correction
+is required. It also includes a compact `review_work_order` with the
+recommended decision path, allowed/blocked actions, required checks, and
+whether an accepted or corrected row can unlock training export and protocol
+inputs. The `evidence` summary carries `evidence_ref_id`, source label, page,
+quote, and source-open link so the reviewer can audit the row before changing
+the action.
+Each exported row defaults to `"action": "skip"`. The reviewer changes only rows they have checked
+to `accept`, `reject`, or `correct`; unchanged rows stay skipped and are not
+written as labels. `reject` rows need an `issue_type` such as `wrong_variable`,
+`wrong_direction`, or `insufficient_evidence`. `correct` rows need a corrected
+`suggested_target.statement` and at least one `evidence_ref_id`. Rows with
+`acceptance_gate.accept_allowed=false` or `protocol_readiness.blocking_missing`
+cannot be imported as `accept`; change them to `correct` after filling the
+missing fields/evidence, `reject`, or leave them as `skip`. Validate first,
+then import with a human reviewer id:
+
+If the reviewer used `expert-decision-board.tsv` in the browser, paste the TSV
+directly into Reviewed decisions. If the reviewer used the offline CLI path,
+run `merge_expert_decision_board.py` first and use the merged
+`reviewed-findings.from-board.jsonl` in the dry-run/import commands below. The
+merge and browser import paths both refuse blocked accepts, rejects without
+`issue_type`, and corrections without corrected statement and evidence refs
+before labels are written.
+
+For agent-assisted review, keep every exported row at `"action": "skip"` and
+write the agent's suggestion under `agent_review` instead. To prepare a safe
+draft file for the agent to fill, run:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format agent-review-prompt-jsonl \
+  > agent-review-prompts.jsonl
+```
+
+`agent-review-prompt-jsonl` is the structured review input for an independent
+review agent. Each row contains the finding fields, acceptance gate, protocol
+readiness, evidence quotes and source links, suggested target, and the expected
+`agent_review` output schema. It intentionally does not include a top-level
+`action` field and does not set `human_confirmed`; it is a prompt/input packet,
+not an import file.
+After the agent writes one `agent_review` result per `finding_id`, merge those
+results back into the decision-template rows without making them importable:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/merge_agent_review_results.py \
+  reviewed-findings.jsonl \
+  agent-review-results.jsonl \
+  --output-path agent-reviewed-findings.jsonl
+```
+
+The merge output keeps every row at `action=skip` and forces
+`agent_review.human_confirmed=false`. It is still only a review draft until a
+human expert confirms individual rows.
+After the agent reviews the source evidence, it may change only
+`agent_review.recommendation`, `agent_review.issue_type`,
+`agent_review.note`, and `agent_review.suggested_target`. Example:
+
+```json
+{
+  "action": "skip",
+  "agent_review": {
+    "reviewer": "ai-reviewer-codex",
+    "recommendation": "correct",
+    "issue_type": "wrong_outcome",
+    "note": "The quote supports ductility, not generic mechanical properties.",
+    "suggested_target": {
+      "statement": "Preheating increased ductility by 14%.",
+      "evidence_ref_ids": ["evref_..."]
+    }
+  }
+}
+```
+
+Check the draft before giving it to a human expert:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_agent_review_draft.py \
+  agent-reviewed-findings.jsonl \
+  --format text
+```
+
+This checker never writes labels. It fails if an agent draft changes `action`
+away from `skip`, if an agent reviewer does not use an `ai-reviewer*` or
+`agent-*` id, or if an agent recommends `accept` while `acceptance_gate` blocks
+direct acceptance. A human expert must verify the `agent_review` suggestions and
+set `agent_review.human_confirmed=true` only on rows they approve. Then convert
+those confirmed suggestions into an importable decision file:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/confirm_agent_review_decisions.py \
+  agent-reviewed-findings.jsonl \
+  --output-path human-confirmed-findings.jsonl
+```
+
+Rows without `agent_review.human_confirmed=true` stay at `action=skip`.
+Confirmed `unclear` or `skip` recommendations also remain skipped. Confirmed
+`accept`, `reject`, or `correct` recommendations become normal import actions;
+blocked accepts still fail and must be corrected, rejected, or left skipped.
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py \
+  human-confirmed-findings.jsonl \
+  --reviewer materials-expert@example.com \
+  --dry-run \
+  --fail-on-warnings \
+  --format text
+
+./.venv/bin/python scripts/evaluation/expert_gold/import_goal_review_decisions.py \
+  human-confirmed-findings.jsonl \
+  --reviewer materials-expert@example.com \
+  --format text
+```
+
+The import writes only explicit human expert decisions. It rejects AI/agent
+reviewer ids and does not promote unreviewed AI suggestions to gold labels.
+Dry-run validation also checks that each reviewed `finding_id` still exists in
+the current goal dataset, that an exported `claim_id` still matches that
+finding, and that corrected `evidence_ref_id` values belong to that finding, so
+stale or hand-edited rows fail before any label is written.
+Dry-run and import summaries may include `warnings` for accepted or corrected
+rows that were originally paper-level, table-row, mechanism, or cross-paper
+confirmation candidates. These warnings do not block import; they tell the
+expert which promoted rows deserve one more look before training export. Add
+`--fail-on-warnings` during dry-run to make those warnings block until the
+expert changes the row to `correct`, `reject`, or leaves it as `skip`.
+If every row is still `skip`, dry-run reports a `no_actionable_decisions`
+warning because no expert labels will be written; with `--fail-on-warnings`,
+that unchanged template fails validation.
+Every dry-run and import summary includes `review_progress`, which reports how
+many rows are actionable, how many remain skipped, whether the file is ready to
+write, and the next steps needed before import.
+Use `--format text` for the pre-import expert loop when you want a compact
+readiness report instead of the full JSON payload. The text output shows the
+current goal counts, pending accept/correct/reject decisions, projected
+`training_ready`, projected training-message and protocol-ready counts, remaining
+review candidates, rejected counts, and the first readiness issues that still
+block fine-tuning messages or protocol inputs.
+The text output's reviewed-goals gate covers only goals present in the current
+decision import; run `check_goal_expert_loop.py` to verify the full collection
+expert-satisfaction gate after import.
+When skipped template rows include `review_work_order`, the text output also
+shows the next skipped finding's recommended decision path, whether direct
+accept is allowed, and the checks that should be completed before changing the
+row away from `skip`.
+Successful non-dry-run imports include `affected_goals` with the resulting
+`training_ready`, training-message, protocol-ready, review-candidate, and
+rejected counts so reviewers can immediately see whether the goal is ready for
+training export or protocol drafting. Each affected goal also lists up to 10
+`readiness_issues` for training-ready samples that still lack fine-tuning
+messages or protocol inputs.
+Dataset quality summaries also include top diagnostic lists for error
+categories, issue types, review reasons, and system warnings. Use these counts
+after imports to identify whether the model is mostly failing on variables,
+directions, evidence grounding, or risky review promotions before changing
+prompts or building fine-tuning data.
+The same summary also includes `optimization_breakdown` and top lists grouped
+by variable, outcome, direction, and evidence role. Use these grouped counts to
+decide whether the next optimization should target, for example, table-row
+evidence handling, a recurring variable confusion, or direction classification.
+
+After expert acceptance or curation creates `training_ready` samples, export the
+fine-tuning-compatible message rows with:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format messages-jsonl \
+  --require-training-ready
+```
+
+For evaluation, audit, or dataset registry import, use `training-jsonl` to keep
+the same `messages` payload plus `collection_id`, `goal_id`, `finding_id`,
+`claim_id`, reviewer/status fields, variables, outcomes, direction,
+scope summary, and `evidence_ref_ids` metadata:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --format training-jsonl \
+  --require-training-ready
+```
+
+The dataset quality summary also reports `protocol_ready_count`. A sample is
+protocol-ready only when it is `training_ready`, has valid fine-tuning messages,
+contains a statement plus variable/outcome/direction-or-scope fields, and keeps
+traceable training evidence. This is the stricter subset that Goal Copilot can
+use as grounded input for experiment protocol drafts.
+
+To run the combined three-layer gate for expert review, dataset accumulation,
+and experiment-planning readiness:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py
+```
+
+The combined check passes only when the expert-facing Findings are reviewable,
+the dataset exports active samples, and at least one goal has a
+`training_ready` sample with protocol-ready inputs that Goal Copilot can use
+for traceable protocol drafting. Its `completion_status` can still be
+`incomplete`; use `remaining_work` to see how many review candidates and
+goal-level training, message, and protocol-input gaps remain before calling the
+full expert loop finished.
+`remaining_work.pending_goals` is the human review queue for the next expert
+loop: each row includes the research question, review candidate count, the next
+action, and a frontend `href` that opens the goal review queue or
+training-ready export view.
+When `--api-base-url` is provided, the combined check also verifies that the
+running API exposes the goal-session routes and the goal-scoped
+experiment-plan list, create, and update routes required by the Goal Copilot
+to draft and save traceable protocol plans. This default runtime check is
+read-only: it inspects the running OpenAPI contract but does not create a
+session, message, or plan.
+If the source app exposes those routes but the running API does not, the text
+summary reports `running_api_not_current_backend`; restart or update the
+backend process, or point `--api-base-url` at the current Lens app before
+validating protocol-draft saving.
+To prove that the running API can actually create and edit goal-scoped plans,
+run an explicit write smoke check with an authenticated operator account:
+
+```bash
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --api-base-url http://localhost:5173 \
+  --runtime-write-check
+```
+
+`--runtime-write-check` creates a small manual smoke experiment-plan draft for
+a protocol-ready checked goal when one exists, otherwise the first checked goal,
+and immediately updates it to `archived`. It proves the
+running API can persist editable goal-scoped plans, but it does not call the
+LLM or create a Goal Copilot source message. The stricter Goal Copilot save
+contract is enforced in application code and tests: a saved plan with
+`source_message_id` must come from a collection-grounded assistant message with
+`review_gate=protocol_ready_findings`, auditable source links, used evidence
+ids, and protocol-draft structure. Use the runtime write check only when
+writing runtime test data is acceptable.
+For a human-readable queue instead of the full JSON payload, run:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --require-complete \
+  --format text
+```
+
+By default `check_goal_dataset_quality.py` is a reviewability gate: a goal may
+pass with only `review_candidate` samples. To require samples that can be used
+for training export, add:
+
+```bash
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_dataset_quality.py \
+  --require-training-ready
+
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --require-all-training-ready
+```
+
+That stricter mode fails until every checked goal has at least one
+`training_ready` sample. Both scripts are read-only and do not rebuild
+collections or mutate feedback.
+
+For final acceptance of the full expert loop, use the expert satisfaction gate:
+
+```bash
+LENS_CHECK_EMAIL=lens-admin@example.com \
+LENS_CHECK_PASSWORD=admin.. \
+./.venv/bin/python scripts/evaluation/expert_gold/check_goal_expert_loop.py \
+  --api-base-url http://localhost:5173 \
+  --expert-satisfaction-gate \
+  --format text
+```
+
+This mode fails unless every checked goal has a training-ready sample, valid
+training messages, protocol-ready experiment inputs, zero remaining review
+candidates, a running API that exposes the Goal Copilot and experiment-plan
+routes, and a running API that can create/update a goal-scoped manual
+experiment-plan smoke draft. It is intentionally stricter than the default
+diagnostic check, which may report `pass (incomplete)` while there is still
+review work left.
+
 The evaluator is offline and read-only. It does not call LLMs, rebuild PDFs, or
 change collection state. Natural language is scored through required claims,
 numbers, paper ids, mechanism-chain phrases, limitations, and forbidden

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from application.source.artifact_registry_service import ArtifactRegistryService
+from application.source.task_service import TaskService
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
@@ -12,11 +13,15 @@ from domain.core import (
     ObjectiveEvidenceUnit,
 )
 from domain.source import SourceArtifactSet
-from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from infra.persistence.memory import MemoryBuildRepository
+from infra.persistence.sqlite import (
+    SqliteCoreFactRepository,
+    SqliteSourceArtifactRepository,
+)
 
 
 def test_artifact_registry_ignores_absent_legacy_graph_outputs(tmp_path):
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    artifact_registry = ArtifactRegistryService(MemoryBuildRepository())
 
     payload = artifact_registry.build_registry("col_demo", tmp_path / "output")
 
@@ -138,7 +143,7 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
         ),
     )
     artifact_registry = ArtifactRegistryService(
-        tmp_path / "collections",
+        MemoryBuildRepository(),
         source_artifact_repository=source_repository,
         core_fact_repository=core_repository,
     )
@@ -199,9 +204,7 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
                 "property_normalized": "corrosion current density",
                 "value_payload": {"value": 1.2},
                 "unit": "uA/cm2",
-                "source_refs": [
-                    {"source_kind": "table", "source_ref": "table-1"}
-                ],
+                "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
                 "resolution_status": "resolved",
             }
         ),
@@ -249,7 +252,7 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
         comparison_rows=comparison_rows,
     )
     artifact_registry = ArtifactRegistryService(
-        tmp_path / "collections",
+        MemoryBuildRepository(),
         source_artifact_repository=source_repository,
         core_fact_repository=core_repository,
     )
@@ -265,3 +268,68 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
     assert payload["comparison_rows_ready"] is True
     assert payload["graph_generated"] is True
     assert payload["graph_ready"] is True
+
+
+def test_artifact_registry_persists_version_rows_and_rebuilds_task_projection(
+    tmp_path,
+) -> None:
+    collection_id = "col_versions"
+    repository = MemoryBuildRepository()
+    task_service = TaskService(repository)
+    task = task_service.create_task(collection_id)
+    task_service.update_task(
+        task["task_id"],
+        status="running",
+        output_path=str(tmp_path / "output"),
+        pipeline_nodes={
+            "artifact_registry": {
+                "status": "running",
+                "started_at": "2026-07-19T10:00:00+00:00",
+                "finished_at": None,
+                "errors": [],
+                "warnings": [],
+                "skip_reason": None,
+            }
+        },
+    )
+    db_path = tmp_path / "lens.sqlite"
+    source_repository = SqliteSourceArtifactRepository(db_path)
+    core_repository = SqliteCoreFactRepository(db_path)
+    source_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Versioned Paper",
+                    "text": "Traceable content.",
+                }
+            ]
+        ),
+    )
+    registry = ArtifactRegistryService(
+        repository,
+        source_artifact_repository=source_repository,
+        core_fact_repository=core_repository,
+    )
+
+    registered = registry.register(
+        task["task_id"],
+        collection_id,
+        tmp_path / "output",
+    )
+    versions = repository.list_artifact_versions(task["task_id"])
+
+    assert {version.artifact_kind for version in versions} == {
+        "blocks",
+        "documents",
+        "figures",
+        "table_cells",
+        "table_rows",
+    }
+    assert all(version.details == {} for version in versions)
+    assert registered["documents_generated"] is True
+    assert registered["documents_ready"] is True
+    assert registered["blocks_generated"] is True
+    assert registered["blocks_ready"] is False
+    assert registry.get_for_task(task["task_id"]) == registered

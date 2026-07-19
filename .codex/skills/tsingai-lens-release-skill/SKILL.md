@@ -1,6 +1,6 @@
 ---
 name: tsingai-lens-release-skill
-description: v0.1.0 - Draft and execute the evidenced TsingAI-Lens release flow for tags, GitHub releases, and Docker image publishing.
+description: v0.1.1 - Draft and execute the evidenced TsingAI-Lens release flow for tags, GitHub releases, and Docker image publishing.
 ---
 
 # TsingAI-Lens Release Skill
@@ -35,11 +35,14 @@ Use these sources before making release decisions:
   - `jeanphilo/tsingai-lens-frontend:<tag>`
   If the tag contains no hyphen, the workflow also publishes `latest` for both
   images.
-- `README.md`
-  Documents release-image deployment and uses `<release-tag>` as the operator
-  input for `LENS_VERSION`.
-- `docker-compose.release.yml`
-  Encodes the default deploy images and default release tag.
+- `deploy/README.md`
+  Documents release-image deployment and treats `LENS_VERSION` as the
+  operator-selected image tag.
+- `deploy/.env.example`
+  Encodes the default release tag used by the deploy bundle.
+- `deploy/compose.yml`
+  Encodes the published backend/frontend images and consumes `LENS_VERSION`
+  from the deploy environment.
 - `backend/pyproject.toml`
   Current backend package version source.
 - `backend/main.py`
@@ -84,9 +87,10 @@ Use these sources before making release decisions:
   - `backend/pyproject.toml`
   - `backend/main.py`
   - `frontend/package.json`
-- deployment-default surface to verify when the release intends to move the
+- deployment-default surfaces to verify when the release intends to move the
   default image tag:
-  - `docker-compose.release.yml`
+  - `deploy/.env.example`
+  - `deploy/compose.yml`
 - hosted release platform: GitHub Releases
 - release-note language and voice:
   Chinese, with one plain-language user explanation first
@@ -119,7 +123,8 @@ Use these sources before making release decisions:
    - Check `backend/pyproject.toml`, `backend/main.py`, and
      `frontend/package.json` for that exact version string.
    - If this release is also updating the default deploy target, check that
-     `docker-compose.release.yml` uses the same tag in `LENS_VERSION`.
+     `deploy/.env.example` uses the same tag in `LENS_VERSION` and that
+     `deploy/compose.yml` consumes `LENS_VERSION` for both images.
    - Do not invent extra version surfaces. If another file looks versioned but
      is not part of the release evidence, mention it separately instead of
      blocking the release.
@@ -290,6 +295,8 @@ Delete empty sections instead of leaving placeholders.
 ## Verification Hooks
 
 - Confirm the target tag matches the checked repo version surfaces.
+- Confirm `deploy/.env.example` carries the intended default release tag and
+  `deploy/compose.yml` consumes it for both published images.
 - Confirm the compare link uses the exact GitHub compare format already seen in
   prior releases.
 - Confirm the `## 用户说明` section stays plain-language and does not contain

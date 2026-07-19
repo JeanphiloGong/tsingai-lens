@@ -1,37 +1,104 @@
 # Persistence Adapters
 
-This node owns repository construction and persistence backend implementations
-for app-layer collection, task, artifact, Goal session, Source artifact, Core
-semantic fact state, and evaluation state.
+This node owns storage-specific repository construction and implementation.
+The stable data ownership and identity contract lives in
+[`../../docs/architecture/persistence-model.md`](../../docs/architecture/persistence-model.md).
 
 ## Scope
 
+- `database.py`
 - `factory.py`
 - `file/`
 - `memory/`
+- `postgres/`
 - `sqlite/`
 - `mysql/`
 
 ## Responsibilities
 
-- choose the active repository backend
-- define the boundary between app-layer services and persistence
-- keep storage-specific details out of higher-level orchestration code
-- keep database engine details, SQL, schema creation, and row encoding inside
-  infra-owned repositories
+- construct the concrete repository used by direct application callers
+- keep file layout, database access, SQL, and row encoding inside infra
+- map explicitly between persistence rows and domain records
+- keep runtime composition visible and small
 
-## Current Implementations
+## Current Runtime
 
 - `file/`
-  Primary file-backed persistence used by the app layer
+  Owns collection workspace directories, scratch/output paths, and immutable
+  uploaded input bytes through `FileObjectStore`. It owns no structured task,
+  build, artifact, collection, membership, or import state.
 - `memory/`
-  In-memory implementations for tests and isolated runs
+  Direct isolated-test implementations for the collection and build
+  aggregates. Neither implementation is selectable at runtime.
+- `postgres/`
+  Owns users, browser sessions, collection metadata, stored-object metadata,
+  canonical documents and versions, collection-document membership, collection
+  file provenance, import provenance, Goal-intake handoffs, tasks, collection
+  builds, stage state, artifact versions, and active-build selection through
+  SQLAlchemy mappings and direct aggregate repositories.
+  The application creates one engine and session factory and composes these
+  repositories and services in the FastAPI lifespan.
 - `sqlite/`
-  SQLite-backed Goal conversation session persistence, Source artifact
-  persistence, Core semantic fact persistence, and collection-bound evaluation
-  persistence. Core fact storage includes collection-level readiness metadata
-  so empty-but-completed fact families do not require file artifact probes. The
-  application layer depends on repository ports and does not import SQLite
-  table names, SQL, or connection details.
+  Five handwritten repositories share `backend/data/lens.sqlite` for Goal
+  sessions and plans, Source records, Core and Goal workflow records, and
+  evaluation/review state. These remaining repositories currently create
+  schema at runtime.
 - `mysql/`
-  Placeholder for future relational persistence work
+  Unimplemented placeholder with no active runtime selection path.
+
+`factory.py` constructs SQLite repositories only for the remaining Goal,
+Source, Core, and evaluation families. Auth, collection, and build aggregates
+are composed directly in `main.py`; none has a repository factory or runtime
+fallback. Source pipeline JSON and Parquet outputs live under `infra/source/`
+runtime storage and are rebuildable intermediates, not a second persistence
+authority.
+
+`database.py` owns the validated synchronous SQLAlchemy engine and session
+factory. The FastAPI lifespan shares this contract between auth, collection,
+and build repositories and disposes its owned engine at shutdown; injected test
+services remain caller-owned.
+
+`postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
+`postgres/models/collection.py`, `postgres/models/document.py`, and
+`postgres/models/build.py` own their storage mappings; the matching direct
+aggregate repositories own explicit row/domain mapping and short transactions.
+`../../migrations/` owns the version history and is the only PostgreSQL schema
+change path; repositories never create tables.
+
+`PostgresCollectionRepository` is the single structured owner for collection
+metadata, canonical documents and versions, exact-version collection
+membership, object/file replicas, imports, imported-document links, and
+handoffs. Import registration creates or reuses document identity and commits
+membership, provenance, and membership-based collection count/status in one
+transaction. Identical content may have separate collection-scoped object
+replicas but only one immutable version. Collection deletion removes final
+unreferenced document identity and commits relational removal before the
+workspace directory is deleted. Maintained callers do not read or write
+collection file or import manifest JSON and do not scan input directories as a
+fallback authority.
+
+There is no separate document repository or service. Canonical registration is
+part of collection import, and keeping one repository preserves the single
+transaction that also owns file provenance and collection count.
+
+`PostgresBuildRepository` is the single structured owner for tasks, collection
+builds, ordered stages, immutable artifact versions, and active-build
+selection. It allocates collection-local build numbers and activates only newer
+successful builds in short transactions. `MemoryBuildRepository` mirrors this
+aggregate only for isolated tests. No maintained caller reads or writes task
+JSON or `artifacts.json`.
+
+## Target Boundary
+
+Approved cutover slices replace the current owners directly:
+
+- PostgreSQL repositories own structured mutable state.
+- A single approved local object-store implementation owns immutable binary
+  bytes by storage key.
+- Alembic owns schema changes; repository reads never create or alter schema.
+- Application services receive only the concrete aggregate repositories they
+  use.
+
+Do not add a generic repository, persistence facade, compatibility wrapper,
+service locator, or runtime fallback. Update the real repository and its direct
+callers in the same cutover slice.

@@ -92,26 +92,59 @@ def check_collection_frontend_projection(
     from application.core.research_view_aggregation_service import (  # noqa: PLC0415
         ResearchViewAggregationService,
     )
+    from application.core.workspace_overview_service import WorkspaceService  # noqa: PLC0415
     from application.core.semantic_build.research_objective_service import (  # noqa: PLC0415
         ResearchObjectiveService,
     )
-
-    objective_service = ResearchObjectiveService()
-    objectives = objective_service.list_objective_workspaces(collection_id)
-    material_profile = (
-        ResearchViewAggregationService().get_collection_material_research_view(
-            collection_id,
-            material_id,
-        )
+    from application.source.collection_service import CollectionService  # noqa: PLC0415
+    from application.source.task_service import TaskService  # noqa: PLC0415
+    from infra.persistence.database import (  # noqa: PLC0415
+        DatabaseSettings,
+        build_database_engine,
+        build_session_factory,
     )
-    objective_details = [
-        objective_service.get_objective_research_view(
-            collection_id,
-            str(row.get("objective_id") or ""),
+    from infra.persistence.file import FileCollectionWorkspace  # noqa: PLC0415
+    from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
+        PostgresCollectionRepository,
+    )
+    from infra.persistence.postgres.build_repository import (  # noqa: PLC0415
+        PostgresBuildRepository,
+    )
+
+    engine = build_database_engine(DatabaseSettings())
+    try:
+        session_factory = build_session_factory(engine)
+        collection_service = CollectionService(
+            repository=PostgresCollectionRepository(session_factory),
+            workspace=FileCollectionWorkspace(),
         )
-        for row in objectives.get("objectives", [])
-        if isinstance(row, dict) and row.get("objective_id")
-    ]
+        workspace_service = WorkspaceService(
+            collection_service=collection_service,
+            task_service=TaskService(PostgresBuildRepository(session_factory)),
+        )
+        objective_service = ResearchObjectiveService(
+            collection_service=collection_service,
+        )
+        objectives = objective_service.list_objective_workspaces(collection_id)
+        material_profile = (
+            ResearchViewAggregationService(
+                collection_service=collection_service,
+                workspace_service=workspace_service,
+            ).get_collection_material_research_view(
+                collection_id,
+                material_id,
+            )
+        )
+        objective_details = [
+            objective_service.get_objective_research_view(
+                collection_id,
+                str(row.get("objective_id") or ""),
+            )
+            for row in objectives.get("objectives", [])
+            if isinstance(row, dict) and row.get("objective_id")
+        ]
+    finally:
+        engine.dispose()
     return evaluate_frontend_projection_payloads(
         collection_id=collection_id,
         material_id=material_id,

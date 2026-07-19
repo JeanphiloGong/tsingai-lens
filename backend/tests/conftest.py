@@ -36,3 +36,47 @@ def _patch_core_llm_extractor(monkeypatch):
         "build_default_core_llm_structured_extractor",
         lambda: fake,
     )
+
+
+@pytest.fixture
+def auth_session_service(tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import URL, create_engine
+
+    from application.auth import AuthSessionService
+    from infra.persistence.database import build_session_factory
+    from infra.persistence.postgres.auth_repository import PostgresAuthRepository
+
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "auth.sqlite"),
+        ),
+        connect_args={"check_same_thread": False},
+    )
+    config = Config(str(ROOT / "alembic.ini"))
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
+    service = AuthSessionService(PostgresAuthRepository(build_session_factory(engine)))
+    try:
+        yield service
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def collection_service(tmp_path, auth_session_service):
+    from application.source.collection_service import CollectionService
+    from infra.persistence.file import FileCollectionWorkspace
+    from infra.persistence.postgres.collection_repository import (
+        PostgresCollectionRepository,
+    )
+
+    return CollectionService(
+        repository=PostgresCollectionRepository(
+            auth_session_service.repository.session_factory
+        ),
+        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+    )

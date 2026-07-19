@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -131,16 +132,24 @@ class MissingObjectiveService(FakeObjectiveService):
         raise ResearchObjectiveNotFoundError(collection_id, objective_id)
 
 
-def test_objective_routes_return_contract_payload(monkeypatch):
-    monkeypatch.setattr(
-        objective_controller,
-        "research_objective_service",
-        FakeObjectiveService(),
+def test_objective_routes_return_contract_payload():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_objective_service=FakeObjectiveService(),
+            )
+        )
     )
 
-    objectives = asyncio.run(objective_controller.list_collection_objectives("col-1"))
+    objectives = asyncio.run(
+        objective_controller.list_collection_objectives("col-1", request)
+    )
     detail = asyncio.run(
-        objective_controller.get_collection_objective_research_view("col-1", "obj-1")
+        objective_controller.get_collection_objective_research_view(
+            "col-1",
+            "obj-1",
+            request,
+        )
     )
 
     assert objectives.collection_id == "col-1"
@@ -158,10 +167,12 @@ def test_objective_routes_run_service_in_threadpool(monkeypatch):
         calls.append((func.__name__, args, kwargs))
         return func(*args, **kwargs)
 
-    monkeypatch.setattr(
-        objective_controller,
-        "research_objective_service",
-        FakeObjectiveService(),
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_objective_service=FakeObjectiveService(),
+            )
+        )
     )
     monkeypatch.setattr(
         objective_controller,
@@ -169,9 +180,13 @@ def test_objective_routes_run_service_in_threadpool(monkeypatch):
         fake_run_in_threadpool,
     )
 
-    asyncio.run(objective_controller.list_collection_objectives("col-1"))
+    asyncio.run(objective_controller.list_collection_objectives("col-1", request))
     asyncio.run(
-        objective_controller.get_collection_objective_research_view("col-1", "obj-1")
+        objective_controller.get_collection_objective_research_view(
+            "col-1",
+            "obj-1",
+            request,
+        )
     )
 
     assert calls == [
@@ -180,15 +195,19 @@ def test_objective_routes_run_service_in_threadpool(monkeypatch):
     ]
 
 
-def test_objective_route_returns_409_when_not_ready(monkeypatch):
-    monkeypatch.setattr(
-        objective_controller,
-        "research_objective_service",
-        NotReadyObjectiveService(),
+def test_objective_route_returns_409_when_not_ready():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_objective_service=NotReadyObjectiveService(),
+            )
+        )
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(objective_controller.list_collection_objectives("col-1"))
+        asyncio.run(
+            objective_controller.list_collection_objectives("col-1", request)
+        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -196,11 +215,13 @@ def test_objective_route_returns_409_when_not_ready(monkeypatch):
     assert exc.detail["collection_id"] == "col-1"
 
 
-def test_objective_detail_route_returns_404_for_missing_objective(monkeypatch):
-    monkeypatch.setattr(
-        objective_controller,
-        "research_objective_service",
-        MissingObjectiveService(),
+def test_objective_detail_route_returns_404_for_missing_objective():
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                research_objective_service=MissingObjectiveService(),
+            )
+        )
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -208,6 +229,7 @@ def test_objective_detail_route_returns_404_for_missing_objective(monkeypatch):
             objective_controller.get_collection_objective_research_view(
                 "col-1",
                 "obj-missing",
+                request,
             )
         )
 

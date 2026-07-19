@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +10,7 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowService,
 )
@@ -20,22 +21,26 @@ from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     workflow_service = SourceReferenceWorkflowService(
         source_artifact_repository=repository
     )
-    monkeypatch.setattr(references_controller, "collection_service", collection_service)
     monkeypatch.setattr(
         references_controller,
         "reference_workflow_service",
         workflow_service,
     )
-    return collection_service, repository
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(collection_service=collection_service),
+        )
+    )
+    return collection_service, repository, request
 
 
 def test_source_reference_routes_build_and_read_refs(source_reference_services):
-    collection_service, repository = source_reference_services
+    collection_service, repository, request = source_reference_services
     collection = collection_service.create_collection("Refs Collection")
     collection_id = collection["collection_id"]
     repository.replace_collection_artifacts(
@@ -76,9 +81,11 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
     )
 
     summary = asyncio.run(
-        references_controller.build_collection_references(collection_id)
+        references_controller.build_collection_references(collection_id, request)
     )
-    payload = asyncio.run(references_controller.get_collection_references(collection_id))
+    payload = asyncio.run(
+        references_controller.get_collection_references(collection_id, request)
+    )
 
     assert summary.collection_id == collection_id
     assert summary.entry_count == 1
@@ -92,13 +99,14 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
 def test_source_reference_build_route_returns_409_when_source_is_not_ready(
     source_reference_services,
 ):
-    collection_service, _repository = source_reference_services
+    collection_service, _repository, request = source_reference_services
     collection = collection_service.create_collection("Pending Refs Collection")
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
             references_controller.build_collection_references(
-                collection["collection_id"]
+                collection["collection_id"],
+                request,
             )
         )
 
@@ -111,7 +119,10 @@ def test_source_reference_build_route_returns_409_when_source_is_not_ready(
 def test_source_reference_route_returns_404_for_missing_collection(
     source_reference_services,
 ):
+    _collection_service, _repository, request = source_reference_services
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(references_controller.get_collection_references("col_missing"))
+        asyncio.run(
+            references_controller.get_collection_references("col_missing", request)
+        )
 
     assert exc_info.value.status_code == 404

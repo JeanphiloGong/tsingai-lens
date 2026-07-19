@@ -2,24 +2,24 @@ from __future__ import annotations
 
 import mimetypes
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response
 
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
-    ComparisonService,
 )
 from application.core.semantic_build.document_profile_service import (
     DocumentContentNotReadyError,
     DocumentNotFoundError,
-    DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.source.collection_service import DocumentSourceUnavailableError
+from application.source.collection_service import (
+    DocumentSourceUnavailableError,
+)
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
-    DocumentMarkdownService,
     SourceFigureImageNotFoundError,
     SourceFigureImageUnavailableError,
     SourceDocumentNotFoundError,
@@ -33,9 +33,6 @@ from controllers.schemas.core.documents import (
 )
 
 router = APIRouter(prefix="/collections", tags=["documents"])
-document_profile_service = DocumentProfileService()
-comparison_service = ComparisonService()
-document_markdown_service = DocumentMarkdownService()
 
 
 def _document_profiles_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -133,11 +130,12 @@ def _figure_image_unavailable_detail(
 )
 async def list_collection_document_profiles(
     collection_id: str,
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
 ) -> DocumentProfileListResponse:
     try:
-        payload = document_profile_service.list_document_profiles(
+        payload = request.app.state.document_profile_service.list_document_profiles(
             collection_id,
             offset=offset,
             limit=limit,
@@ -160,9 +158,13 @@ async def list_collection_document_profiles(
 async def get_collection_document_profile(
     collection_id: str,
     document_id: str,
+    request: Request,
 ) -> DocumentProfileItemResponse:
     try:
-        payload = document_profile_service.get_document_profile(collection_id, document_id)
+        payload = request.app.state.document_profile_service.get_document_profile(
+            collection_id,
+            document_id,
+        )
     except DocumentNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -191,9 +193,13 @@ async def get_collection_document_profile(
 async def get_collection_document_content(
     collection_id: str,
     document_id: str,
+    request: Request,
 ) -> DocumentContentResponse:
     try:
-        payload = document_profile_service.get_document_content(collection_id, document_id)
+        payload = request.app.state.document_profile_service.get_document_content(
+            collection_id,
+            document_id,
+        )
     except DocumentNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -222,9 +228,10 @@ async def get_collection_document_content(
 async def get_collection_document_markdown(
     collection_id: str,
     document_id: str,
+    request: Request,
 ) -> DocumentMarkdownResponse:
     try:
-        payload = document_markdown_service.get_document_markdown(
+        payload = request.app.state.document_markdown_service.get_document_markdown(
             collection_id,
             document_id,
         )
@@ -255,7 +262,9 @@ async def get_collection_document_markdown(
 async def get_collection_document_source(
     collection_id: str,
     document_id: str,
-) -> FileResponse:
+    request: Request,
+) -> Response:
+    document_profile_service = request.app.state.document_profile_service
     source_filename: str | None = None
     try:
         profile = document_profile_service.get_document_profile(collection_id, document_id)
@@ -264,7 +273,7 @@ async def get_collection_document_source(
         source_filename = None
 
     try:
-        payload = document_profile_service.collection_service.resolve_document_source_file(
+        payload = request.app.state.collection_service.resolve_document_source_file(
             collection_id,
             document_id,
             source_filename=source_filename,
@@ -286,11 +295,16 @@ async def get_collection_document_source(
         or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )
-    return FileResponse(
-        payload["path"],
+    encoded_filename = quote(filename)
+    content_disposition = (
+        f"inline; filename*=utf-8''{encoded_filename}"
+        if encoded_filename != filename
+        else f'inline; filename="{filename}"'
+    )
+    return Response(
+        content=payload["content"],
         media_type=media_type,
-        filename=filename,
-        content_disposition_type="inline",
+        headers={"content-disposition": content_disposition},
     )
 
 
@@ -302,9 +316,10 @@ async def get_collection_document_figure_image(
     collection_id: str,
     document_id: str,
     figure_id: str,
+    request: Request,
 ) -> FileResponse:
     try:
-        payload = document_markdown_service.resolve_figure_image_file(
+        payload = request.app.state.document_markdown_service.resolve_figure_image_file(
             collection_id,
             document_id,
             figure_id,
@@ -344,6 +359,7 @@ async def get_collection_document_figure_image(
 async def get_collection_document_comparison_semantics(
     collection_id: str,
     document_id: str,
+    request: Request,
     include_row_projections: Annotated[
         bool,
         Query(description="是否附带按需生成的 row projection"),
@@ -353,6 +369,8 @@ async def get_collection_document_comparison_semantics(
         Query(description="是否附带 variant dossier/result series grouped projection"),
     ] = False,
 ) -> DocumentComparisonSemanticListResponse:
+    comparison_service = request.app.state.comparison_service
+    document_profile_service = request.app.state.document_profile_service
     try:
         payload = comparison_service.inspect_document_comparison_semantics(
             collection_id,

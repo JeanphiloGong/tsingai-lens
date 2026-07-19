@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
+	import { createExperimentPlan } from '../../../_shared/experimentPlans';
 	import {
 		createGoalSession,
 		fetchGoalSession,
@@ -12,6 +13,10 @@
 		type GoalSourceLink
 	} from '../../../_shared/goalSessions';
 	import { t } from '../../../_shared/i18n';
+	import {
+		fetchResearchUnderstandingDataset,
+		type ResearchUnderstandingDataset
+	} from '../../../_shared/researchView';
 
 	type StoredGoalSession = {
 		session_id: string;
@@ -49,16 +54,90 @@
 	let history: StoredGoalSession[] = [];
 	let loading = false;
 	let sending = false;
+	let savingPlanMessageId = '';
+	let savedPlanMessageIds: Record<string, string> = {};
 	let error = '';
+	let readinessError = '';
 	let input = '';
 	let loadedKey = '';
+	let goalDatasetSummary: ResearchUnderstandingDataset | null = null;
+	let goalDatasetLoading = false;
+	let readinessText = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: queryMaterialId = $page.url.searchParams.get('material_id') ?? '';
 	$: queryPaperId = $page.url.searchParams.get('paper_id') ?? '';
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
-	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}`;
+	$: queryGoalId = $page.url.searchParams.get('goal_id') ?? '';
+	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}:${queryGoalId}`;
 	$: activeSessionId = session?.session_id ?? '';
+	$: goalTrainingReadyCount = goalDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: goalTrainingMessageCount =
+		goalDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: goalProtocolReadyCount = goalDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
+	$: goalReviewCandidateCount =
+		goalDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: goalProtocolReady = goalProtocolReadyCount > 0;
+	$: nextReviewAction = nextReviewActionForDisplay(goalDatasetSummary);
+	$: goalReviewLinkHref = goalReviewHref(
+		collectionId,
+		queryGoalId,
+		goalReviewCandidateCount,
+		goalTrainingReadyCount,
+		goalProtocolReady
+	);
+	$: goalReviewLinkLabel = goalReviewActionLabel(
+		goalReviewCandidateCount,
+		goalTrainingReadyCount,
+		goalProtocolReady
+	);
+	$: readinessStatus = goalProtocolReady
+		? 'ready'
+		: goalTrainingReadyCount > 0
+			? 'messages_pending'
+		: goalReviewCandidateCount > 0
+			? 'needs_review'
+			: goalDatasetSummary
+				? 'empty'
+				: readinessError
+					? 'error'
+					: 'pending';
+	$: {
+		if (!queryGoalId) {
+			readinessText = $t('goalCopilot.experimentReadiness.noGoal');
+		} else if (goalDatasetLoading) {
+			readinessText = $t('goalCopilot.experimentReadiness.loading');
+		} else if (readinessError) {
+			readinessText = $t('goalCopilot.experimentReadiness.error', { message: readinessError });
+		} else if (goalProtocolReady) {
+			readinessText = $t('goalCopilot.experimentReadiness.ready', {
+				training: goalTrainingReadyCount,
+				messages: goalTrainingMessageCount
+			});
+		} else if (goalTrainingMessageCount > 0) {
+			readinessText = $t('goalCopilot.experimentReadiness.protocolInputsPending', {
+				training: goalTrainingReadyCount,
+				messages: goalTrainingMessageCount,
+				protocol: goalProtocolReadyCount
+			});
+		} else if (goalTrainingReadyCount > 0) {
+			readinessText = $t('goalCopilot.experimentReadiness.messagesPending', {
+				training: goalTrainingReadyCount,
+				messages: goalTrainingMessageCount
+			});
+		} else if (goalReviewCandidateCount > 0) {
+			readinessText = nextReviewAction
+				? $t('goalCopilot.experimentReadiness.needsReviewAction', {
+						review: goalReviewCandidateCount,
+						action: nextReviewAction
+					})
+				: $t('goalCopilot.experimentReadiness.needsReview', {
+						review: goalReviewCandidateCount
+					});
+		} else {
+			readinessText = $t('goalCopilot.experimentReadiness.empty');
+		}
+	}
 	$: if (collectionId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		void loadSession();
@@ -139,6 +218,8 @@
 	}
 
 	async function loadSession(sessionId = '') {
+		const activeCollectionId = collectionId;
+		const activeGoalId = queryGoalId;
 		loading = true;
 		error = '';
 		history = readHistory();
@@ -160,6 +241,7 @@
 					focused_material_id: queryMaterialId || null,
 					focused_paper_id: queryPaperId || null,
 					focused_objective_id: queryObjectiveId || null,
+					focused_goal_id: queryGoalId || null,
 					answer_mode: 'hybrid'
 				});
 				messages = [];
@@ -170,6 +252,7 @@
 				storeSessionId(session.session_id);
 				upsertHistory(session);
 			}
+			await loadGoalReadiness(activeCollectionId, activeGoalId);
 		} catch (err) {
 			error = errorMessage(err);
 			session = null;
@@ -179,12 +262,37 @@
 		}
 	}
 
+	async function loadGoalReadiness(
+		activeCollectionId: string,
+		activeGoalId: string
+	) {
+		goalDatasetSummary = null;
+		readinessError = '';
+		if (!activeCollectionId || !activeGoalId) {
+			goalDatasetLoading = false;
+			return;
+		}
+		goalDatasetLoading = true;
+		try {
+			const dataset = await fetchResearchUnderstandingDataset(activeCollectionId, {
+				scope_type: 'goal',
+				scope_id: activeGoalId
+			});
+			goalDatasetSummary = dataset;
+		} catch (err) {
+			readinessError = errorMessage(err);
+		} finally {
+			goalDatasetLoading = false;
+		}
+	}
+
 	function sessionMatchesCurrentFocus(nextSession: GoalSession | null) {
 		if (!nextSession || nextSession.collection_id !== collectionId) return false;
 		return (
 			(nextSession.focused_material_id ?? '') === queryMaterialId &&
 			(nextSession.focused_paper_id ?? '') === queryPaperId &&
-			(nextSession.focused_objective_id ?? '') === queryObjectiveId
+			(nextSession.focused_objective_id ?? '') === queryObjectiveId &&
+			(nextSession.focused_goal_id ?? '') === queryGoalId
 		);
 	}
 
@@ -198,6 +306,7 @@
 				focused_material_id: queryMaterialId || null,
 				focused_paper_id: queryPaperId || null,
 				focused_objective_id: queryObjectiveId || null,
+				focused_goal_id: queryGoalId || null,
 				answer_mode: 'hybrid'
 			});
 			messages = [];
@@ -237,7 +346,8 @@
 				route: 'collection_assistant',
 				material_id: queryMaterialId || null,
 				paper_id: queryPaperId || null,
-				objective_id: queryObjectiveId || null
+				objective_id: queryObjectiveId || null,
+				goal_id: queryGoalId || null
 			});
 			messages = [...messages, response];
 			session = await fetchGoalSession(session.session_id);
@@ -252,6 +362,63 @@
 	function askSuggestion(key: string) {
 		const text = $t(key);
 		void sendMessage(text);
+	}
+
+	function draftProtocolFromReviewedFindings() {
+		void sendMessage($t('goalCopilot.experimentReadiness.protocolPrompt'));
+	}
+
+	function nextReviewActionForDisplay(dataset: ResearchUnderstandingDataset | null) {
+		if (!dataset) return '';
+		const nextFindingId = dataset.quality_summary.next_review_finding_id;
+		const sample =
+			(nextFindingId
+				? dataset.items.find(
+						(item) =>
+							item.finding_id === nextFindingId &&
+							item.dataset_use_status === 'review_candidate'
+					)
+				: null) ??
+			dataset.items.find((item) => item.dataset_use_status === 'review_candidate') ??
+			null;
+		const code = sample?.review_action?.code ?? '';
+		if (!code) return '';
+		const localized = $t(`research.objectives.goalReviewRecommendedActions.${code}`);
+		return localized.startsWith('research.') ? (sample?.review_action?.label ?? '') : localized;
+	}
+
+	function goalReviewHref(
+		activeCollectionId: string,
+		activeGoalId: string,
+		reviewCandidateCount: number,
+		trainingReadyCount: number,
+		protocolReady: boolean
+	) {
+		if (!activeCollectionId || !activeGoalId) return '';
+		const baseHref = `/collections/${encodeURIComponent(activeCollectionId)}/goals/${encodeURIComponent(
+			activeGoalId
+		)}`;
+		if (reviewCandidateCount > 0 && !protocolReady) {
+			return `${baseHref}?review=queue`;
+		}
+		if (trainingReadyCount > 0) {
+			return `${baseHref}?review=training_ready`;
+		}
+		return baseHref;
+	}
+
+	function goalReviewActionLabel(
+		reviewCandidateCount: number,
+		trainingReadyCount: number,
+		protocolReady: boolean
+	) {
+		if (reviewCandidateCount > 0 && !protocolReady) {
+			return $t('goalCopilot.experimentReadiness.reviewFindings');
+		}
+		if (trainingReadyCount > 0 && !protocolReady) {
+			return $t('goalCopilot.experimentReadiness.checkReadiness');
+		}
+		return $t('goalCopilot.experimentReadiness.openGoal');
 	}
 
 	function messageText(message: GoalSessionMessage) {
@@ -310,6 +477,60 @@
 			.slice(0, 12);
 	}
 
+	function needsCuratedFindings(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('curated_research_findings_empty');
+	}
+
+	function hasProtocolReadyReviewGate(message: GoalSessionMessage) {
+		return message.review_gate === 'protocol_ready_findings';
+	}
+
+	function missingSourceCitation(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('goal_copilot_missing_source_citation');
+	}
+
+	function invalidProtocolContract(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('goal_copilot_protocol_contract_invalid');
+	}
+
+	function hasEvidenceCitations(message: GoalSessionMessage) {
+		return (message.used_evidence_ids ?? []).length > 0;
+	}
+
+	function citesVisibleSourceLabel(message: GoalSessionMessage) {
+		const text = messageText(message);
+		return visibleSourceLinks(message).some((link) => text.includes(link.label));
+	}
+
+	function sourceLinksMatchEvidenceCitations(message: GoalSessionMessage) {
+		const usedEvidenceIds = new Set(message.used_evidence_ids ?? []);
+		const linkedEvidenceIds = visibleSourceLinks(message)
+			.map((link) => new URL(link.href, 'http://localhost').searchParams.get('evidence_id') ?? '')
+			.filter(Boolean);
+		return linkedEvidenceIds.every((evidenceId) => usedEvidenceIds.has(evidenceId));
+	}
+
+	function allEvidenceCitationsHaveSourceLinks(message: GoalSessionMessage) {
+		const usedEvidenceIds = new Set(message.used_evidence_ids ?? []);
+		const linkedEvidenceIds = new Set(
+			visibleSourceLinks(message)
+				.map((link) => new URL(link.href, 'http://localhost').searchParams.get('evidence_id') ?? '')
+				.filter(Boolean)
+		);
+		return [...usedEvidenceIds].every((evidenceId) => linkedEvidenceIds.has(evidenceId));
+	}
+
+	function hasProtocolDraftStructure(message: GoalSessionMessage) {
+		const text = messageText(message).toLowerCase();
+		return [
+			['hypothesis', '假设'],
+			['variable matrix', '变量矩阵', '变量'],
+			['measurement', 'measurements', '表征', '测试指标', '测量'],
+			['control', 'controls', '对照'],
+			['risk', 'risks', 'limit', 'limits', '风险', '限制']
+		].every((terms) => terms.some((term) => text.includes(term)));
+	}
+
 	function sourceLinkLabel(link: GoalSourceLink, index: number) {
 		const key =
 			link.kind === 'document'
@@ -338,6 +559,88 @@
 	function copyMessage(text: string) {
 		if (!browser || !text) return;
 		void navigator.clipboard?.writeText(text);
+	}
+
+	function canSaveExperimentPlan(message: GoalSessionMessage) {
+		return Boolean(
+			queryGoalId &&
+				message.role === 'assistant' &&
+				message.source_mode === 'collection_grounded' &&
+				hasProtocolReadyReviewGate(message) &&
+				messageText(message).trim() &&
+				visibleSourceLinks(message).length > 0 &&
+				hasEvidenceCitations(message) &&
+				citesVisibleSourceLabel(message) &&
+				sourceLinksMatchEvidenceCitations(message) &&
+				allEvidenceCitationsHaveSourceLinks(message) &&
+				hasProtocolDraftStructure(message) &&
+				!needsCuratedFindings(message)
+		);
+	}
+
+	function experimentPlanTitle(text: string) {
+		const firstLine = text
+			.split('\n')
+			.map((line) => cleanPlanTitleLine(line))
+			.filter((line) => !isProtocolSectionHeading(line))
+			.find(Boolean);
+		if (!firstLine) return $t('goalCopilot.experimentPlan.defaultTitle');
+		const title = text.match(/^\s*\*{0,2}hypothesis\*{0,2}\s*$/im)
+			? `Hypothesis: ${firstLine.replace(/^hypothesis\s*:\s*/i, '')}`
+			: firstLine;
+		return title.length > 80 ? `${title.slice(0, 80)}...` : title;
+	}
+
+	function cleanPlanTitleLine(line: string) {
+		return line
+			.trim()
+			.replace(/^#+\s*/, '')
+			.replace(/^\d+\.\s+/, '')
+			.replace(/^\*\*(.+)\*\*$/, '$1')
+			.trim();
+	}
+
+	function isProtocolSectionHeading(line: string) {
+		return ['hypothesis', 'variable matrix', 'measurements', 'controls', 'risks or limits'].includes(
+			line.toLowerCase()
+		);
+	}
+
+	function experimentPlanHref(planId: string) {
+		const anchor = planId ? `?plan_id=${encodeURIComponent(planId)}` : '';
+		return `/collections/${encodeURIComponent(collectionId)}/goals/${encodeURIComponent(
+			queryGoalId
+		)}${anchor}#experiment-plans-title`;
+	}
+
+	async function saveExperimentPlan(message: GoalSessionMessage) {
+		const content = messageText(message).trim();
+		if (!queryGoalId || !content || savingPlanMessageId) return;
+		savingPlanMessageId = message.message_id;
+		error = '';
+		try {
+			const plan = await createExperimentPlan(collectionId, queryGoalId, {
+				title: experimentPlanTitle(content),
+				content,
+				source_message_id: message.message_id,
+				source_links: visibleSourceLinks(message),
+				metadata: {
+					source: 'goal_copilot',
+					source_mode: message.source_mode,
+					review_gate: message.review_gate ?? null,
+					used_evidence_ids: message.used_evidence_ids ?? [],
+					source_link_count: visibleSourceLinks(message).length
+				}
+			});
+			savedPlanMessageIds = {
+				...savedPlanMessageIds,
+				[message.message_id]: plan.plan_id
+			};
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			savingPlanMessageId = '';
+		}
 	}
 </script>
 
@@ -408,6 +711,25 @@
 				<span aria-hidden="true">⋮</span>
 			</button>
 		</header>
+
+		{#if queryGoalId}
+			<section class={`experiment-readiness experiment-readiness--${readinessStatus}`}>
+				<div>
+					<span>{$t('goalCopilot.experimentReadiness.title')}</span>
+					<strong>{readinessText}</strong>
+				</div>
+				<div class="experiment-readiness__actions">
+					{#if goalProtocolReady}
+						<button type="button" on:click={draftProtocolFromReviewedFindings} disabled={sending}>
+							{$t('goalCopilot.experimentReadiness.draftProtocol')}
+						</button>
+					{/if}
+					<a href={goalReviewLinkHref}>
+						{goalReviewLinkLabel}
+					</a>
+				</div>
+			</section>
+		{/if}
 
 		{#if error}
 			<div class="status-message" role="alert">{error}</div>
@@ -490,21 +812,72 @@
 											{/each}
 										</nav>
 									{/if}
+									{#if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										!hasProtocolReadyReviewGate(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.reviewRequired')}
+										</p>
+									{:else if needsCuratedFindings(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.reviewRequired')}
+										</p>
+									{:else if invalidProtocolContract(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.protocolContractInvalid')}
+										</p>
+									{:else if missingSourceCitation(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceTraceRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										!hasEvidenceCitations(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.evidenceRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										!citesVisibleSourceLabel(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceCitationRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										citesVisibleSourceLabel(message) &&
+										!sourceLinksMatchEvidenceCitations(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.evidenceLinkMismatch')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										citesVisibleSourceLabel(message) &&
+										sourceLinksMatchEvidenceCitations(message) &&
+										!allEvidenceCitationsHaveSourceLinks(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceLinkRequired')}
+										</p>
+									{:else if message.role === 'assistant' &&
+										message.source_mode === 'collection_grounded' &&
+										hasProtocolReadyReviewGate(message) &&
+										visibleSourceLinks(message).length &&
+										hasEvidenceCitations(message) &&
+										citesVisibleSourceLabel(message) &&
+										sourceLinksMatchEvidenceCitations(message) &&
+										allEvidenceCitationsHaveSourceLinks(message) &&
+										!hasProtocolDraftStructure(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.protocolStructureRequired')}
+										</p>
+									{/if}
 									<div class="message-actions">
-										<button
-											class="action-button"
-											type="button"
-											aria-label={$t('goalCopilot.actions.like')}
-										>
-											<span aria-hidden="true">⌃</span>
-										</button>
-										<button
-											class="action-button"
-											type="button"
-											aria-label={$t('goalCopilot.actions.dislike')}
-										>
-											<span aria-hidden="true">⌄</span>
-										</button>
 										<button
 											class="action-button"
 											type="button"
@@ -513,6 +886,29 @@
 										>
 											<span aria-hidden="true">⧉</span>
 										</button>
+										{#if canSaveExperimentPlan(message)}
+											{#if savedPlanMessageIds[message.message_id]}
+												<a
+													class="action-button action-button--text"
+													href={experimentPlanHref(savedPlanMessageIds[message.message_id])}
+												>
+													{$t('goalCopilot.experimentPlan.open')}
+												</a>
+											{:else}
+												<button
+													class="action-button action-button--text"
+													type="button"
+													disabled={savingPlanMessageId === message.message_id}
+													on:click={() => saveExperimentPlan(message)}
+												>
+													{#if savingPlanMessageId === message.message_id}
+														{$t('goalCopilot.experimentPlan.saving')}
+													{:else}
+														{$t('goalCopilot.experimentPlan.save')}
+													{/if}
+												</button>
+											{/if}
+										{/if}
 									</div>
 								</div>
 							</article>
@@ -865,6 +1261,93 @@
 		vertical-align: -1px;
 	}
 
+	.experiment-readiness {
+		margin: 12px 40px 0;
+		border: 1px solid #d8e0ec;
+		border-radius: 8px;
+		padding: 12px 14px;
+		background: #f8fafc;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.experiment-readiness div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.experiment-readiness span {
+		color: #64748b;
+		font-size: 12px;
+		line-height: 18px;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.experiment-readiness strong {
+		color: #111827;
+		font-size: 14px;
+		line-height: 21px;
+		font-weight: 650;
+	}
+
+	.experiment-readiness__actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex: 0 0 auto;
+	}
+
+	.experiment-readiness__actions button {
+		border: 1px solid #16a34a;
+		border-radius: 6px;
+		padding: 7px 10px;
+		background: #16a34a;
+		color: #ffffff;
+		font-size: 13px;
+		line-height: 18px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.experiment-readiness__actions button:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	.experiment-readiness a {
+		flex: 0 0 auto;
+		color: #2563eb;
+		font-size: 13px;
+		line-height: 20px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.experiment-readiness a:hover,
+	.experiment-readiness a:focus-visible {
+		text-decoration: underline;
+	}
+
+	.experiment-readiness--ready {
+		border-color: #bbf7d0;
+		background: #f0fdf4;
+	}
+
+	.experiment-readiness--needs_review,
+	.experiment-readiness--pending {
+		border-color: #fed7aa;
+		background: #fff7ed;
+	}
+
+	.experiment-readiness--error {
+		border-color: #fecaca;
+		background: #fef2f2;
+	}
+
 	.more-button {
 		height: 40px;
 		padding: 0 16px;
@@ -1083,6 +1566,17 @@
 		background: #f8fbff;
 	}
 
+	.review-required-note {
+		margin: 10px 0 0;
+		padding: 9px 11px;
+		border-radius: 8px;
+		border: 1px solid #fde68a;
+		background: #fffbeb;
+		color: #92400e;
+		font-size: 13px;
+		line-height: 19px;
+	}
+
 	.message-actions {
 		display: flex;
 		gap: 8px;
@@ -1110,6 +1604,21 @@
 	.action-button:hover {
 		background: #f8fafc;
 		color: #2563eb;
+	}
+
+	.action-button--text {
+		width: auto;
+		min-width: 92px;
+		padding: 0 10px;
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0;
+		white-space: nowrap;
+	}
+
+	.action-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.65;
 	}
 
 	.input-area {

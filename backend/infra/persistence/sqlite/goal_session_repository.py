@@ -31,6 +31,7 @@ class SqliteGoalSessionRepository:
                     focused_material_id,
                     focused_paper_id,
                     focused_objective_id,
+                    focused_goal_id,
                     goal_text,
                     goal_brief_json,
                     answer_mode,
@@ -50,6 +51,40 @@ class SqliteGoalSessionRepository:
             return None
         return self._session_from_row(row)
 
+    def read_message_context(self, message_id: str) -> dict[str, Any] | None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    message_id,
+                    session_id,
+                    role,
+                    content,
+                    source_mode,
+                    used_evidence_ids,
+                    warnings,
+                    links,
+                    source_links,
+                    review_gate,
+                    source_finding_refs,
+                    created_at
+                FROM goal_messages
+                WHERE message_id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        message = self._message_from_row(row)
+        session = self.read_session(message["session_id"])
+        if session is None:
+            return None
+        return {
+            "message": message,
+            "session": session,
+        }
+
     def write_session(self, payload: Mapping[str, Any]) -> None:
         self._ensure_schema()
         with self._connection() as connection:
@@ -62,6 +97,7 @@ class SqliteGoalSessionRepository:
                     focused_material_id,
                     focused_paper_id,
                     focused_objective_id,
+                    focused_goal_id,
                     goal_text,
                     goal_brief_json,
                     answer_mode,
@@ -72,13 +108,14 @@ class SqliteGoalSessionRepository:
                     collection_data_version,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     user_id = excluded.user_id,
                     collection_id = excluded.collection_id,
                     focused_material_id = excluded.focused_material_id,
                     focused_paper_id = excluded.focused_paper_id,
                     focused_objective_id = excluded.focused_objective_id,
+                    focused_goal_id = excluded.focused_goal_id,
                     goal_text = excluded.goal_text,
                     goal_brief_json = excluded.goal_brief_json,
                     answer_mode = excluded.answer_mode,
@@ -108,6 +145,8 @@ class SqliteGoalSessionRepository:
                     warnings,
                     links,
                     source_links,
+                    review_gate,
+                    source_finding_refs,
                     created_at
                 FROM goal_messages
                 WHERE session_id = ?
@@ -141,8 +180,10 @@ class SqliteGoalSessionRepository:
                     warnings,
                     links,
                     source_links,
+                    review_gate,
+                    source_finding_refs,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     self._message_values(session_id, index, message)
@@ -175,6 +216,7 @@ class SqliteGoalSessionRepository:
                     focused_material_id TEXT,
                     focused_paper_id TEXT,
                     focused_objective_id TEXT,
+                    focused_goal_id TEXT,
                     goal_text TEXT,
                     goal_brief_json TEXT NOT NULL,
                     answer_mode TEXT NOT NULL,
@@ -198,6 +240,16 @@ class SqliteGoalSessionRepository:
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+            try:
+                connection.execute(
+                    """
+                    ALTER TABLE goal_sessions
+                    ADD COLUMN focused_goal_id TEXT
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS goal_messages (
@@ -211,6 +263,8 @@ class SqliteGoalSessionRepository:
                     warnings TEXT NOT NULL,
                     links TEXT NOT NULL,
                     source_links TEXT NOT NULL,
+                    review_gate TEXT,
+                    source_finding_refs TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(session_id)
                         REFERENCES goal_sessions(session_id)
@@ -225,6 +279,26 @@ class SqliteGoalSessionRepository:
                 ON goal_messages(session_id, position)
                 """
             )
+            try:
+                connection.execute(
+                    """
+                    ALTER TABLE goal_messages
+                    ADD COLUMN review_gate TEXT
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+            try:
+                connection.execute(
+                    """
+                    ALTER TABLE goal_messages
+                    ADD COLUMN source_finding_refs TEXT NOT NULL DEFAULT '[]'
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def _session_values(self, payload: Mapping[str, Any]) -> tuple[Any, ...]:
         return (
@@ -234,6 +308,7 @@ class SqliteGoalSessionRepository:
             _optional_text(payload.get("focused_material_id")),
             _optional_text(payload.get("focused_paper_id")),
             _optional_text(payload.get("focused_objective_id")),
+            _optional_text(payload.get("focused_goal_id")),
             _optional_text(payload.get("goal_text")),
             _dump_json_object(payload.get("goal_brief_json")),
             str(payload["answer_mode"]),
@@ -263,6 +338,8 @@ class SqliteGoalSessionRepository:
             _dump_json_list(payload.get("warnings")),
             _dump_json_object(payload.get("links")),
             _dump_json_list(payload.get("source_links")),
+            _optional_text(payload.get("review_gate")),
+            _dump_json_list(payload.get("source_finding_refs")),
             str(payload["created_at"]),
         )
 
@@ -274,6 +351,7 @@ class SqliteGoalSessionRepository:
             "focused_material_id": row["focused_material_id"],
             "focused_paper_id": row["focused_paper_id"],
             "focused_objective_id": row["focused_objective_id"],
+            "focused_goal_id": row["focused_goal_id"],
             "goal_text": row["goal_text"],
             "goal_brief_json": _load_json_object(row["goal_brief_json"]),
             "answer_mode": row["answer_mode"],
@@ -303,6 +381,10 @@ class SqliteGoalSessionRepository:
                     "warnings": _load_json_list(row["warnings"]),
                     "links": _load_json_object(row["links"]),
                     "source_links": _load_json_list(row["source_links"]),
+                    "review_gate": row["review_gate"],
+                    "source_finding_refs": _load_json_list(
+                        row["source_finding_refs"]
+                    ),
                 }
             )
         return record

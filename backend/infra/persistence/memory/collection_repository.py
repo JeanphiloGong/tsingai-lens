@@ -1,93 +1,196 @@
 from __future__ import annotations
 
-import shutil
-import tempfile
-from copy import deepcopy
-from pathlib import Path
+from dataclasses import replace
 
-from config import DATA_DIR
-from domain.ports import CollectionPaths
+from domain.source import (
+    CollectionDocumentRecord,
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
+    collection_document_identity,
+    document_identity_for_sha256,
+)
 
 
 class MemoryCollectionRepository:
-    """Memory-backed persistence for collection metadata and uploaded files."""
+    """In-memory collection metadata for isolated tests."""
 
-    backend_name = "memory"
+    def __init__(self) -> None:
+        self._collections: dict[str, CollectionRecord] = {}
+        self._files: dict[str, list[CollectionFileRecord]] = {}
+        self._imports: dict[str, list[CollectionImportRecord]] = {}
+        self._handoffs: dict[str, list[CollectionHandoffRecord]] = {}
+        self._documents: dict[str, DocumentRecord] = {}
+        self._document_versions: dict[str, DocumentVersionRecord] = {}
+        self._collection_documents: dict[str, list[CollectionDocumentRecord]] = {}
 
-    def __init__(self, root_dir: Path | None = None) -> None:
-        self._temp_dir: tempfile.TemporaryDirectory[str] | None = None
-        if root_dir is None:
-            self._temp_dir = tempfile.TemporaryDirectory(prefix="lens-collections-")
-            root_dir = Path(self._temp_dir.name)
-        self.root_dir = Path(root_dir or (DATA_DIR / "collections")).resolve()
-        self.root_dir.mkdir(parents=True, exist_ok=True)
-        self._collections: dict[str, dict] = {}
-        self._files: dict[str, list[dict]] = {}
-        self._import_manifests: dict[str, dict] = {}
+    def add_collection(self, record: CollectionRecord) -> None:
+        if record.collection_id in self._collections:
+            raise ValueError(f"collection already exists: {record.collection_id}")
+        self._collections[record.collection_id] = record
 
-    def get_paths(self, collection_id: str) -> CollectionPaths:
-        collection_dir = self.root_dir / collection_id
-        return CollectionPaths(
-            collection_dir=collection_dir,
-            input_dir=collection_dir / "input",
-            output_dir=collection_dir / "output",
-            meta_path=collection_dir / "meta.json",
-            files_path=collection_dir / "files.json",
-            import_manifest_path=collection_dir / "import_manifest.json",
-            artifacts_path=collection_dir / "artifacts.json",
+    def list_collections(
+        self,
+        owner_user_id: str | None = None,
+    ) -> tuple[CollectionRecord, ...]:
+        return tuple(
+            record
+            for _, record in sorted(self._collections.items())
+            if owner_user_id is None or record.owner_user_id == owner_user_id
         )
 
-    def create_collection_dirs(self, collection_id: str) -> CollectionPaths:
-        paths = self.get_paths(collection_id)
-        paths.collection_dir.mkdir(parents=True, exist_ok=True)
-        paths.input_dir.mkdir(parents=True, exist_ok=True)
-        paths.output_dir.mkdir(parents=True, exist_ok=True)
-        return paths
+    def read_collection(self, collection_id: str) -> CollectionRecord | None:
+        return self._collections.get(collection_id)
 
-    def collection_exists(self, collection_id: str) -> bool:
-        return collection_id in self._collections
+    def update_collection(self, record: CollectionRecord) -> bool:
+        if record.collection_id not in self._collections:
+            return False
+        self._collections[record.collection_id] = record
+        return True
 
-    def list_collection_records(self) -> list[tuple[str, dict]]:
-        return [
-            (collection_id, deepcopy(record))
-            for collection_id, record in sorted(self._collections.items())
+    def add_collection_import(
+        self,
+        record: CollectionImportRecord,
+        *,
+        updated_at: str,
+    ) -> None:
+        collection = self._collections.get(record.collection_id)
+        if collection is None:
+            raise FileNotFoundError(f"collection not found: {record.collection_id}")
+        if not record.documents:
+            raise ValueError("collection import must include at least one document")
+        if any(
+            document.file.collection_id != record.collection_id
+            for document in record.documents
+        ):
+            raise ValueError("collection import file belongs to another collection")
+
+        files = self._files.setdefault(record.collection_id, [])
+        imports = self._imports.setdefault(record.collection_id, [])
+        incoming_files = [document.file for document in record.documents]
+        existing_file_ids = {item.file_id for item in files}
+        existing_object_ids = {item.object_id for item in files}
+        existing_storage_keys = {item.storage_key for item in files}
+        if any(item.file_id in existing_file_ids for item in incoming_files):
+            raise ValueError("collection file already exists")
+        if any(item.object_id in existing_object_ids for item in incoming_files):
+            raise ValueError("stored object already exists")
+        if any(item.storage_key in existing_storage_keys for item in incoming_files):
+            raise ValueError("storage key already exists")
+        if any(item.import_id == record.import_id for item in imports):
+            raise ValueError("collection import already exists")
+
+        identities = [
+            (*document_identity_for_sha256(file_record.sha256), file_record)
+            for file_record in incoming_files
         ]
+        files.extend(incoming_files)
+        imports.append(record)
+        memberships = self._collection_documents.setdefault(record.collection_id, [])
+        membership_ids = {item.collection_document_id for item in memberships}
+        for document_id, document_version_id, file_record in identities:
+            collection_document_id = collection_document_identity(
+                record.collection_id,
+                document_id,
+            )
+            self._documents.setdefault(
+                document_id,
+                DocumentRecord(
+                    document_id=document_id,
+                    created_at=file_record.created_at,
+                ),
+            )
+            self._document_versions.setdefault(
+                document_version_id,
+                DocumentVersionRecord(
+                    document_version_id=document_version_id,
+                    document_id=document_id,
+                    sha256=file_record.sha256,
+                    media_type=file_record.media_type,
+                    created_at=file_record.created_at,
+                ),
+            )
+            if collection_document_id not in membership_ids:
+                memberships.append(
+                    CollectionDocumentRecord(
+                        collection_document_id=collection_document_id,
+                        collection_id=record.collection_id,
+                        document_id=document_id,
+                        document_version_id=document_version_id,
+                        created_at=file_record.created_at,
+                    )
+                )
+                membership_ids.add(collection_document_id)
+        self._collections[record.collection_id] = replace(
+            collection,
+            status="ready",
+            paper_count=len(memberships),
+            updated_at=updated_at,
+        )
 
-    def read_collection(self, collection_id: str) -> dict | None:
-        record = self._collections.get(collection_id)
-        return deepcopy(record) if record is not None else None
+    def list_collection_files(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionFileRecord, ...]:
+        return tuple(self._files.get(collection_id, ()))
 
-    def write_collection(self, collection_id: str, payload: dict) -> None:
-        self.create_collection_dirs(collection_id)
-        self._collections[collection_id] = deepcopy(payload)
+    def list_collection_imports(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionImportRecord, ...]:
+        return tuple(self._imports.get(collection_id, ()))
 
-    def delete_collection_dir(self, collection_id: str) -> None:
-        self._collections.pop(collection_id, None)
+    def read_document(self, document_id: str) -> DocumentRecord | None:
+        return self._documents.get(document_id)
+
+    def read_document_version(
+        self,
+        document_version_id: str,
+    ) -> DocumentVersionRecord | None:
+        return self._document_versions.get(document_version_id)
+
+    def list_collection_documents(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionDocumentRecord, ...]:
+        return tuple(self._collection_documents.get(collection_id, ()))
+
+    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None:
+        if record.collection_id not in self._collections:
+            raise FileNotFoundError(f"collection not found: {record.collection_id}")
+        handoffs = self._handoffs.setdefault(record.collection_id, [])
+        if any(item.handoff_id == record.handoff_id for item in handoffs):
+            raise ValueError("collection handoff already exists")
+        handoffs.append(record)
+
+    def list_collection_handoffs(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionHandoffRecord, ...]:
+        return tuple(self._handoffs.get(collection_id, ()))
+
+    def delete_collection(self, collection_id: str) -> bool:
+        if self._collections.pop(collection_id, None) is None:
+            return False
         self._files.pop(collection_id, None)
-        self._import_manifests.pop(collection_id, None)
-        shutil.rmtree(self.get_paths(collection_id).collection_dir, ignore_errors=True)
-
-    def read_files(self, collection_id: str) -> list[dict] | None:
-        if collection_id not in self._collections and collection_id not in self._files:
-            return None
-        return deepcopy(self._files.get(collection_id, []))
-
-    def write_files(self, collection_id: str, payload: list[dict]) -> None:
-        self.create_collection_dirs(collection_id)
-        self._files[collection_id] = deepcopy(payload)
-
-    def read_import_manifest(self, collection_id: str) -> dict | None:
-        payload = self._import_manifests.get(collection_id)
-        return deepcopy(payload) if payload is not None else None
-
-    def write_import_manifest(self, collection_id: str, payload: dict) -> None:
-        self.create_collection_dirs(collection_id)
-        self._import_manifests[collection_id] = deepcopy(payload)
-
-    def write_input_file(
-        self, collection_id: str, stored_filename: str, payload: bytes
-    ) -> Path:
-        paths = self.create_collection_dirs(collection_id)
-        stored_path = paths.input_dir / stored_filename
-        stored_path.write_bytes(payload)
-        return stored_path
+        self._imports.pop(collection_id, None)
+        self._handoffs.pop(collection_id, None)
+        removed_memberships = self._collection_documents.pop(collection_id, [])
+        remaining_version_ids = {
+            membership.document_version_id
+            for memberships in self._collection_documents.values()
+            for membership in memberships
+        }
+        for membership in removed_memberships:
+            if membership.document_version_id not in remaining_version_ids:
+                self._document_versions.pop(membership.document_version_id, None)
+        remaining_document_ids = {
+            version.document_id for version in self._document_versions.values()
+        }
+        for membership in removed_memberships:
+            if membership.document_id not in remaining_document_ids:
+                self._documents.pop(membership.document_id, None)
+        return True

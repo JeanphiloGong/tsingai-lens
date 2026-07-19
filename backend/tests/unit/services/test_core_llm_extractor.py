@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,8 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.prompts import (
     build_objective_evidence_unit_prompt,
+    build_research_understanding_finding_synthesis_prompt,
+    build_research_understanding_relation_prompt,
 )
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -18,6 +21,9 @@ from application.core.semantic_build.llm.schemas import (
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchObjectives,
+    StructuredResearchUnderstandingFindingOutcome,
+    StructuredResearchUnderstandingFindings,
+    StructuredResearchUnderstandingRelations,
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
@@ -45,12 +51,15 @@ class _FakeChat:
 
 
 class _FakeBetaCompletions:
-    def __init__(self, parsed: object) -> None:
+    def __init__(self, parsed: object, *, error: Exception | None = None) -> None:
         self._parsed = parsed
+        self._error = error
         self.calls: list[dict[str, object]] = []
 
     def parse(self, **kwargs):  # noqa: ANN003, ARG002
         self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -61,19 +70,25 @@ class _FakeBetaCompletions:
 
 
 class _FakeBetaChat:
-    def __init__(self, parsed: object) -> None:
-        self.completions = _FakeBetaCompletions(parsed)
+    def __init__(self, parsed: object, *, error: Exception | None = None) -> None:
+        self.completions = _FakeBetaCompletions(parsed, error=error)
 
 
 class _FakeBeta:
-    def __init__(self, parsed: object) -> None:
-        self.chat = _FakeBetaChat(parsed)
+    def __init__(self, parsed: object, *, error: Exception | None = None) -> None:
+        self.chat = _FakeBetaChat(parsed, error=error)
 
 
 class _FakeOpenAIClient:
-    def __init__(self, content: str, *, parsed: object | None = None) -> None:
+    def __init__(
+        self,
+        content: str,
+        *,
+        parsed: object | None = None,
+        parse_error: Exception | None = None,
+    ) -> None:
         self.chat = _FakeChat(content)
-        self.beta = _FakeBeta(parsed)
+        self.beta = _FakeBeta(parsed, error=parse_error)
 
 
 def _json_text_extractor(client: _FakeOpenAIClient) -> CoreLLMStructuredExtractor:
@@ -161,7 +176,218 @@ def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
     assert len(client.beta.chat.completions.calls) == 1
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTextWindowMentions
-    assert "JSON schema:" in parse_call["messages"][1]["content"]
+    assert "JSON schema:" not in parse_call["messages"][1]["content"]
+
+
+def test_core_llm_extractor_captures_provider_parse_trace_for_relations():
+    parsed = StructuredResearchUnderstandingRelations(relations=[])
+    client = _FakeOpenAIClient("unused", parsed=parsed)
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    result = extractor.extract_research_understanding_relations(
+        {
+            "objective": {"question": "How does preheating affect porosity?"},
+            "evidence_units": [
+                {
+                    "evidence_unit_id": "oeu-1",
+                    "summary": "Preheating reduces porosity.",
+                }
+            ],
+        }
+    )
+
+    assert result == parsed
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["task_type"] == "research_understanding_relation"
+    assert trace["prompt_version"] == "research_understanding_relation.v2"
+    assert trace["model"] == "fake-model"
+    assert trace["trace_status"] == "available"
+    assert trace["parsed_output"] == {"relations": []}
+    assert trace["raw_output"] is None
+    assert "api_key" not in str(trace).lower()
+    assert "authorization" not in str(trace).lower()
+
+
+def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
+    parsed = StructuredResearchUnderstandingFindings(findings=[])
+    client = _FakeOpenAIClient("unused", parsed=parsed)
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    payload = {
+        "objective": {"question": "How does energy density affect density?"},
+        "result_sets": [
+            {
+                "source_axes": ["energy density"],
+                "outcome_properties": ["density"],
+                "document_evidence": [
+                    {
+                        "document_id": "paper-1",
+                        "result_units": [
+                            {
+                                "evidence_unit_id": "oeu-1",
+                                "direct_result": True,
+                                "statement": (
+                                    "Higher energy density increased density."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = extractor.synthesize_research_understanding_findings(payload)
+
+    assert result == parsed
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"] is StructuredResearchUnderstandingFindings
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["task_type"] == "research_understanding_finding_synthesis"
+    assert trace["prompt_version"] == "research_understanding_finding_synthesis.v12"
+    assert trace["parsed_output"] == {"findings": []}
+
+
+def test_research_understanding_finding_synthesis_prompt_uses_goal_level_contract():
+    payload = {
+        "objective": {"question": "How does energy density affect density?"},
+        "result_sets": [],
+    }
+
+    system_prompt, user_prompt = build_research_understanding_finding_synthesis_prompt(
+        payload
+    )
+
+    assert "INPUT SCHEMA" in system_prompt
+    assert "DECISION PROCESS" in system_prompt
+    assert "one goal-level synthesis pass" in system_prompt
+    normalized_system_prompt = " ".join(system_prompt.split())
+    assert "paper_frames are context, not result evidence" in normalized_system_prompt
+    assert "document_context" in normalized_system_prompt
+    assert "result_sets" in normalized_system_prompt
+    assert "copy its `result_set_id`" in normalized_system_prompt
+    assert "exactly one outcome for each distinct `outcome_properties` value" in (
+        normalized_system_prompt
+    )
+    assert "must equal that property" in normalized_system_prompt
+    assert "Never combine direct-result ids from separate `result_sets`" in (
+        normalized_system_prompt
+    )
+    assert "Keep its linked measured outcomes together" in normalized_system_prompt
+    assert "One Finding must preserve all goal-relevant outcomes" in (
+        normalized_system_prompt
+    )
+    assert "Build `source_concept` from `source_axes` only" in (
+        normalized_system_prompt
+    )
+    assert "Never turn `document_context` into an unsupported outcome" in (
+        normalized_system_prompt
+    )
+    assert "If all direct-result ids come from one document" in (
+        normalized_system_prompt
+    )
+    assert "Context and mechanism id lists must be disjoint" in (
+        normalized_system_prompt
+    )
+    assert "Do not silently discard an explicit regime limitation" in (
+        normalized_system_prompt
+    )
+    assert "use that qualification instead of foregrounding a small endpoint delta" in (
+        normalized_system_prompt
+    )
+    assert "directly supported by one paper" in normalized_system_prompt
+    assert "cannot increase the contributing paper count" in normalized_system_prompt
+    outcome_schema = StructuredResearchUnderstandingFindingOutcome.model_json_schema()
+    assert "supporting_evidence_unit_ids" not in outcome_schema["properties"]
+    assert "backend binds all matching direct-result ids" in normalized_system_prompt
+    assert "`agreement`: at least two independent papers" in user_prompt
+    assert "`insufficient_confirmation`" in user_prompt
+    assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt
+
+
+def test_research_understanding_relation_prompt_compacts_input_json():
+    payload = {
+        "objective": {"question": "预热如何影响孔隙率？"},
+        "contexts": [{"label": "LPBF 316L", "property_scope": ["porosity"]}],
+        "evidence_units": [
+            {
+                "evidence_unit_id": "oeu-1",
+                "value_payload": {"summary": "Preheating reduces porosity."},
+            }
+        ],
+    }
+
+    _, user_prompt = build_research_understanding_relation_prompt(payload)
+
+    input_json = user_prompt.split("Input JSON:\n", 1)[1].split(
+        "\n\nReturn only schema-valid", 1
+    )[0]
+    assert input_json == json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def test_core_llm_extractor_falls_back_to_json_text_when_provider_parse_fails(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient(
+        '{"relations": []}',
+        parse_error=RuntimeError("provider parse failed"),
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    result = extractor.extract_research_understanding_relations(
+        {
+            "objective": {"question": "How does preheating affect porosity?"},
+            "evidence_units": [],
+        }
+    )
+
+    assert result == StructuredResearchUnderstandingRelations(relations=[])
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    assert "JSON schema:" not in (
+        client.beta.chat.completions.calls[0]["messages"][1]["content"]
+    )
+    assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1][
+        "content"
+    ]
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["trace_status"] == "available"
+    assert trace["extraction_mode"] == "provider_parse->json_text"
+    assert trace["parsed_output"] == {"relations": []}
+
+
+def test_core_llm_extractor_retries_provider_parse_after_transient_failure(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient(
+        '{"relations": []}',
+        parse_error=RuntimeError("provider parse failed once"),
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    payload = {
+        "objective": {"question": "How does preheating affect porosity?"},
+        "evidence_units": [],
+    }
+
+    first = extractor.extract_research_understanding_relations(payload)
+    client.beta.chat.completions._error = None
+    client.beta.chat.completions._parsed = StructuredResearchUnderstandingRelations(
+        relations=[]
+    )
+    second = extractor.extract_research_understanding_relations(payload)
+
+    assert first == StructuredResearchUnderstandingRelations(relations=[])
+    assert second == StructuredResearchUnderstandingRelations(relations=[])
+    assert len(client.beta.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 1
 
 
 def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):

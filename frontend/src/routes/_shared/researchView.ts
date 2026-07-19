@@ -48,6 +48,7 @@ export type ResearchUnderstandingEvidenceRef = {
 	anchor_ids: string[];
 	confidence: number | null;
 	traceability_status: string;
+	evidence_role: string | null;
 	quote: string | null;
 	href: string | null;
 };
@@ -72,6 +73,14 @@ export type ResearchUnderstandingClaim = {
 	source_object_ids: string[];
 	warnings: string[];
 };
+export type ResearchUnderstandingPaperContribution = {
+	document_id: string;
+	title: string | null;
+	source_filename: string | null;
+	role: string;
+	statement: string;
+	evidence_ref_ids: string[];
+};
 export type ResearchUnderstandingRelation = {
 	relation_id: string;
 	relation_type: string;
@@ -86,6 +95,12 @@ export type ResearchUnderstandingRelation = {
 	context_ids: string[];
 	source_object_ids: string[];
 	warnings: string[];
+	synthesis_status: string | null;
+	supporting_evidence_ref_ids: string[];
+	conflicting_evidence_ref_ids: string[];
+	common_conditions: string[];
+	incomparable_conditions: string[];
+	paper_contributions: ResearchUnderstandingPaperContribution[];
 };
 export type ResearchUnderstandingPresentationSummary = {
 	title: string;
@@ -97,6 +112,19 @@ export type ResearchUnderstandingPresentationSummary = {
 	evidence_count: number;
 	context_count: number;
 	review_queue_count: number;
+	primary_finding_count: number;
+	review_queue_finding_count: number;
+	collection_document_count: number;
+	axis_coverage: ResearchUnderstandingAxisCoverage;
+};
+export type ResearchUnderstandingAxisCoverageItem = {
+	axis: string;
+	status: 'primary' | 'review_queue' | 'mechanism' | 'context' | 'missing';
+	finding_id: string;
+};
+export type ResearchUnderstandingAxisCoverage = {
+	variables: ResearchUnderstandingAxisCoverageItem[];
+	properties: ResearchUnderstandingAxisCoverageItem[];
 };
 export type ResearchUnderstandingPresentationEffect = {
 	effect_id: string;
@@ -118,6 +146,74 @@ export type ResearchUnderstandingPresentationEffect = {
 	needs_review: boolean;
 	warnings: string[];
 };
+export type ResearchUnderstandingPresentationEvidenceBundle = {
+	direct_result: string[];
+	mechanism: string[];
+	condition_context: string[];
+	background: string[];
+	conflict: string[];
+	noise: string[];
+	uncategorized: string[];
+};
+export type ResearchUnderstandingPresentationRelationSegment = {
+	relation_id: string;
+	variable: string;
+	mediators: string[];
+	outcome: string;
+	direction: string;
+	statement: string;
+};
+export type ResearchUnderstandingPresentationFinding = {
+	finding_id: string;
+	claim_id: string;
+	title: string;
+	statement: string;
+	variables: string[];
+	mediators: string[];
+	outcomes: string[];
+	direction: string;
+	scope_summary: string;
+	support_grade: string;
+	review_status: string;
+	confidence: number | null;
+	paper_count: number;
+	evidence_count: number;
+	evidence_ref_ids: string[];
+	context_ids: string[];
+	relation_ids: string[];
+	relation_chain: ResearchUnderstandingPresentationRelationSegment[];
+	evidence_bundle: ResearchUnderstandingPresentationEvidenceBundle;
+	comparison_summary: ResearchUnderstandingPresentationComparisonSummary | null;
+	expert_use_status: string;
+	dataset_use_status: string;
+	generalization_status: string;
+	generalization_note: string;
+	evidence_gap_summary: string;
+	upgrade_actions: string[];
+	related_review_finding_ids: string[];
+	review_reasons: string[];
+	warnings: string[];
+	synthesis_status: string;
+	common_conditions: string[];
+	incomparable_conditions: string[];
+	paper_contributions: ResearchUnderstandingPaperContribution[];
+};
+export type ResearchUnderstandingPresentationComparisonValue = {
+	label: string;
+	value: string;
+};
+export type ResearchUnderstandingPresentationControlledCondition = {
+	axis: string;
+	value: string;
+};
+export type ResearchUnderstandingPresentationComparisonSummary = {
+	variable: string;
+	direction: string;
+	outcome: string;
+	baseline: ResearchUnderstandingPresentationComparisonValue;
+	observed: ResearchUnderstandingPresentationComparisonValue;
+	controlled_conditions: ResearchUnderstandingPresentationControlledCondition[];
+};
 export type ResearchUnderstandingPresentationEvidence = {
 	evidence_ref_id: string;
 	document_id: string | null;
@@ -131,9 +227,20 @@ export type ResearchUnderstandingPresentationEvidence = {
 	quote: string | null;
 	source_text: string | null;
 	value_summary: string;
+	table_audit: ResearchUnderstandingPresentationTableAudit | null;
 	traceability_status: string;
+	evidence_role: string | null;
 	confidence: number | null;
 	href: string | null;
+};
+export type ResearchUnderstandingPresentationTableAudit = {
+	columns: string[];
+	relevant_rows: ResearchUnderstandingPresentationTableRow[];
+};
+export type ResearchUnderstandingPresentationTableRow = {
+	row_index: number;
+	cells: string[];
+	aligned: boolean;
 };
 export type ResearchUnderstandingPresentationContext = {
 	context_id: string;
@@ -147,6 +254,9 @@ export type ResearchUnderstandingPresentationContext = {
 export type ResearchUnderstandingPresentation = {
 	summary: ResearchUnderstandingPresentationSummary;
 	effects: ResearchUnderstandingPresentationEffect[];
+	findings: ResearchUnderstandingPresentationFinding[];
+	primary_findings: ResearchUnderstandingPresentationFinding[];
+	review_queue_findings: ResearchUnderstandingPresentationFinding[];
 	evidence_items: ResearchUnderstandingPresentationEvidence[];
 	context_summaries: ResearchUnderstandingPresentationContext[];
 };
@@ -172,6 +282,10 @@ export type ResearchUnderstandingFeedbackIssueType =
 	| 'none'
 	| 'evidence_not_grounded'
 	| 'missing_evidence'
+	| 'insufficient_evidence'
+	| 'wrong_variable'
+	| 'wrong_outcome'
+	| 'wrong_direction'
 	| 'wrong_context'
 	| 'wrong_relation'
 	| 'overclaim'
@@ -180,7 +294,8 @@ export type ResearchUnderstandingFeedbackIssueType =
 export type ResearchUnderstandingFeedbackCreate = {
 	scope_type: string;
 	scope_id: string;
-	claim_id: string;
+	finding_id: string;
+	claim_id?: string | null;
 	review_status: ResearchUnderstandingFeedbackStatus;
 	issue_type: ResearchUnderstandingFeedbackIssueType;
 	note?: string | null;
@@ -189,20 +304,30 @@ export type ResearchUnderstandingFeedbackCreate = {
 export type ResearchUnderstandingFeedback = ResearchUnderstandingFeedbackCreate & {
 	feedback_id: string;
 	collection_id: string;
+	finding_fingerprint: string | null;
 	created_at: string;
 };
 export type ResearchUnderstandingFeedbackFilters = {
 	scope_type?: string;
 	scope_id?: string;
+	finding_id?: string;
 	claim_id?: string;
 };
 export type ResearchUnderstandingCurationCreate = {
 	scope_type: string;
 	scope_id: string;
-	claim_id: string;
+	finding_id: string;
+	claim_id?: string | null;
 	curated_claim_type: string;
 	curated_status: string;
 	curated_statement: string;
+	curated_support_grade?: string | null;
+	curated_review_status?: string | null;
+	curated_variables?: string[];
+	curated_mediators?: string[];
+	curated_outcomes?: string[];
+	curated_direction?: string | null;
+	curated_scope_summary?: string | null;
 	curated_evidence_ref_ids: string[];
 	curated_context_ids: string[];
 	note?: string | null;
@@ -211,12 +336,36 @@ export type ResearchUnderstandingCurationCreate = {
 export type ResearchUnderstandingCuration = ResearchUnderstandingCurationCreate & {
 	curation_id: string;
 	collection_id: string;
+	finding_fingerprint: string | null;
 	updated_at: string;
 };
 export type ResearchUnderstandingCurationFilters = {
 	scope_type?: string;
 	scope_id?: string;
+	finding_id?: string;
 	claim_id?: string;
+};
+export type ResearchUnderstandingReviewDecisionImportRequest = {
+	rows?: Record<string, unknown>[];
+	decision_board_tsv?: string | null;
+	reviewer?: string | null;
+	dry_run?: boolean;
+	fail_on_warnings?: boolean;
+};
+export type ResearchUnderstandingReviewDecisionImportResponse = {
+	status: string;
+	dry_run: boolean;
+	total_rows: number;
+	written_count: number;
+	skipped_count: number;
+	counts: Record<string, number>;
+	errors: Record<string, unknown>[];
+	warnings: Record<string, unknown>[];
+	review_progress: Record<string, unknown>;
+	decision_progress_by_goal: Record<string, unknown>[];
+	affected_goals: Record<string, unknown>[];
+	readiness_summary: Record<string, unknown>;
+	review_scope_gate: Record<string, unknown>;
 };
 export type ResearchUnderstandingGoldDraftItem = {
 	gold_item_id: string;
@@ -240,6 +389,144 @@ export type ResearchUnderstandingGoldDraft = {
 export type ResearchUnderstandingGoldDraftFilters = {
 	scope_type: string;
 	scope_id: string;
+};
+export type ResearchUnderstandingDatasetLabelStatus = 'candidate' | 'silver' | 'gold' | 'rejected';
+export type ResearchUnderstandingDatasetUseStatus =
+	| 'training_ready'
+	| 'review_candidate'
+	| 'rejected';
+export type ResearchUnderstandingDatasetExportFormat =
+	| 'json'
+	| 'jsonl'
+	| 'messages_jsonl'
+	| 'training_jsonl'
+	| 'review_jsonl'
+	| 'decision_template'
+	| 'decision_board_tsv'
+	| 'agent_review_prompt_jsonl'
+	| 'review_packet';
+export type ResearchUnderstandingDatasetFilters = {
+	scope_type: string;
+	scope_id: string;
+	label_status?: ResearchUnderstandingDatasetLabelStatus;
+	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
+};
+export type ResearchUnderstandingCollectionDatasetFilters = {
+	scope_type: string;
+	label_status?: ResearchUnderstandingDatasetLabelStatus;
+	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
+};
+export type ResearchUnderstandingDatasetReviewAction = {
+	code: string;
+	label: string;
+};
+export type ResearchUnderstandingProtocolReadiness = {
+	status: string;
+	ready_after_review: boolean;
+	missing: string[];
+	blocking_missing: string[];
+	checks: Record<string, boolean>;
+	guidance: string;
+};
+export type ResearchUnderstandingAcceptanceGate = {
+	status: string;
+	accept_allowed: boolean;
+	requires_correction: boolean;
+	blocking_missing: string[];
+	accept_blockers: string[];
+	review_checks: string[];
+	recommended_action_code: string;
+	guidance: string;
+};
+export type ResearchUnderstandingReviewDecisionHint = {
+	summary: string;
+	preferred_next_action: string;
+	allowed_actions: string[];
+	blocked_actions: string[];
+	why_accept_blocked: string[];
+	required_checks: string[];
+	import_note: string;
+};
+export type ResearchUnderstandingDatasetCountEntry = {
+	name: string;
+	count: number;
+};
+export type ResearchUnderstandingDatasetMetricEntry = ResearchUnderstandingDatasetCountEntry & {
+	metric: string;
+};
+export type ResearchUnderstandingDatasetOptimizationBreakdown = Record<
+	string,
+	Record<
+		string,
+		{
+			issue_type: Record<string, number>;
+			error_category: Record<string, number>;
+			review_candidate_reason: Record<string, number>;
+			system_warning: Record<string, number>;
+		}
+	>
+>;
+export type ResearchUnderstandingDatasetSample = {
+	sample_id: string;
+	finding_id: string;
+	claim_id: string;
+	finding_fingerprint: string;
+	label_status: ResearchUnderstandingDatasetLabelStatus | null;
+	dataset_use_status: ResearchUnderstandingDatasetUseStatus | null;
+	review_action: ResearchUnderstandingDatasetReviewAction;
+	protocol_readiness: ResearchUnderstandingProtocolReadiness | null;
+	acceptance_gate: ResearchUnderstandingAcceptanceGate | null;
+	review_decision_hint: ResearchUnderstandingReviewDecisionHint | null;
+	feedback_refs: ResearchUnderstandingFeedback[];
+	metadata: {
+		curation_id: string | null;
+		ignored_feedback_refs: ResearchUnderstandingFeedback[];
+		ignored_curation_refs: ResearchUnderstandingCuration[];
+		training_message_diagnostic: string[];
+	};
+};
+export type ResearchUnderstandingDataset = {
+	schema_version: string;
+	dataset_id: string;
+	collection_id: string;
+	scope_type: string;
+	scope_id: string;
+	task_type: string;
+	metric_profile: string;
+	label_status_filter: ResearchUnderstandingDatasetLabelStatus | null;
+	dataset_use_status_filter: ResearchUnderstandingDatasetUseStatus | null;
+	item_count: number;
+	label_counts: Record<ResearchUnderstandingDatasetLabelStatus, number>;
+	quality_summary: {
+		training_ready_sample_count: number;
+		training_message_sample_count: number;
+		protocol_ready_sample_count: number;
+		review_candidate_sample_count: number;
+		next_review_finding_id: string;
+		by_dataset_use_status: Record<ResearchUnderstandingDatasetUseStatus, number>;
+		by_presentation_bucket: Record<string, number>;
+		by_issue_type: Record<string, number>;
+		by_error_category: Record<string, number>;
+		by_review_reason: Record<string, number>;
+		by_system_warning: Record<string, number>;
+		by_review_candidate_reason: Record<string, number>;
+		by_review_candidate_warning: Record<string, number>;
+		optimization_breakdown: ResearchUnderstandingDatasetOptimizationBreakdown;
+		top_error_categories: ResearchUnderstandingDatasetCountEntry[];
+		top_issue_types: ResearchUnderstandingDatasetCountEntry[];
+		top_review_reasons: ResearchUnderstandingDatasetCountEntry[];
+		top_system_warnings: ResearchUnderstandingDatasetCountEntry[];
+		top_variable_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_outcome_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_direction_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_evidence_role_issue_types: ResearchUnderstandingDatasetMetricEntry[];
+		top_variable_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+		top_outcome_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+		top_direction_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+		top_evidence_role_review_reasons: ResearchUnderstandingDatasetMetricEntry[];
+	};
+	items: ResearchUnderstandingDatasetSample[];
+	warnings: string[];
 };
 
 export type EvidenceBackedValue = {
@@ -545,6 +832,10 @@ export type ConfirmedGoal = {
 	created_at: string | null;
 	updated_at: string | null;
 };
+export type ConfirmedGoalList = {
+	collection_id: string;
+	goals: ConfirmedGoal[];
+};
 export type GoalAnalysis = {
 	collection_id: string;
 	goal: ConfirmedGoal;
@@ -729,6 +1020,68 @@ function toNumber(value: unknown, fallback = 0): number {
 	return fallback;
 }
 
+function toNumberRecord(value: unknown): Record<string, number> {
+	const record = asRecord(value);
+	if (!record) return {};
+	return Object.fromEntries(
+		Object.entries(record)
+			.map(([key, item]) => [key, toNumber(item)] as const)
+			.filter(([, item]) => item > 0)
+	);
+}
+
+function toCountEntries(value: unknown): ResearchUnderstandingDatasetCountEntry[] {
+	return asArray(value)
+		.map((item) => {
+			const record = asRecord(item);
+			if (!record) return null;
+			const name = toText(record.name);
+			const count = toNumber(record.count);
+			return name && count > 0 ? { name, count } : null;
+		})
+		.filter((item): item is ResearchUnderstandingDatasetCountEntry => item !== null);
+}
+
+function toMetricEntries(value: unknown): ResearchUnderstandingDatasetMetricEntry[] {
+	return asArray(value)
+		.map((item) => {
+			const record = asRecord(item);
+			if (!record) return null;
+			const name = toText(record.name);
+			const metric = toText(record.metric);
+			const count = toNumber(record.count);
+			return name && metric && count > 0 ? { name, metric, count } : null;
+		})
+		.filter((item): item is ResearchUnderstandingDatasetMetricEntry => item !== null);
+}
+
+function toOptimizationBreakdown(
+	value: unknown
+): ResearchUnderstandingDatasetOptimizationBreakdown {
+	const record = asRecord(value);
+	if (!record) return {};
+	const result: ResearchUnderstandingDatasetOptimizationBreakdown = {};
+	for (const [dimension, dimensionValue] of Object.entries(record)) {
+		const dimensionRecord = asRecord(dimensionValue);
+		if (!dimensionRecord) continue;
+		const normalizedDimension: ResearchUnderstandingDatasetOptimizationBreakdown[string] = {};
+		for (const [name, bucketValue] of Object.entries(dimensionRecord)) {
+			const bucketRecord = asRecord(bucketValue);
+			if (!bucketRecord) continue;
+			normalizedDimension[name] = {
+				issue_type: toNumberRecord(bucketRecord.issue_type),
+				error_category: toNumberRecord(bucketRecord.error_category),
+				review_candidate_reason: toNumberRecord(bucketRecord.review_candidate_reason),
+				system_warning: toNumberRecord(bucketRecord.system_warning)
+			};
+		}
+		if (Object.keys(normalizedDimension).length) {
+			result[dimension] = normalizedDimension;
+		}
+	}
+	return result;
+}
+
 function toOptionalNumber(value: unknown): number | null {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value === 'string' && value.trim() !== '') {
@@ -876,6 +1229,269 @@ function normalizeWarnings(value: unknown): ResearchViewWarning[] {
 		.filter((item) => item.message);
 }
 
+function normalizeResearchUnderstandingDataset(value: unknown): ResearchUnderstandingDataset {
+	const record = asRecord(value);
+	const rawLabelCounts = asRecord(record?.label_counts) ?? {};
+	const qualitySummary = asRecord(record?.quality_summary) ?? {};
+	const rawUseCounts = asRecord(qualitySummary.by_dataset_use_status) ?? {};
+	return {
+		schema_version: toText(record?.schema_version, 'research_understanding_dataset.v1'),
+		dataset_id: toText(record?.dataset_id),
+		collection_id: toText(record?.collection_id),
+		scope_type: toText(record?.scope_type),
+		scope_id: toText(record?.scope_id),
+		task_type: toText(record?.task_type, 'research_understanding_finding'),
+		metric_profile: toText(record?.metric_profile),
+		label_status_filter:
+			normalizeResearchUnderstandingDatasetLabelStatus(record?.label_status_filter),
+		dataset_use_status_filter: normalizeResearchUnderstandingDatasetUseStatus(
+			record?.dataset_use_status_filter
+		),
+		item_count: toNumber(record?.item_count),
+		label_counts: {
+			candidate: toNumber(rawLabelCounts.candidate),
+			silver: toNumber(rawLabelCounts.silver),
+			gold: toNumber(rawLabelCounts.gold),
+			rejected: toNumber(rawLabelCounts.rejected)
+		},
+		quality_summary: {
+			training_ready_sample_count: toNumber(qualitySummary.training_ready_sample_count),
+			training_message_sample_count: toNumber(qualitySummary.training_message_sample_count),
+			protocol_ready_sample_count: toNumber(qualitySummary.protocol_ready_sample_count),
+			review_candidate_sample_count: toNumber(qualitySummary.review_candidate_sample_count),
+			next_review_finding_id: toText(qualitySummary.next_review_finding_id),
+			by_dataset_use_status: {
+				training_ready: toNumber(rawUseCounts.training_ready),
+				review_candidate: toNumber(rawUseCounts.review_candidate),
+				rejected: toNumber(rawUseCounts.rejected)
+			},
+			by_presentation_bucket: toNumberRecord(qualitySummary.by_presentation_bucket),
+			by_issue_type: toNumberRecord(qualitySummary.by_issue_type),
+			by_error_category: toNumberRecord(qualitySummary.by_error_category),
+			by_review_reason: toNumberRecord(qualitySummary.by_review_reason),
+			by_system_warning: toNumberRecord(qualitySummary.by_system_warning),
+			by_review_candidate_reason: toNumberRecord(qualitySummary.by_review_candidate_reason),
+			by_review_candidate_warning: toNumberRecord(qualitySummary.by_review_candidate_warning),
+			optimization_breakdown: toOptimizationBreakdown(qualitySummary.optimization_breakdown),
+			top_error_categories: toCountEntries(qualitySummary.top_error_categories),
+			top_issue_types: toCountEntries(qualitySummary.top_issue_types),
+			top_review_reasons: toCountEntries(qualitySummary.top_review_reasons),
+			top_system_warnings: toCountEntries(qualitySummary.top_system_warnings),
+			top_variable_issue_types: toMetricEntries(qualitySummary.top_variable_issue_types),
+			top_outcome_issue_types: toMetricEntries(qualitySummary.top_outcome_issue_types),
+			top_direction_issue_types: toMetricEntries(qualitySummary.top_direction_issue_types),
+			top_evidence_role_issue_types: toMetricEntries(
+				qualitySummary.top_evidence_role_issue_types
+			),
+			top_variable_review_reasons: toMetricEntries(qualitySummary.top_variable_review_reasons),
+			top_outcome_review_reasons: toMetricEntries(qualitySummary.top_outcome_review_reasons),
+			top_direction_review_reasons: toMetricEntries(qualitySummary.top_direction_review_reasons),
+			top_evidence_role_review_reasons: toMetricEntries(
+				qualitySummary.top_evidence_role_review_reasons
+			)
+		},
+		items: asArray(record?.items)
+			.map((item) => normalizeResearchUnderstandingDatasetSample(item))
+			.filter((item): item is ResearchUnderstandingDatasetSample => item !== null),
+		warnings: toStringList(record?.warnings)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetSample(
+	value: unknown
+): ResearchUnderstandingDatasetSample | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const sampleId = toText(record.sample_id);
+	const findingId = toText(record.finding_id);
+	const claimId = toText(record.claim_id);
+	if (!sampleId && !findingId && !claimId) return null;
+	return {
+		sample_id: sampleId,
+		finding_id: findingId,
+		claim_id: claimId,
+		finding_fingerprint: toText(record.finding_fingerprint),
+		label_status: normalizeResearchUnderstandingDatasetLabelStatus(record.label_status),
+		dataset_use_status: normalizeResearchUnderstandingDatasetUseStatus(record.dataset_use_status),
+		review_action: normalizeResearchUnderstandingDatasetReviewAction(record.review_action),
+		protocol_readiness: normalizeResearchUnderstandingProtocolReadiness(record.protocol_readiness),
+		acceptance_gate: normalizeResearchUnderstandingAcceptanceGate(record.acceptance_gate),
+		review_decision_hint: normalizeResearchUnderstandingReviewDecisionHint(
+			record.review_decision_hint
+		),
+		feedback_refs: asArray(record.feedback_refs)
+			.map(normalizeResearchUnderstandingFeedback)
+			.filter((item): item is ResearchUnderstandingFeedback => item !== null),
+		metadata: normalizeResearchUnderstandingDatasetSampleMetadata(record.metadata)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetSampleMetadata(value: unknown) {
+	const record = asRecord(value);
+	return {
+		curation_id: toText(record?.curation_id) || null,
+		ignored_feedback_refs: asArray(record?.ignored_feedback_refs)
+			.map(normalizeResearchUnderstandingFeedback)
+			.filter((item): item is ResearchUnderstandingFeedback => item !== null),
+		ignored_curation_refs: asArray(record?.ignored_curation_refs)
+			.map(normalizeResearchUnderstandingCuration)
+			.filter((item): item is ResearchUnderstandingCuration => item !== null),
+		training_message_diagnostic: toStringList(record?.training_message_diagnostic)
+	};
+}
+
+function normalizeResearchUnderstandingFeedback(
+	value: unknown
+): ResearchUnderstandingFeedback | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const feedbackId = toText(record.feedback_id);
+	if (!feedbackId) return null;
+	return {
+		feedback_id: feedbackId,
+		collection_id: toText(record.collection_id),
+		scope_type: toText(record.scope_type),
+		scope_id: toText(record.scope_id),
+		finding_id: toText(record.finding_id),
+		claim_id: toText(record.claim_id) || null,
+		finding_fingerprint: toText(record.finding_fingerprint) || null,
+		review_status: toText(record.review_status) as ResearchUnderstandingFeedbackStatus,
+		issue_type: toText(record.issue_type) as ResearchUnderstandingFeedbackIssueType,
+		note: toText(record.note) || null,
+		reviewer: toText(record.reviewer) || null,
+		created_at: toText(record.created_at)
+	};
+}
+
+function normalizeResearchUnderstandingCuration(
+	value: unknown
+): ResearchUnderstandingCuration | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const curationId = toText(record.curation_id);
+	if (!curationId) return null;
+	return {
+		curation_id: curationId,
+		collection_id: toText(record.collection_id),
+		scope_type: toText(record.scope_type),
+		scope_id: toText(record.scope_id),
+		finding_id: toText(record.finding_id),
+		claim_id: toText(record.claim_id) || null,
+		finding_fingerprint: toText(record.finding_fingerprint) || null,
+		curated_claim_type: toText(record.curated_claim_type),
+		curated_status: toText(record.curated_status),
+		curated_statement: toText(record.curated_statement),
+		curated_support_grade: toText(record.curated_support_grade) || null,
+		curated_review_status: toText(record.curated_review_status) || null,
+		curated_variables: toStringList(record.curated_variables),
+		curated_mediators: toStringList(record.curated_mediators),
+		curated_outcomes: toStringList(record.curated_outcomes),
+		curated_direction: toText(record.curated_direction) || null,
+		curated_scope_summary: toText(record.curated_scope_summary) || null,
+		curated_evidence_ref_ids: toStringList(record.curated_evidence_ref_ids),
+		curated_context_ids: toStringList(record.curated_context_ids),
+		note: toText(record.note) || null,
+		reviewer: toText(record.reviewer) || null,
+		updated_at: toText(record.updated_at)
+	};
+}
+
+function normalizeResearchUnderstandingProtocolReadiness(
+	value: unknown
+): ResearchUnderstandingProtocolReadiness | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	return {
+		status: toText(record.status),
+		ready_after_review: Boolean(record.ready_after_review),
+		missing: toStringList(record.missing),
+		blocking_missing: toStringList(record.blocking_missing),
+		checks: toBooleanRecord(record.checks),
+		guidance: toText(record.guidance)
+	};
+}
+
+function normalizeResearchUnderstandingAcceptanceGate(
+	value: unknown
+): ResearchUnderstandingAcceptanceGate | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	return {
+		status: toText(record.status),
+		accept_allowed: Boolean(record.accept_allowed),
+		requires_correction: Boolean(record.requires_correction),
+		blocking_missing: toStringList(record.blocking_missing),
+		accept_blockers: toStringList(record.accept_blockers),
+		review_checks: toStringList(record.review_checks),
+		recommended_action_code: toText(record.recommended_action_code),
+		guidance: toText(record.guidance)
+	};
+}
+
+function normalizeResearchUnderstandingReviewDecisionHint(
+	value: unknown
+): ResearchUnderstandingReviewDecisionHint | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const summary = toText(record.summary);
+	const preferredNextAction = toText(record.preferred_next_action);
+	const allowedActions = toStringList(record.allowed_actions);
+	const blockedActions = toStringList(record.blocked_actions);
+	const whyAcceptBlocked = toStringList(record.why_accept_blocked);
+	const requiredChecks = toStringList(record.required_checks);
+	const importNote = toText(record.import_note);
+	if (
+		!summary &&
+		!preferredNextAction &&
+		!allowedActions.length &&
+		!blockedActions.length &&
+		!whyAcceptBlocked.length &&
+		!requiredChecks.length &&
+		!importNote
+	) {
+		return null;
+	}
+	return {
+		summary,
+		preferred_next_action: preferredNextAction,
+		allowed_actions: allowedActions,
+		blocked_actions: blockedActions,
+		why_accept_blocked: whyAcceptBlocked,
+		required_checks: requiredChecks,
+		import_note: importNote
+	};
+}
+
+function normalizeResearchUnderstandingDatasetReviewAction(
+	value: unknown
+): ResearchUnderstandingDatasetReviewAction {
+	const record = asRecord(value);
+	return {
+		code: toText(record?.code),
+		label: toText(record?.label)
+	};
+}
+
+function normalizeResearchUnderstandingDatasetLabelStatus(
+	value: unknown
+): ResearchUnderstandingDatasetLabelStatus | null {
+	const status = toText(value) as ResearchUnderstandingDatasetLabelStatus;
+	return ['candidate', 'silver', 'gold', 'rejected'].includes(status) ? status : null;
+}
+
+function normalizeResearchUnderstandingDatasetUseStatus(
+	value: unknown
+): ResearchUnderstandingDatasetUseStatus | null {
+	const status = toText(value) as ResearchUnderstandingDatasetUseStatus;
+	return ['training_ready', 'review_candidate', 'rejected'].includes(status) ? status : null;
+}
+
+function toBooleanRecord(value: unknown): Record<string, boolean> {
+	const record = asRecord(value);
+	if (!record) return {};
+	return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, Boolean(item)]));
+}
+
 function normalizeEvidenceReference(value: unknown): EvidenceReference | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -982,6 +1598,7 @@ function normalizeResearchUnderstandingEvidenceRef(
 		anchor_ids: toStringList(record.anchor_ids),
 		confidence: toOptionalNumber(record.confidence),
 		traceability_status: toText(record.traceability_status, 'unknown'),
+		evidence_role: nonEmptyText(record.evidence_role),
 		quote: nonEmptyText(record.quote),
 		href: nonEmptyText(record.href)
 	};
@@ -1045,7 +1662,15 @@ function normalizeResearchUnderstandingRelation(
 		evidence_ref_ids: toStringList(record.evidence_ref_ids),
 		context_ids: toStringList(record.context_ids),
 		source_object_ids: toStringList(record.source_object_ids),
-		warnings: toStringList(record.warnings)
+		warnings: toStringList(record.warnings),
+		synthesis_status: nonEmptyText(record.synthesis_status),
+		supporting_evidence_ref_ids: toStringList(record.supporting_evidence_ref_ids),
+		conflicting_evidence_ref_ids: toStringList(record.conflicting_evidence_ref_ids),
+		common_conditions: toStringList(record.common_conditions),
+		incomparable_conditions: toStringList(record.incomparable_conditions),
+		paper_contributions: normalizeResearchUnderstandingPaperContributions(
+			record.paper_contributions
+		)
 	};
 }
 
@@ -1062,6 +1687,21 @@ function normalizeResearchUnderstandingPresentation(
 	const effects = asArray(record.effects)
 		.map((item) => normalizeResearchUnderstandingPresentationEffect(item))
 		.filter((item): item is ResearchUnderstandingPresentationEffect => item !== null);
+	const findings = asArray(record.findings)
+		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
+		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
+	const primaryFindingsSource = Array.isArray(record.primary_findings)
+		? record.primary_findings
+		: findings;
+	const reviewQueueFindingsSource = Array.isArray(record.review_queue_findings)
+		? record.review_queue_findings
+		: findings;
+	const primaryFindings = primaryFindingsSource
+		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
+		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
+	const reviewQueueFindings = reviewQueueFindingsSource
+		.map((item) => normalizeResearchUnderstandingPresentationFinding(item))
+		.filter((item): item is ResearchUnderstandingPresentationFinding => item !== null);
 	const evidenceItems = asArray(record.evidence_items)
 		.map((item) => normalizeResearchUnderstandingPresentationEvidence(item))
 		.filter((item): item is ResearchUnderstandingPresentationEvidence => item !== null);
@@ -1078,11 +1718,52 @@ function normalizeResearchUnderstandingPresentation(
 			relation_count: toNumber(summaryRecord.relation_count, fallback.summary.relation_count),
 			evidence_count: toNumber(summaryRecord.evidence_count, fallback.summary.evidence_ref_count),
 			context_count: toNumber(summaryRecord.context_count, fallback.summary.context_count),
-			review_queue_count: toNumber(summaryRecord.review_queue_count, 0)
+			review_queue_count: toNumber(summaryRecord.review_queue_count, 0),
+			primary_finding_count: toNumber(summaryRecord.primary_finding_count, primaryFindings.length),
+			review_queue_finding_count: toNumber(
+				summaryRecord.review_queue_finding_count,
+				reviewQueueFindings.length
+			),
+			collection_document_count: toNumber(summaryRecord.collection_document_count, 0),
+			axis_coverage: normalizeResearchUnderstandingAxisCoverage(summaryRecord.axis_coverage)
 		},
 		effects,
+		findings,
+		primary_findings: primaryFindings,
+		review_queue_findings: reviewQueueFindings,
 		evidence_items: evidenceItems,
 		context_summaries: contextSummaries
+	};
+}
+
+function normalizeResearchUnderstandingAxisCoverage(
+	value: unknown
+): ResearchUnderstandingAxisCoverage {
+	const record = asRecord(value);
+	return {
+		variables: asArray(record?.variables)
+			.map((item) => normalizeResearchUnderstandingAxisCoverageItem(item))
+			.filter((item): item is ResearchUnderstandingAxisCoverageItem => item !== null),
+		properties: asArray(record?.properties)
+			.map((item) => normalizeResearchUnderstandingAxisCoverageItem(item))
+			.filter((item): item is ResearchUnderstandingAxisCoverageItem => item !== null)
+	};
+}
+
+function normalizeResearchUnderstandingAxisCoverageItem(
+	value: unknown
+): ResearchUnderstandingAxisCoverageItem | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const axis = toText(record.axis);
+	if (!axis) return null;
+	const status = toText(record.status);
+	return {
+		axis,
+		status: ['primary', 'review_queue', 'mechanism', 'context', 'missing'].includes(status)
+			? (status as ResearchUnderstandingAxisCoverageItem['status'])
+			: 'missing',
+		finding_id: toText(record.finding_id)
 	};
 }
 
@@ -1116,6 +1797,176 @@ function normalizeResearchUnderstandingPresentationEffect(
 	};
 }
 
+function emptyResearchUnderstandingPresentationEvidenceBundle(): ResearchUnderstandingPresentationEvidenceBundle {
+	return {
+		direct_result: [],
+		mechanism: [],
+		condition_context: [],
+		background: [],
+		conflict: [],
+		noise: [],
+		uncategorized: []
+	};
+}
+
+function normalizeResearchUnderstandingPresentationEvidenceBundle(
+	value: unknown
+): ResearchUnderstandingPresentationEvidenceBundle {
+	const record = asRecord(value);
+	if (!record) return emptyResearchUnderstandingPresentationEvidenceBundle();
+	return {
+		direct_result: toStringList(record.direct_result),
+		mechanism: toStringList(record.mechanism),
+		condition_context: toStringList(record.condition_context),
+		background: toStringList(record.background),
+		conflict: toStringList(record.conflict),
+		noise: toStringList(record.noise),
+		uncategorized: toStringList(record.uncategorized)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationFinding(
+	value: unknown
+): ResearchUnderstandingPresentationFinding | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const claimId = toText(record.claim_id);
+	const statement = toText(record.statement);
+	if (!claimId && !statement) return null;
+	return {
+		finding_id: toText(record.finding_id, claimId || statement),
+		claim_id: claimId || statement,
+		title: toText(record.title, statement || 'Research finding'),
+		statement,
+		variables: toStringList(record.variables),
+		mediators: toStringList(record.mediators),
+		outcomes: toStringList(record.outcomes),
+		direction: toText(record.direction),
+		scope_summary: toText(record.scope_summary),
+		support_grade: toText(record.support_grade, 'weak'),
+		review_status: toText(record.review_status, 'pending_review'),
+		confidence: toOptionalNumber(record.confidence),
+		paper_count: toNumber(record.paper_count, 0),
+		evidence_count: toNumber(record.evidence_count, 0),
+		evidence_ref_ids: toStringList(record.evidence_ref_ids),
+		context_ids: toStringList(record.context_ids),
+		relation_ids: toStringList(record.relation_ids),
+		relation_chain: asArray(record.relation_chain)
+			.map((item) => normalizeResearchUnderstandingPresentationRelationSegment(item))
+			.filter(
+				(item): item is ResearchUnderstandingPresentationRelationSegment => item !== null
+			),
+		evidence_bundle: normalizeResearchUnderstandingPresentationEvidenceBundle(
+			record.evidence_bundle
+		),
+		comparison_summary: normalizeResearchUnderstandingPresentationComparisonSummary(
+			record.comparison_summary
+		),
+		expert_use_status: toText(record.expert_use_status, 'review_candidate'),
+		dataset_use_status: toText(record.dataset_use_status, 'review_candidate'),
+		generalization_status: toText(record.generalization_status, 'cross_paper_candidate'),
+		generalization_note: toText(record.generalization_note),
+		evidence_gap_summary: toText(record.evidence_gap_summary),
+		upgrade_actions: toStringList(record.upgrade_actions),
+		related_review_finding_ids: toStringList(record.related_review_finding_ids),
+		review_reasons: toStringList(record.review_reasons),
+		warnings: toStringList(record.warnings),
+		synthesis_status: toText(record.synthesis_status),
+		common_conditions: toStringList(record.common_conditions),
+		incomparable_conditions: toStringList(record.incomparable_conditions),
+		paper_contributions: normalizeResearchUnderstandingPaperContributions(
+			record.paper_contributions
+		)
+	};
+}
+
+function normalizeResearchUnderstandingPaperContributions(
+	value: unknown
+): ResearchUnderstandingPaperContribution[] {
+	return asArray(value)
+		.map((item) => {
+			const record = asRecord(item);
+			if (!record) return null;
+			const documentId = toText(record.document_id);
+			if (!documentId) return null;
+			return {
+				document_id: documentId,
+				title: nonEmptyText(record.title),
+				source_filename: nonEmptyText(record.source_filename),
+				role: toText(record.role, 'supporting'),
+				statement: toText(record.statement),
+				evidence_ref_ids: toStringList(record.evidence_ref_ids)
+			};
+		})
+		.filter((item): item is ResearchUnderstandingPaperContribution => item !== null);
+}
+
+function normalizeResearchUnderstandingPresentationRelationSegment(
+	value: unknown
+): ResearchUnderstandingPresentationRelationSegment | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const variable = toText(record.variable);
+	const outcome = toText(record.outcome);
+	const statement = toText(record.statement);
+	if (!variable && !outcome && !statement) return null;
+	return {
+		relation_id: toText(record.relation_id),
+		variable,
+		mediators: toStringList(record.mediators),
+		outcome,
+		direction: toText(record.direction),
+		statement
+	};
+}
+
+function normalizeResearchUnderstandingPresentationComparisonSummary(
+	value: unknown
+): ResearchUnderstandingPresentationComparisonSummary | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const baseline = normalizeResearchUnderstandingPresentationComparisonValue(record.baseline);
+	const observed = normalizeResearchUnderstandingPresentationComparisonValue(record.observed);
+	const variable = toText(record.variable);
+	const outcome = toText(record.outcome);
+	if (!baseline.value && !observed.value && !variable && !outcome) return null;
+	return {
+		variable,
+		direction: toText(record.direction),
+		outcome,
+		baseline,
+		observed,
+		controlled_conditions: asArray(record.controlled_conditions)
+			.map((item) => normalizeResearchUnderstandingPresentationControlledCondition(item))
+			.filter(
+				(
+					item
+				): item is ResearchUnderstandingPresentationControlledCondition => item !== null
+			)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationComparisonValue(
+	value: unknown
+): ResearchUnderstandingPresentationComparisonValue {
+	const record = asRecord(value);
+	return {
+		label: toText(record?.label),
+		value: toText(record?.value)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationControlledCondition(
+	value: unknown
+): ResearchUnderstandingPresentationControlledCondition | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const axis = toText(record.axis);
+	const conditionValue = toText(record.value);
+	if (!axis && !conditionValue) return null;
+	return { axis, value: conditionValue };
+}
+
 function normalizeResearchUnderstandingPresentationEvidence(
 	value: unknown
 ): ResearchUnderstandingPresentationEvidence | null {
@@ -1136,9 +1987,44 @@ function normalizeResearchUnderstandingPresentationEvidence(
 		quote: nonEmptyText(record.quote),
 		source_text: nonEmptyText(record.source_text ?? record.quote),
 		value_summary: toText(record.value_summary),
+		table_audit: normalizeResearchUnderstandingPresentationTableAudit(record.table_audit),
 		traceability_status: toText(record.traceability_status, 'unknown'),
+		evidence_role: nonEmptyText(record.evidence_role),
 		confidence: toOptionalNumber(record.confidence),
 		href: nonEmptyText(record.href)
+	};
+}
+
+function normalizeResearchUnderstandingPresentationTableAudit(
+	value: unknown
+): ResearchUnderstandingPresentationTableAudit | null {
+	const record = asRecord(value);
+	if (!record) return null;
+	const columns = asArray(record.columns)
+		.map((column) => toText(column))
+		.filter(Boolean);
+	const relevantRows = asArray(record.relevant_rows)
+		.map((row) => {
+			const rowRecord = asRecord(row);
+			if (!rowRecord) return null;
+			const cells = asArray(rowRecord.cells)
+				.map((cell) => toText(cell))
+				.map((cell) => cell || '-');
+			if (!cells.some((cell) => cell && cell !== '-')) return null;
+			return {
+				row_index: toOptionalNumber(rowRecord.row_index) ?? 0,
+				cells,
+				aligned:
+					typeof rowRecord.aligned === 'boolean'
+						? rowRecord.aligned
+						: !columns.length || cells.length === columns.length
+			};
+		})
+		.filter((row): row is ResearchUnderstandingPresentationTableRow => Boolean(row));
+	if (!columns.length && !relevantRows.length) return null;
+	return {
+		columns,
+		relevant_rows: relevantRows
 	};
 }
 
@@ -1174,9 +2060,16 @@ function emptyResearchUnderstandingPresentation(fallback: {
 			relation_count: fallback.summary.relation_count,
 			evidence_count: fallback.summary.evidence_ref_count,
 			context_count: fallback.summary.context_count,
-			review_queue_count: 0
+			review_queue_count: 0,
+			primary_finding_count: 0,
+			review_queue_finding_count: 0,
+			collection_document_count: 0,
+			axis_coverage: { variables: [], properties: [] }
 		},
 		effects: [],
+		findings: [],
+		primary_findings: [],
+		review_queue_findings: [],
 		evidence_items: [],
 		context_summaries: []
 	};
@@ -2115,6 +3008,14 @@ function normalizeConfirmedGoalStatus(value: unknown): ConfirmedGoalStatus {
 	return ['pending', 'running', 'ready', 'failed'].includes(status) ? status : 'pending';
 }
 
+function normalizeConfirmedGoalList(value: unknown, collectionId: string): ConfirmedGoalList {
+	const record = asRecord(value) ?? {};
+	return {
+		collection_id: toText(record.collection_id, collectionId),
+		goals: normalizeObjectList(value, 'goals').map((item) => normalizeConfirmedGoal(item))
+	};
+}
+
 function normalizeGoalAnalysis(value: unknown, collectionId: string): GoalAnalysis {
 	const record = asRecord(value) ?? {};
 	return {
@@ -2153,6 +3054,12 @@ export async function createConfirmedGoalFromObjective(
 		})
 	});
 	return normalizeConfirmedGoal(data);
+}
+
+export async function fetchConfirmedGoals(collectionId: string): Promise<ConfirmedGoalList> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const data = await requestJson(`/collections/${encodedCollection}/goals`);
+	return normalizeConfirmedGoalList(data, collectionId);
 }
 
 export async function runGoalAnalysis(
@@ -2197,6 +3104,7 @@ export async function fetchResearchUnderstandingFeedback(
 	const params = new URLSearchParams();
 	if (filters.scope_type) params.set('scope_type', filters.scope_type);
 	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.finding_id) params.set('finding_id', filters.finding_id);
 	if (filters.claim_id) params.set('claim_id', filters.claim_id);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	const data = (await requestJson(
@@ -2224,12 +3132,27 @@ export async function fetchResearchUnderstandingCurations(
 	const params = new URLSearchParams();
 	if (filters.scope_type) params.set('scope_type', filters.scope_type);
 	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.finding_id) params.set('finding_id', filters.finding_id);
 	if (filters.claim_id) params.set('claim_id', filters.claim_id);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	const data = (await requestJson(
 		`/collections/${encodedCollection}/research-understanding/curations${suffix}`
 	)) as { items?: ResearchUnderstandingCuration[] };
 	return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function importResearchUnderstandingReviewDecisions(
+	collectionId: string,
+	payload: ResearchUnderstandingReviewDecisionImportRequest
+): Promise<ResearchUnderstandingReviewDecisionImportResponse> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	return requestJson(
+		`/collections/${encodedCollection}/research-understanding/review-decisions/import`,
+		{
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}
+	) as Promise<ResearchUnderstandingReviewDecisionImportResponse>;
 }
 
 export async function exportResearchUnderstandingGoldDraft(
@@ -2243,6 +3166,70 @@ export async function exportResearchUnderstandingGoldDraft(
 	return requestJson(
 		`/collections/${encodedCollection}/research-understanding/gold-draft?${params.toString()}`
 	) as Promise<ResearchUnderstandingGoldDraft>;
+}
+
+function researchUnderstandingDatasetParams(
+	filters: ResearchUnderstandingDatasetFilters,
+	format?: ResearchUnderstandingDatasetExportFormat
+): URLSearchParams {
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	params.set('scope_id', filters.scope_id);
+	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
+	if (format) params.set('format', format);
+	return params;
+}
+
+export function researchUnderstandingDatasetUrl(
+	collectionId: string,
+	filters: ResearchUnderstandingDatasetFilters,
+	format: ResearchUnderstandingDatasetExportFormat
+): string {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = researchUnderstandingDatasetParams(filters, format);
+	return `/api/v1/collections/${encodedCollection}/research-understanding/dataset?${params.toString()}`;
+}
+
+export function researchUnderstandingCollectionDatasetUrl(
+	collectionId: string,
+	filters: ResearchUnderstandingCollectionDatasetFilters,
+	format: ResearchUnderstandingDatasetExportFormat
+): string {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
+	params.set('format', format);
+	return `/api/v1/collections/${encodedCollection}/research-understanding/dataset/collection?${params.toString()}`;
+}
+
+export async function fetchResearchUnderstandingDataset(
+	collectionId: string,
+	filters: ResearchUnderstandingDatasetFilters
+): Promise<ResearchUnderstandingDataset> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = researchUnderstandingDatasetParams(filters);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/research-understanding/dataset?${params.toString()}`
+	);
+	return normalizeResearchUnderstandingDataset(data);
+}
+
+export async function fetchResearchUnderstandingCollectionDataset(
+	collectionId: string,
+	filters: ResearchUnderstandingCollectionDatasetFilters
+): Promise<ResearchUnderstandingDataset> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const params = new URLSearchParams();
+	params.set('scope_type', filters.scope_type);
+	if (filters.label_status) params.set('label_status', filters.label_status);
+	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/research-understanding/dataset/collection?${params.toString()}`
+	);
+	return normalizeResearchUnderstandingDataset(data);
 }
 
 export async function fetchDocumentMaterials(

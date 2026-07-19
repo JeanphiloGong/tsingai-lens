@@ -281,6 +281,175 @@ function objectivePayload() {
 				relation_count: 1,
 				evidence_ref_count: 1,
 				context_count: 1
+			},
+			presentation: {
+				summary: {
+					title: 'How does heat treatment affect LPBF 316L tensile strength?',
+					material_scope: ['316L stainless steel'],
+					variable_axes: ['heat treatment'],
+					property_scope: ['yield strength'],
+					claim_count: 1,
+					relation_count: 1,
+					evidence_count: 1,
+					context_count: 1,
+					review_queue_count: 1,
+					primary_finding_count: 1,
+					review_queue_finding_count: 0
+				},
+				effects: [
+					{
+						effect_id: 'effect_measure',
+						claim_id: 'claim_measure',
+						title: 'heat treatment -> yield strength',
+						statement: 'Heat-treated LPBF 316L reached a yield strength of 560 MPa.',
+						claim_type: 'finding',
+						support_status: 'limited',
+						confidence: 0.92,
+						effect_direction: 'improves',
+						variable_axis: 'heat treatment',
+						target_property: 'yield strength',
+						paper_count: 1,
+						evidence_count: 1,
+						context_summary: '316L stainless steel, LPBF, tensile test',
+						evidence_ref_ids: ['ref_measure'],
+						context_ids: ['ctx_objective'],
+						relation_ids: ['rel_heat_treatment'],
+						needs_review: true,
+						warnings: ['needs_expert_review']
+					}
+				],
+				findings: [
+					{
+						finding_id: 'finding_measure',
+						claim_id: 'claim_measure',
+						title: 'heat treatment -> yield strength',
+						statement: 'Heat-treated LPBF 316L reached a yield strength of 560 MPa.',
+						variables: ['heat treatment'],
+						mediators: ['cellular substructure'],
+						outcomes: ['yield strength'],
+						direction: 'improves',
+						scope_summary: '316L stainless steel, LPBF, tensile test',
+						support_grade: 'partial',
+						review_status: 'needs_review',
+						confidence: 0.92,
+						paper_count: 1,
+						evidence_count: 1,
+						evidence_ref_ids: ['ref_measure'],
+						context_ids: ['ctx_objective'],
+						relation_ids: ['rel_heat_treatment'],
+						evidence_bundle: {
+							direct_result: ['ref_measure'],
+							mechanism: [],
+							condition_context: [],
+							background: [],
+							conflict: [],
+							noise: [],
+							uncategorized: []
+						},
+						expert_use_status: 'paper_level_finding',
+						dataset_use_status: 'review_candidate',
+						generalization_status: 'paper_level_only',
+						generalization_note:
+							'Evidence comes from one paper; use this as a traceable paper-level finding, not a cross-paper conclusion.',
+						evidence_gap_summary:
+							'Needs independent cross-paper confirmation, support-grade curation, expert review.',
+						upgrade_actions: [
+							'verify_direct_evidence',
+							'add_cross_paper_evidence',
+							'curate_support_grade',
+							'record_expert_review'
+						],
+						review_reasons: [
+							'single_paper_evidence',
+							'needs_cross_paper_confirmation',
+							'partial_support',
+							'needs_expert_review'
+						],
+						warnings: ['needs_expert_review']
+					}
+				],
+				primary_findings: [
+					{
+						finding_id: 'finding_measure',
+						claim_id: 'claim_measure',
+						title: 'heat treatment -> yield strength',
+						statement: 'Heat-treated LPBF 316L reached a yield strength of 560 MPa.',
+						variables: ['heat treatment'],
+						mediators: ['cellular substructure'],
+						outcomes: ['yield strength'],
+						direction: 'improves',
+						scope_summary: '316L stainless steel, LPBF, tensile test',
+						support_grade: 'partial',
+						review_status: 'needs_review',
+						confidence: 0.92,
+						paper_count: 1,
+						evidence_count: 1,
+						evidence_ref_ids: ['ref_measure'],
+						context_ids: ['ctx_objective'],
+						relation_ids: ['rel_heat_treatment'],
+						evidence_bundle: {
+							direct_result: ['ref_measure'],
+							mechanism: [],
+							condition_context: [],
+							background: [],
+							conflict: [],
+							noise: [],
+							uncategorized: []
+						},
+						expert_use_status: 'paper_level_finding',
+						dataset_use_status: 'review_candidate',
+						generalization_status: 'paper_level_only',
+						generalization_note:
+							'Evidence comes from one paper; use this as a traceable paper-level finding, not a cross-paper conclusion.',
+						evidence_gap_summary:
+							'Needs independent cross-paper confirmation, support-grade curation, expert review.',
+						upgrade_actions: [
+							'verify_direct_evidence',
+							'add_cross_paper_evidence',
+							'curate_support_grade',
+							'record_expert_review'
+						],
+						review_reasons: [
+							'single_paper_evidence',
+							'needs_cross_paper_confirmation',
+							'partial_support',
+							'needs_expert_review'
+						],
+						warnings: ['needs_expert_review']
+					}
+				],
+				review_queue_findings: [],
+				evidence_items: [
+					{
+						evidence_ref_id: 'ref_measure',
+						document_id: 'doc_1',
+						title: 'table · table-2 · p. 5',
+						source_label: 'table · table-2 · p. 5',
+						source_kind: 'table',
+						source_ref: 'table-2',
+						block_type: 'table',
+						heading_path: 'Results',
+						page: '5',
+						quote: 'Yield strength reached 560 MPa.',
+						source_text: 'Yield strength reached 560 MPa.',
+						value_summary: 'Yield strength reached 560 MPa.',
+						traceability_status: 'resolved',
+						evidence_role: 'direct_result',
+						confidence: 0.92,
+						href: null
+					}
+				],
+				context_summaries: [
+					{
+						context_id: 'ctx_objective',
+						label: 'Objective scope',
+						material_scope: ['316L stainless steel'],
+						property_scope: ['yield strength'],
+						process_summary: 'heat treatment',
+						test_summary: 'tensile test',
+						limitations: ['single paper evidence']
+					}
+				]
 			}
 		}
 	};
@@ -309,6 +478,29 @@ async function mockObjectiveApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/research-view`) {
 			return route.fulfill(json(objectivePayload()));
+		}
+		if (path === `/api/v1/collections/${collectionId}/research-understanding/dataset`) {
+			return route.fulfill(
+				json({
+					schema_version: 'research_understanding_dataset.v1',
+					dataset_id: 'rud_obj_1',
+					collection_id: collectionId,
+					scope_type: 'objective',
+					scope_id: objectiveId,
+					task_type: 'research_understanding_finding',
+					metric_profile: 'materials_expert',
+					label_status_filter: null,
+					item_count: 1,
+					label_counts: { candidate: 1, silver: 0, gold: 0, rejected: 0 },
+					warnings: []
+				})
+			);
+		}
+		if (path === `/api/v1/collections/${collectionId}/research-understanding/feedback`) {
+			return route.fulfill(json({ collection_id: collectionId, items: [] }));
+		}
+		if (path === `/api/v1/collections/${collectionId}/research-understanding/curations`) {
+			return route.fulfill(json({ collection_id: collectionId, items: [] }));
 		}
 
 		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
@@ -376,15 +568,28 @@ test('objective workspace renders research understanding screenshots and source 
 		})
 	).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Research understanding' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Findings' })).toBeVisible();
+	await expect(page.getByRole('columnheader', { name: 'Finding' })).toBeVisible();
+	await expect(page.getByRole('columnheader', { name: 'Variables' })).toBeVisible();
+	await expect(page.getByRole('columnheader', { name: 'Mechanism' })).toBeVisible();
+	await expect(page.getByRole('columnheader', { name: 'Result' })).toBeVisible();
+	await expect(page.getByRole('columnheader', { name: 'Actions' })).toBeVisible();
 	await expect(
-		page.getByLabel('Claims').getByText('Yield strength reached 560 MPa.')
+		page.getByLabel('Research findings table').getByText('Heat-treated LPBF 316L reached a yield strength of 560 MPa.')
 	).toBeVisible();
-	const understandingEvidence = page.getByLabel('Evidence').getByRole('link', {
-		name: /table · table-2 · p\. 5/
-	});
+	await expect(page.getByRole('cell', { name: 'heat treatment', exact: true })).toBeVisible();
+	await expect(page.getByRole('cell', { name: 'cellular substructure', exact: true })).toBeVisible();
+	await expect(page.getByLabel('Research findings table').getByText('Paper-level finding')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Give feedback' })).toBeVisible();
+	await page.getByRole('button', { name: 'Give feedback' }).click();
+	await expect(page.getByRole('heading', { name: 'Finding detail' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Expert feedback' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Direct result evidence' })).toBeVisible();
+	await expect(page.getByText('table · table-2 · p. 5').first()).toBeVisible();
+	const understandingEvidence = page.getByRole('link', { name: 'Open source' }).first();
 	await expect(understandingEvidence).toHaveAttribute(
 		'href',
-		'/collections/col_123/documents/doc_1?page=5&source_ref=table-2&evidence_id=ref_measure&anchor_id=anc_1&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
+		'/collections/col_123/documents/doc_1?view=parsed-paper&page=5&source_ref=table-2&evidence_id=ref_measure&anchor_id=anc_1&quote=Yield%20strength%20reached%20560%20MPa.&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1'
 	);
 	await page.getByText('Evidence audit').click();
 	await expect(page.getByRole('heading', { name: 'Supporting evidence' })).toBeVisible();
@@ -399,6 +604,8 @@ test('objective workspace renders research understanding screenshots and source 
 	const mobileUnderstandingHeading = page.getByRole('heading', { name: 'Research understanding' });
 	await mobileUnderstandingHeading.scrollIntoViewIfNeeded();
 	await expect(mobileUnderstandingHeading).toBeInViewport();
+	await expect(page.getByRole('heading', { name: 'Findings' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Review evidence' })).toBeVisible();
 	await page.getByText('Evidence audit').click();
 	await expect(page.getByRole('heading', { name: 'Supporting evidence' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);

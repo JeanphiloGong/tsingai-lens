@@ -94,12 +94,12 @@ class DocumentProfileService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self._structured_extractor = structured_extractor
         self.core_fact_repository = (
             core_fact_repository

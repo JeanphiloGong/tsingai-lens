@@ -5,8 +5,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from config import CONFIG_DIR
 from infra.source.config.pipeline_mode import IndexingMethod
+from infra.source.config.source_runtime_config import (
+    CacheConfig,
+    InputConfig,
+    InputStorageConfig,
+    SourceRuntimeConfig,
+    StorageConfig,
+)
 
 from application.core.semantic_build.document_profile_service import DocumentProfileService
 from application.core.semantic_build.research_objective_service import (
@@ -44,12 +50,6 @@ try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
 except Exception:  # noqa: BLE001
     build_source_artifacts = None
 
-try:  # pragma: no cover - exercised indirectly in runtime, patched in tests
-    from infra.source.config.load_config import load_config  # type: ignore
-except Exception:  # noqa: BLE001
-    load_config = None
-
-
 _OBJECTIVE_PROGRESS_STAGE_PERCENT = {
     "objective_paper_skim_started": 72,
     "objective_discovery_started": 73,
@@ -66,17 +66,15 @@ class CollectionBuildPipelineService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
-        task_service: TaskService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
+        collection_service: CollectionService,
+        task_service: TaskService,
+        artifact_registry_service: ArtifactRegistryService,
         document_profile_service: DocumentProfileService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
-        self.task_service = task_service or TaskService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
+        self.collection_service = collection_service
+        self.task_service = task_service
+        self.artifact_registry_service = artifact_registry_service
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
         )
@@ -88,14 +86,6 @@ class CollectionBuildPipelineService:
             )
         )
 
-    def _resolve_load_config(self):
-        global load_config
-        if load_config is None:
-            from infra.source.config.load_config import load_config as resolved_load_config
-
-            load_config = resolved_load_config
-        return load_config
-
     def _resolve_build_source_artifacts(self):
         global build_source_artifacts
         if build_source_artifacts is None:
@@ -106,19 +96,22 @@ class CollectionBuildPipelineService:
             build_source_artifacts = resolved_build_source_artifacts
         return build_source_artifacts
 
-    def _load_collection_config(self, collection_id: str) -> tuple[Any, Path]:
-        default_config = CONFIG_DIR / "default.yaml"
-        if not default_config.is_file():
-            raise FileNotFoundError(
-                "默认配置不存在，请在 backend/data/configs 下提供 default.yaml"
-            )
-
-        resolved_load_config = self._resolve_load_config()
-        config = resolved_load_config(default_config.parent, config_filepath=default_config)
+    def _build_collection_config(
+        self,
+        collection_id: str,
+    ) -> tuple[SourceRuntimeConfig, Path]:
         paths = self.collection_service.get_paths(collection_id)
-        config.input.storage.base_dir = str(paths.input_dir)
-        config.output.base_dir = str(paths.output_dir)
-        config.root_dir = str(paths.collection_dir)
+        config = SourceRuntimeConfig(
+            root_dir=str(paths.collection_dir),
+            input=InputConfig(
+                storage=InputStorageConfig(base_dir=str(paths.input_dir)),
+                file_type="document",
+                encoding="utf-8",
+                file_pattern=r".*\.(txt|pdf)$",
+            ),
+            output=StorageConfig(base_dir=str(paths.output_dir)),
+            cache=CacheConfig(base_dir="../cache"),
+        )
         return config, paths.output_dir
 
     def run_task_blocking(
@@ -152,7 +145,7 @@ class CollectionBuildPipelineService:
     ) -> dict:
         request_token = bind_request_id(request_id) if request_id else None
         try:
-            config, output_dir = self._load_collection_config(collection_id)
+            config, output_dir = self._build_collection_config(collection_id)
             self.collection_service.update_collection(collection_id, status="running")
             task = self.task_service.get_task(task_id)
             if not task.get("started_at"):
@@ -187,7 +180,7 @@ class CollectionBuildPipelineService:
                 if isinstance(artifacts, dict)
                 else str(output_dir)
             )
-            self.task_service.update_task(
+            self.task_service.finish_task(
                 task_id,
                 status=final_status,
                 current_stage="artifacts_ready" if final_status != "failed" else "failed",
@@ -204,7 +197,6 @@ class CollectionBuildPipelineService:
                 output_path=output_path,
                 errors=result["errors"],
                 warnings=result["warnings"],
-                finished_at=self.task_service.get_task(task_id)["updated_at"],
             )
             self.collection_service.update_collection(collection_id, status=final_status)
             return self.task_service.get_task(task_id)
@@ -218,7 +210,7 @@ class CollectionBuildPipelineService:
             errors = list(record.get("errors", []))
             if str(exc) not in errors:
                 errors.append(str(exc))
-            self.task_service.update_task(
+            self.task_service.finish_task(
                 task_id,
                 status="failed",
                 current_stage="failed",
@@ -229,7 +221,6 @@ class CollectionBuildPipelineService:
                     "message": "Build failed before artifacts were ready.",
                 },
                 errors=errors,
-                finished_at=record["updated_at"],
             )
             self.collection_service.update_collection(collection_id, status="failed")
             raise

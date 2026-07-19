@@ -19,6 +19,9 @@ CLAIM_TYPES: Final[frozenset[str]] = frozenset(
 RELATION_TYPES: Final[frozenset[str]] = frozenset(
     {"improves", "reduces", "increases", "decreases", "correlates", "explains", "conflicts", "compares"}
 )
+FINDING_SYNTHESIS_STATUSES: Final[frozenset[str]] = frozenset(
+    {"agreement", "conflict", "condition_dependent", "insufficient_confirmation"}
+)
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,7 @@ class ResearchEvidenceRef:
     anchor_ids: tuple[str, ...]
     confidence: float | None
     traceability_status: str
+    evidence_role: str | None = None
     quote: str | None = None
     href: str | None = None
 
@@ -89,6 +93,7 @@ class ResearchEvidenceRef:
             anchor_ids=_strings(payload.get("anchor_ids")),
             confidence=_confidence_or_none(payload.get("confidence")),
             traceability_status=_text(payload.get("traceability_status")) or "unknown",
+            evidence_role=_text(payload.get("evidence_role")),
             quote=_text(payload.get("quote")),
             href=_text(payload.get("href")),
         )
@@ -104,6 +109,7 @@ class ResearchEvidenceRef:
             "anchor_ids": list(self.anchor_ids),
             "confidence": self.confidence,
             "traceability_status": self.traceability_status,
+            "evidence_role": self.evidence_role,
             "quote": self.quote,
             "href": self.href,
         }
@@ -218,6 +224,14 @@ class ResearchRelation:
     context_ids: tuple[str, ...]
     source_object_ids: tuple[str, ...]
     warnings: tuple[str, ...]
+    synthesis_status: str | None
+    supporting_evidence_ref_ids: tuple[str, ...]
+    conflicting_evidence_ref_ids: tuple[str, ...]
+    context_evidence_ref_ids: tuple[str, ...]
+    mechanism_evidence_ref_ids: tuple[str, ...]
+    common_conditions: tuple[str, ...]
+    incomparable_conditions: tuple[str, ...]
+    paper_contributions: tuple[dict[str, Any], ...]
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchRelation":
@@ -249,6 +263,27 @@ class ResearchRelation:
             context_ids=_strings(payload.get("context_ids")),
             source_object_ids=_strings(payload.get("source_object_ids")),
             warnings=_strings(payload.get("warnings")),
+            synthesis_status=_optional_choice(
+                payload.get("synthesis_status"),
+                FINDING_SYNTHESIS_STATUSES,
+            ),
+            supporting_evidence_ref_ids=_strings(
+                payload.get("supporting_evidence_ref_ids")
+            ),
+            conflicting_evidence_ref_ids=_strings(
+                payload.get("conflicting_evidence_ref_ids")
+            ),
+            context_evidence_ref_ids=_strings(
+                payload.get("context_evidence_ref_ids")
+            ),
+            mechanism_evidence_ref_ids=_strings(
+                payload.get("mechanism_evidence_ref_ids")
+            ),
+            common_conditions=_strings(payload.get("common_conditions")),
+            incomparable_conditions=_strings(
+                payload.get("incomparable_conditions")
+            ),
+            paper_contributions=_mapping_list(payload.get("paper_contributions")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -266,6 +301,20 @@ class ResearchRelation:
             "context_ids": list(self.context_ids),
             "source_object_ids": list(self.source_object_ids),
             "warnings": list(self.warnings),
+            "synthesis_status": self.synthesis_status,
+            "supporting_evidence_ref_ids": list(
+                self.supporting_evidence_ref_ids
+            ),
+            "conflicting_evidence_ref_ids": list(
+                self.conflicting_evidence_ref_ids
+            ),
+            "context_evidence_ref_ids": list(self.context_evidence_ref_ids),
+            "mechanism_evidence_ref_ids": list(self.mechanism_evidence_ref_ids),
+            "common_conditions": list(self.common_conditions),
+            "incomparable_conditions": list(self.incomparable_conditions),
+            "paper_contributions": [
+                dict(contribution) for contribution in self.paper_contributions
+            ],
         }
 
 
@@ -280,6 +329,7 @@ class ResearchUnderstanding:
     contexts: tuple[ResearchContext, ...]
     warnings: tuple[str, ...]
     presentation: dict[str, Any]
+    model_traces: tuple[dict[str, Any], ...]
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstanding":
@@ -305,6 +355,7 @@ class ResearchUnderstanding:
             ),
             warnings=_strings(payload.get("warnings")),
             presentation=_mapping(payload.get("presentation")),
+            model_traces=_mapping_list(payload.get("model_traces")),
         )
 
     @classmethod
@@ -331,6 +382,7 @@ class ResearchUnderstanding:
                     "title": title,
                 },
                 "warnings": list(warnings),
+                "model_traces": [],
             }
         )
 
@@ -344,6 +396,7 @@ class ResearchUnderstanding:
             "evidence_refs": [ref.to_record() for ref in self.evidence_refs],
             "contexts": [context.to_record() for context in self.contexts],
             "warnings": list(self.warnings),
+            "model_traces": [dict(trace) for trace in self.model_traces],
             "summary": {
                 "claim_count": len(self.claims),
                 "relation_count": len(self.relations),
@@ -385,6 +438,11 @@ def _stable_text(value: Any) -> str:
 def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
     normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
     return normalized if normalized in allowed else default
+
+
+def _optional_choice(value: Any, allowed: frozenset[str]) -> str | None:
+    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in allowed else None
 
 
 def _text(value: Any) -> str | None:

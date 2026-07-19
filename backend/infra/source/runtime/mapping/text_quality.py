@@ -7,7 +7,7 @@ from typing import Any
 def normalize_display_text(value: Any) -> str | None:
     if value is None:
         return None
-    text = " ".join(str(value).strip().split())
+    text = " ".join(str(value).replace("\ufffd", " ").strip().split())
     return text or None
 
 
@@ -17,7 +17,10 @@ def is_garbled_pdf_text(text: str) -> bool:
         return False
     if any(0x80 <= ord(char) <= 0x9F for char in normalized):
         return True
-    if "\ufffd" in normalized or "\x00" in normalized:
+    if "\x00" in normalized:
+        return True
+    replacement_count = str(text or "").count("\ufffd")
+    if replacement_count and replacement_count / max(len(str(text)), 1) >= 0.08:
         return True
     words = re.findall(r"[A-Za-z0-9]{4,}", normalized)
     if not words:

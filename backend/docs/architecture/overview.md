@@ -52,6 +52,10 @@ The backend is still in transition, but its intended shape is already visible:
 - graph is a Core-derived secondary surface
 - query now crosses a Source-owned runtime facade rather than importing
   GraphRAG internals from product-facing application code
+- persistence is moving from split JSON and handwritten SQLite ownership toward
+  the single authority model defined in
+  [`persistence-model.md`](persistence-model.md); current repositories remain
+  active until their explicit cutover slices land
 - historical GraphRAG engine code is being retired rather than preserved as a
   separate active backend package
 
@@ -101,6 +105,9 @@ larger flat service bag.
   Current comparison-semantic authority and implemented substrate
 - [`application-layer-boundary.md`](application-layer-boundary.md)
   Backend ADR for HTTP and application ownership separation
+- [`persistence-model.md`](persistence-model.md)
+  Current and target persistence authorities, identities, build lineage, and
+  deletion boundaries
 - [`../specs/api.md`](../specs/api.md)
   Public backend contract reference
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -17,6 +18,17 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
+from domain.ports import CollectionRepository
+from infra.persistence.database import (
+    DatabaseSettings,
+    build_database_engine,
+    build_session_factory,
+)
+from infra.persistence.file.object_store import FileObjectStore
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -27,8 +39,10 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from infra.source.runtime.parsers.docling_pdf import (
+    build_pdf_bundle,
+    build_pdf_converter,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,12 +102,19 @@ def main() -> None:
     )
     artifact_dir = collection_dir / "output"
     if args.reparse_inputs:
-        frames = _reparse_collection_inputs(
-            backend_root=backend_root,
-            collection_dir=collection_dir,
-            document_id=args.document_id,
-            limit=args.limit,
-        )
+        engine = build_database_engine(DatabaseSettings())
+        try:
+            frames = _reparse_collection_inputs(
+                backend_root=backend_root,
+                collection_dir=collection_dir,
+                collection_repository=PostgresCollectionRepository(
+                    build_session_factory(engine)
+                ),
+                document_id=args.document_id,
+                limit=args.limit,
+            )
+        finally:
+            engine.dispose()
         source_mode = "reparse_inputs"
     else:
         frames = _load_existing_artifacts(
@@ -156,98 +177,114 @@ def _reparse_collection_inputs(
     *,
     backend_root: Path,
     collection_dir: Path,
+    collection_repository: CollectionRepository,
     document_id: str | None,
     limit: int | None,
 ) -> dict[str, pd.DataFrame]:
-    inputs = _collection_input_rows(collection_dir)
+    inputs = _collection_input_rows(collection_repository, collection_dir.name)
     if document_id:
-        inputs = [
-            item for item in inputs
-            if str(item.get("id") or "") == document_id
-        ]
+        inputs = [item for item in inputs if str(item.get("id") or "") == document_id]
     if limit is not None:
-        inputs = inputs[:max(limit, 0)]
+        inputs = inputs[: max(limit, 0)]
     if not inputs:
         raise SystemExit(f"no input PDFs found for collection: {collection_dir}")
 
     config = SourceRuntimeConfig(root_dir=str(backend_root))
+    object_store = FileObjectStore(collection_dir.parent)
     converter = build_pdf_converter()
     bundles = []
     for index, item in enumerate(inputs, start=1):
-        source_path = Path(str(item["source_path"])).expanduser().resolve()
-        print(f"[{index}/{len(inputs)}] parsing {source_path.name}", flush=True)
+        storage_key = str(item.get("storage_key") or "").strip()
+        if storage_key:
+            payload = object_store.read(
+                storage_key,
+                str(item.get("sha256") or "").strip(),
+            )
+            source_name = Path(storage_key).name
+        else:
+            source_path = Path(str(item["source_path"])).expanduser().resolve()
+            payload = source_path.read_bytes()
+            source_name = source_path.name
+        print(f"[{index}/{len(inputs)}] parsing {source_name}", flush=True)
         bundles.append(
             build_pdf_bundle(
                 row=pd.Series(item),
-                payload=source_path.read_bytes(),
+                payload=payload,
                 config=config,
                 converter=converter,
             )
         )
 
     return {
-        "documents": _concat_frames([bundle.documents for bundle in bundles], DOCUMENTS_FINAL_COLUMNS),
-        "text_units": _concat_frames([bundle.text_units for bundle in bundles], TEXT_UNITS_FINAL_COLUMNS),
-        "blocks": _concat_frames([bundle.blocks for bundle in bundles], BLOCKS_FINAL_COLUMNS),
-        "figures": _concat_frames([bundle.figures for bundle in bundles], FIGURES_FINAL_COLUMNS),
-        "tables": _concat_frames([bundle.tables for bundle in bundles], TABLES_FINAL_COLUMNS),
-        "table_rows": _concat_frames([bundle.table_rows for bundle in bundles], TABLE_ROWS_FINAL_COLUMNS),
-        "table_cells": _concat_frames([bundle.table_cells for bundle in bundles], TABLE_CELLS_FINAL_COLUMNS),
+        "documents": _concat_frames(
+            [bundle.documents for bundle in bundles], DOCUMENTS_FINAL_COLUMNS
+        ),
+        "text_units": _concat_frames(
+            [bundle.text_units for bundle in bundles], TEXT_UNITS_FINAL_COLUMNS
+        ),
+        "blocks": _concat_frames(
+            [bundle.blocks for bundle in bundles], BLOCKS_FINAL_COLUMNS
+        ),
+        "figures": _concat_frames(
+            [bundle.figures for bundle in bundles], FIGURES_FINAL_COLUMNS
+        ),
+        "tables": _concat_frames(
+            [bundle.tables for bundle in bundles], TABLES_FINAL_COLUMNS
+        ),
+        "table_rows": _concat_frames(
+            [bundle.table_rows for bundle in bundles], TABLE_ROWS_FINAL_COLUMNS
+        ),
+        "table_cells": _concat_frames(
+            [bundle.table_cells for bundle in bundles], TABLE_CELLS_FINAL_COLUMNS
+        ),
     }
 
 
-def _collection_input_rows(collection_dir: Path) -> list[dict[str, Any]]:
-    manifest_path = collection_dir / "import_manifest.json"
-    if manifest_path.is_file():
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        rows = []
-        for item in payload.get("imports") or []:
-            for document in item.get("documents") or []:
-                source_path = str(document.get("stored_path") or "").strip()
-                if not source_path.lower().endswith(".pdf"):
-                    continue
-                rows.append(
-                    {
-                        "id": document.get("source_document_id"),
-                        "title": document.get("original_filename") or Path(source_path).name,
-                        "creation_date": item.get("ingested_at"),
-                        "source_path": source_path,
-                        "source_type": "pdf",
-                    }
-                )
-        if rows:
-            return rows
-
-    files_path = collection_dir / "files.json"
-    if files_path.is_file():
-        payload = json.loads(files_path.read_text(encoding="utf-8"))
-        rows = []
-        for item in payload:
-            source_path = str(item.get("stored_path") or "").strip()
-            if not source_path.lower().endswith(".pdf"):
+def _collection_input_rows(
+    collection_repository: CollectionRepository,
+    collection_id: str,
+) -> list[dict[str, Any]]:
+    rows = []
+    for import_record in collection_repository.list_collection_imports(collection_id):
+        for document in import_record.documents:
+            file_record = document.file
+            storage_key = file_record.storage_key.strip()
+            if not storage_key.lower().endswith(".pdf"):
                 continue
+            if storage_key != f"{collection_id}/input/{file_record.stored_filename}":
+                raise ValueError("invalid collection object key")
             rows.append(
                 {
-                    "id": item.get("file_id"),
-                    "title": item.get("original_filename") or Path(source_path).name,
-                    "creation_date": item.get("created_at"),
-                    "source_path": source_path,
+                    "id": document.source_document_id,
+                    "title": file_record.original_filename or Path(storage_key).name,
+                    "creation_date": import_record.ingested_at,
+                    "source_path": storage_key,
+                    "storage_key": storage_key,
+                    "sha256": file_record.sha256,
                     "source_type": "pdf",
                 }
             )
+    if rows:
         return rows
 
-    input_dir = collection_dir / "input"
-    return [
-        {
-            "id": path.stem,
-            "title": path.name,
-            "creation_date": None,
-            "source_path": str(path),
-            "source_type": "pdf",
-        }
-        for path in sorted(input_dir.glob("*.pdf"))
-    ]
+    for file_record in collection_repository.list_collection_files(collection_id):
+        storage_key = file_record.storage_key.strip()
+        if not storage_key.lower().endswith(".pdf"):
+            continue
+        if storage_key != f"{collection_id}/input/{file_record.stored_filename}":
+            raise ValueError("invalid collection object key")
+        rows.append(
+            {
+                "id": file_record.file_id,
+                "title": file_record.original_filename or Path(storage_key).name,
+                "creation_date": file_record.created_at,
+                "source_path": storage_key,
+                "storage_key": storage_key,
+                "sha256": file_record.sha256,
+                "source_type": "pdf",
+            }
+        )
+    return rows
 
 
 def _concat_frames(frames: list[pd.DataFrame], columns: list[str]) -> pd.DataFrame:
@@ -283,7 +320,9 @@ def export_source_tables(
         table_id = str(table.get("table_id") or "")
         rows = _records_where(table_rows, "table_id", table_id)
         cells = _records_where(table_cells, "table_id", table_id)
-        prefix = f"{index:03d}_{_safe_name(table.get('document_id'))}_{_safe_name(table_id)}"
+        prefix = (
+            f"{index:03d}_{_safe_name(table.get('document_id'))}_{_safe_name(table_id)}"
+        )
         prefix = prefix[:180]
         _write_table_review_files(
             table_dir=table_dir,
@@ -321,7 +360,9 @@ def export_source_tables(
     _write_json(destination / "summary.json", summary)
     pd.DataFrame(summary_rows).to_csv(destination / "tables_summary.csv", index=False)
     (destination / "source_tables.md").write_text(
-        _render_source_tables(summary=summary, summary_rows=summary_rows, table_dir=table_dir),
+        _render_source_tables(
+            summary=summary, summary_rows=summary_rows, table_dir=table_dir
+        ),
         encoding="utf-8",
     )
     return destination
@@ -337,7 +378,9 @@ def _write_table_review_files(
 ) -> None:
     matrix = _normalize_matrix(table.get("table_matrix"))
     if matrix:
-        pd.DataFrame(matrix).to_csv(table_dir / f"{prefix}_matrix.csv", index=False, header=False)
+        pd.DataFrame(matrix).to_csv(
+            table_dir / f"{prefix}_matrix.csv", index=False, header=False
+        )
     pd.DataFrame(rows).to_csv(table_dir / f"{prefix}_rows.csv", index=False)
     pd.DataFrame(cells).to_csv(table_dir / f"{prefix}_cells.csv", index=False)
     (table_dir / f"{prefix}.md").write_text(
@@ -436,13 +479,27 @@ def _render_single_table(
             )
             + " |"
         )
-    lines.extend(["", "## Cells", "", "| row | col | header_path | cell_text | unit |", "| --- | --- | --- | --- | --- |"])
+    lines.extend(
+        [
+            "",
+            "## Cells",
+            "",
+            "| row | col | header_path | cell_text | unit |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
     for cell in cells:
         lines.append(
             "| "
             + " | ".join(
                 _md_cell(cell.get(key))
-                for key in ("row_index", "col_index", "header_path", "cell_text", "unit_hint")
+                for key in (
+                    "row_index",
+                    "col_index",
+                    "header_path",
+                    "cell_text",
+                    "unit_hint",
+                )
             )
             + " |"
         )
@@ -502,7 +559,9 @@ def _frame_records(frame: pd.DataFrame | None) -> list[dict[str, Any]]:
     ]
 
 
-def _filter_by_document(frame: pd.DataFrame | None, document_id: str | None) -> pd.DataFrame:
+def _filter_by_document(
+    frame: pd.DataFrame | None, document_id: str | None
+) -> pd.DataFrame:
     if frame is None or frame.empty or not document_id:
         return pd.DataFrame() if frame is None else frame.copy()
     column = "document_id" if "document_id" in frame.columns else "id"
@@ -511,7 +570,9 @@ def _filter_by_document(frame: pd.DataFrame | None, document_id: str | None) -> 
     return frame[frame[column].astype(str) == str(document_id)].copy()
 
 
-def _records_where(frame: pd.DataFrame | None, key: str, value: str) -> list[dict[str, Any]]:
+def _records_where(
+    frame: pd.DataFrame | None, key: str, value: str
+) -> list[dict[str, Any]]:
     if frame is None or frame.empty or key not in frame.columns:
         return []
     return _frame_records(frame[frame[key].astype(str) == str(value)])

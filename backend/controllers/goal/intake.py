@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from application.goal.brief_service import GoalService
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.goal.intake import GoalIntakeRequest, GoalIntakeResponse
 
 router = APIRouter(prefix="/goals", tags=["goals"])
-goal_service = GoalService()
 
 
 @router.post(
@@ -20,7 +18,7 @@ async def intake_goal(
     request: Request,
 ) -> GoalIntakeResponse:
     try:
-        response = goal_service.intake_goal(
+        response = request.app.state.goal_service.intake_goal(
             material_system=payload.material_system,
             target_property=payload.target_property,
             intent=payload.intent,

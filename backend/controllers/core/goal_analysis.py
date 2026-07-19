@@ -4,18 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException
-from starlette.concurrency import run_in_threadpool
+from fastapi import APIRouter, HTTPException, Request
 
 from application.core.confirmed_goal_service import ConfirmedGoalNotFoundError
-from application.core.research_understanding_service import ResearchUnderstandingService
 from application.pipeline.goal_analysis.service import GoalAnalysisPipelineService
 from controllers.schemas.core.goal_analysis import GoalAnalysisResponse
 from domain.core import ConfirmedGoal, ResearchUnderstanding
 
 router = APIRouter(prefix="/collections", tags=["goal-analysis"])
-goal_analysis_service = GoalAnalysisPipelineService()
-research_understanding_service = ResearchUnderstandingService()
 logger = logging.getLogger(__name__)
 _goal_analysis_executor = ThreadPoolExecutor(
     max_workers=1,
@@ -30,19 +26,18 @@ _active_goal_analysis_jobs_lock = Lock()
     response_model=GoalAnalysisResponse,
     summary="运行 confirmed goal 深度分析",
 )
-async def run_confirmed_goal_analysis(
+def run_confirmed_goal_analysis(
     collection_id: str,
     goal_id: str,
+    request: Request,
 ) -> GoalAnalysisResponse:
+    goal_analysis_service = request.app.state.goal_analysis_service
     try:
-        payload = await run_in_threadpool(
-            goal_analysis_service.start_goal_analysis,
-            collection_id,
-            goal_id,
-        )
+        payload = goal_analysis_service.start_goal_analysis(collection_id, goal_id)
         if _register_goal_analysis_job(collection_id, goal_id):
             future = _goal_analysis_executor.submit(
                 _run_goal_analysis_blocking,
+                goal_analysis_service,
                 collection_id,
                 goal_id,
             )
@@ -60,7 +55,11 @@ async def run_confirmed_goal_analysis(
     return _analysis_response(collection_id, payload)
 
 
-def _run_goal_analysis_blocking(collection_id: str, goal_id: str) -> dict:
+def _run_goal_analysis_blocking(
+    goal_analysis_service: GoalAnalysisPipelineService,
+    collection_id: str,
+    goal_id: str,
+) -> dict:
     import asyncio
 
     return asyncio.run(
@@ -92,13 +91,13 @@ def _finish_goal_analysis_job(collection_id: str, goal_id: str, future) -> None:
     response_model=GoalAnalysisResponse,
     summary="读取 confirmed goal 深度分析结果",
 )
-async def get_confirmed_goal_analysis(
+def get_confirmed_goal_analysis(
     collection_id: str,
     goal_id: str,
+    request: Request,
 ) -> GoalAnalysisResponse:
     try:
-        payload = await run_in_threadpool(
-            goal_analysis_service.get_goal_analysis,
+        payload = request.app.state.goal_analysis_service.get_goal_analysis(
             collection_id,
             goal_id,
         )
@@ -114,9 +113,9 @@ def _analysis_response(collection_id: str, payload: dict) -> GoalAnalysisRespons
         collection_id=collection_id,
         goal=goal.to_record() if isinstance(goal, ConfirmedGoal) else goal,
         understanding=(
-            research_understanding_service.with_presentation(understanding)
+            understanding.to_record()
             if isinstance(understanding, ResearchUnderstanding)
-            else research_understanding_service.with_presentation(understanding)
+            else understanding
         ),
         pipeline_nodes=payload.get("pipeline_nodes") or {},
         errors=payload.get("errors") or [],

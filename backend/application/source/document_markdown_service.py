@@ -75,10 +75,10 @@ class DocumentMarkdownService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.source_artifact_repository = (
             source_artifact_repository
             or build_source_artifact_repository(
@@ -426,7 +426,11 @@ class DocumentMarkdownService:
         caption = self._normalize_text(figure.caption_text)
         label = self._normalize_text(figure.figure_label)
         image_markdown = None
-        if self._normalize_text(figure.image_path):
+        if self._figure_image_available(
+            collection_id=collection_id,
+            document_id=document_id,
+            figure_id=figure.figure_id,
+        ):
             alt_text = label or caption or "Figure"
             image_markdown = (
                 f"![{self._escape_markdown_image_alt(alt_text)}]"
@@ -442,6 +446,19 @@ class DocumentMarkdownService:
         return "\n\n".join(
             part for part in (image_markdown, caption_markdown) if part
         ) or None
+
+    def _figure_image_available(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        figure_id: str,
+    ) -> bool:
+        try:
+            self.resolve_figure_image_file(collection_id, document_id, figure_id)
+        except (SourceFigureImageNotFoundError, SourceFigureImageUnavailableError):
+            return False
+        return True
 
     def _figure_image_url(
         self,

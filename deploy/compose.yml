@@ -1,18 +1,43 @@
 services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: lens
+      POSTGRES_USER: lens
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lens -d lens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   backend:
-    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:-v0.4.0}
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     env_file:
       - ./backend.env
+    environment:
+      LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
       - ./data/backend:/app/data:Z
     expose:
       - "8010"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
-    image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:-v0.4.0}
+    image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     ports:
       - "${LENS_HTTP_PORT:-8080}:80"
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  postgres-data:

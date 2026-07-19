@@ -179,22 +179,24 @@ def parse_args() -> argparse.Namespace:
 
 def build_services(
     collections_root: Path,
-) -> tuple[Any, Any, Any, Any, Any]:
+    session_factory: Any,
+) -> tuple[Any, Any, Any, Any]:
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
     from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
+    from infra.persistence.file import FileCollectionWorkspace
+    from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 
-    collection_service = CollectionService(root_dir=collections_root)
-    artifact_registry_service = ArtifactRegistryService(root_dir=collections_root)
+    collection_service = CollectionService(
+        repository=PostgresCollectionRepository(session_factory),
+        workspace=FileCollectionWorkspace(collections_root),
+    )
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry_service,
     )
     return (
         collection_service,
-        artifact_registry_service,
         document_profile_service,
         PaperFactsService,
         CoreLLMStructuredExtractor,
@@ -204,7 +206,7 @@ def build_services(
 def load_collection_inputs_for_benchmark(
     collection_id: str,
     *,
-    collections_root: Path,
+    collection_service: Any,
 ) -> tuple[Path, pd.DataFrame, pd.DataFrame | None, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     from application.source.artifact_input_service import (
         load_blocks_artifact,
@@ -216,9 +218,6 @@ def load_collection_inputs_for_benchmark(
         DocumentProfileService,
         DocumentProfilesNotReadyError,
     )
-    from application.source.collection_service import CollectionService
-
-    collection_service = CollectionService(root_dir=collections_root)
     output_dir = collection_service.get_paths(collection_id).output_dir
     documents, text_units = load_collection_inputs(collection_id)
     blocks = load_blocks_artifact(collection_id)
@@ -439,13 +438,19 @@ def main() -> int:
         if args.collections_root is not None
         else (runtime.backend_root / "data" / "collections").resolve()
     )
+    from infra.persistence.database import (
+        DatabaseSettings,
+        build_database_engine,
+        build_session_factory,
+    )
+
+    engine = build_database_engine(DatabaseSettings())
     (
         collection_service,
-        artifact_registry_service,
         document_profile_service,
         paper_facts_service_class,
         extractor_class,
-    ) = build_services(collections_root)
+    ) = build_services(collections_root, build_session_factory(engine))
     (
         output_dir,
         documents,
@@ -456,7 +461,7 @@ def main() -> int:
         profiles,
     ) = load_collection_inputs_for_benchmark(
         args.collection_id,
-        collections_root=collections_root,
+        collection_service=collection_service,
     )
 
     inner_extractor = extractor_class(
@@ -466,7 +471,6 @@ def main() -> int:
     )
     planning_service = paper_facts_service_class(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry_service,
         document_profile_service=document_profile_service,
         structured_extractor=inner_extractor,
     )
@@ -487,7 +491,6 @@ def main() -> int:
     )
     benchmark_service = paper_facts_service_class(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry_service,
         document_profile_service=document_profile_service,
         structured_extractor=timing_extractor,
     )
@@ -565,6 +568,7 @@ def main() -> int:
 
     write_json_output(args.summary_output, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    engine.dispose()
     return 0
 
 

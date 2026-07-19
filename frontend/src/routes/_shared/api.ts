@@ -3,6 +3,7 @@ import { API_PREFIX } from './base';
 import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {
+	invalid_credentials: 'auth.invalidCredentials',
 	collection_not_found: 'error.collectionNotFound',
 	graph_not_ready: 'error.graphNotReady',
 	community_not_found: 'error.communityNotFound'
@@ -113,7 +114,16 @@ export function buildApiUrl(path: string) {
 }
 
 function buildApiError(response: Response, detail: unknown) {
-	return new ApiError(response.status, response.statusText, normalizeDetail(detail));
+	const error = new ApiError(response.status, response.statusText, normalizeDetail(detail));
+	if (
+		error.status === 401 &&
+		getApiErrorCode(error) === 'authentication_required' &&
+		typeof window !== 'undefined' &&
+		window.location.pathname !== '/login'
+	) {
+		window.location.replace('/login');
+	}
+	return error;
 }
 
 async function readResponseData(response: Response) {

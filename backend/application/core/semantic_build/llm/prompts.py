@@ -4,6 +4,14 @@ import json
 from typing import Any
 
 
+RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION = (
+    "research_understanding_relation.v2"
+)
+RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION = (
+    "research_understanding_finding_synthesis.v12"
+)
+
+
 _COMMON_SYSTEM_PROMPT = """
 You are extracting structured research facts for a materials-literature backend.
 
@@ -109,6 +117,117 @@ Non-negotiable rules:
 - If the evidence only supports a low-level sample comparison and no scientific
   relation can be stated, return an empty `relations` array.
 - Every relation must cite one or more `evidence_unit_ids` from the input.
+""".strip()
+
+
+_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_SYSTEM_PROMPT = """
+TASK MODEL
+You are the cross-paper evidence judge for one materials-literature goal. Run
+one goal-level synthesis pass over evidence already extracted while traversing
+the candidate papers. Produce final Findings for materials experts. This is
+evidence synthesis, not source extraction, routing, paper-by-paper generation,
+field clustering, or a general literature summary.
+
+INPUT SCHEMA
+- `objective`: the user question and requested material, process, and property
+  axes.
+- `result_sets`: backend-aligned candidate Findings. A result set groups direct
+  results for one relationship. `result_set_id` identifies that candidate;
+  `source_axes` names changed variables; `outcome_properties` names measured
+  properties. Each `document_evidence` entry contains one paper's actual
+  `source_axes` and `result_units`. A result unit contains its exact evidence id,
+  `property_normalized`, and a backend-calibrated statement.
+- `paper_frames`: paper metadata only. paper_frames are context, not result evidence.
+- `document_context`: bounded author interpretation, mechanism, and
+  characterization from papers with direct results. It may qualify or explain a
+  Finding but cannot increase the contributing paper count.
+- `input_coverage`: counts of included and omitted evidence units. Omission means
+  bounded input, never agreement by an omitted paper.
+
+DECISION PROCESS
+1. Read the objective and ignore relationships that do not answer it.
+2. Treat each `result_set` independently. If it answers the objective, emit at
+   most one Finding and copy its `result_set_id`. Keep its linked measured
+   outcomes together; never emit one Finding per result unit.
+3. Build `source_concept` from `source_axes` only. Put fixed values in
+   `common_conditions`. When several variables change together, retain the
+   coupled variable set instead of naming one isolated cause.
+4. Create exactly one outcome for each distinct `outcome_properties` value.
+   The outcome `concept` must equal that property, never a source axis. The
+   backend binds all matching direct-result ids. List an id only in
+   `conflicting_evidence_unit_ids` when its result explicitly opposes the
+   outcome direction. Copy calibrated values and units into the statement.
+5. Compare contributing papers by material, process, changed variables, sample
+   state, baseline, measurement method, and test conditions. Use
+   `condition_dependent` for overlapping but non-identical source axes or for an
+   explicit condition boundary. Use `conflict` only for opposing comparable
+   results.
+6. Use `document_context` only for explicit qualifications and mechanisms.
+   Follow `context_role`; interpretation is context, while mechanism may supply
+   mediator concepts.
+7. Write one concise composite statement. Report structural or defect outcomes
+   before performance outcomes. Preserve decisive values and explicit regime
+   limits without strengthening association into causation.
+8. Count only papers whose direct-result ids are assigned to an outcome. Return
+   the smallest set of goal-answering Findings.
+
+HARD RULES
+- Return exactly one JSON object and nothing else.
+- Conflict ids must come from the selected `result_set`; context/mechanism ids
+  must come from `document_context`. Never invent ids or papers.
+- Never combine direct-result ids from separate `result_sets` in one Finding.
+  A Finding's direct ids must all belong to its copied `result_set_id`.
+- One Finding must preserve all goal-relevant outcomes aligned in its result set.
+  Do not split one property into one outcome per paper or measurement.
+- Create outcomes only for `outcome_properties` backed by at least one direct
+  result id. Never turn `document_context` into an unsupported outcome.
+- The backend binds all matching direct-result ids as support. Return only
+  explicit opposing ids in `conflicting_evidence_unit_ids`; an id for one
+  property must not be attached to another outcome.
+- `source_concept` must cover only the result set's `source_axes`. Controlled
+  axes belong in conditions. A grouping label may qualify a coupled parameter
+  set but must not replace its changed axes or become an isolated cause.
+- Paper frames cannot count as results and cannot supply evidence ids.
+- Use `context_evidence_unit_ids` for source-explicit qualifications and author
+  interpretations. Use `mechanism_evidence_unit_ids` only when the excerpt
+  explicitly supports the returned mediator. Neither list counts as direct
+  support or cross-paper confirmation.
+- Context and mechanism id lists must be disjoint. When mechanism ids are
+  present, name their supported concepts in `mediator_concepts`; otherwise keep
+  those ids as context.
+- Include goal-relevant document context when it directly qualifies an outcome
+  or explains an observed mechanism. Do not silently discard an explicit
+  regime limitation. If an outcome stayed in a narrow range, use that
+  qualification instead of foregrounding a small endpoint delta.
+- A single-paper composite statement must say that it is directly supported by
+  one paper and use `insufficient_confirmation`.
+- If all direct-result ids come from one document, use
+- Do not convert association into control or causation.
+- If no goal-relevant direct result exists, return an empty `findings` array.
+
+BOUNDARY EXAMPLES
+- `result_set_1` has source axes `laser power, scan speed`, outcome property
+  `density`, and one density id from each of two papers. Return one Finding with
+  `result_set_id: result_set_1`, source concept `laser power and scan speed`, one
+  `density` outcome, and no conflict ids. The backend attaches both supporting
+  ids. If each paper changed a different subset of the axes, use
+  `condition_dependent`, not isolated-variable agreement.
+- One paper reports a direct result and another only describes a method: return
+  `insufficient_confirmation`; do not cite the method unit as support.
+- Two papers report different directions and the difference follows explicit
+  heat-treatment or test conditions: return `condition_dependent` and state the
+  boundary. Reserve `conflict` for opposing results that remain comparable.
+- Power, speed, and hatch spacing all change between samples: use the coupled
+  parameter set as `source_concept`, not power alone.
+- One result set has outcomes `defect size`, `LCF strength`, and `HCF limit`:
+  return one Finding with exactly those three outcomes. Do not return three
+  Findings or use `laser power` as an outcome.
+
+OUTPUT CONTRACT
+Return `findings` only. Each Finding copies `result_set_id` and contains
+`source_concept`, `outcomes`, an expert-readable statement, optional
+mediators/context/mechanism, conditions, status, confidence, and warnings. Use
+exact input ids, empty arrays when absent, and no hidden reasoning or extra keys.
 """.strip()
 
 
@@ -500,8 +619,14 @@ def _build_objective_context_guidance(payload: dict[str, Any]) -> str:
     return (
         "Objective-context rules:\n"
         "- Treat `objective_context.focus` as the current research lens.\n"
+        "- If `objective_context.objective_evidence_lens` is present, treat "
+        "`target_outcome_axes` as the outcomes that answer the objective, "
+        "`mediator_axes` as explanatory intermediate concepts, `context_axes` "
+        "as binding scope, and `excluded_axes` as out-of-lens properties.\n"
         "- Prefer facts that connect `objective_context.variable_process_axes` to "
         "`objective_context.target_property_axes` for that lens.\n"
+        "- Do not treat a mediator or context-only observation as a target result "
+        "unless the source explicitly links it to a target outcome.\n"
         "- If `objective_context.material_scope` identifies one clear material "
         "system, populate emitted evidence units' `material_system.family` with "
         "that material unless the source explicitly states a different material.\n"
@@ -700,6 +825,12 @@ def build_objective_evidence_route_prompt(
         "process_or_treatment, test_condition, composition_or_background, "
         "characterization, literature_comparison, modeling_or_prediction, "
         "low_value_or_irrelevant.\n"
+        "When `objective_context.objective_evidence_lens` is present, first "
+        "decide whether `current_source` is direct target-outcome evidence, "
+        "mediator/context evidence, or irrelevant. Treat `target_outcome_axes` "
+        "as the only outcome axes that answer the objective. Treat "
+        "`mediator_axes` as explanatory context unless the source explicitly "
+        "links them to a target outcome.\n"
         "Use `current_experimental_evidence` only when the source unit likely "
         "contains current-work target results for the active objective.\n"
         "Use `process_or_treatment` or `test_condition` when a unit is mainly "
@@ -774,9 +905,10 @@ def build_objective_evidence_unit_prompt(
 def build_research_understanding_relation_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
+    input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     user_prompt = (
         "Extract expert-readable relations for this research understanding workspace.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{input_json}\n\n"
         "Return only schema-valid structured data with a `relations` array.\n"
         "Return at most 8 relations.\n"
         "`relation_type` must be one of: causal, correlational, mechanistic, "
@@ -786,6 +918,9 @@ def build_research_understanding_relation_prompt(
         "`source_concept` and `target_concept` must be concise scientific terms "
         "such as laser power, scan speed, porosity, density, microstructure, "
         "ductility, pitting corrosion, heat treatment, or residual stress.\n"
+        "Do not use None, null, unknown, n/a, true/false, JSON fragments, backend "
+        "field names, sample ids, or condition ids as source, target, or mediator "
+        "concepts; return no relation instead.\n"
         "Use `mediator_concepts` only for explicit or strongly supported middle "
         "concepts, for example porosity or microstructure evolution.\n"
         "`statement` should be a short expert-readable sentence grounded in the "
@@ -796,3 +931,31 @@ def build_research_understanding_relation_prompt(
         "risk. If no expert relation is supported, return `{\"relations\": []}`."
     )
     return _RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT, user_prompt
+
+
+def build_research_understanding_finding_synthesis_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    user_prompt = (
+        "Synthesize the final Findings for this research goal from the aligned "
+        "result sets.\n\n"
+        f"Input JSON:\n{input_json}\n\n"
+        "Return only schema-valid structured data with a `findings` array.\n"
+        "Return at most 6 Findings, ordered by relevance to the goal.\n"
+        "For each candidate result set, compare the cited direct "
+        "evidence by document and condition before choosing `synthesis_status`:\n"
+        "- `agreement`: at least two independent papers provide comparable direct "
+        "results with the same scientific direction.\n"
+        "- `conflict`: independent papers provide opposing direct results under "
+        "comparable or overlapping conditions.\n"
+        "- `condition_dependent`: at least two papers provide direct results whose "
+        "difference is tied to explicit material, process, or test conditions.\n"
+        "- `insufficient_confirmation`: only one paper provides a direct result, or "
+        "the available papers cannot independently confirm the relationship.\n"
+        "Keep all outcomes from one coherent result set inside one Finding. Follow "
+        "the system rules for conflict ids, coupled variables, and scope. If no "
+        "Finding meets them, return "
+        "`{\"findings\": []}`."
+    )
+    return _RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt

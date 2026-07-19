@@ -16,6 +16,7 @@ function buildWorkspacePayload(
 		workflow?: Record<string, unknown>;
 		artifacts?: Record<string, unknown>;
 		capabilities?: Record<string, unknown>;
+		latest_task?: Record<string, unknown> | null;
 	} = {}
 ) {
 	return {
@@ -64,6 +65,7 @@ function buildWorkspacePayload(
 			can_download_graphml: false,
 			...overrides.capabilities
 		},
+		latest_task: overrides.latest_task ?? null,
 		recent_tasks: []
 	};
 }
@@ -217,5 +219,34 @@ describe('workspace shared helpers', () => {
 		const workspace = await fetchWorkspaceOverview('col_123');
 
 		expect(getCollectionWorkspaceState(workspace)).toBe('ready');
+	});
+
+	it('requires retry when a build only partially succeeds before primary views are ready', async () => {
+		requestJson.mockResolvedValue(
+			buildWorkspacePayload({
+				workflow: {
+					documents: 'not_started',
+					results: 'not_started',
+					evidence: 'not_started',
+					comparisons: 'not_started'
+				},
+				latest_task: {
+					task_id: 'task_partial',
+					collection_id: 'col_123',
+					task_type: 'build',
+					status: 'partial_success',
+					current_stage: 'artifacts_ready',
+					progress_percent: 100,
+					errors: ['document_profiles: Connection error.'],
+					warnings: [],
+					created_at: '2026-07-19T05:23:33Z',
+					updated_at: '2026-07-19T05:24:42Z'
+				}
+			})
+		);
+
+		const workspace = await fetchWorkspaceOverview('col_123');
+
+		expect(getCollectionWorkspaceState(workspace)).toBe('failed');
 	});
 });

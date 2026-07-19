@@ -21,6 +21,7 @@ class GoalSessionCreateRequest(BaseModel):
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
     focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
+    focused_goal_id: str | None = Field(default=None, description="Focused confirmed goal id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] = Field(
         default_factory=dict,
@@ -36,6 +37,7 @@ class GoalSessionUpdateRequest(BaseModel):
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
     focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
+    focused_goal_id: str | None = Field(default=None, description="Focused confirmed goal id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] | None = Field(
         default=None,
@@ -53,6 +55,7 @@ class GoalSessionResponse(BaseModel):
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
     focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
+    focused_goal_id: str | None = Field(default=None, description="Focused confirmed goal id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] = Field(
         default_factory=dict,
@@ -107,6 +110,10 @@ class GoalSessionMessageResponse(BaseModel):
     source_links: list[GoalSourceLinkResponse] = Field(
         default_factory=list,
         description="User-navigable document or evidence links used by the answer",
+    )
+    review_gate: str | None = Field(
+        default=None,
+        description="Review gate satisfied by the answer, such as protocol_ready_findings",
     )
     created_at: str = Field(..., description="Creation timestamp")
 

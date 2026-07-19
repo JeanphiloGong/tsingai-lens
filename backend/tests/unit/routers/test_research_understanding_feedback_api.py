@@ -1,18 +1,41 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+from io import StringIO
+import json
+from types import SimpleNamespace
 
 from controllers.core import research_understanding_feedback as feedback_controller
 from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingCurationCreateRequest,
     ResearchUnderstandingFeedbackCreateRequest,
+    ResearchUnderstandingReviewDecisionImportRequest,
 )
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
+
+
+def request_with_user(
+    *,
+    user_id: str = "user-materials-expert",
+    email: str = "materials-expert@example.com",
+    display_name: str | None = "Materials Expert",
+):
+    return SimpleNamespace(
+        state=SimpleNamespace(
+            current_user={
+                "user_id": user_id,
+                "email": email,
+                "display_name": display_name,
+            }
+        )
+    )
 
 
 class FakeResearchUnderstandingFeedbackService:
     def __init__(self) -> None:
         self.created = None
+        self.dataset_feedback_refs = []
         self.items = (
             ResearchUnderstandingFeedback.from_mapping(
                 {
@@ -20,6 +43,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "collection_id": "col-1",
                     "scope_type": "objective",
                     "scope_id": "obj-1",
+                    "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "review_status": "incorrect",
                     "issue_type": "evidence_not_grounded",
@@ -36,6 +60,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "collection_id": "col-1",
                     "scope_type": "objective",
                     "scope_id": "obj-1",
+                    "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "curated_claim_type": "mechanism",
                     "curated_status": "limited",
@@ -57,6 +82,7 @@ class FakeResearchUnderstandingFeedbackService:
                 "collection_id": kwargs["collection_id"],
                 "scope_type": kwargs["scope_type"],
                 "scope_id": kwargs["scope_id"],
+                "finding_id": kwargs["finding_id"],
                 "claim_id": kwargs["claim_id"],
                 "review_status": kwargs["review_status"],
                 "issue_type": kwargs["issue_type"],
@@ -78,6 +104,7 @@ class FakeResearchUnderstandingFeedbackService:
                 "collection_id": kwargs["collection_id"],
                 "scope_type": kwargs["scope_type"],
                 "scope_id": kwargs["scope_id"],
+                "finding_id": kwargs["finding_id"],
                 "claim_id": kwargs["claim_id"],
                 "curated_claim_type": kwargs["curated_claim_type"],
                 "curated_status": kwargs["curated_status"],
@@ -108,9 +135,10 @@ class FakeResearchUnderstandingFeedbackService:
                 {
                     "gold_item_id": "gold_claim-1",
                     "document_id": "",
-                    "family": "research_understanding_claims",
-                    "item_key": "objective:obj-1:claim-1",
+                    "family": "research_understanding_findings",
+                    "item_key": "objective:obj-1:finding-1",
                     "payload": {
+                        "finding_id": "finding-1",
                         "claim_id": "claim-1",
                         "claim_type": "mechanism",
                         "status": "limited",
@@ -123,6 +151,515 @@ class FakeResearchUnderstandingFeedbackService:
                 }
             ],
         }
+
+    def export_dataset(self, **kwargs):  # noqa: ANN003
+        self.dataset_exported = kwargs
+        dataset_use_status = kwargs["dataset_use_status"] or "training_ready"
+        label_status = "silver" if dataset_use_status == "review_candidate" else "gold"
+        return {
+            "schema_version": "research_understanding_dataset.v1",
+            "dataset_id": "dataset_col-1_goal_goal-1_research_understanding",
+            "collection_id": kwargs["collection_id"],
+            "scope_type": kwargs["scope_type"],
+            "scope_id": kwargs["scope_id"],
+            "task_type": "research_understanding_finding",
+            "metric_profile": "research_understanding_v1",
+            "label_status_filter": kwargs["label_status"],
+            "dataset_use_status_filter": kwargs["dataset_use_status"],
+            "task_type_filter": kwargs["task_type"],
+            "item_count": 1,
+            "label_counts": {
+                "candidate": 0,
+                "silver": 1 if label_status == "silver" else 0,
+                "gold": 1 if label_status == "gold" else 0,
+                "rejected": 0,
+            },
+            "quality_summary": {
+                "total_samples": 1,
+                "usable_sample_count": 1,
+                "training_ready_sample_count": 1,
+                "training_message_sample_count": 1,
+                "protocol_ready_sample_count": 1,
+                "review_candidate_sample_count": 0,
+                "needs_review_count": 0,
+                "rejected_count": 0,
+                "labeled_sample_count": 1,
+                "accepted_system_sample_count": 0,
+                "accepted_after_curation_match_count": 1,
+                "curated_correction_count": 0,
+                "system_error_count": 0,
+                "resolved_feedback_count": 0,
+                "by_label_status": {
+                    "candidate": 0,
+                    "silver": 1 if label_status == "silver" else 0,
+                    "gold": 1 if label_status == "gold" else 0,
+                    "rejected": 0,
+                },
+                "by_dataset_use_status": {
+                    "training_ready": 1 if dataset_use_status == "training_ready" else 0,
+                    "review_candidate": 1 if dataset_use_status == "review_candidate" else 0,
+                    "rejected": 0,
+                },
+                "by_review_status": {"accepted": 1},
+                "by_issue_type": {"none": 1},
+                "by_error_category": {"none": 1},
+                "by_support_grade": {"partial": 1},
+                "by_trace_status": {"unavailable": 1},
+                "by_evidence_role": {"direct_result": 1},
+                "by_evidence_traceability_status": {"direct": 1},
+                "by_quality_decision": {"accepted_after_curation_match": 1},
+                "by_presentation_bucket": {"primary": 1},
+                "by_bucket_quality_decision": {
+                    "primary": {"accepted_after_curation_match": 1}
+                },
+                "by_review_reason": {"single_paper_evidence": 1},
+                "by_system_warning": {"needs_expert_review": 1},
+                "by_review_candidate_reason": {},
+                "by_review_candidate_warning": {},
+                "optimization_breakdown": {
+                    "by_variable": {
+                        "build platform preheating": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                    "by_outcome": {
+                        "ductility": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                    "by_direction": {
+                        "increases": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                    "by_evidence_role": {
+                        "direct_result": {
+                            "issue_type": {"none": 1},
+                            "error_category": {"none": 1},
+                            "review_candidate_reason": {},
+                            "system_warning": {},
+                        }
+                    },
+                },
+                "top_error_categories": [{"name": "none", "count": 1}],
+                "top_issue_types": [{"name": "none", "count": 1}],
+                "top_review_reasons": [{"name": "single_paper_evidence", "count": 1}],
+                "top_system_warnings": [{"name": "needs_expert_review", "count": 1}],
+                "top_variable_issue_types": [],
+                "top_outcome_issue_types": [],
+                "top_direction_issue_types": [],
+                "top_evidence_role_issue_types": [],
+                "top_variable_review_reasons": [
+                    {
+                        "name": "build platform preheating",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "top_outcome_review_reasons": [
+                    {
+                        "name": "ductility",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "top_direction_review_reasons": [
+                    {
+                        "name": "increases",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "top_evidence_role_review_reasons": [
+                    {
+                        "name": "direct_result",
+                        "metric": "single_paper_evidence",
+                        "count": 1,
+                    }
+                ],
+                "warning_counts": {
+                    "missing_evidence": 0,
+                    "missing_source_text": 0,
+                    "missing_context": 0,
+                    "unavailable_trace": 1,
+                    "failed_trace": 0,
+                    "rejected_feedback": 0,
+                    "resolved_feedback": 0,
+                },
+            },
+            "items": [
+                {
+                    "sample_id": "rus-1",
+                    "finding_fingerprint": "finding.v1:test",
+                    "task_type": "research_understanding_finding",
+                    "training_schema_version": (
+                        "research_understanding_finding_training.v1"
+                    ),
+                    "training_prompt_version": (
+                        "research_understanding_finding_training_prompt.v1"
+                    ),
+                    "research_objective": "How does preheating affect ductility?",
+                    "finding_level": "paper_level",
+                    "document_ids": ["doc-1"],
+                    "collection_id": kwargs["collection_id"],
+                    "scope_type": kwargs["scope_type"],
+                    "scope_id": kwargs["scope_id"],
+                    "finding_id": "finding-1",
+                    "claim_id": "claim-1",
+                    "label_status": label_status,
+                    "dataset_use_status": dataset_use_status,
+                    "presentation_bucket": "primary",
+                    "trace_status": "unavailable",
+                    "input_blocks": [],
+                    "prompt_version": None,
+                    "model_output": None,
+                    "system_prediction": {
+                        "statement": "Preheating improves ductility.",
+                        "variables": ["build platform preheating"],
+                        "mediators": ["homogenized microstructure"],
+                        "outcomes": ["ductility"],
+                        "direction": "increases",
+                        "scope_summary": "LPBF 316L",
+                        "support_grade": "partial",
+                        "review_status": "needs_review",
+                        "presentation_bucket": "primary",
+                        "review_reasons": ["single_paper_evidence"],
+                        "warnings": ["needs_expert_review"],
+                    },
+                    "expert_target": {
+                        "source": "curation",
+                        "statement": "Preheating improves ductility by 14%.",
+                        "evidence_ref_ids": ["ev-1"],
+                    },
+                    "review_action": {
+                        "code": "accept_as_paper_level",
+                        "label": "Accept as paper-level evidence",
+                    },
+                    "evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev-1",
+                            "document_id": "doc-1",
+                            "label": "P001 Section 3.2",
+                            "source_ref": "blk_1",
+                            "page": "9",
+                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1&quote=long-text",
+                            "quote": "Preheating increased ductility by 14%.",
+                            "source_text": (
+                                "Preheating increased ductility by 14% in LPBF 316L."
+                            ),
+                            "training_source_text": "Preheating increased ductility by 14%.",
+                            "value_summary": "ductility +14%",
+                            "table_audit": {
+                                "columns": ["Preheat", "Ductility"],
+                                "relevant_rows": [
+                                    {"cells": {"Preheat": "150 C", "Ductility": "+14%"}}
+                                ],
+                            },
+                        }
+                    ],
+                    "training_evidence_refs": [
+                        {
+                            "evidence_ref_id": "ev-1",
+                            "document_id": "doc-1",
+                            "label": "P001 Section 3.2",
+                            "source_ref": "blk_1",
+                            "page": "9",
+                            "href": "/collections/col-1/documents/doc-1?source_ref=blk_1&quote=long-text",
+                            "quote": "Preheating increased ductility by 14%.",
+                            "source_text": (
+                                "Preheating increased ductility by 14% in LPBF 316L."
+                            ),
+                            "training_source_text": "Preheating increased ductility by 14%.",
+                            "value_summary": "ductility +14%",
+                            "table_audit": {
+                                "columns": ["Preheat", "Ductility"],
+                                "relevant_rows": [
+                                    {"cells": {"Preheat": "150 C", "Ductility": "+14%"}}
+                                ],
+                            },
+                        }
+                    ],
+                    "training_messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Research goal: improve LPBF 316L ductility.\n\n"
+                                "Evidence ev-1: Preheating increased ductility by 14%."
+                            ),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                {
+                                    "finding": (
+                                        "Preheating improves ductility by 14%."
+                                    ),
+                                    "evidence_ref_ids": ["ev-1"],
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    ],
+                    "protocol_readiness": {
+                        "status": "protocol_ready",
+                        "ready_after_review": True,
+                        "missing": [],
+                        "blocking_missing": [],
+                        "checks": {
+                            "expert_review_decision": True,
+                            "training_messages": True,
+                            "statement": True,
+                            "variables": True,
+                            "outcomes": True,
+                            "direction_or_scope": True,
+                            "support_status": True,
+                            "support_grade": True,
+                            "traceable_training_evidence": True,
+                        },
+                        "guidance": "Ready for traceable protocol drafting.",
+                    },
+                    "acceptance_gate": {
+                        "status": "review_required",
+                        "accept_allowed": True,
+                        "requires_correction": False,
+                        "blocking_missing": [],
+                        "accept_blockers": [],
+                        "review_checks": [
+                            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+                        ],
+                        "recommended_action_code": "accept_as_paper_level",
+                        "guidance": "Accept only after the listed checks and source evidence match.",
+                    },
+                    "review_decision_hint": {
+                        "summary": (
+                            "Accept only as paper-level evidence after checking the "
+                            "quote; correct if the scope should be narrower."
+                        ),
+                        "preferred_next_action": "accept_after_checks",
+                        "allowed_actions": ["accept", "reject", "correct", "skip"],
+                        "blocked_actions": [],
+                        "why_accept_blocked": [],
+                        "required_checks": [
+                            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+                        ],
+                        "import_note": (
+                            "accept imports only after the reviewer changes action "
+                            "from skip"
+                        ),
+                    },
+                    "context_refs": [],
+                    "feedback_refs": list(self.dataset_feedback_refs),
+                    "metadata": {"curation_id": "ruc-existing"},
+                }
+            ],
+            "warnings": [],
+        }
+
+    def export_collection_dataset(self, **kwargs):  # noqa: ANN003
+        self.collection_dataset_exported = kwargs
+        dataset = self.export_dataset(
+            collection_id=kwargs["collection_id"],
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=kwargs["label_status"],
+            dataset_use_status=kwargs["dataset_use_status"],
+            task_type=kwargs["task_type"],
+        )
+        dataset["dataset_id"] = "dataset_col-1_collection_goal_research_understanding"
+        dataset["scope_type"] = "collection"
+        dataset["scope_id"] = kwargs["scope_type"]
+        for item in dataset["items"]:
+            item["scope_type"] = "goal"
+            item["scope_id"] = "goal-1"
+        return dataset
+
+
+class FakeResearchUnderstandingReviewImportService:
+    def __init__(self) -> None:
+        self.imported = None
+        self.imported_tsv = None
+
+    def import_rows(self, **kwargs):  # noqa: ANN003
+        self.imported = kwargs
+        return {
+            "status": "pass",
+            "dry_run": kwargs["dry_run"],
+            "total_rows": len(kwargs["rows"]),
+            "written_count": 0 if kwargs["dry_run"] else 1,
+            "skipped_count": 0,
+            "counts": {"accept": 1},
+            "errors": [],
+            "warnings": [],
+            "review_progress": {
+                "actionable_count": 1,
+                "skipped_count": 0,
+                "needs_review_count": 0,
+                "ready_to_write": True,
+                "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
+            },
+            "decision_progress_by_goal": [
+                {
+                    "collection_id": "col-1",
+                    "goal_id": "goal-1",
+                    "total_rows": 1,
+                    "actionable_count": 1,
+                    "skipped_count": 0,
+                    "accept_count": 1,
+                    "reject_count": 0,
+                    "correct_count": 0,
+                    "next_review_finding_id": "",
+                }
+            ],
+            "affected_goals": [],
+            "readiness_summary": {},
+        }
+
+    def import_decision_board_tsv(self, **kwargs):  # noqa: ANN003
+        self.imported_tsv = kwargs
+        return {
+            "status": "pass",
+            "dry_run": kwargs["dry_run"],
+            "total_rows": 1,
+            "written_count": 0,
+            "skipped_count": 0,
+            "counts": {"correct": 1},
+            "errors": [],
+            "warnings": [],
+            "review_progress": {
+                "actionable_count": 1,
+                "skipped_count": 0,
+                "needs_review_count": 0,
+                "ready_to_write": True,
+                "next_steps": [],
+            },
+            "decision_progress_by_goal": [],
+            "affected_goals": [],
+            "readiness_summary": {},
+        }
+
+
+def test_research_understanding_review_decision_import_dry_run(monkeypatch):
+    import_service = FakeResearchUnderstandingReviewImportService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "review_import_service",
+        import_service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.import_research_understanding_review_decisions(
+            "col-1",
+            ResearchUnderstandingReviewDecisionImportRequest(
+                dry_run=True,
+                fail_on_warnings=True,
+                rows=[
+                    {
+                        "goal_id": "goal-1",
+                        "finding_id": "finding-1",
+                        "claim_id": "claim-1",
+                        "action": "accept",
+                    }
+                ],
+            ),
+            request_with_user(email="expert@example.com"),
+        )
+    )
+
+    assert response.status == "pass"
+    assert response.dry_run is True
+    assert response.total_rows == 1
+    assert response.review_progress["ready_to_write"] is True
+    assert response.decision_progress_by_goal[0]["goal_id"] == "goal-1"
+    assert import_service.imported == {
+        "rows": [
+            {
+                "collection_id": "col-1",
+                "goal_id": "goal-1",
+                "finding_id": "finding-1",
+                "claim_id": "claim-1",
+                "action": "accept",
+            }
+        ],
+        "reviewer": "expert@example.com",
+        "dry_run": True,
+        "fail_on_warnings": True,
+    }
+
+
+def test_research_understanding_review_decision_import_writes(monkeypatch):
+    import_service = FakeResearchUnderstandingReviewImportService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "review_import_service",
+        import_service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.import_research_understanding_review_decisions(
+            "col-1",
+            ResearchUnderstandingReviewDecisionImportRequest(
+                dry_run=False,
+                rows=[
+                    {
+                        "collection_id": "col-other",
+                        "goal_id": "goal-1",
+                        "finding_id": "finding-1",
+                        "action": "accept",
+                    }
+                ],
+            ),
+            request_with_user(email="expert@example.com"),
+        )
+    )
+
+    assert response.written_count == 1
+    assert import_service.imported["dry_run"] is False
+    assert import_service.imported["rows"][0]["collection_id"] == "col-other"
+
+
+def test_research_understanding_review_decision_import_accepts_decision_board_tsv(
+    monkeypatch,
+):
+    import_service = FakeResearchUnderstandingReviewImportService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "review_import_service",
+        import_service,
+    )
+    tsv = (
+        "expert_action\tcollection_id\tgoal_id\tfinding_id\n"
+        "correct\tcol-1\tgoal-1\tfinding-1\n"
+    )
+
+    response = asyncio.run(
+        feedback_controller.import_research_understanding_review_decisions(
+            "col-1",
+            ResearchUnderstandingReviewDecisionImportRequest(
+                dry_run=True,
+                fail_on_warnings=True,
+                decision_board_tsv=tsv,
+            ),
+            request_with_user(email="expert@example.com"),
+        )
+    )
+
+    assert response.status == "pass"
+    assert response.counts == {"correct": 1}
+    assert import_service.imported_tsv == {
+        "content": tsv,
+        "reviewer": "expert@example.com",
+        "dry_run": True,
+        "fail_on_warnings": True,
+    }
 
 
 def test_research_understanding_feedback_route_records_contract_payload(monkeypatch):
@@ -139,30 +676,92 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
             ResearchUnderstandingFeedbackCreateRequest(
                 scope_type="objective",
                 scope_id="obj-1",
+                finding_id="finding-1",
                 claim_id="claim-1",
                 review_status="incorrect",
                 issue_type="evidence_not_grounded",
                 note="The cited table does not support the mechanism claim.",
                 reviewer="materials-expert",
             ),
+            request_with_user(),
         )
     )
 
     assert response.feedback_id == "ruf-created"
     assert response.collection_id == "col-1"
     assert response.scope_id == "obj-1"
+    assert response.finding_id == "finding-1"
     assert response.claim_id == "claim-1"
     assert response.review_status == "incorrect"
     assert service.created == {
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
         "review_status": "incorrect",
         "issue_type": "evidence_not_grounded",
         "note": "The cited table does not support the mechanism claim.",
-        "reviewer": "materials-expert",
+        "reviewer": "materials-expert@example.com",
     }
+
+
+def test_research_understanding_feedback_route_preserves_agent_reviewer(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.create_research_understanding_feedback(
+            "col-1",
+            ResearchUnderstandingFeedbackCreateRequest(
+                scope_type="objective",
+                scope_id="obj-1",
+                finding_id="finding-1",
+                claim_id="claim-1",
+                review_status="correct",
+                issue_type="none",
+                note="AI source audit accepted the evidence.",
+                reviewer="ai-reviewer-codex-evidence-audit",
+            ),
+            request_with_user(),
+        )
+    )
+
+    assert response.reviewer == "ai-reviewer-codex-evidence-audit"
+    assert service.created["reviewer"] == "ai-reviewer-codex-evidence-audit"
+
+
+def test_research_understanding_feedback_route_accepts_material_error_issue_type(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.create_research_understanding_feedback(
+            "col-1",
+            ResearchUnderstandingFeedbackCreateRequest(
+                scope_type="goal",
+                scope_id="goal-1",
+                finding_id="finding-1",
+                claim_id="claim-1",
+                review_status="incorrect",
+                issue_type="wrong_variable",
+                note="The finding attributes the effect to VED, but the paper varied preheating.",
+                reviewer="materials-expert",
+            ),
+            request_with_user(),
+        )
+    )
+
+    assert response.issue_type == "wrong_variable"
+    assert service.created["issue_type"] == "wrong_variable"
 
 
 def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch):
@@ -178,6 +777,7 @@ def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch)
             "col-1",
             scope_type="objective",
             scope_id="obj-1",
+            finding_id="finding-1",
             claim_id="claim-1",
         )
     )
@@ -189,6 +789,7 @@ def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch)
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
     }
 
@@ -207,6 +808,7 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
             ResearchUnderstandingCurationCreateRequest(
                 scope_type="objective",
                 scope_id="obj-1",
+                finding_id="finding-1",
                 claim_id="claim-1",
                 curated_claim_type="mechanism",
                 curated_status="limited",
@@ -218,11 +820,13 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
                 note="Needs microstructure evidence before marking supported.",
                 reviewer="materials-expert",
             ),
+            request_with_user(),
         )
     )
 
     assert response.curation_id == "ruc-created"
     assert response.collection_id == "col-1"
+    assert response.finding_id == "finding-1"
     assert response.claim_id == "claim-1"
     assert response.curated_claim_type == "mechanism"
     assert response.curated_status == "limited"
@@ -231,15 +835,57 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
         "curated_claim_type": "mechanism",
         "curated_status": "limited",
         "curated_statement": "Nitrogen improves strength with limited mechanism evidence.",
+        "curated_support_grade": None,
+        "curated_review_status": None,
+        "curated_variables": [],
+        "curated_mediators": [],
+        "curated_outcomes": [],
+        "curated_direction": None,
+        "curated_scope_summary": None,
         "curated_evidence_ref_ids": ["ev-1"],
         "curated_context_ids": ["ctx-1"],
         "note": "Needs microstructure evidence before marking supported.",
-        "reviewer": "materials-expert",
+        "reviewer": "materials-expert@example.com",
     }
+
+
+def test_research_understanding_curation_route_preserves_agent_reviewer(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.create_research_understanding_curation(
+            "col-1",
+            ResearchUnderstandingCurationCreateRequest(
+                scope_type="objective",
+                scope_id="obj-1",
+                finding_id="finding-1",
+                claim_id="claim-1",
+                curated_claim_type="mechanism",
+                curated_status="limited",
+                curated_statement=(
+                    "Nitrogen improves strength with limited mechanism evidence."
+                ),
+                curated_evidence_ref_ids=["ev-1"],
+                curated_context_ids=["ctx-1"],
+                note="AI curation candidate, keep silver.",
+                reviewer="agent-lens-claim-review",
+            ),
+            request_with_user(),
+        )
+    )
+
+    assert response.reviewer == "agent-lens-claim-review"
+    assert service.curated["reviewer"] == "agent-lens-claim-review"
 
 
 def test_research_understanding_curation_route_lists_expert_claim_curations(monkeypatch):
@@ -255,6 +901,7 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
             "col-1",
             scope_type="objective",
             scope_id="obj-1",
+            finding_id="finding-1",
             claim_id="claim-1",
         )
     )
@@ -266,6 +913,7 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+        "finding_id": "finding-1",
         "claim_id": "claim-1",
     }
 
@@ -290,10 +938,1065 @@ def test_research_understanding_gold_draft_route_exports_curations(monkeypatch):
     assert response.scope_type == "objective"
     assert response.scope_id == "obj-1"
     assert response.item_count == 1
-    assert response.items[0].family == "research_understanding_claims"
+    assert response.items[0].family == "research_understanding_findings"
     assert response.items[0].payload["claim_type"] == "mechanism"
     assert service.exported == {
         "collection_id": "col-1",
         "scope_type": "objective",
         "scope_id": "obj-1",
+    }
+
+
+def test_research_understanding_dataset_route_exports_json(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type="research_understanding_finding",
+            format="json",
+        )
+    )
+
+    assert response.collection_id == "col-1"
+    assert response.scope_type == "goal"
+    assert response.scope_id == "goal-1"
+    assert response.label_status_filter == "gold"
+    assert response.dataset_use_status_filter == "training_ready"
+    assert response.task_type_filter == "research_understanding_finding"
+    assert response.item_count == 1
+    assert response.quality_summary.total_samples == 1
+    assert response.quality_summary.by_label_status["gold"] == 1
+    assert response.quality_summary.by_issue_type == {"none": 1}
+    assert response.quality_summary.by_error_category == {"none": 1}
+    assert response.quality_summary.accepted_after_curation_match_count == 1
+    assert response.quality_summary.curated_correction_count == 0
+    assert response.quality_summary.resolved_feedback_count == 0
+    assert response.quality_summary.by_quality_decision == {
+        "accepted_after_curation_match": 1
+    }
+    assert response.quality_summary.by_presentation_bucket == {"primary": 1}
+    assert response.quality_summary.by_bucket_quality_decision == {
+        "primary": {"accepted_after_curation_match": 1}
+    }
+    assert response.quality_summary.by_review_reason == {"single_paper_evidence": 1}
+    assert response.quality_summary.by_system_warning == {"needs_expert_review": 1}
+    assert response.quality_summary.optimization_breakdown["by_variable"][
+        "build platform preheating"
+    ]["issue_type"] == {"none": 1}
+    assert response.quality_summary.top_evidence_role_review_reasons == [
+        {
+            "name": "direct_result",
+            "metric": "single_paper_evidence",
+            "count": 1,
+        }
+    ]
+    assert response.items[0].label_status == "gold"
+    assert response.items[0].presentation_bucket == "primary"
+    assert response.items[0].evidence_refs[0]["source_text"] == (
+        "Preheating increased ductility by 14% in LPBF 316L."
+    )
+    assert response.items[0].training_evidence_refs[0]["training_source_text"] == (
+        "Preheating increased ductility by 14%."
+    )
+    assert response.items[0].training_messages[0]["role"] == "user"
+    assert response.items[0].training_messages[1]["role"] == "assistant"
+    assert response.items[0].protocol_readiness["status"] == "protocol_ready"
+    assert response.items[0].review_decision_hint["summary"] == (
+        "Accept only as paper-level evidence after checking the quote; correct if "
+        "the scope should be narrower."
+    )
+    assert response.items[0].review_decision_hint["blocked_actions"] == []
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "task_type": "research_understanding_finding",
+    }
+
+
+def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status=None,
+            task_type=None,
+            format="jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["sample_id"] == "rus-1"
+    assert line["presentation_bucket"] == "primary"
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": None,
+        "task_type": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type=None,
+            format="messages_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert list(line) == ["messages"]
+    assert line["messages"][0]["role"] == "user"
+    assert line["messages"][1]["role"] == "assistant"
+    assert "Preheating increased ductility by 14%." in line["messages"][0]["content"]
+    assert '"evidence_ref_ids": ["ev-1"]' in line["messages"][1]["content"]
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type=None,
+            format="training_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert set(line) == {"messages", "metadata"}
+    assert line["messages"][0]["role"] == "user"
+    assert line["metadata"] == {
+        "schema_version": "research_understanding_finding_training.v1",
+        "task_type": "research_understanding_finding",
+        "prompt_version": "research_understanding_finding_training_prompt.v1",
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "goal_id": "goal-1",
+        "scope_id": "goal-1",
+        "sample_id": "rus-1",
+        "finding_id": "finding-1",
+        "claim_id": "claim-1",
+        "finding_fingerprint": "finding.v1:test",
+        "research_objective": "How does preheating affect ductility?",
+        "finding_level": "paper_level",
+        "document_ids": ["doc-1"],
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "trace_status": "unavailable",
+        "reviewer": "",
+        "review_status": "",
+        "issue_type": "",
+        "support_grade": "partial",
+        "generalization_status": "",
+        "evidence_ref_ids": ["ev-1"],
+    }
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_training_jsonl_skips_invalid_training_messages(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    original_export = service.export_dataset
+
+    def export_with_invalid_messages(**kwargs):  # noqa: ANN003
+        dataset = original_export(**kwargs)
+        dataset["items"][0]["metadata"] = {
+            "training_message_diagnostic": ["mismatched_assistant_statement"]
+        }
+        return dataset
+
+    service.export_dataset = export_with_invalid_messages
+    monkeypatch.setattr(feedback_controller, "feedback_service", service)
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type=None,
+            format="training_jsonl",
+        )
+    )
+
+    assert response.body == b""
+
+
+def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="review_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert line["finding_id"] == "finding-1"
+    assert line["claim_id"] == "claim-1"
+    assert line["statement"] == "Preheating improves ductility."
+    assert line["variables"] == ["build platform preheating"]
+    assert line["outcomes"] == ["ductility"]
+    assert line["direction"] == "increases"
+    assert line["recommended_action"] == "Accept as paper-level evidence"
+    assert line["review_instructions"].startswith("Set action=accept")
+    assert line["review_risk_flags"] == [
+        "Paper-level evidence; do not treat as cross-paper conclusion without confirmation."
+    ]
+    assert line["protocol_readiness"] == {
+        "status": "ready_after_review",
+        "ready_after_review": True,
+        "missing": ["expert_review_decision"],
+        "blocking_missing": [],
+        "checks": {
+            "expert_review_decision": False,
+            "training_messages": True,
+            "statement": True,
+            "variables": True,
+            "outcomes": True,
+            "direction_or_scope": True,
+            "support_status": True,
+            "support_grade": True,
+            "traceable_training_evidence": True,
+        },
+        "guidance": "Accept only after expert review confirms the finding and evidence.",
+    }
+    assert line["review_decision_hint"] == {
+        "summary": (
+            "Accept only as paper-level evidence after checking the quote; correct if "
+            "the scope should be narrower."
+        ),
+        "preferred_next_action": "accept_after_checks",
+        "allowed_actions": ["accept", "reject", "correct", "skip"],
+        "blocked_actions": [],
+        "why_accept_blocked": [],
+        "required_checks": [
+            "Confirm the finding is only paper-level unless cross-paper evidence is present."
+        ],
+        "import_note": "accept imports only after the reviewer changes action from skip",
+    }
+    assert line["action"] == "skip"
+    assert "accept" in line["allowed_actions"]
+    assert "wrong_direction" in line["reject_issue_options"]
+    assert line["issue_type"] == ""
+    assert line["expert_note"] == ""
+    assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert line["evidence"][0]["value_summary"] == "ductility +14%"
+    assert line["evidence"][0]["table_audit"] == {
+        "columns": ["Preheat", "Ductility"],
+        "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+    }
+    assert "source_ref=blk_1" in line["evidence"][0]["href"]
+    assert line["suggested_target"]["statement"] == (
+        "Preheating improves ductility by 14%."
+    )
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_decision_template(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="decision_template",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line == {
+        "collection_id": "col-1",
+        "goal_id": "goal-1",
+        "finding_id": "finding-1",
+        "claim_id": "claim-1",
+        "action": "skip",
+        "issue_type": "",
+        "expert_note": "",
+        "statement": "Preheating improves ductility.",
+        "variables": ["build platform preheating"],
+        "outcomes": ["ductility"],
+        "direction": "increases",
+        "support_grade": "partial",
+        "recommended_action_code": "accept_as_paper_level",
+        "review_reasons": ["single_paper_evidence"],
+        "acceptance_gate": {
+            "status": "review_required",
+            "accept_allowed": True,
+            "requires_correction": False,
+            "blocking_missing": [],
+            "accept_blockers": [],
+            "review_checks": [
+                "Confirm the finding is only paper-level unless cross-paper evidence is present."
+            ],
+            "recommended_action_code": "accept_as_paper_level",
+            "guidance": "Accept only after the listed checks and source evidence match.",
+        },
+        "review_decision_hint": {
+            "summary": (
+                "Accept only as paper-level evidence after checking the quote; correct if "
+                "the scope should be narrower."
+            ),
+            "preferred_next_action": "accept_after_checks",
+            "allowed_actions": ["accept", "reject", "correct", "skip"],
+            "blocked_actions": [],
+            "why_accept_blocked": [],
+            "required_checks": [
+                "Confirm the finding is only paper-level unless cross-paper evidence is present."
+            ],
+            "import_note": "accept imports only after the reviewer changes action from skip",
+        },
+        "protocol_blocking_missing": [],
+        "curated_evidence_ref_ids": ["ev-1"],
+        "evidence": [
+            {
+                "evidence_ref_id": "ev-1",
+                "label": "P001 Section 3.2",
+                "source_ref": "blk_1",
+                "page": "9",
+                "value_summary": "ductility +14%",
+                "table_audit": {
+                    "columns": ["Preheat", "Ductility"],
+                    "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+                },
+                "quote": "Preheating increased ductility by 14%.",
+                "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+            }
+        ],
+        "suggested_target": {
+            "statement": "Preheating improves ductility by 14%.",
+            "status": "limited",
+            "support_grade": "partial",
+            "review_status": "accepted",
+            "variables": ["build platform preheating"],
+            "mediators": ["homogenized microstructure"],
+            "outcomes": ["ductility"],
+            "direction": "increases",
+            "scope_summary": "LPBF 316L",
+            "evidence_ref_ids": ["ev-1"],
+        },
+    }
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    service.dataset_feedback_refs = [
+        {
+            "feedback_id": "ruf-ai-older",
+            "review_status": "partial",
+            "issue_type": "insufficient_evidence",
+            "note": "Older AI review.",
+            "reviewer": "ai-reviewer-codex-v1",
+            "created_at": "2026-06-18T09:00:00+00:00",
+        },
+        {
+            "feedback_id": "ruf-human-newer",
+            "review_status": "incorrect",
+            "issue_type": "wrong_direction",
+            "note": "Human feedback must not be presented as AI review.",
+            "reviewer": "materials-expert@example.com",
+            "created_at": "2026-06-18T11:00:00+00:00",
+        },
+        {
+            "feedback_id": "ruf-ai-latest",
+            "review_status": "correct",
+            "issue_type": "none",
+            "note": "AI confirms the paper-level finding against the cited quote.",
+            "reviewer": "ai-reviewer-codex-v2",
+            "created_at": "2026-06-18T10:00:00+00:00",
+        },
+    ]
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="decision_board_tsv",
+        )
+    )
+
+    assert response.media_type == "text/tab-separated-values"
+    body = response.body.decode("utf-8")
+    rows = list(csv.DictReader(StringIO(body), delimiter="\t"))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["expert_action"] == ""
+    assert row["issue_type"] == ""
+    assert row["label_status"] == "silver"
+    assert row["ai_review_status"] == "correct"
+    assert row["ai_review_issue_type"] == "none"
+    assert row["ai_review_note"] == (
+        "AI confirms the paper-level finding against the cited quote."
+    )
+    assert row["ai_reviewer"] == "ai-reviewer-codex-v2"
+    assert row["corrected_statement"] == ""
+    assert "Fill expert_action with accept, reject, correct, or skip" in row[
+        "fill_instruction"
+    ]
+    assert "Accept only if the statement" in row["accept_rule"]
+    assert "wrong_variable" in row["reject_issue_options"]
+    assert row["collection_id"] == "col-1"
+    assert row["goal_id"] == "goal-1"
+    assert row["finding_id"] == "finding-1"
+    assert row["claim_id"] == "claim-1"
+    assert row["statement"] == "Preheating improves ductility."
+    assert row["variables"] == "build platform preheating"
+    assert row["outcomes"] == "ductility"
+    assert row["direction"] == "increases"
+    assert row["support_grade"] == "partial"
+    assert row["recommended_action"] == "Accept as paper-level evidence"
+    assert row["recommended_action_code"] == "accept_as_paper_level"
+    assert row["accept_allowed"] == "yes"
+    assert "accept" in row["allowed_actions"]
+    assert "Confirm the finding is only paper-level" in row["required_checks"]
+    assert row["evidence_ref_ids"] == "ev-1"
+    assert row["quote"] == "Preheating increased ductility by 14%."
+    assert row["source_open"] == "/collections/col-1/documents/doc-1?source_ref=blk_1"
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_agent_review_prompt(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="agent_review_prompt_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["task"] == "review_lens_research_finding"
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert "action" not in line
+    assert line["finding"]["statement"] == "Preheating improves ductility."
+    assert line["acceptance_gate"]["status"] == "review_required"
+    assert line["review_decision_hint"]["summary"] == (
+        "Accept only as paper-level evidence after checking the quote; correct if "
+        "the scope should be narrower."
+    )
+    assert line["protocol_readiness"]["status"] == "ready_after_review"
+    assert line["evidence"][0]["evidence_ref_id"] == "ev-1"
+    assert line["output_schema"]["agent_review"]["human_confirmed"] is False
+    assert line["output_schema"]["agent_review"]["recommendation"] == (
+        "accept|reject|correct|unclear|skip"
+    )
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_dataset_route_exports_review_packet(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="review_packet",
+        )
+    )
+
+    assert response.media_type == "text/plain"
+    body = response.body.decode("utf-8")
+    assert "Lens review packet: col-1" in body
+    assert "Scope: goal goal-1" in body
+    assert "Review candidates: 1" in body
+    assert "Preheating improves ductility." in body
+    assert "recommended action: Accept as paper-level evidence" in body
+    assert "protocol readiness: ready_after_review" in body
+    assert "acceptance gate: review_required; accept_allowed=true" in body
+    assert (
+        "expert checks: Confirm the finding is only paper-level unless cross-paper evidence is present."
+        in body
+    )
+    assert (
+        "decision hint: Accept only as paper-level evidence after checking the quote; correct if the scope should be narrower."
+        in body
+    )
+    assert "review reasons: single_paper_evidence" in body
+    assert "quote: Preheating increased ductility by 14%." in body
+    assert "open: /collections/col-1/documents/doc-1?source_ref=blk_1" in body
+    assert "quote=long-text" not in body
+    assert body.endswith("\n")
+    assert service.dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "scope_id": "goal-1",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
+    item = SimpleNamespace(
+        scope_type="goal",
+        scope_id="goal-1",
+        sample_id="rus-1",
+        finding_id="finding-1",
+        claim_id="claim-1",
+        label_status="candidate",
+        dataset_use_status="review_candidate",
+        presentation_bucket="review_queue",
+        trace_status="evidence_derived",
+        system_prediction={
+            "statement": "Preheating improves ductility.",
+            "variables": [],
+            "outcomes": ["ductility"],
+            "direction": "",
+            "scope_summary": "",
+            "support_grade": "partial",
+            "review_status": "needs_review",
+        },
+        expert_target={},
+        feedback_refs=[],
+        review_action={},
+        training_evidence_refs=[
+            {
+                "evidence_ref_id": "ev-1",
+                "source_ref": "blk_1",
+                "href": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+                "quote": "Preheating increased ductility by 14%.",
+            }
+        ],
+        evidence_refs=[],
+        input_blocks=[],
+    )
+
+    row = feedback_controller._review_jsonl_row("col-1", item)
+
+    assert row["protocol_readiness"]["status"] == "needs_correction"
+    assert row["protocol_readiness"]["ready_after_review"] is False
+    assert row["protocol_readiness"]["blocking_missing"] == [
+        "variables",
+        "direction_or_scope",
+    ]
+    assert row["acceptance_gate"]["status"] == "correction_required"
+    assert row["acceptance_gate"]["accept_allowed"] is False
+    assert row["acceptance_gate"]["requires_correction"] is True
+    assert row["acceptance_gate"]["blocking_missing"] == [
+        "variables",
+        "direction_or_scope",
+    ]
+    assert row["acceptance_gate"]["accept_blockers"] == []
+    assert row["review_decision_hint"] == {}
+
+
+def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type="research_understanding_finding",
+            format="json",
+        )
+    )
+
+    assert response.collection_id == "col-1"
+    assert response.scope_type == "collection"
+    assert response.scope_id == "goal"
+    assert response.label_status_filter == "gold"
+    assert response.dataset_use_status_filter == "training_ready"
+    assert response.task_type_filter == "research_understanding_finding"
+    assert response.item_count == 1
+    assert response.items[0].scope_type == "goal"
+    assert response.items[0].scope_id == "goal-1"
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "task_type": "research_understanding_finding",
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypatch):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status=None,
+            task_type=None,
+            format="jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["scope_type"] == "goal"
+    assert line["scope_id"] == "goal-1"
+    assert line["sample_id"] == "rus-1"
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": None,
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type=None,
+            format="messages_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert list(line) == ["messages"]
+    assert line["messages"][0]["role"] == "user"
+    assert line["messages"][1]["role"] == "assistant"
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_training_jsonl(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type=None,
+            format="training_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert set(line) == {"messages", "metadata"}
+    assert line["metadata"]["collection_id"] == "col-1"
+    assert line["metadata"]["scope_type"] == "goal"
+    assert line["metadata"]["goal_id"] == "goal-1"
+    assert line["metadata"]["finding_id"] == "finding-1"
+    assert line["metadata"]["claim_id"] == "claim-1"
+    assert line["metadata"]["evidence_ref_ids"] == ["ev-1"]
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": "gold",
+        "dataset_use_status": "training_ready",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_review_jsonl(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="review_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert line["scope_type"] == "goal"
+    assert line["action"] == "skip"
+    assert line["protocol_readiness"]["status"] == "ready_after_review"
+    assert line["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_decision_template(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="decision_template",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["collection_id"] == "col-1"
+    assert line["goal_id"] == "goal-1"
+    assert line["action"] == "skip"
+    assert line["curated_evidence_ref_ids"] == ["ev-1"]
+    assert line["acceptance_gate"]["status"] == "review_required"
+    assert line["acceptance_gate"]["accept_allowed"] is True
+    assert line["acceptance_gate"]["accept_blockers"] == []
+    assert line["evidence"][0] == {
+        "evidence_ref_id": "ev-1",
+        "label": "P001 Section 3.2",
+        "source_ref": "blk_1",
+        "page": "9",
+        "value_summary": "ductility +14%",
+        "table_audit": {
+            "columns": ["Preheat", "Ductility"],
+            "relevant_rows": [{"cells": {"Preheat": "150 C", "Ductility": "+14%"}}],
+        },
+        "quote": "Preheating increased ductility by 14%.",
+        "open": "/collections/col-1/documents/doc-1?source_ref=blk_1",
+    }
+    assert line["suggested_target"]["evidence_ref_ids"] == ["ev-1"]
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_decision_board_tsv(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="decision_board_tsv",
+        )
+    )
+
+    assert response.media_type == "text/tab-separated-values"
+    rows = list(csv.DictReader(StringIO(response.body.decode("utf-8")), delimiter="\t"))
+    assert len(rows) == 1
+    assert rows[0]["collection_id"] == "col-1"
+    assert rows[0]["goal_id"] == "goal-1"
+    assert rows[0]["finding_id"] == "finding-1"
+    assert rows[0]["expert_action"] == ""
+    assert rows[0]["quote"] == "Preheating increased ductility by 14%."
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_agent_review_prompt(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="agent_review_prompt_jsonl",
+        )
+    )
+
+    assert response.media_type == "application/x-ndjson"
+    body = response.body.decode("utf-8")
+    line = json.loads(body.strip())
+    assert line["task"] == "review_lens_research_finding"
+    assert line["scope_type"] == "goal"
+    assert line["goal_id"] == "goal-1"
+    assert "action" not in line
+    assert line["output_schema"]["agent_review"]["reviewer"] == "ai-reviewer-<name>"
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
+    }
+
+
+def test_research_understanding_collection_dataset_route_exports_review_packet(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    monkeypatch.setattr(
+        feedback_controller,
+        "feedback_service",
+        service,
+    )
+
+    response = asyncio.run(
+        feedback_controller.export_collection_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            label_status=None,
+            dataset_use_status="review_candidate",
+            task_type=None,
+            format="review_packet",
+        )
+    )
+
+    assert response.media_type == "text/plain"
+    body = response.body.decode("utf-8")
+    assert "Lens review packet: col-1" in body
+    assert "Scope: collection goal" in body
+    assert "Review candidates: 1" in body
+    assert "recommended action: Accept as paper-level evidence" in body
+    assert "quote: Preheating increased ductility by 14%." in body
+    assert body.endswith("\n")
+    assert service.collection_dataset_exported == {
+        "collection_id": "col-1",
+        "scope_type": "goal",
+        "label_status": None,
+        "dataset_use_status": "review_candidate",
+        "task_type": None,
     }

@@ -73,6 +73,10 @@ function tracebackCallPaths() {
 		.filter((path) => path.endsWith('/traceback'));
 }
 
+function callPaths() {
+	return fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request));
+}
+
 function buildResearchPayload() {
 	return {
 		collection_id: 'col_123',
@@ -138,6 +142,7 @@ function buildResearchPayload() {
 }
 
 let researchPayload: unknown = null;
+let scrollIntoViewMock: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>>;
 
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
@@ -147,6 +152,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		});
 		fetchMock.mockReset();
 		researchPayload = buildResearchPayload();
+		scrollIntoViewMock = vi.fn();
+		Element.prototype.scrollIntoView = scrollIntoViewMock;
 		getDocumentMock.mockReset();
 		getDocumentMock.mockImplementation(() => ({
 			promise: Promise.resolve({
@@ -217,6 +224,112 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							text_unit_ids: [],
 							page: 3,
 							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5, coord_origin: 'percent' }
+						},
+						{
+							block_id: 'list-first',
+							block_type: 'list_item',
+							heading_path: 'Results',
+							heading_level: 1,
+							order: 4,
+							text: 'First listed observation.',
+							start_offset: 144,
+							end_offset: 169,
+							text_unit_ids: [],
+							page: 3,
+							bbox: null
+						},
+						{
+							block_id: 'list-second',
+							block_type: 'list_item',
+							heading_path: 'Results',
+							heading_level: 1,
+							order: 5,
+							text: 'Second listed observation.',
+							start_offset: 170,
+							end_offset: 196,
+							text_unit_ids: [],
+							page: 3,
+							bbox: null
+						},
+						{
+							block_id: 'missing-results-block',
+							block_type: 'list_item',
+							heading_path: 'Results',
+							heading_level: 1,
+							order: 6,
+							text: 'This source block exists in parsed content but is absent from markdown.',
+							start_offset: null,
+							end_offset: null,
+							text_unit_ids: [],
+							page: 3,
+							bbox: null
+						},
+						{
+							block_id: 'glyph-list',
+							block_type: 'list_item',
+							heading_path: 'Results',
+							heading_level: 1,
+							order: 7,
+							text:
+								'\ufffd The SLM samples processed at higher scanning speed exhibited better densification.',
+							start_offset: null,
+							end_offset: null,
+							text_unit_ids: [],
+							page: 3,
+							bbox: null
+						},
+						{
+							block_id: 'missing-glyph-block',
+							block_type: 'list_item',
+							heading_path: 'Results',
+							heading_level: 1,
+							order: 8,
+							text: '\ufffd This fallback source block should be readable.',
+							start_offset: null,
+							end_offset: null,
+							text_unit_ids: [],
+							page: 3,
+							bbox: null
+						},
+						{
+							block_id: 'conclusion-overview',
+							block_type: 'paragraph',
+							heading_path: '4. Conclusion',
+							heading_level: 2,
+							order: 9,
+							text: 'The effect of SLM processing parameters has been investigated.',
+							start_offset: null,
+							end_offset: null,
+							text_unit_ids: [],
+							page: 12,
+							bbox: null
+						},
+						{
+							block_id: 'conclusion-first',
+							block_type: 'list_item',
+							heading_path: '4. Conclusion',
+							heading_level: 2,
+							order: 10,
+							text: 'The highest densification was observed for alternate hatches.',
+							start_offset: null,
+							end_offset: null,
+							text_unit_ids: [],
+							page: 12,
+							bbox: null
+						},
+						{
+							block_id: 'conclusion-third',
+							block_type: 'list_item',
+							heading_path: '4. Conclusion',
+							heading_level: 2,
+							order: 11,
+							text:
+								'\ufffd The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.',
+							start_offset: null,
+							end_offset: null,
+							text_unit_ids: [],
+							page: 12,
+							bbox: null
 						}
 					],
 					warnings: []
@@ -230,7 +343,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					source_filename: 'paper-a.pdf',
 					parser: 'docling',
 					markdown:
-						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n![Fig. 1](/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image)\n\n**Figure.** Fig. 1. Microstructure after annealing.\n\n| Sample | Conductivity |\n| --- | --- |\n| A | 12 mS/cm |',
+						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n- First listed observation.\n- Second listed observation.\n- The SLM samples processed at higher scanning speed exhibited better densification.\n\n## 4. Conclusion\n\nThe effect of SLM processing parameters has been investigated.\n\n- The highest densification was observed for alternate hatches.\n- The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.\n\n![Fig. 1](/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image)\n\n**Figure.** Fig. 1. Microstructure after annealing.\n\n| Sample | Conductivity |\n| --- | --- |\n| A | 12 mS/cm |',
 					source_map: [
 						{
 							markdown_anchor: 'block-abstract',
@@ -240,6 +353,100 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							block_type: 'paragraph',
 							page: 1,
 							heading_path: 'Abstract',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-methods',
+							artifact_type: 'block',
+							artifact_id: 'methods',
+							block_id: 'methods',
+							block_type: 'paragraph',
+							page: 2,
+							heading_path: 'Methodology',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-results',
+							artifact_type: 'block',
+							artifact_id: 'results',
+							block_id: 'results',
+							block_type: 'paragraph',
+							page: 3,
+							heading_path: 'Results',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-list-first',
+							artifact_type: 'block',
+							artifact_id: 'list-first',
+							block_id: 'list-first',
+							block_type: 'list_item',
+							page: 3,
+							heading_path: 'Results',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-list-second',
+							artifact_type: 'block',
+							artifact_id: 'list-second',
+							block_id: 'list-second',
+							block_type: 'list_item',
+							page: 3,
+							heading_path: 'Results',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-conclusion-overview',
+							artifact_type: 'block',
+							artifact_id: 'conclusion-overview',
+							block_id: 'conclusion-overview',
+							block_type: 'paragraph',
+							page: 12,
+							heading_path: '4. Conclusion',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-conclusion-first',
+							artifact_type: 'block',
+							artifact_id: 'conclusion-first',
+							block_id: 'conclusion-first',
+							block_type: 'list_item',
+							page: 12,
+							heading_path: '4. Conclusion',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'block-conclusion-third',
+							artifact_type: 'block',
+							artifact_id: 'conclusion-third',
+							block_id: 'conclusion-third',
+							block_type: 'list_item',
+							page: 12,
+							heading_path: '4. Conclusion',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'figure-fig-1',
+							artifact_type: 'figure',
+							artifact_id: 'fig_1',
+							block_id: null,
+							table_id: null,
+							figure_id: 'fig_1',
+							block_type: null,
+							page: 3,
+							heading_path: 'Results',
+							text_unit_ids: []
+						},
+						{
+							markdown_anchor: 'table-table-1',
+							artifact_type: 'table',
+							artifact_id: 'table-1',
+							block_id: null,
+							table_id: 'table-1',
+							figure_id: null,
+							block_type: null,
+							page: 3,
+							heading_path: 'Results',
 							text_unit_ids: []
 						}
 					],
@@ -603,6 +810,216 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
+	});
+
+	it('highlights the parsed paper source when a source_ref deep link is present', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=results&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveAttribute('aria-current', 'location');
+		await expect.poll(() => scrollIntoViewMock.mock.calls.length).toBeGreaterThan(0);
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
+		expect(callPaths()).not.toContain('/api/v1/collections/col_123/results');
+		expect(callPaths()).not.toContain(
+			'/api/v1/collections/col_123/documents/doc_1/comparison-semantics'
+		);
+		expect(tracebackCallPaths()).toEqual([]);
+	});
+
+	it('targets a table artifact instead of the first text block on the same page', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=table-1&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		const activeSource = browserPage.getByTestId('markdown-active-source');
+		await expect.element(activeSource).toHaveTextContent('Sample');
+		await expect.element(activeSource).toHaveTextContent('Conductivity');
+		await expect.element(activeSource).toHaveTextContent('12 mS/cm');
+		await expect
+			.element(activeSource)
+			.not.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
+		await expect.poll(() => scrollIntoViewMock.mock.calls.length).toBeGreaterThan(0);
+	});
+
+	it('shows the selected evidence quote from parsed paper source deep links', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=results&page=3&quote=Conductivity%20improved%20to%2012%20mS%2Fcm%20under%20EIS.'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
+		await expect
+			.element(browserPage.getByTestId('markdown-selected-evidence-quote'))
+			.toHaveTextContent('Selected evidence quote');
+		await expect
+			.element(browserPage.getByTestId('markdown-selected-evidence-quote'))
+			.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
+		expect(tracebackCallPaths()).toEqual([]);
+	});
+
+	it('highlights parsed paper paragraph blocks from source_ref deep links', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=methods&page=2'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent('The sample was annealed at 700 C.');
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
+	});
+
+	it('highlights the exact parsed paper list item from source_ref deep links', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=list-second&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent('Second listed observation.');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.not.toHaveTextContent('First listed observation.');
+		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
+	});
+
+	it('matches parsed paper list items when the source quote contains replacement glyphs', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=glyph-list&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent(
+				'The SLM samples processed at higher scanning speed exhibited better densification.'
+			);
+		await expect.element(browserPage.getByTestId('markdown-active-source')).not.toHaveTextContent(
+			'\ufffd'
+		);
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.not.toBeInTheDocument();
+	});
+
+	it('highlights conclusion list items instead of falling back when source_map contains the block', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=conclusion-third&page=12'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.toHaveTextContent(
+				'The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties'
+			);
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.not.toHaveTextContent('The highest densification was observed');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.not.toBeInTheDocument();
+	});
+
+	it('shows the exact source block when source_ref is missing from markdown', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=missing-results-block&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.toHaveTextContent('This source block exists in parsed content but is absent from markdown.');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.toHaveTextContent('Selected source block');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.toHaveTextContent('Parsed source text');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.toHaveTextContent('Page 3');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.toHaveTextContent('Results');
+		await browserPage.getByTestId('markdown-active-source-fallback').getByRole('button', { name: 'View PDF' }).click();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		await expect.poll(() => scrollIntoViewMock.mock.calls.length).toBeGreaterThan(0);
+		await expect.element(browserPage.getByTestId('markdown-active-source')).not.toBeInTheDocument();
+	});
+
+	it('cleans replacement glyphs from parsed paper fallback source text', async () => {
+		setPage({
+			params: { id: 'col_123', document_id: 'doc_1' },
+			url: new URL(
+				'http://localhost/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=missing-glyph-block&page=3'
+			)
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.toHaveTextContent('This fallback source block should be readable.');
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source-fallback'))
+			.not.toHaveTextContent('\ufffd');
+		await expect.element(browserPage.getByTestId('markdown-active-source')).not.toBeInTheDocument();
 	});
 
 	it('honors page and return_to query parameters for source review links', async () => {

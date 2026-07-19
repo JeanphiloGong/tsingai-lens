@@ -6,20 +6,31 @@
 	import { t } from '../../../_shared/i18n';
 	import {
 		createConfirmedGoalFromObjective,
+		fetchConfirmedGoals,
 		fetchCollectionObjectives,
+		fetchResearchUnderstandingDataset,
 		getResearchViewStateTone,
 		runGoalAnalysis,
+		type ConfirmedGoal,
 		type ObjectiveList,
-		type ObjectiveListItem
+		type ObjectiveListItem,
+		type ResearchUnderstandingDataset,
+		type ResearchUnderstandingDatasetSample
 	} from '../../../_shared/researchView';
 
 	let objectiveList: ObjectiveList | null = null;
+	let confirmedGoals: ConfirmedGoal[] = [];
+	let goalDatasetById = new Map<string, ResearchUnderstandingDataset>();
 	let objectivesError = '';
+	let goalReviewError = '';
 	let objectivesNotReady = false;
 	let loading = false;
+	let goalReviewLoading = false;
 	let loadedCollectionId = '';
 	let analyzingObjectiveId = '';
 	let analysisError = '';
+	let objectivesRequestSequence = 0;
+	let goalReviewRequestSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectives = objectiveList?.objectives ?? [];
@@ -33,27 +44,92 @@
 		(total, objective) => total + objective.evidence_route_count,
 		0
 	);
+	$: goalReviewSummary = buildGoalReviewSummary(confirmedGoals, goalDatasetById);
+	$: goalReviewDiagnostics = buildGoalReviewDiagnostics(goalDatasetById);
+	$: goalReviewRows = buildGoalReviewRows(confirmedGoals, goalDatasetById);
+	$: goalReviewOpenGoalCount = goalReviewRows.filter(
+		(row) => row.status !== 'protocol_ready'
+	).length;
+	$: goalReviewMessagePendingGoalCount = goalReviewRows.filter(
+		(row) => row.status === 'messages_pending'
+	).length;
+	$: goalReviewProtocolPendingGoalCount = goalReviewRows.filter(
+		(row) => row.status === 'protocol_inputs_pending'
+	).length;
+	$: firstGoalReviewAction =
+		goalReviewRows.find((row) => row.status !== 'protocol_ready') ?? null;
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		void loadObjectives();
 	}
 
 	async function loadObjectives() {
+		const activeCollectionId = collectionId;
+		const requestSequence = ++objectivesRequestSequence;
 		loading = true;
 		objectivesError = '';
 		objectivesNotReady = false;
 		analysisError = '';
 		try {
-			objectiveList = await fetchCollectionObjectives(collectionId);
+			const nextObjectiveList = await fetchCollectionObjectives(activeCollectionId);
+			if (requestSequence !== objectivesRequestSequence || activeCollectionId !== collectionId) return;
+			objectiveList = nextObjectiveList;
+			void loadGoalReviewStatus(activeCollectionId);
 		} catch (err) {
+			if (requestSequence !== objectivesRequestSequence || activeCollectionId !== collectionId) return;
 			objectiveList = null;
+			confirmedGoals = [];
+			goalDatasetById = new Map();
 			if (getApiErrorCode(err) === 'research_objectives_not_ready') {
 				objectivesNotReady = true;
 			} else {
 				objectivesError = errorMessage(err);
 			}
 		} finally {
-			loading = false;
+			if (requestSequence === objectivesRequestSequence && activeCollectionId === collectionId) {
+				loading = false;
+			}
+		}
+	}
+
+	async function loadGoalReviewStatus(activeCollectionId = collectionId) {
+		const requestSequence = ++goalReviewRequestSequence;
+		goalReviewLoading = true;
+		goalReviewError = '';
+		try {
+			const goalList = await fetchConfirmedGoals(activeCollectionId);
+			if (requestSequence !== goalReviewRequestSequence || activeCollectionId !== collectionId) return;
+			confirmedGoals = goalList.goals;
+			const datasetEntries = await Promise.all(
+				goalList.goals.map(async (goal) => {
+					try {
+						const dataset = await fetchResearchUnderstandingDataset(activeCollectionId, {
+							scope_type: 'goal',
+							scope_id: goal.goal_id
+						});
+						return [goal.goal_id, dataset] as const;
+					} catch {
+						return [goal.goal_id, null] as const;
+					}
+				})
+			);
+			if (requestSequence !== goalReviewRequestSequence || activeCollectionId !== collectionId) return;
+			goalDatasetById = new Map(
+				datasetEntries
+					.filter((entry): entry is readonly [string, ResearchUnderstandingDataset] =>
+						Boolean(entry[1])
+					)
+					.map(([goalId, dataset]) => [goalId, dataset])
+			);
+		} catch (err) {
+			if (requestSequence !== goalReviewRequestSequence || activeCollectionId !== collectionId) return;
+			confirmedGoals = [];
+			goalDatasetById = new Map();
+			goalReviewError = errorMessage(err);
+		} finally {
+			if (requestSequence === goalReviewRequestSequence && activeCollectionId === collectionId) {
+				goalReviewLoading = false;
+			}
 		}
 	}
 
@@ -69,7 +145,211 @@
 		return value > 0 ? `${Math.round(value * 100)}%` : $t('research.emptyValue');
 	}
 
+	function canAnalyzeObjective(objective: ObjectiveListItem) {
+		return Boolean(objective.objective_id && objective.question);
+	}
+
+	function needsAnalysisCoverage(objective: ObjectiveListItem) {
+		return (
+			objective.paper_frame_count === 0 ||
+			objective.evidence_route_count === 0 ||
+			objective.evidence_unit_count === 0
+		);
+	}
+
+	function buildGoalReviewSummary(
+		goals: ConfirmedGoal[],
+		datasets: Map<string, ResearchUnderstandingDataset>
+	) {
+		let trainingReady = 0;
+		let trainingMessages = 0;
+		let protocolReady = 0;
+		let reviewCandidates = 0;
+		for (const goal of goals) {
+			const dataset = datasets.get(goal.goal_id);
+			trainingReady += dataset?.quality_summary.training_ready_sample_count ?? 0;
+			trainingMessages += dataset?.quality_summary.training_message_sample_count ?? 0;
+			protocolReady += dataset?.quality_summary.protocol_ready_sample_count ?? 0;
+			reviewCandidates += dataset?.quality_summary.review_candidate_sample_count ?? 0;
+		}
+		return {
+			goalCount: goals.length,
+			trainingReady,
+			trainingMessages,
+			protocolReady,
+			reviewCandidates
+		};
+	}
+
+	function buildGoalReviewDiagnostics(datasets: Map<string, ResearchUnderstandingDataset>) {
+		const counts = new Map<string, number>();
+		for (const dataset of datasets.values()) {
+			const summary = dataset.quality_summary;
+			const entries = summary.top_review_reasons.length
+				? summary.top_review_reasons
+				: Object.entries(summary.by_review_candidate_reason).map(([name, count]) => ({
+						name,
+						count
+					}));
+			for (const { name, count } of entries) {
+				if (count <= 0 || name === 'none' || name === 'unreviewed') continue;
+				counts.set(name, (counts.get(name) ?? 0) + count);
+			}
+		}
+		return [...counts.entries()]
+			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+			.slice(0, 5);
+	}
+
+	function buildGoalReviewRows(
+		goals: ConfirmedGoal[],
+		datasets: Map<string, ResearchUnderstandingDataset>
+	) {
+		return goals
+			.map((goal, index) => {
+				const dataset = datasets.get(goal.goal_id) ?? null;
+				const status = goalReviewStatus(goal, dataset);
+				return {
+					goal,
+					dataset,
+					status,
+					index,
+					priority: goalReviewPriority(status)
+				};
+			})
+			.sort(
+				(left, right) =>
+					left.priority - right.priority ||
+					goalReviewCandidateCount(right.dataset) - goalReviewCandidateCount(left.dataset) ||
+					left.index - right.index
+			);
+	}
+
+	function goalReviewStatus(
+		goal: ConfirmedGoal,
+		dataset: ResearchUnderstandingDataset | null
+	) {
+		if (goal.status !== 'ready') return goal.status;
+		if (!dataset) return 'dataset_pending';
+		if (dataset.quality_summary.review_candidate_sample_count > 0) return 'needs_review';
+		if (dataset.quality_summary.training_ready_sample_count > 0) {
+			if (dataset.quality_summary.protocol_ready_sample_count > 0) return 'protocol_ready';
+			if (dataset.quality_summary.training_message_sample_count > 0) {
+				return 'protocol_inputs_pending';
+			}
+			return 'messages_pending';
+		}
+		return 'needs_review';
+	}
+
+	function goalReviewPriority(status: string) {
+		if (status === 'needs_review') return 0;
+		if (status === 'dataset_pending') return 1;
+		if (status === 'messages_pending') return 2;
+		if (status === 'protocol_inputs_pending') return 3;
+		if (status === 'failed') return 4;
+		if (status === 'running' || status === 'pending') return 5;
+		if (status === 'protocol_ready') return 6;
+		return 6;
+	}
+
+	function goalReviewCandidateCount(dataset: ResearchUnderstandingDataset | null) {
+		return dataset?.quality_summary.review_candidate_sample_count ?? 0;
+	}
+
+	function goalReviewStatusLabel(status: string) {
+		return $t(`research.objectives.goalReviewStatuses.${status}`);
+	}
+
+	function goalReviewDiagnosticLabel(reason: string) {
+		const label = $t(`research.understanding.datasetReviewReasons.${reason}`);
+		return label.startsWith('research.') ? reason.replace(/_/g, ' ') : label;
+	}
+
+	function goalReviewBody(dataset: ResearchUnderstandingDataset | null) {
+		if (!dataset) return $t('research.objectives.goalReviewDatasetPending');
+		return $t('research.objectives.goalReviewDatasetBody', {
+			training: dataset.quality_summary.training_ready_sample_count,
+			messages: dataset.quality_summary.training_message_sample_count,
+			protocol: dataset.quality_summary.protocol_ready_sample_count,
+			review: dataset.quality_summary.review_candidate_sample_count
+		});
+	}
+
+	function goalReviewActionLabel(status: string, dataset: ResearchUnderstandingDataset | null) {
+		if (status === 'needs_review') {
+			const reviewAction = nextReviewSample(dataset)?.review_action;
+			if (reviewAction?.code) {
+				const localized = $t(`research.objectives.goalReviewRecommendedActions.${reviewAction.code}`);
+				return localized.startsWith('research.') ? reviewAction.label : localized;
+			}
+			return $t('research.objectives.goalReviewActionReviewCount', {
+				count: dataset?.quality_summary.review_candidate_sample_count ?? 0
+			});
+		}
+		if (status === 'protocol_ready') {
+			return $t('research.objectives.goalReviewActionProtocolCount', {
+				count: dataset?.quality_summary.protocol_ready_sample_count ?? 0
+			});
+		}
+		if (status === 'protocol_inputs_pending') {
+			return $t('research.objectives.goalReviewActionProtocolInputsCount', {
+				count: dataset?.quality_summary.training_message_sample_count ?? 0
+			});
+		}
+		if (status === 'messages_pending') {
+			return $t('research.objectives.goalReviewActionMessagesCount', {
+				count: dataset?.quality_summary.training_ready_sample_count ?? 0
+			});
+		}
+		if (status === 'failed') return $t('research.objectives.goalReviewActionRepair');
+		if (status === 'running' || status === 'pending') {
+			return $t('research.objectives.goalReviewActionWait');
+		}
+		return $t('research.objectives.goalReviewActionOpen');
+	}
+
+	function nextReviewSample(
+		dataset: ResearchUnderstandingDataset | null
+	): ResearchUnderstandingDatasetSample | null {
+		if (!dataset) return null;
+		const nextFindingId = dataset.quality_summary.next_review_finding_id;
+		if (nextFindingId) {
+			const matched = dataset.items.find(
+				(item) =>
+					item.finding_id === nextFindingId && item.dataset_use_status === 'review_candidate'
+			);
+			if (matched) return matched;
+		}
+		return dataset.items.find((item) => item.dataset_use_status === 'review_candidate') ?? null;
+	}
+
+	function goalReviewHref(goal: ConfirmedGoal) {
+		return resolve('/collections/[id]/goals/[goal_id]', {
+			id: collectionId,
+			goal_id: goal.goal_id
+		});
+	}
+
+	function goalReviewActionHref(row: {
+		goal: ConfirmedGoal;
+		dataset: ResearchUnderstandingDataset | null;
+		status: string;
+	}) {
+		const href = goalReviewHref(row.goal);
+		if (row.status === 'needs_review') {
+			const params = new URLSearchParams({ review: 'queue' });
+			const findingId = row.dataset?.quality_summary.next_review_finding_id ?? '';
+			if (findingId) params.set('finding_id', findingId);
+			return `${href}?${params.toString()}`;
+		}
+		if (row.status === 'messages_pending') return `${href}?review=training_ready`;
+		if (row.status === 'protocol_inputs_pending') return `${href}?review=training_ready`;
+		return href;
+	}
+
 	async function confirmAndAnalyze(objective: ObjectiveListItem) {
+		if (!canAnalyzeObjective(objective)) return;
 		analyzingObjectiveId = objective.objective_id;
 		analysisError = '';
 		try {
@@ -165,6 +445,126 @@
 			</article>
 		</section>
 
+		<section class="goal-review-panel" aria-label={$t('research.objectives.goalReviewTitle')}>
+			<div class="goal-review-panel__heading">
+				<div>
+					<h3>{$t('research.objectives.goalReviewTitle')}</h3>
+					<p>
+								{goalReviewLoading
+							? $t('research.objectives.goalReviewLoading')
+							: $t('research.objectives.goalReviewBody', {
+									goals: goalReviewSummary.goalCount,
+									training: goalReviewSummary.trainingReady,
+									messages: goalReviewSummary.trainingMessages,
+									protocol: goalReviewSummary.protocolReady,
+									review: goalReviewSummary.reviewCandidates
+								})}
+					</p>
+				</div>
+				<button
+					class="btn btn--ghost btn--small"
+					type="button"
+					on:click={() => loadGoalReviewStatus()}
+				>
+					{$t('research.objectives.refreshGoalReview')}
+				</button>
+			</div>
+			{#if goalReviewError}
+				<p class="goal-review-panel__error" role="alert">
+					{$t('research.objectives.goalReviewError', { message: goalReviewError })}
+				</p>
+			{:else if confirmedGoals.length}
+				<div class="goal-review-panel__metrics">
+					<span>
+						{$t('research.objectives.goalReviewGoals')}
+						<strong>{goalReviewSummary.goalCount}</strong>
+					</span>
+					<span>
+						{$t('research.understanding.datasetTrainingReady')}
+						<strong>{goalReviewSummary.trainingReady}</strong>
+					</span>
+					<span>
+						{$t('research.understanding.datasetTrainingMessages')}
+						<strong>{goalReviewSummary.trainingMessages}</strong>
+					</span>
+					<span>
+						{$t('research.understanding.datasetProtocolReady')}
+						<strong>{goalReviewSummary.protocolReady}</strong>
+					</span>
+					<span>
+						{$t('research.understanding.datasetReviewCandidate')}
+						<strong>{goalReviewSummary.reviewCandidates}</strong>
+					</span>
+				</div>
+				{#if goalReviewOpenGoalCount > 0}
+					<div
+						class="goal-review-panel__completion goal-review-panel__completion--incomplete"
+						role="status"
+					>
+						<div>
+							<strong>{$t('research.objectives.goalReviewIncompleteTitle')}</strong>
+							<span>
+								{$t('research.objectives.goalReviewIncompleteBody', {
+									goals: goalReviewOpenGoalCount,
+									review: goalReviewSummary.reviewCandidates,
+									messages: goalReviewMessagePendingGoalCount,
+									protocol: goalReviewProtocolPendingGoalCount
+								})}
+							</span>
+						</div>
+						{#if firstGoalReviewAction}
+							<a
+								class="btn btn--primary btn--small"
+								href={goalReviewActionHref(firstGoalReviewAction)}
+							>
+								{$t('research.objectives.goalReviewOpenFirstPending')}
+							</a>
+						{/if}
+					</div>
+				{:else}
+					<div
+						class="goal-review-panel__completion goal-review-panel__completion--complete"
+						role="status"
+					>
+						<strong>{$t('research.objectives.goalReviewCompleteTitle')}</strong>
+						<span>{$t('research.objectives.goalReviewCompleteBody')}</span>
+					</div>
+				{/if}
+				{#if goalReviewDiagnostics.length}
+					<div
+						class="goal-review-panel__error-categories"
+						aria-label={$t('research.objectives.goalReviewDiagnostics')}
+					>
+						<strong>{$t('research.objectives.goalReviewDiagnostics')}</strong>
+						<div>
+							{#each goalReviewDiagnostics as [reason, count] (reason)}
+								<span>
+									{goalReviewDiagnosticLabel(reason)}
+									<strong>{count}</strong>
+								</span>
+							{/each}
+						</div>
+					</div>
+				{/if}
+				<div class="goal-review-list">
+					{#each goalReviewRows as row (row.goal.goal_id)}
+						<a href={goalReviewActionHref(row)} class="goal-review-item">
+							<div>
+								<strong>{row.goal.question}</strong>
+								<span>{goalReviewBody(row.dataset)}</span>
+							</div>
+							<small class={`goal-review-item__status goal-review-item__status--${row.status}`}>
+								{goalReviewStatusLabel(row.status)}
+							</small>
+							<small class="goal-review-item__action">{goalReviewActionLabel(row.status, row.dataset)}</small>
+						</a>
+					{/each}
+				</div>
+			{:else}
+				<p class="goal-review-panel__empty">{$t('research.objectives.goalReviewEmpty')}</p>
+			{/if}
+		</section>
+
 		<section class="objectives-grid" aria-label={$t('research.objectives.title')}>
 			{#each objectives as objective (objective.objective_id)}
 				<article class="objective-card">
@@ -216,7 +616,7 @@
 						<button
 							class="btn btn--primary btn--small"
 							type="button"
-							disabled={Boolean(analyzingObjectiveId)}
+							disabled={Boolean(analyzingObjectiveId) || !canAnalyzeObjective(objective)}
 							on:click={() => confirmAndAnalyze(objective)}
 						>
 							{analyzingObjectiveId === objective.objective_id
@@ -233,6 +633,11 @@
 							{$t('research.objectives.openWorkspace')}
 						</a>
 					</div>
+					{#if needsAnalysisCoverage(objective)}
+						<p class="objective-card__analysis-note">
+							{$t('research.objectives.noAnalysisCoverage')}
+						</p>
+					{/if}
 				</article>
 			{/each}
 		</section>
@@ -251,6 +656,7 @@
 	.objectives-header,
 	.objectives-state-card,
 	.objective-card,
+	.goal-review-panel,
 	.objectives-summary-grid article {
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-lg);
@@ -326,6 +732,233 @@
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 12px;
+	}
+
+	.goal-review-panel {
+		display: grid;
+		gap: 14px;
+		padding: 18px;
+	}
+
+	.goal-review-panel__heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+		min-width: 0;
+	}
+
+	.goal-review-panel__heading h3 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 18px;
+		line-height: 26px;
+	}
+
+	.goal-review-panel__heading p,
+	.goal-review-panel__empty,
+	.goal-review-panel__error {
+		margin: 6px 0 0;
+		color: var(--text-secondary);
+		font-size: 14px;
+		line-height: 22px;
+	}
+
+	.goal-review-panel__error {
+		color: var(--color-danger);
+	}
+
+	.goal-review-panel__metrics {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.goal-review-panel__metrics span {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 28px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 4px 9px;
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.goal-review-panel__metrics strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.goal-review-panel__error-categories {
+		display: grid;
+		gap: 8px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 10px 12px;
+		background: var(--bg-subtle);
+	}
+
+	.goal-review-panel__error-categories > strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		line-height: 19px;
+	}
+
+	.goal-review-panel__error-categories > div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.goal-review-panel__error-categories span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 26px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.goal-review-panel__error-categories span strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.goal-review-panel__completion {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 12px;
+	}
+
+	.goal-review-panel__completion div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.goal-review-panel__completion strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 21px;
+	}
+
+	.goal-review-panel__completion span {
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
+	}
+
+	.goal-review-panel__completion--incomplete {
+		border-color: rgba(217, 119, 6, 0.36);
+		background: rgba(217, 119, 6, 0.08);
+	}
+
+	.goal-review-panel__completion--complete {
+		border-color: rgba(22, 163, 74, 0.34);
+		background: rgba(22, 163, 74, 0.08);
+	}
+
+	.goal-review-list {
+		display: grid;
+		gap: 8px;
+	}
+
+	.goal-review-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		gap: 12px;
+		align-items: center;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		padding: 11px 12px;
+		background: var(--bg-subtle);
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.goal-review-item:hover,
+	.goal-review-item:focus-visible {
+		border-color: var(--color-accent);
+	}
+
+	.goal-review-item div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.goal-review-item strong {
+		color: var(--text-primary);
+		font-size: 14px;
+		line-height: 21px;
+		overflow-wrap: anywhere;
+	}
+
+	.goal-review-item span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.goal-review-item__status {
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		padding: 3px 8px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.goal-review-item__status--needs_review,
+	.goal-review-item__status--dataset_pending,
+	.goal-review-item__status--messages_pending,
+	.goal-review-item__status--protocol_inputs_pending,
+	.goal-review-item__status--pending,
+	.goal-review-item__status--running {
+		border-color: rgba(217, 119, 6, 0.36);
+		background: rgba(217, 119, 6, 0.08);
+		color: #92400e;
+	}
+
+	.goal-review-item__status--protocol_ready {
+		border-color: rgba(22, 163, 74, 0.34);
+		background: rgba(22, 163, 74, 0.08);
+		color: #166534;
+	}
+
+	.goal-review-item__status--failed {
+		border-color: var(--danger-border);
+		background: var(--danger-bg);
+		color: var(--danger-text);
+	}
+
+	.goal-review-item__action {
+		color: var(--color-accent);
+		font-size: 12px;
+		font-weight: 750;
+		line-height: 18px;
+		white-space: nowrap;
 	}
 
 	.objectives-summary-grid article {
@@ -407,6 +1040,15 @@
 	.objective-card__actions {
 		display: flex;
 		justify-content: flex-end;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.objective-card__analysis-note {
+		margin: -8px 0 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.refresh-icon {
@@ -427,6 +1069,12 @@
 		.objectives-summary-grid,
 		.objective-stat-row {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.goal-review-panel__heading,
+		.goal-review-panel__completion,
+		.goal-review-item {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
     DocumentMarkdownService,
     SourceDocumentNotFoundError,
 )
 from domain.source import SourceArtifactSet
+from infra.source.ingestion.normalized_import import (
+    NormalizedImportBatch,
+    NormalizedImportDocument,
+    NormalizedImportSourceMetadata,
+)
 
 
 def _build_markdown_service(tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     return collection_service, DocumentMarkdownService(collection_service)
 
 
@@ -158,9 +165,9 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     assert payload["markdown"].index("## Results") < payload["markdown"].index(
         "Results section text appears before the table."
     )
-    assert payload["markdown"].index("Results section text appears before the table.") < (
-        payload["markdown"].index("**Table.** Table 1. Conductivity summary.")
-    )
+    assert payload["markdown"].index(
+        "Results section text appears before the table."
+    ) < (payload["markdown"].index("**Table.** Table 1. Conductivity summary."))
     assert payload["markdown"].index("**Table.** Table 1. Conductivity summary.") < (
         payload["markdown"].index("## References")
     )
@@ -177,6 +184,13 @@ def test_document_markdown_service_projects_figure_images(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Figure Markdown Collection")
     collection_id = collection["collection_id"]
+    figure_asset = (
+        collection_service.get_paths(collection_id).output_dir
+        / "image_assets"
+        / "fig-1.png"
+    )
+    figure_asset.parent.mkdir(parents=True, exist_ok=True)
+    figure_asset.write_bytes(b"fake-png")
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -215,6 +229,38 @@ def test_document_markdown_service_projects_figure_images(tmp_path):
     source_map = {item["artifact_id"]: item for item in payload["source_map"]}
     assert source_map["fig-1"]["artifact_type"] == "figure"
     assert source_map["fig-1"]["figure_id"] == "fig-1"
+
+
+def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missing(
+    tmp_path,
+):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Missing Figure Asset Collection")
+    collection_id = collection["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "figure_label": "Fig. 1",
+                    "caption_text": "Fig. 1. Microstructure after annealing.",
+                    "page": 4,
+                    "heading_path": "Results",
+                    "image_path": "image_assets/missing-fig-1.png",
+                    "image_mime_type": "image/png",
+                }
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert "![Fig. 1]" not in payload["markdown"]
+    assert "**Figure.** Fig. 1. Microstructure after annealing." in payload["markdown"]
 
 
 def test_document_markdown_service_keeps_caption_when_figure_image_is_missing(tmp_path):
@@ -333,18 +379,85 @@ def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
     assert "blk-garbled-header" not in source_map
 
 
+def test_document_markdown_service_keeps_readable_block_with_replacement_glyph(
+    tmp_path,
+):
+    collection_service, markdown_service = _build_markdown_service(tmp_path)
+    collection = collection_service.create_collection("Readable Glyph Collection")
+    collection_id = collection["collection_id"]
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Readable Paper",
+                    "text": "ignored when block structure is available",
+                }
+            ],
+            blocks=[
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-conclusion-heading",
+                    "block_type": "heading",
+                    "block_order": 1,
+                    "heading_level": 1,
+                    "text": "4. Conclusion",
+                    "page": 12,
+                },
+                {
+                    "document_id": "paper-1",
+                    "block_id": "blk-readable-conclusion",
+                    "block_type": "list_item",
+                    "block_order": 2,
+                    "heading_path": "4. Conclusion",
+                    "text": (
+                        "\ufffd The  SLM  samples  processed  at  higher  scanning  "
+                        "speed exhibited better densification, refined microstructure, "
+                        "and excellent mechanical properties."
+                    ),
+                    "page": 12,
+                },
+            ],
+        ),
+    )
+
+    payload = markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert "\ufffd" not in payload["markdown"]
+    assert (
+        "- The SLM samples processed at higher scanning speed exhibited better "
+        "densification, refined microstructure, and excellent mechanical properties."
+    ) in payload["markdown"]
+    assert payload["warnings"] == []
+    source_map = {item["artifact_id"]: item for item in payload["source_map"]}
+    assert "blk-readable-conclusion" in source_map
+
+
 def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Stored Filename Collection")
     collection_id = collection["collection_id"]
-    collection_service.repository.write_files(
+    collection_service.import_normalized_batch(
         collection_id,
-        [
-            {
-                "original_filename": "P001-Readable Paper.pdf",
-                "stored_filename": "abc123_P001-Readable Paper.pdf",
-            }
-        ],
+        NormalizedImportBatch(
+            documents=(
+                NormalizedImportDocument(
+                    source_document_id="srcdoc_p001",
+                    origin_channel="upload",
+                    original_filename="P001-Readable Paper.pdf",
+                    stored_filename="abc123_P001-Readable Paper.pdf",
+                    media_type="application/pdf",
+                    storage_payload_base64=base64.b64encode(b"fixture").decode("ascii"),
+                ),
+            ),
+            text_units=(),
+            source_metadata=NormalizedImportSourceMetadata(
+                channel="upload",
+                adapter_name="upload",
+                ingested_at="2026-07-19T00:00:00+00:00",
+            ),
+        ),
     )
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,

@@ -13,6 +13,7 @@ from domain.source import (
 )
 from infra.source.contracts.artifact_schemas import BLOCKS_FINAL_COLUMNS
 from infra.source.runtime.mapping.layout_binding import (
+    first_bbox,
     first_page,
     serialize_char_range,
     serialize_prov_bbox,
@@ -124,22 +125,70 @@ def collect_caption_ref_sets(document: Any) -> tuple[set[str], set[str]]:
 
 def collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    figure_caption_refs, table_caption_refs = collect_caption_ref_sets(document)
+    caption_refs = figure_caption_refs | table_caption_refs
+    figure_regions = _collect_figure_regions(document)
     for index, item in enumerate(getattr(document, "texts", []) or []):
         text = str(getattr(item, "text", "") or "").strip()
         if not text or is_garbled_pdf_text(text):
             continue
+        ref = f"#/texts/{index}"
+        provenance = getattr(item, "prov", None)
+        page = first_page(provenance)
+        bbox = SourceBoundingBox.from_value(first_bbox(provenance))
+        if ref not in caption_refs and _is_inside_figure(page, bbox, figure_regions):
+            continue
         rows.append(
             {
                 "index": index,
-                "ref": f"#/texts/{index}",
+                "ref": ref,
                 "text": text,
                 "label": str(getattr(item, "label", "") or ""),
-                "page": first_page(getattr(item, "prov", None)),
-                "bbox": serialize_prov_bbox(getattr(item, "prov", None)),
-                "char_range": serialize_char_range(getattr(item, "prov", None)),
+                "page": page,
+                "bbox": serialize_prov_bbox(provenance),
+                "char_range": serialize_char_range(provenance),
             }
         )
     return rows
+
+
+def _collect_figure_regions(
+    document: Any,
+) -> list[tuple[int, SourceBoundingBox]]:
+    regions: list[tuple[int, SourceBoundingBox]] = []
+    for picture in getattr(document, "pictures", []) or []:
+        provenance = getattr(picture, "prov", None)
+        page = first_page(provenance)
+        bbox = SourceBoundingBox.from_value(first_bbox(provenance))
+        if page is not None and bbox is not None:
+            regions.append((page, bbox))
+    return regions
+
+
+def _is_inside_figure(
+    page: int | None,
+    bbox: SourceBoundingBox | None,
+    figure_regions: list[tuple[int, SourceBoundingBox]],
+) -> bool:
+    if page is None or bbox is None:
+        return False
+    for figure_page, figure_bbox in figure_regions:
+        if figure_page != page:
+            continue
+        if (
+            bbox.coord_origin
+            and figure_bbox.coord_origin
+            and bbox.coord_origin != figure_bbox.coord_origin
+        ):
+            continue
+        if (
+            min(bbox.l, bbox.r) >= min(figure_bbox.l, figure_bbox.r)
+            and max(bbox.l, bbox.r) <= max(figure_bbox.l, figure_bbox.r)
+            and min(bbox.t, bbox.b) >= min(figure_bbox.t, figure_bbox.b)
+            and max(bbox.t, bbox.b) <= max(figure_bbox.t, figure_bbox.b)
+        ):
+            return True
+    return False
 
 
 def _map_docling_block_type(

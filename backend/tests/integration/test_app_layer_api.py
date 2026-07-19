@@ -27,6 +27,7 @@ from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
@@ -68,10 +69,8 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
     )
 
 
-def _collection_output_dir(collection_id: str) -> Path:
-    from controllers.source import collections as collections_controller
-
-    return collections_controller.collection_service.get_paths(collection_id).output_dir
+def _collection_output_dir(app_client, collection_id: str) -> Path:  # noqa: ANN001
+    return app_client.app.state.collection_service.get_paths(collection_id).output_dir
 
 
 def _write_source_artifact_outputs(
@@ -464,8 +463,6 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
 
 
 def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, monkeypatch):
-    from controllers.source import tasks as tasks_controller
-
     captured: dict[str, object] = {}
     started = threading.Event()
     release = threading.Event()
@@ -483,12 +480,12 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
         raise AssertionError("async build entry should not be scheduled directly")
 
     monkeypatch.setattr(
-        tasks_controller.build_pipeline_service,
+        app_client.app.state.build_pipeline_service,
         "run_task_blocking",
         fake_run_task_blocking,
     )
     monkeypatch.setattr(
-        tasks_controller.build_pipeline_service,
+        app_client.app.state.build_pipeline_service,
         "run_task",
         fail_run_task,
     )
@@ -566,22 +563,10 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 
 
 @pytest.fixture()
-def app_client(monkeypatch, tmp_path):
-    from controllers.source import collections as collections_controller
-    from controllers.core import comparable_results as comparable_results_controller
-    from controllers.core import comparisons as comparisons_controller
-    from controllers.core import documents as documents_controller
-    from controllers.core import evidence as evidence_controller
-    from controllers.core import research_view as research_view_controller
-    from controllers.core import results as results_controller
-    from controllers.goal import intake as goals_controller
-    from controllers.derived import graph as graph_controller
-    from controllers.source import tasks as tasks_controller
-    from controllers.core import workspace as workspace_controller
+def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     import application.derived.graph_service as graph_service_module
     import application.pipeline.collection_build.service as task_runner_module
     from application.source.artifact_registry_service import ArtifactRegistryService
-    from application.source.collection_service import CollectionService
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -595,17 +580,21 @@ def app_client(monkeypatch, tmp_path):
     from application.pipeline.collection_build.service import CollectionBuildPipelineService
     from application.source.task_service import TaskService
     from application.core.workspace_overview_service import WorkspaceService
-    from main import create_app
-
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
+    monkeypatch.setattr("config.DATA_DIR", tmp_path)
+    monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
 
-    collection_service = CollectionService(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
+    from main import create_app
+
+    monkeypatch.setattr("main.DATA_DIR", tmp_path)
+
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
-        tmp_path / "collections",
+        build_repository,
         source_artifact_repository=source_artifact_repository,
         core_fact_repository=core_fact_repository,
     )
@@ -648,18 +637,13 @@ def app_client(monkeypatch, tmp_path):
     )
     research_view_service = ResearchViewAggregationService(
         collection_service=collection_service,
-        task_service=task_service,
+        workspace_service=workspace_service,
         document_profile_service=document_profile_service,
         paper_facts_service=paper_facts_service,
         comparison_service=comparison_service,
-        workspace_service=workspace_service,
         core_fact_repository=core_fact_repository,
     )
     goal_service = GoalService(collection_service)
-
-    default_config = tmp_path / "configs" / "default.yaml"
-    default_config.parent.mkdir(parents=True, exist_ok=True)
-    default_config.write_text("dummy: true\n", encoding="utf-8")
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
@@ -669,44 +653,53 @@ def app_client(monkeypatch, tmp_path):
         )
         return [DummyWorkflowOutput()]
 
-    monkeypatch.setattr(collections_controller, "collection_service", collection_service)
-    monkeypatch.setattr(goals_controller, "goal_service", goal_service)
-    monkeypatch.setattr(graph_controller.graph_service, "collection_service", collection_service)
-    monkeypatch.setattr(graph_controller.graph_service, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(
-        graph_controller.graph_service,
-        "core_fact_repository",
-        comparison_service.core_fact_repository,
-    )
-    monkeypatch.setattr(tasks_controller, "collection_service", collection_service)
-    monkeypatch.setattr(tasks_controller, "task_service", task_service)
-    monkeypatch.setattr(tasks_controller, "artifact_registry_service", artifact_registry)
-    monkeypatch.setattr(tasks_controller, "build_pipeline_service", runner)
-    monkeypatch.setattr(task_runner_module, "CONFIG_DIR", default_config.parent)
-    monkeypatch.setattr(task_runner_module, "load_config", lambda *args, **kwargs: _build_config(Path("placeholder-output"), Path("placeholder-input")))
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
-    monkeypatch.setattr(graph_service_module, "collection_service", collection_service)
-    monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(
         graph_service_module,
         "core_fact_repository",
         comparison_service.core_fact_repository,
     )
-    monkeypatch.setattr(workspace_controller, "workspace_service", workspace_service)
-    monkeypatch.setattr(documents_controller, "document_profile_service", document_profile_service)
-    monkeypatch.setattr(documents_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(comparable_results_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(evidence_controller, "paper_facts_service", paper_facts_service)
-    monkeypatch.setattr(research_view_controller, "research_view_service", research_view_service)
-    monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
-    monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
-    client = TestClient(create_app())
-    login_response = client.post(
-        f"{API_V1_PREFIX}/auth/login",
-        json={"email": "admin@example.com", "password": "admin-password"},
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+            task_service=task_service,
+        )
+    ) as client:
+        state = client.app.state
+        state.collection_service = collection_service
+        state.task_service = task_service
+        state.artifact_registry_service = artifact_registry
+        state.document_profile_service = document_profile_service
+        state.paper_facts_service = paper_facts_service
+        state.comparison_service = comparison_service
+        state.research_objective_service = research_objective_service
+        state.workspace_service = workspace_service
+        state.research_view_service = research_view_service
+        state.build_pipeline_service = runner
+        state.goal_service = goal_service
+
+        login_response = client.post(
+            f"{API_V1_PREFIX}/auth/login",
+            json={"email": "admin@example.com", "password": "admin-password"},
+        )
+        assert login_response.status_code == 200
+        yield client
+
+
+def test_goal_experiment_plan_routes_are_registered(app_client):
+    openapi = app_client.get("/api/openapi.json")
+    assert openapi.status_code == 200
+    paths = openapi.json()["paths"]
+    plan_list_path = (
+        f"{API_V1_PREFIX}/collections/{{collection_id}}/goals/{{goal_id}}/"
+        "experiment-plans"
     )
-    assert login_response.status_code == 200
-    return client
+    plan_detail_path = f"{plan_list_path}/{{plan_id}}"
+
+    assert "get" in paths[plan_list_path]
+    assert "post" in paths[plan_list_path]
+    assert "patch" in paths[plan_detail_path]
 
 
 def test_collection_task_flow(app_client):
@@ -808,8 +801,6 @@ def test_collection_task_flow(app_client):
 
 
 def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
-    from controllers.core import comparisons as comparisons_controller
-
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
         json={"name": "Filtered Comparisons"},
@@ -880,7 +871,7 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
         sort_order=1,
     )
     _store_core_comparison_facts(
-        comparisons_controller.comparison_service,
+        app_client.app.state.comparison_service,
         collection_id,
         comparable_results=[comparable_result_1, comparable_result_2],
         scoped_results=[scoped_result_1, scoped_result_2],
@@ -906,8 +897,6 @@ def test_comparisons_endpoint_supports_graph_drilldown_filters(app_client):
 def test_comparable_results_endpoint_deduplicates_across_collections_without_row_cache(
     app_client,
 ):
-    from controllers.core import comparable_results as comparable_results_controller
-
     first_create = app_client.post(
         f"{API_V1_PREFIX}/collections",
         json={"name": "Corpus Route A"},
@@ -985,7 +974,7 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
         sort_order=1,
     )
     _store_core_comparison_facts(
-        comparable_results_controller.comparison_service,
+        app_client.app.state.comparison_service,
         first_collection_id,
         comparable_results=[shared_result, unique_result],
         scoped_results=[first_shared_overlay, unique_overlay],
@@ -994,7 +983,7 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     second_shared_overlay["collection_id"] = second_collection_id
     second_shared_overlay["sort_order"] = 4
     _store_core_comparison_facts(
-        comparable_results_controller.comparison_service,
+        app_client.app.state.comparison_service,
         second_collection_id,
         comparable_results=[shared_result],
         scoped_results=[second_shared_overlay],
@@ -1035,8 +1024,6 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
 def test_collection_results_endpoints_project_product_results_and_workspace_exposes_results(
     app_client,
 ):
-    from controllers.core import results as results_controller
-
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
         json={"name": "Result Projection Collection"},
@@ -1116,7 +1103,7 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         sort_order=1,
     )
     _store_core_comparison_facts(
-        results_controller.comparison_service,
+        app_client.app.state.comparison_service,
         collection_id,
         comparable_results=[first_result, second_result],
         scoped_results=[first_scoped_result, second_scoped_result],
@@ -1245,8 +1232,6 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
 def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     app_client,
 ):
-    from controllers.derived import graph as graph_controller
-
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
         json={"name": "Core Graph Only"},
@@ -1254,13 +1239,9 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
-    output_dir = _collection_output_dir(collection_id)
+    output_dir = _collection_output_dir(app_client, collection_id)
 
     _write_core_graph_outputs(output_dir, collection_id)
-    graph_controller.graph_service.artifact_registry_service.upsert(
-        collection_id,
-        output_dir,
-    )
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()

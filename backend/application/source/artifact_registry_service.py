@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from domain.ports import (
-    ArtifactRepository,
+    BuildRepository,
     CoreFactRepository,
     SourceArtifactRepository,
 )
-from domain.source import ArtifactStatusRecord
+from domain.source import ArtifactStatusRecord, ArtifactVersionRecord
 from infra.persistence.factory import (
-    build_artifact_repository,
     build_core_fact_repository,
     build_source_artifact_repository,
 )
@@ -20,32 +20,107 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_ARTIFACT_FIELDS = (
+    ("documents", "documents_generated", "documents_ready", None),
+    (
+        "document_profiles",
+        "document_profiles_generated",
+        "document_profiles_ready",
+        None,
+    ),
+    (
+        "evidence_anchors",
+        "evidence_anchors_generated",
+        "evidence_anchors_ready",
+        None,
+    ),
+    ("method_facts", "method_facts_generated", "method_facts_ready", None),
+    (
+        "evidence_cards",
+        "evidence_cards_generated",
+        "evidence_cards_ready",
+        None,
+    ),
+    (
+        "characterization_observations",
+        "characterization_observations_generated",
+        "characterization_observations_ready",
+        None,
+    ),
+    (
+        "structure_features",
+        "structure_features_generated",
+        "structure_features_ready",
+        None,
+    ),
+    (
+        "test_conditions",
+        "test_conditions_generated",
+        "test_conditions_ready",
+        None,
+    ),
+    (
+        "baseline_references",
+        "baseline_references_generated",
+        "baseline_references_ready",
+        None,
+    ),
+    (
+        "sample_variants",
+        "sample_variants_generated",
+        "sample_variants_ready",
+        None,
+    ),
+    (
+        "measurement_results",
+        "measurement_results_generated",
+        "measurement_results_ready",
+        None,
+    ),
+    (
+        "comparable_results",
+        "comparable_results_generated",
+        "comparable_results_ready",
+        None,
+    ),
+    (
+        "collection_comparable_results",
+        "collection_comparable_results_generated",
+        "collection_comparable_results_ready",
+        "collection_comparable_results_stale",
+    ),
+    (
+        "comparison_rows",
+        "comparison_rows_generated",
+        "comparison_rows_ready",
+        "comparison_rows_stale",
+    ),
+    ("blocks", "blocks_generated", "blocks_ready", None),
+    ("figures", "figures_generated", "figures_ready", None),
+    ("table_rows", "table_rows_generated", "table_rows_ready", None),
+    ("table_cells", "table_cells_generated", "table_cells_ready", None),
+)
+
+
 class ArtifactRegistryService:
     """Track which collection-level artifacts are ready for downstream use."""
 
     def __init__(
         self,
-        root_dir: Path | None = None,
-        repository: ArtifactRepository | None = None,
+        repository: BuildRepository,
         source_artifact_repository: SourceArtifactRepository | None = None,
         core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
-        self.repository = repository or build_artifact_repository(root_dir)
-        self.root_dir = self.repository.root_dir
-        db_path = self.root_dir.parent / "lens.sqlite"
+        self.repository = repository
         self.source_artifact_repository = (
-            source_artifact_repository or build_source_artifact_repository(db_path)
+            source_artifact_repository or build_source_artifact_repository()
         )
-        self.core_fact_repository = (
-            core_fact_repository or build_core_fact_repository(db_path)
-        )
+        self.core_fact_repository = core_fact_repository or build_core_fact_repository()
 
     def build_registry(
         self,
         collection_id: str,
         output_dir: str | Path,
-        *,
-        previous_payload: dict | None = None,
     ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
         source_artifacts = self.source_artifact_repository.read_collection_artifacts(
@@ -103,47 +178,72 @@ class ArtifactRegistryService:
             table_cells_ready=bool(source_artifacts.table_cells),
             updated_at=_now_iso(),
         ).to_record()
-        if previous_payload is None:
-            return payload
-        normalized_previous = ArtifactStatusRecord.from_mapping(
-            previous_payload,
-            collection_id=collection_id,
-        ).to_record()
-        if self._payload_without_updated_at(normalized_previous) == self._payload_without_updated_at(
-            payload
-        ):
-            payload["updated_at"] = normalized_previous["updated_at"]
         return payload
 
-    def upsert(self, collection_id: str, output_dir: str | Path) -> dict:
-        previous_payload = self.repository.read(collection_id)
-        payload = self.build_registry(
-            collection_id,
-            output_dir,
-            previous_payload=previous_payload,
+    def register(
+        self,
+        task_id: str,
+        collection_id: str,
+        output_dir: str | Path,
+    ) -> dict:
+        stage = next(
+            (
+                item
+                for item in self.repository.list_stages(task_id)
+                if item.stage_kind == "artifact_registry"
+            ),
+            None,
         )
-        self.repository.write(collection_id, payload)
+        if stage is None:
+            raise RuntimeError(f"artifact_registry stage not found for task: {task_id}")
+        payload = self.build_registry(collection_id, output_dir)
+        records = tuple(
+            ArtifactVersionRecord(
+                artifact_version_id=f"artifact_{uuid4().hex[:20]}",
+                build_stage_id=stage.stage_id,
+                artifact_kind=artifact_kind,
+                schema_version=1,
+                content_version=1,
+                status=(
+                    "stale"
+                    if stale_field is not None and payload[stale_field]
+                    else "ready"
+                    if payload[ready_field]
+                    else "generated"
+                ),
+                object_id=None,
+                details={},
+                created_at=payload["updated_at"],
+            )
+            for artifact_kind, generated_field, ready_field, stale_field in _ARTIFACT_FIELDS
+            if payload[generated_field]
+        )
+        self.repository.add_artifact_versions(task_id, records)
         return payload
 
-    def get(self, collection_id: str) -> dict:
-        payload = self.repository.read(collection_id)
-        if payload is None:
-            raise FileNotFoundError(f"artifact registry not found: {collection_id}")
-        normalized = ArtifactStatusRecord.from_mapping(
+    def get_for_task(self, task_id: str) -> dict:
+        task = self.repository.read_task(task_id)
+        if task is None:
+            raise FileNotFoundError(f"task not found: {task_id}")
+        versions = self.repository.list_artifact_versions(task_id)
+        if not versions:
+            raise FileNotFoundError(f"artifact registry not found for task: {task_id}")
+        payload: dict = {
+            "collection_id": task.collection_id,
+            "output_path": task.output_path or "",
+            "updated_at": max(version.created_at for version in versions),
+        }
+        fields_by_kind = {item[0]: item[1:] for item in _ARTIFACT_FIELDS}
+        for version in versions:
+            fields = fields_by_kind.get(version.artifact_kind)
+            if fields is None:
+                continue
+            generated_field, ready_field, stale_field = fields
+            payload[generated_field] = True
+            payload[ready_field] = version.status == "ready"
+            if stale_field is not None:
+                payload[stale_field] = version.status == "stale"
+        return ArtifactStatusRecord.from_mapping(
             payload,
-            collection_id=collection_id,
+            collection_id=task.collection_id,
         ).to_record()
-        output_path = normalized.get("output_path")
-        if output_path:
-            normalized = self.build_registry(
-                collection_id,
-                output_path,
-                previous_payload=normalized,
-            )
-        if normalized != payload:
-            self.repository.write(collection_id, normalized)
-        return normalized
-
-
-    def _payload_without_updated_at(self, payload: dict) -> dict:
-        return {key: value for key, value in payload.items() if key != "updated_at"}

@@ -9,14 +9,14 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceArtifactSet
 from infra.source.runtime.source_evidence import build_blocks
 
 
 def _build_profile_service(tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     return collection_service, DocumentProfileService(collection_service)
 
 
@@ -170,7 +170,7 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
         def extract_document_profile(self, payload):  # noqa: ANN001
             raise AssertionError("extract_document_profile should not be called")
 
-    collection_service = CollectionService(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / "collections")
     profile_service = DocumentProfileService(
         collection_service,
         structured_extractor=ExplodingExtractor(),
@@ -189,8 +189,10 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     assert item["parsing_warnings"] == ["insufficient_content"]
 
 
-def test_document_profile_service_normalizes_numpy_array_columns():
-    profile_service = DocumentProfileService()
+def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):
+    profile_service = DocumentProfileService(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
 
     profiles = [
         DocumentProfile.from_mapping(

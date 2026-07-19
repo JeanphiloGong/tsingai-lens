@@ -37,6 +37,9 @@ order in root `docs/`.
 - [`user-ownership-modeling/README.md`](user-ownership-modeling/README.md)
   Backend ownership modeling plan for collection-scoped users, goal sessions,
   and generated review reports
+- [`persistence-model-revision/README.md`](persistence-model-revision/README.md)
+  Backend-wide PostgreSQL, object-storage, lineage, and retrieval-index revision
+  plan
 
 ## Reading Paths
 
@@ -52,6 +55,8 @@ order in root `docs/`.
   start at [`materials-comparison-v2/README.md`](materials-comparison-v2/README.md)
 - Backend user ownership modeling:
   start at [`user-ownership-modeling/implementation-plan.md`](user-ownership-modeling/implementation-plan.md)
+- Backend persistence and data-model revision:
+  start at [`persistence-model-revision/implementation-plan.md`](persistence-model-revision/implementation-plan.md)
 
 ## Boundary Rule
 

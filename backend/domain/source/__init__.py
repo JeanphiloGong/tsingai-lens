@@ -1,6 +1,12 @@
 """Source-domain records and status semantics."""
 
 from domain.source.artifact_status import ArtifactStatusRecord
+from domain.source.build import (
+    ArtifactVersionRecord,
+    BuildStageRecord,
+    CollectionBuildRecord,
+    TaskRecord,
+)
 from domain.source.artifacts import (
     SourceBlock,
     SourceBlockType,
@@ -39,11 +45,35 @@ from domain.source.artifacts import (
     safe_int,
     update_heading_stack,
 )
-from domain.source.collection import CollectionRecord, empty_import_manifest
+from domain.source.collection import (
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+    empty_import_manifest,
+)
+from domain.source.document import (
+    CollectionDocumentRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
+    collection_document_identity,
+    document_identity_for_sha256,
+)
 
 __all__ = [
+    "ArtifactVersionRecord",
     "ArtifactStatusRecord",
+    "BuildStageRecord",
+    "CollectionFileRecord",
+    "CollectionHandoffRecord",
+    "CollectionImportDocumentRecord",
+    "CollectionImportRecord",
     "CollectionRecord",
+    "CollectionBuildRecord",
+    "CollectionDocumentRecord",
+    "DocumentRecord",
+    "DocumentVersionRecord",
     "SourceBlock",
     "SourceBlockType",
     "SourceArtifactSet",
@@ -64,11 +94,14 @@ __all__ = [
     "SourceTableCell",
     "SourceTableRow",
     "SourceTextUnit",
+    "TaskRecord",
     "build_figure_caption_blocks",
     "build_heading_blocks",
     "build_source_document_tree",
     "build_source_table_rows_from_cells",
     "build_table_caption_blocks",
+    "collection_document_identity",
+    "document_identity_for_sha256",
     "empty_import_manifest",
     "extract_unit_hint",
     "find_nearest_caption_block",

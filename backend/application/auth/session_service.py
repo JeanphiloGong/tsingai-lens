@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from typing import Any, Mapping
 from uuid import uuid4
 
 from application.auth.passwords import hash_password, verify_password
-from infra.persistence.factory import build_auth_repository
+from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 
 SESSION_COOKIE_NAME = "lens_session"
 DEFAULT_SESSION_TTL_HOURS = 24
@@ -30,11 +31,11 @@ class AuthSessionService:
 
     def __init__(
         self,
-        repository: Any | None = None,
+        repository: PostgresAuthRepository,
         *,
         session_ttl_hours: int = DEFAULT_SESSION_TTL_HOURS,
     ) -> None:
-        self.repository = repository or build_auth_repository()
+        self.repository = repository
         self.session_ttl = timedelta(hours=session_ttl_hours)
 
     def ensure_bootstrap_user(self) -> dict[str, Any] | None:
@@ -69,7 +70,7 @@ class AuthSessionService:
             "password_hash": hash_password(password),
             "created_at": now,
         }
-        self.repository.write_user(user)
+        self.repository.add_user(user)
         return _public_user(user)
 
     def login(self, *, email: str, password: str) -> dict[str, Any]:
@@ -77,16 +78,18 @@ class AuthSessionService:
         if not user or not verify_password(password, str(user["password_hash"])):
             raise InvalidCredentialsError("invalid email or password")
         now = datetime.now(timezone.utc)
+        bearer_token = secrets.token_urlsafe(32)
         session = {
-            "session_id": secrets.token_urlsafe(32),
+            "session_id": f"session_{uuid4().hex}",
             "user_id": str(user["user_id"]),
+            "token_hash": _session_token_hash(bearer_token),
             "created_at": now.isoformat(),
             "expires_at": (now + self.session_ttl).isoformat(),
             "revoked_at": None,
         }
-        self.repository.write_session(session)
+        self.repository.add_session(session)
         return {
-            "session_id": session["session_id"],
+            "session_id": bearer_token,
             "expires_at": session["expires_at"],
             "user": _public_user(user),
         }
@@ -94,12 +97,17 @@ class AuthSessionService:
     def logout(self, session_id: str | None) -> None:
         if not session_id:
             return
-        self.repository.revoke_session(session_id, _now_iso())
+        self.repository.revoke_session_by_token_hash(
+            _session_token_hash(session_id),
+            _now_iso(),
+        )
 
     def resolve_session(self, session_id: str | None) -> dict[str, Any]:
         if not session_id:
             raise SessionNotFoundError("authentication required")
-        session = self.repository.read_session(session_id)
+        session = self.repository.read_session_by_token_hash(
+            _session_token_hash(session_id)
+        )
         if not session or session.get("revoked_at"):
             raise SessionNotFoundError("authentication required")
         if _parse_iso(str(session["expires_at"])) <= datetime.now(timezone.utc):
@@ -127,6 +135,10 @@ def _parse_iso(value: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _session_token_hash(session_token: str) -> str:
+    return sha256(session_token.encode("utf-8")).hexdigest()
 
 
 def _required_text(value: Any, field_name: str) -> str:

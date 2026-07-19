@@ -21,6 +21,7 @@ export type GoalSession = {
 	focused_material_id: string | null;
 	focused_paper_id: string | null;
 	focused_objective_id: string | null;
+	focused_goal_id: string | null;
 	goal_text: string | null;
 	goal_brief_json: Record<string, unknown>;
 	answer_mode: GoalAnswerMode;
@@ -44,6 +45,7 @@ export type GoalSessionMessage = {
 	warnings?: string[];
 	links?: Record<string, string>;
 	source_links?: GoalSourceLink[];
+	review_gate?: string | null;
 	created_at: string;
 };
 
@@ -58,6 +60,7 @@ export type GoalSessionMessageResponse = {
 	warnings: string[];
 	links: Record<string, string>;
 	source_links: GoalSourceLink[];
+	review_gate: string | null;
 	created_at: string;
 };
 
@@ -66,6 +69,7 @@ type CreateGoalSessionOptions = {
 	focused_material_id?: string | null;
 	focused_paper_id?: string | null;
 	focused_objective_id?: string | null;
+	focused_goal_id?: string | null;
 	goal_text?: string | null;
 	goal_brief_json?: Record<string, unknown>;
 	answer_mode?: GoalAnswerMode;
@@ -85,6 +89,7 @@ export async function createGoalSession(options: CreateGoalSessionOptions) {
 			focused_material_id: options.focused_material_id ?? null,
 			focused_paper_id: options.focused_paper_id ?? null,
 			focused_objective_id: options.focused_objective_id ?? null,
+			focused_goal_id: options.focused_goal_id ?? null,
 			goal_text: options.goal_text ?? null,
 			goal_brief_json: options.goal_brief_json ?? {},
 			answer_mode: options.answer_mode ?? 'hybrid'

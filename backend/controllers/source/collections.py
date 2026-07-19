@@ -11,10 +11,8 @@ from controllers.schemas.source.collection import (
     CollectionListResponse,
     CollectionResponse,
 )
-from application.source.collection_service import CollectionService
 
 router = APIRouter(prefix="/collections", tags=["collections"])
-collection_service = CollectionService()
 
 
 @router.post("", response_model=CollectionResponse, summary="create the paper collection")
@@ -23,7 +21,7 @@ async def create_collection(
     request: Request,
 ) -> CollectionResponse:
     # create collection of paper
-    record = collection_service.create_collection(
+    record = request.app.state.collection_service.create_collection(
         name=payload.name,
         description=payload.description,
         owner_user_id=current_user_id(request),
@@ -35,7 +33,9 @@ async def create_collection(
 async def list_collections(request: Request) -> CollectionListResponse:
     items = [
         CollectionResponse(**record)
-        for record in collection_service.list_collections(current_user_id(request))
+        for record in request.app.state.collection_service.list_collections(
+            current_user_id(request)
+        )
     ]
     return CollectionListResponse(items=items)
 
@@ -43,7 +43,7 @@ async def list_collections(request: Request) -> CollectionListResponse:
 @router.get("/{collection_id}", response_model=CollectionResponse, summary="获取集合详情")
 async def get_collection(collection_id: str, request: Request) -> CollectionResponse:
     try:
-        record = collection_service.get_collection_for_user(
+        record = request.app.state.collection_service.get_collection_for_user(
             collection_id,
             current_user_id(request),
         )
@@ -59,7 +59,7 @@ async def get_collection(collection_id: str, request: Request) -> CollectionResp
 )
 async def delete_collection(collection_id: str, request: Request) -> CollectionDeleteResponse:
     try:
-        result = collection_service.delete_collection_for_user(
+        result = request.app.state.collection_service.delete_collection_for_user(
             collection_id,
             current_user_id(request),
         )
@@ -80,6 +80,7 @@ async def upload_collection_file(
     request: Request,
     file: UploadFile = File(...),
 ) -> CollectionFileResponse:
+    collection_service = request.app.state.collection_service
     try:
         collection_service.get_collection_for_user(collection_id, current_user_id(request))
         content = await file.read()
@@ -93,7 +94,10 @@ async def upload_collection_file(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"文件上传失败: {exc}") from exc
-    return CollectionFileResponse(**record)
+    return CollectionFileResponse(
+        **record,
+        stored_path=str(record["storage_key"]),
+    )
 
 
 @router.get(
@@ -105,10 +109,14 @@ async def list_collection_files(
     collection_id: str,
     request: Request,
 ) -> CollectionFileListResponse:
+    collection_service = request.app.state.collection_service
     try:
         collection_service.get_collection_for_user(collection_id, current_user_id(request))
         items = [
-            CollectionFileResponse(**record)
+            CollectionFileResponse(
+                **record,
+                stored_path=str(record["storage_key"]),
+            )
             for record in collection_service.list_files(collection_id)
         ]
     except FileNotFoundError as exc:

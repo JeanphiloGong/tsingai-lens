@@ -16,7 +16,6 @@ from application.core.semantic_build.paper_facts_service import PaperFactsServic
 from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.collection_service import CollectionService
-from application.source.task_service import TaskService
 from domain.core import ResearchUnderstanding
 from domain.core.fact_store import CoreFactSet
 from domain.core.objective_material_projection import (
@@ -148,16 +147,15 @@ class ResearchViewAggregationService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
-        task_service: TaskService | None = None,
+        collection_service: CollectionService,
+        workspace_service: WorkspaceService,
         document_profile_service: DocumentProfileService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         comparison_service: ComparisonService | None = None,
-        workspace_service: WorkspaceService | None = None,
         core_fact_repository: CoreFactRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
-        self.task_service = task_service or TaskService()
+        self.collection_service = collection_service
+        self.workspace_service = workspace_service
         self.core_fact_repository = (
             core_fact_repository
             or getattr(paper_facts_service, "core_fact_repository", None)
@@ -178,11 +176,6 @@ class ResearchViewAggregationService:
             collection_service=self.collection_service,
             document_profile_service=self.document_profile_service,
             core_fact_repository=self.core_fact_repository,
-        )
-        self.workspace_service = workspace_service or WorkspaceService(
-            collection_service=self.collection_service,
-            task_service=self.task_service,
-            document_profile_service=self.document_profile_service,
         )
         self.research_understanding_service = ResearchUnderstandingService()
 

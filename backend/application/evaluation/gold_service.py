@@ -13,10 +13,10 @@ class EvaluationGoldService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         evaluation_repository: EvaluationRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()
         )
@@ -76,6 +76,7 @@ class EvaluationGoldService:
                 "file_id",
                 "original_filename",
                 "stored_filename",
+                "storage_key",
             ):
                 self._add_document_key(keys, record.get(field))
         manifest = self.collection_service.get_import_manifest(collection_id)
@@ -93,7 +94,7 @@ class EvaluationGoldService:
                     "source_document_id",
                     "original_filename",
                     "stored_filename",
-                    "storage_relpath",
+                    "storage_key",
                 ):
                     self._add_document_key(keys, document.get(field))
         return keys

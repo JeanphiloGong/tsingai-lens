@@ -19,12 +19,15 @@ from .schemas import (
     StructuredObjectivePaperFrame,
     StructuredPaperSkim,
     StructuredResearchUnderstandingRelations,
+    StructuredResearchUnderstandingFindings,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableMatrixRepair,
     StructuredTextWindowMentions,
 )
 from .prompts import (
+    RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION,
+    RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION,
     build_document_profile_prompt,
     build_objective_evidence_unit_prompt,
     build_objective_evidence_route_prompt,
@@ -34,6 +37,7 @@ from .prompts import (
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
     build_research_understanding_relation_prompt,
+    build_research_understanding_finding_synthesis_prompt,
     build_table_batch_mentions_prompt,
     build_table_matrix_repair_prompt,
     build_text_window_extraction_prompt,
@@ -46,6 +50,8 @@ _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
+_TRACE_TEXT_LIMIT = 8000
+_TRACE_JSON_LIMIT = 12000
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
@@ -66,6 +72,7 @@ class CoreLLMStructuredExtractor:
     ) -> None:
         self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
+        self.last_trace: dict[str, Any] | None = None
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
@@ -226,9 +233,29 @@ class CoreLLMStructuredExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredResearchUnderstandingRelations,
+            task_type="research_understanding_relation",
+            prompt_version=RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredResearchUnderstandingRelations):
             raise TypeError("unexpected research understanding relations response type")
+        return response
+
+    def synthesize_research_understanding_findings(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchUnderstandingFindings:
+        system_prompt, user_prompt = (
+            build_research_understanding_finding_synthesis_prompt(payload)
+        )
+        response = self._parse_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredResearchUnderstandingFindings,
+            task_type="research_understanding_finding_synthesis",
+            prompt_version=RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION,
+        )
+        if not isinstance(response, StructuredResearchUnderstandingFindings):
+            raise TypeError("unexpected research understanding Findings response type")
         return response
 
     def _parse_structured_response(
@@ -237,28 +264,70 @@ class CoreLLMStructuredExtractor:
         system_prompt: str,
         user_prompt: str,
         response_model: type[BaseModel],
+        task_type: str | None = None,
+        prompt_version: str | None = None,
     ) -> BaseModel:
         messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=response_model,
+            include_schema=self.extraction_mode != _EXTRACTION_MODE_PROVIDER_PARSE,
         )
+        self.last_trace = None
         started_at = perf_counter()
+        trace_extraction_mode = self.extraction_mode
         try:
             if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
-                parsed = self._parse_provider_structured_response(
-                    messages=messages,
-                    response_model=response_model,
-                )
+                try:
+                    parsed, raw_content = self._parse_provider_structured_response(
+                        messages=messages,
+                        response_model=response_model,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Core LLM provider parse failed; retrying with json_text "
+                        "model=%s response_model=%s",
+                        self.model,
+                        response_model.__name__,
+                        exc_info=True,
+                    )
+                    messages = self._build_messages(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        include_schema=True,
+                    )
+                    parsed, raw_content = self._parse_json_text_response(
+                        messages=messages,
+                        response_model=response_model,
+                    )
+                    trace_extraction_mode = (
+                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
+                    )
             else:
-                parsed = self._parse_json_text_response(
+                parsed, raw_content = self._parse_json_text_response(
                     messages=messages,
                     response_model=response_model,
                 )
+                if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+                    trace_extraction_mode = (
+                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
+                    )
         except Exception:
             elapsed_s = perf_counter() - started_at
+            self.last_trace = self._build_trace(
+                task_type=task_type,
+                prompt_version=prompt_version,
+                response_model=response_model,
+                messages=messages,
+                extraction_mode=trace_extraction_mode,
+                trace_status="failed",
+                elapsed_s=elapsed_s,
+                error="structured extraction failed",
+            )
             logger.exception(
-                "Core LLM extraction failed mode=%s model=%s response_model=%s elapsed_s=%.3f validated=false",
+                "Core LLM extraction failed mode=%s model=%s "
+                "response_model=%s elapsed_s=%.3f validated=false",
                 self.extraction_mode,
                 self.model,
                 response_model.__name__,
@@ -266,8 +335,20 @@ class CoreLLMStructuredExtractor:
             )
             raise
         elapsed_s = perf_counter() - started_at
+        self.last_trace = self._build_trace(
+            task_type=task_type,
+            prompt_version=prompt_version,
+            response_model=response_model,
+            messages=messages,
+            extraction_mode=trace_extraction_mode,
+            trace_status="available",
+            elapsed_s=elapsed_s,
+            raw_content=raw_content,
+            parsed_output=parsed,
+        )
         logger.debug(
-            "Core LLM extraction finished mode=%s model=%s response_model=%s elapsed_s=%.3f validated=true",
+            "Core LLM extraction finished mode=%s model=%s "
+            "response_model=%s elapsed_s=%.3f validated=true",
             self.extraction_mode,
             self.model,
             response_model.__name__,
@@ -281,23 +362,24 @@ class CoreLLMStructuredExtractor:
         system_prompt: str,
         user_prompt: str,
         response_model: type[BaseModel],
+        include_schema: bool,
     ) -> list[dict[str, str]]:
-        schema = json.dumps(
-            response_model.model_json_schema(),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
+        user_content = user_prompt
+        if include_schema:
+            schema = json.dumps(
+                response_model.model_json_schema(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            user_content = (
+                f"{user_prompt}\n\n"
+                "Return exactly one JSON object that matches this schema. "
+                "Do not include markdown fences or commentary.\n"
+                f"JSON schema:\n{schema}"
+            )
         return [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": (
-                    f"{user_prompt}\n\n"
-                    "Return exactly one JSON object that matches this schema. "
-                    "Do not include markdown fences or commentary.\n"
-                    f"JSON schema:\n{schema}"
-                ),
-            },
+            {"role": "user", "content": user_content},
         ]
 
     def _parse_json_text_response(
@@ -305,7 +387,7 @@ class CoreLLMStructuredExtractor:
         *,
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
-    ) -> BaseModel:
+    ) -> tuple[BaseModel, str | None]:
         completion = self.client.chat.completions.create(
             model=self.model,
             temperature=0,
@@ -318,7 +400,7 @@ class CoreLLMStructuredExtractor:
             raise RuntimeError("structured extraction returned empty response content")
         payload = self._load_json_payload(self._extract_json_object(raw_content))
         try:
-            return response_model.model_validate(payload)
+            return response_model.model_validate(payload), raw_content
         except ValidationError:
             if isinstance(payload, dict):
                 extra_keys = set(payload) - set(response_model.model_fields)
@@ -330,7 +412,7 @@ class CoreLLMStructuredExtractor:
                     if key in response_model.model_fields
                 }
                 if filtered_payload != payload:
-                    return response_model.model_validate(filtered_payload)
+                    return response_model.model_validate(filtered_payload), raw_content
             raise
 
     def _parse_provider_structured_response(
@@ -338,7 +420,7 @@ class CoreLLMStructuredExtractor:
         *,
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
-    ) -> BaseModel:
+    ) -> tuple[BaseModel, str | None]:
         request_kwargs: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
@@ -360,9 +442,51 @@ class CoreLLMStructuredExtractor:
                 "structured extraction returned no parsed response content"
                 + (f": {raw_content[:500]}" if raw_content else "")
             )
+        raw_content = self._coerce_message_content(getattr(message, "content", None))
         if isinstance(parsed, response_model):
-            return parsed
-        return response_model.model_validate(parsed)
+            return parsed, raw_content
+        return response_model.model_validate(parsed), raw_content
+
+    def consume_last_trace(self) -> dict[str, Any] | None:
+        trace = self.last_trace
+        self.last_trace = None
+        return dict(trace) if trace else None
+
+    def _build_trace(
+        self,
+        *,
+        task_type: str | None,
+        prompt_version: str | None,
+        response_model: type[BaseModel],
+        messages: list[dict[str, str]],
+        extraction_mode: str,
+        trace_status: str,
+        elapsed_s: float,
+        raw_content: str | None = None,
+        parsed_output: BaseModel | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "task_type": task_type or response_model.__name__,
+            "prompt_version": prompt_version,
+            "model": self.model,
+            "extraction_mode": extraction_mode,
+            "response_model": response_model.__name__,
+            "trace_status": trace_status,
+            "elapsed_s": round(elapsed_s, 6),
+            "messages": [
+                {
+                    "role": _trace_text(message.get("role")),
+                    "content": _trace_text(message.get("content"), _TRACE_TEXT_LIMIT),
+                }
+                for message in messages
+            ],
+            "raw_output": _trace_text(raw_content, _TRACE_TEXT_LIMIT),
+            "parsed_output": _trace_json(
+                parsed_output.model_dump(mode="json") if parsed_output else None
+            ),
+            "error": _trace_text(error, 1000),
+        }
 
     def _resolve_extraction_mode(self, extraction_mode: str | None) -> str:
         candidate = (
@@ -461,3 +585,26 @@ class CoreLLMStructuredExtractor:
 
 def build_default_core_llm_structured_extractor() -> CoreLLMStructuredExtractor:
     return CoreLLMStructuredExtractor()
+
+
+def _trace_text(value: Any, limit: int = _TRACE_TEXT_LIMIT) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
+def _trace_json(
+    value: Any,
+    limit: int = _TRACE_JSON_LIMIT,
+) -> dict[str, Any] | list[Any] | str | None:
+    if value is None:
+        return None
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if len(text) <= limit:
+        return value
+    return text[:limit] + "...[truncated]"

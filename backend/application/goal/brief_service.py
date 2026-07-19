@@ -8,9 +8,9 @@ class GoalService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
 
     def _build_objective(
         self,

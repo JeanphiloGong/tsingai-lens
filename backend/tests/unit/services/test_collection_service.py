@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import base64
-import json
-from pathlib import Path
-
+from dataclasses import replace
+from hashlib import sha256
 import pytest
 
 from application.source.collection_service import CollectionService
+from domain.source import (
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
+)
+from infra.persistence.memory import MemoryCollectionRepository
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
@@ -14,62 +18,103 @@ from infra.source.ingestion.normalized_import import (
     NormalizedImportTextUnit,
 )
 from infra.source.ingestion.source_adapter import SourceAdapterRequest
+from tests.support.collection_service import build_test_collection_service
 
 
-def test_collection_service_normalizes_legacy_meta(tmp_path):
-    service = CollectionService(tmp_path / "collections")
-    paths = service.get_paths("default")
-    paths.collection_dir.mkdir(parents=True, exist_ok=True)
-    paths.meta_path.write_text(
-        json.dumps(
-            {
-                "id": "default",
-                "name": "default",
-                "created_at": "2026-01-15T12:03:14.032160+00:00",
-            },
-            ensure_ascii=True,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+def test_collection_service_requires_explicit_repository():
+    with pytest.raises(TypeError, match="repository"):
+        CollectionService()
 
-    listed = service.list_collections()
-    assert listed[0]["collection_id"] == "default"
-    assert listed[0]["status"] == "idle"
-    assert "default_method" not in listed[0]
-    assert listed[0]["updated_at"] == "2026-01-15T12:03:14.032160+00:00"
+    with pytest.raises(TypeError, match="workspace"):
+        CollectionService(repository=MemoryCollectionRepository())
 
-    record = service.get_collection("default")
-    assert record["collection_id"] == "default"
-    assert record["paper_count"] == 0
-    assert "default_method" not in record
 
-    saved = json.loads(paths.meta_path.read_text(encoding="utf-8"))
-    assert saved["collection_id"] == "default"
-    assert "id" not in saved
-    assert "default_method" not in saved
+def test_collection_service_never_creates_collection_metadata_json(tmp_path):
+    service = build_test_collection_service(tmp_path / "collections")
+    record = service.create_collection("Database metadata")
+    paths = service.get_paths(record["collection_id"])
+
+    assert service.get_collection(record["collection_id"]) == record
+    assert service.list_collections() == [record]
+    assert paths.collection_dir.exists()
+    assert not (paths.collection_dir / "meta.json").exists()
+    assert not (paths.collection_dir / "files.json").exists()
+    assert not (paths.collection_dir / "import_manifest.json").exists()
+
+
+def test_list_files_requires_collection_metadata(tmp_path):
+    service = build_test_collection_service(tmp_path / "collections")
+    service.workspace.create_collection_dirs("col_orphaned_workspace")
+
+    with pytest.raises(FileNotFoundError, match="collection not found"):
+        service.list_files("col_orphaned_workspace")
 
 
 def test_delete_collection_removes_collection_directory(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     record = service.create_collection("Delete Me")
     collection_id = record["collection_id"]
     paths = service.get_paths(collection_id)
 
-    service.add_file(collection_id, "paper.txt", b"Experimental Section\nMix.")
+    uploaded = service.add_file(
+        collection_id,
+        "paper.txt",
+        b"Experimental Section\nMix.",
+    )
 
     assert paths.collection_dir.exists()
-    assert paths.meta_path.exists()
-    assert paths.files_path.exists()
+    assert not (paths.collection_dir / "meta.json").exists()
+    assert not (paths.collection_dir / "files.json").exists()
+    assert not (paths.collection_dir / "import_manifest.json").exists()
+    assert service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
 
     result = service.delete_collection(collection_id)
 
     assert result["collection_id"] == collection_id
     assert not paths.collection_dir.exists()
+    with pytest.raises(FileNotFoundError):
+        service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
+
+
+def test_identical_uploads_share_identity_but_keep_collection_scoped_downloads(
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
+    first = service.create_collection("First")
+    second = service.create_collection("Second")
+    payload = b"%PDF-1.4\nshared content\n"
+
+    first_file = service.add_file(first["collection_id"], "first.pdf", payload)
+    second_file = service.add_file(second["collection_id"], "second.pdf", payload)
+    first_membership = service.repository.list_collection_documents(
+        first["collection_id"]
+    )[0]
+    second_membership = service.repository.list_collection_documents(
+        second["collection_id"]
+    )[0]
+    second_source_id = service.get_import_manifest(second["collection_id"])["imports"][
+        0
+    ]["documents"][0]["source_document_id"]
+
+    assert first_membership.document_id == second_membership.document_id
+    assert first_membership.document_version_id == second_membership.document_version_id
+    assert first_file["storage_key"] != second_file["storage_key"]
+    with pytest.raises(FileNotFoundError, match="document not found"):
+        service.resolve_document_source_file(
+            first["collection_id"],
+            second_source_id,
+        )
+
+    service.delete_collection(first["collection_id"])
+
+    assert (
+        service.object_store.read(second_file["storage_key"], second_file["sha256"])
+        == payload
+    )
 
 
 def test_delete_collection_raises_for_missing_collection(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
 
     try:
         service.delete_collection("col_missing")
@@ -79,8 +124,103 @@ def test_delete_collection_raises_for_missing_collection(tmp_path):
         raise AssertionError("expected FileNotFoundError")
 
 
-def test_collection_service_returns_empty_import_manifest_for_existing_collection(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+def test_delete_collection_rejects_another_collections_storage_key(tmp_path):
+    service = build_test_collection_service(tmp_path / "collections")
+    first = service.create_collection(name="First collection")
+    second = service.create_collection(name="Second collection")
+    second_file = service.add_file(
+        second["collection_id"],
+        "paper.txt",
+        b"Second collection bytes",
+    )
+    second_file_record = service.repository.list_collection_files(
+        second["collection_id"]
+    )[0]
+    invalid_file = replace(
+        second_file_record,
+        file_id="file_invalid_key",
+        object_id="obj_invalid_key",
+        collection_id=first["collection_id"],
+    )
+    service.repository.add_collection_import(
+        CollectionImportRecord(
+            import_id="imp_invalid_key",
+            collection_id=first["collection_id"],
+            channel="upload",
+            adapter_name="upload",
+            adapter_version=None,
+            raw_locator="paper.txt",
+            goal_context=None,
+            warnings=(),
+            ingested_at=invalid_file.created_at,
+            documents=(
+                CollectionImportDocumentRecord(
+                    source_document_id="srcdoc_invalid_key",
+                    origin_channel="upload",
+                    file=invalid_file,
+                    language=None,
+                    ingest_status="normalized",
+                    text_units=(),
+                ),
+            ),
+        ),
+        updated_at=invalid_file.created_at,
+    )
+
+    with pytest.raises(ValueError, match="invalid collection object key"):
+        service.delete_collection(first["collection_id"])
+
+    assert (
+        service.object_store.read(
+            second_file["storage_key"],
+            second_file["sha256"],
+        )
+        == b"Second collection bytes"
+    )
+
+
+def test_delete_collection_keeps_bytes_when_relational_delete_fails(
+    monkeypatch,
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = service.create_collection("Delete failure")
+    collection_id = collection["collection_id"]
+    uploaded = service.add_file(
+        collection_id,
+        "paper.txt",
+        b"Registered source bytes",
+    )
+    collection_dir = service.get_paths(collection_id).collection_dir
+
+    def fail_delete(_collection_id: str) -> bool:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(service.repository, "delete_collection", fail_delete)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.delete_collection(collection_id)
+
+    assert service.get_collection(collection_id) == {
+        **collection,
+        "paper_count": 1,
+        "status": "ready",
+        "updated_at": service.get_collection(collection_id)["updated_at"],
+    }
+    assert collection_dir.exists()
+    assert (
+        service.object_store.read(
+            uploaded["storage_key"],
+            uploaded["sha256"],
+        )
+        == b"Registered source bytes"
+    )
+
+
+def test_collection_service_returns_empty_import_manifest_for_existing_collection(
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("No Manifest Yet")
 
     manifest = service.get_import_manifest(collection["collection_id"])
@@ -94,7 +234,7 @@ def test_collection_service_returns_empty_import_manifest_for_existing_collectio
 
 
 def test_collection_service_registers_goal_brief_handoff(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Goal Collection")
 
     handoff = service.register_goal_brief_handoff(
@@ -121,12 +261,21 @@ def test_collection_service_registers_goal_brief_handoff(tmp_path):
     assert handoff["source_channels"] == ["upload"]
     manifest = service.get_import_manifest(collection["collection_id"])
     assert len(manifest["handoffs"]) == 1
-    assert manifest["handoffs"][0]["goal_context"]["research_brief"]["material_system"] == "PVDF"
-    assert manifest["handoffs"][0]["goal_context"]["coverage_assessment"]["level"] == "direct"
+    assert (
+        manifest["handoffs"][0]["goal_context"]["research_brief"]["material_system"]
+        == "PVDF"
+    )
+    assert (
+        manifest["handoffs"][0]["goal_context"]["coverage_assessment"]["level"]
+        == "direct"
+    )
+    collection_dir = service.get_paths(collection["collection_id"]).collection_dir
+    assert not (collection_dir / "files.json").exists()
+    assert not (collection_dir / "import_manifest.json").exists()
 
 
 def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Imported Collection")
     collection_id = collection["collection_id"]
 
@@ -170,11 +319,19 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
     assert records[0]["original_filename"] == "paper.txt"
     assert records[0]["stored_filename"] == "normalized_paper.txt"
     assert records[0]["media_type"] == "text/plain"
-    assert Path(records[0]["stored_path"]).read_text(encoding="utf-8") == (
-        "Experimental Section\nMix and anneal."
+    expected_payload = b"Experimental Section\nMix and anneal."
+    expected_sha256 = sha256(expected_payload).hexdigest()
+    assert records[0]["storage_key"] == (f"{collection_id}/input/normalized_paper.txt")
+    assert records[0]["sha256"] == expected_sha256
+    assert "stored_path" not in records[0]
+    assert service.object_store.read(records[0]["storage_key"], expected_sha256) == (
+        expected_payload
     )
     assert service.get_collection(collection_id)["paper_count"] == 1
-    assert service.list_files(collection_id)[0]["stored_filename"] == "normalized_paper.txt"
+    assert (
+        service.list_files(collection_id)[0]["stored_filename"]
+        == "normalized_paper.txt"
+    )
     manifest = service.get_import_manifest(collection_id)
     assert manifest["schema_version"] == 1
     assert manifest["collection_id"] == collection_id
@@ -187,8 +344,10 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
     document_entry = import_entry["documents"][0]
     assert document_entry["source_document_id"] == "srcdoc_1"
     assert document_entry["stored_filename"] == "normalized_paper.txt"
-    assert document_entry["storage_relpath"] == "input/normalized_paper.txt"
-    assert document_entry["checksum"] == "abc123"
+    assert document_entry["storage_key"] == records[0]["storage_key"]
+    assert document_entry["sha256"] == expected_sha256
+    assert "stored_path" not in document_entry
+    assert "storage_relpath" not in document_entry
     assert document_entry["text_units"] == [
         {
             "text_unit_id": "tu_0",
@@ -205,15 +364,61 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
     ]
     assert "text" not in document_entry["text_units"][0]
     assert "document_profiles" not in import_entry
+    collection_dir = service.get_paths(collection_id).collection_dir
+    assert not (collection_dir / "files.json").exists()
+    assert not (collection_dir / "import_manifest.json").exists()
+
+
+def test_collection_service_cleans_only_unregistered_bytes_after_import_failure(
+    monkeypatch,
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = service.create_collection("Failed import")
+    collection_id = collection["collection_id"]
+    registered = service.add_file(
+        collection_id,
+        "registered.txt",
+        b"Registered source bytes",
+    )
+
+    def fail_import(*_args, **_kwargs) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(service.repository, "add_collection_import", fail_import)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.add_file(
+            collection_id,
+            "failed.txt",
+            b"Unregistered source bytes",
+        )
+
+    failed_key = f"{collection_id}/input/failed.txt"
+    failed_sha256 = sha256(b"Unregistered source bytes").hexdigest()
+    with pytest.raises(FileNotFoundError):
+        service.object_store.read(failed_key, failed_sha256)
+    assert (
+        service.object_store.read(
+            registered["storage_key"],
+            registered["sha256"],
+        )
+        == b"Registered source bytes"
+    )
+    assert [record["storage_key"] for record in service.list_files(collection_id)] == [
+        registered["storage_key"]
+    ]
 
 
 def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Upload Collection")
     collection_id = collection["collection_id"]
     captured: dict[str, object] = {}
 
-    def fake_normalize_upload(filename: str, content: bytes, media_type: str | None = None):
+    def fake_normalize_upload(
+        filename: str, content: bytes, media_type: str | None = None
+    ):
         captured["filename"] = filename
         captured["content"] = content
         captured["media_type"] = media_type
@@ -236,7 +441,9 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
             ),
         )
 
-    monkeypatch.setattr("application.source.collection_service.normalize_upload", fake_normalize_upload)
+    monkeypatch.setattr(
+        "application.source.collection_service.normalize_upload", fake_normalize_upload
+    )
 
     record = service.add_file(
         collection_id,
@@ -251,16 +458,23 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
         "media_type": "application/pdf",
     }
     assert record["stored_filename"] == "normalized_upload.pdf"
-    assert Path(record["stored_path"]).read_bytes() == b"%PDF-1.4 fake"
+    assert record["storage_key"] == f"{collection_id}/input/normalized_upload.pdf"
+    assert record["sha256"] == sha256(b"%PDF-1.4 fake").hexdigest()
+    assert service.object_store.read(record["storage_key"], record["sha256"]) == (
+        b"%PDF-1.4 fake"
+    )
     manifest = service.get_import_manifest(collection_id)
     assert manifest["handoffs"] == []
     assert len(manifest["imports"]) == 1
-    assert manifest["imports"][0]["documents"][0]["stored_filename"] == "normalized_upload.pdf"
+    assert (
+        manifest["imports"][0]["documents"][0]["stored_filename"]
+        == "normalized_upload.pdf"
+    )
     assert manifest["imports"][0]["documents"][0]["text_units"] == []
 
 
 def test_collection_service_imports_from_source_adapter(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Adapter Collection")
     captured: dict[str, object] = {}
 
@@ -319,9 +533,10 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
 
     assert len(records) == 1
     assert records[0]["stored_filename"] == "search_result_1.txt"
-    assert Path(records[0]["stored_path"]).read_text(encoding="utf-8") == (
-        "Search adapter normalized text"
-    )
+    assert service.object_store.read(
+        records[0]["storage_key"],
+        records[0]["sha256"],
+    ) == (b"Search adapter normalized text")
 
     manifest = service.get_import_manifest(collection["collection_id"])
     assert manifest["handoffs"] == []
@@ -334,23 +549,9 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
     assert import_entry["goal_context"] == {"intent": "compare"}
     assert import_entry["documents"][0]["source_document_id"] == "srcdoc_search_1"
 
-    artifacts = service.artifact_repository.read(collection["collection_id"])
-    assert artifacts["document_profiles_generated"] is False
-    assert artifacts["evidence_cards_generated"] is False
-    assert artifacts["characterization_observations_generated"] is False
-    assert artifacts["structure_features_generated"] is False
-    assert artifacts["test_conditions_generated"] is False
-    assert artifacts["baseline_references_generated"] is False
-    assert artifacts["sample_variants_generated"] is False
-    assert artifacts["measurement_results_generated"] is False
-    assert artifacts["comparable_results_generated"] is False
-    assert artifacts["collection_comparable_results_generated"] is False
-    assert artifacts["comparison_rows_generated"] is False
-    assert artifacts["table_cells_generated"] is False
-
 
 def test_collection_service_rejects_source_adapter_batch_shape_mismatch(tmp_path):
-    service = CollectionService(tmp_path / "collections")
+    service = build_test_collection_service(tmp_path / "collections")
     collection = service.create_collection("Bad Adapter Collection")
 
     class BadAdapter:

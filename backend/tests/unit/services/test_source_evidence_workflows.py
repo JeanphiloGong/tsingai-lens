@@ -9,12 +9,13 @@ from PIL import Image
 
 from domain.source import resolve_heading_path_for_target
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.runtime.mapping.block_artifacts import collect_pdf_text_items
+from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
 from infra.source.runtime.source_evidence import (
     build_blocks,
     build_table_cells,
     build_table_rows,
 )
-from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
 
 
 def test_default_source_pipeline_uses_structure_first_handoff_workflow():
@@ -178,20 +179,90 @@ def test_build_pdf_converter_uses_docling_device_env(monkeypatch):
     assert _pdf_pipeline_device(converter) == "cpu"
 
 
-def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch, tmp_path):
+def test_collect_pdf_text_items_excludes_figure_text_but_preserves_caption():
     class FakeBBox:
-        def __init__(self) -> None:
-            self.l = 1.0
-            self.t = 2.0
-            self.r = 3.0
-            self.b = 4.0
+        def __init__(self, *, l: float, t: float, r: float, b: float) -> None:
+            self.l = l
+            self.t = t
+            self.r = r
+            self.b = b
             self.coord_origin = SimpleNamespace(value="BOTTOMLEFT")
 
     class FakeProv:
-        def __init__(self, page_no: int, start: int, end: int) -> None:
+        def __init__(self, bbox: FakeBBox) -> None:
+            self.page_no = 1
+            self.charspan = (0, 1)
+            self.bbox = bbox
+
+    class FakeTextItem:
+        def __init__(self, text: str, bbox: FakeBBox, label: str = "text") -> None:
+            self.text = text
+            self.label = label
+            self.prov = [FakeProv(bbox)]
+
+    class FakeRef:
+        def __init__(self, cref: str) -> None:
+            self.cref = cref
+
+    body = FakeTextItem(
+        "The porosity level decreased after preheating.",
+        FakeBBox(l=72, t=760, r=540, b=730),
+    )
+    plot_tick = FakeTextItem(
+        "(25-32[",
+        FakeBBox(l=160, t=397, r=180, b=392),
+    )
+    caption = FakeTextItem(
+        "Figure 4. Porosity measurement results.",
+        FakeBBox(l=76, t=370, r=535, b=340),
+        label="caption",
+    )
+    picture = SimpleNamespace(
+        prov=[FakeProv(FakeBBox(l=76, t=714, r=535, b=379))],
+        captions=[FakeRef("#/texts/2")],
+    )
+    document = SimpleNamespace(
+        texts=[body, plot_tick, caption],
+        pictures=[picture],
+        tables=[],
+    )
+
+    text_items = collect_pdf_text_items(document)
+
+    assert [item["text"] for item in text_items] == [
+        "The porosity level decreased after preheating.",
+        "Figure 4. Porosity measurement results.",
+    ]
+
+
+def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch, tmp_path):
+    class FakeBBox:
+        def __init__(
+            self,
+            *,
+            l: float = 1.0,
+            t: float = 4.0,
+            r: float = 3.0,
+            b: float = 2.0,
+        ) -> None:
+            self.l = l
+            self.t = t
+            self.r = r
+            self.b = b
+            self.coord_origin = SimpleNamespace(value="BOTTOMLEFT")
+
+    class FakeProv:
+        def __init__(
+            self,
+            page_no: int,
+            start: int,
+            end: int,
+            *,
+            bbox: FakeBBox | None = None,
+        ) -> None:
             self.page_no = page_no
             self.charspan = (start, end)
-            self.bbox = FakeBBox()
+            self.bbox = bbox or FakeBBox()
 
     class FakeTextItem:
         def __init__(self, text: str, label: str, start: int, end: int) -> None:
@@ -249,7 +320,14 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
         def __init__(self, caption_item: FakeTextItem) -> None:
             self.label = SimpleNamespace(value="picture")
             self.captions = [FakeRef("#/texts/5", caption_item)]
-            self.prov = [FakeProv(1, 115, 145)]
+            self.prov = [
+                FakeProv(
+                    1,
+                    115,
+                    145,
+                    bbox=FakeBBox(l=10.0, t=40.0, r=30.0, b=20.0),
+                )
+            ]
 
         def caption_text(self, document) -> str:  # noqa: ANN001
             return self.captions[0].resolve(document).text

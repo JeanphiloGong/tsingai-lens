@@ -11,6 +11,7 @@ def _session_record() -> dict:
         "focused_material_id": "mat-316l",
         "focused_paper_id": None,
         "focused_objective_id": "obj_lpbf",
+        "focused_goal_id": "goal_lpbf",
         "goal_text": "Compare strength and ductility.",
         "goal_brief_json": {"objective": "compare"},
         "answer_mode": "hybrid",
@@ -49,11 +50,20 @@ def test_sqlite_goal_session_repository_round_trips_sessions_and_messages(tmp_pa
                 "used_evidence_ids": ["E01"],
                 "warnings": [],
                 "links": {"workspace": "/collections/col_demo"},
+                "review_gate": "protocol_ready_findings",
                 "source_links": [
                     {
                         "kind": "evidence",
                         "label": "Source 1",
                         "href": "/collections/col_demo/documents/paper-a?evidence_id=E01",
+                    }
+                ],
+                "source_finding_refs": [
+                    {
+                        "finding_id": "finding-1",
+                        "finding_fingerprint": "finding.v1:abc",
+                        "protocol_source_fingerprint": "protocol-source.v1:def",
+                        "evidence_ref_ids": ["E01"],
                     }
                 ],
                 "created_at": "2026-05-10T00:00:02+00:00",
@@ -69,7 +79,22 @@ def test_sqlite_goal_session_repository_round_trips_sessions_and_messages(tmp_pa
     ]
     assert messages[1]["answer"] == "Hardness is supported by [Source 1]."
     assert messages[1]["used_evidence_ids"] == ["E01"]
+    assert messages[1]["review_gate"] == "protocol_ready_findings"
     assert messages[1]["source_links"][0]["label"] == "Source 1"
+    assert messages[1]["source_finding_refs"] == [
+        {
+            "finding_id": "finding-1",
+            "finding_fingerprint": "finding.v1:abc",
+            "protocol_source_fingerprint": "protocol-source.v1:def",
+            "evidence_ref_ids": ["E01"],
+        }
+    ]
+    context = repository.read_message_context("msg_assistant")
+    assert context is not None
+    assert context["session"]["focused_goal_id"] == "goal_lpbf"
+    assert context["message"]["message_id"] == "msg_assistant"
+    assert context["message"]["review_gate"] == "protocol_ready_findings"
+    assert context["message"]["source_links"][0]["href"].endswith("evidence_id=E01")
 
 
 def test_sqlite_goal_session_repository_replaces_message_history(tmp_path):

@@ -14,9 +14,12 @@ const {
 	exportResearchUnderstandingGoldDraft,
 	fetchResearchUnderstandingFeedback,
 	fetchResearchUnderstandingCurations,
+	importResearchUnderstandingReviewDecisions,
+	fetchResearchUnderstandingDataset,
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
+	fetchConfirmedGoals,
 	fetchDocumentResearchView,
 	fetchGoalAnalysis,
 	fetchObjectiveResearchView,
@@ -28,12 +31,154 @@ const {
 	normalizeCollectionAggregation,
 	normalizeEvidenceBackedValue,
 	normalizeObjectiveResearchView,
-	normalizePaperAggregation
+	normalizePaperAggregation,
+	researchUnderstandingCollectionDatasetUrl,
+	researchUnderstandingDatasetUrl
 } = await import('./researchView');
 
 describe('research view shared helpers', () => {
 	beforeEach(() => {
 		requestJson.mockReset();
+	});
+
+	it('builds traceable training dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'training_ready'
+				},
+				'training_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=training_ready&format=training_jsonl'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'training_ready'
+				},
+				'training_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=training_ready&format=training_jsonl'
+		);
+	});
+
+	it('builds review packet dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'review_packet'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=review_packet'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'review_packet'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=review_packet'
+		);
+	});
+
+	it('builds review decision template dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'decision_template'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=decision_template'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'decision_template'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=decision_template'
+		);
+	});
+
+	it('builds review decision board TSV export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'decision_board_tsv'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=decision_board_tsv'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'decision_board_tsv'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=decision_board_tsv'
+		);
+	});
+
+	it('builds agent review prompt dataset export urls', () => {
+		expect(
+			researchUnderstandingDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					scope_id: 'goal 1',
+					dataset_use_status: 'review_candidate'
+				},
+				'agent_review_prompt_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
+		);
+		expect(
+			researchUnderstandingCollectionDatasetUrl(
+				'col 1',
+				{
+					scope_type: 'goal',
+					dataset_use_status: 'review_candidate'
+				},
+				'agent_review_prompt_jsonl'
+			)
+		).toBe(
+			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
+		);
 	});
 
 	it('fetches collection and document research views through same-origin api paths', async () => {
@@ -176,6 +321,26 @@ describe('research view shared helpers', () => {
 
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
+			goals: [
+				{
+					goal_id: 'goal_1',
+					collection_id: 'col_123',
+					question: 'How does heat treatment affect corrosion resistance?',
+					source_type: 'objective_candidate',
+					status: 'ready',
+					source_objective_id: 'obj_1'
+				}
+			]
+		});
+
+		const goals = await fetchConfirmedGoals('col_123');
+
+		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/goals');
+		expect(goals.goals[0].goal_id).toBe('goal_1');
+		expect(goals.goals[0].status).toBe('ready');
+
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
 			state: 'partial',
 			objective: {
 				objective_id: 'obj_1',
@@ -273,12 +438,228 @@ describe('research view shared helpers', () => {
 		});
 	});
 
+	it('normalizes research understanding findings on confirmed goal analysis', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			goal: {
+				goal_id: 'goal_1',
+				collection_id: 'col_123',
+				question: 'How does heat treatment affect strength?',
+				source_type: 'objective_candidate',
+				status: 'ready'
+			},
+			understanding: {
+				schema_version: 'research_understanding.v1',
+				state: 'ready',
+				scope: {
+					scope_type: 'goal',
+					collection_id: 'col_123',
+					goal_id: 'goal_1',
+					title: 'How does heat treatment affect strength?'
+				},
+				claims: [
+					{
+						claim_id: 'claim_1',
+						claim_type: 'finding',
+						statement: 'Heat treatment changes tensile strength.',
+						status: 'supported'
+					}
+				],
+				relations: [],
+				evidence_refs: [
+					{
+						evidence_ref_id: 'ev_1',
+						source_kind: 'table',
+						document_id: 'doc_1',
+						label: 'P001 Table 2',
+						traceability_status: 'traceable',
+						evidence_role: 'direct_support'
+					}
+				],
+				contexts: [],
+				summary: {
+					claim_count: 1,
+					relation_count: 0,
+					evidence_ref_count: 1,
+					context_count: 0
+				},
+				presentation: {
+					summary: {
+						primary_finding_count: 1,
+						review_queue_finding_count: 1
+					},
+					findings: [
+						{
+							finding_id: 'finding_claim_1',
+							claim_id: 'claim_1',
+							title: 'heat treatment -> tensile strength',
+							statement: 'Heat treatment changes tensile strength.',
+							variables: ['heat treatment'],
+							outcomes: ['tensile strength'],
+							support_grade: 'partial',
+							review_status: 'pending_review',
+							synthesis_status: 'condition_dependent',
+							common_conditions: ['LPBF 316L'],
+							incomparable_conditions: ['different tensile temperatures'],
+							paper_contributions: [
+								{
+									document_id: 'doc_1',
+									title: 'Heat treatment study',
+									source_filename: 'heat-treatment.pdf',
+									role: 'supporting',
+									statement: 'The paper reports a condition-specific strength change.',
+									evidence_ref_ids: ['ev_1']
+								}
+							],
+							evidence_ref_ids: ['ev_1'],
+							relation_chain: [
+								{
+									relation_id: 'rel_1',
+									variable: 'heat treatment',
+									mediators: ['recrystallization'],
+									outcome: 'tensile strength',
+									direction: 'condition-dependent',
+									statement: 'The source reports a condition-specific association.'
+								}
+							],
+							evidence_bundle: {
+								direct_result: ['ev_1']
+							}
+						},
+						{
+							finding_id: 'finding_claim_review',
+							claim_id: 'claim_review',
+							title: 'background -> tensile strength',
+							statement: 'Background-only candidate.',
+							variables: ['background'],
+							outcomes: ['tensile strength'],
+							support_grade: 'insufficient',
+							review_status: 'needs_review',
+							evidence_ref_ids: [],
+							evidence_bundle: {
+								background: ['ev_background']
+							}
+						}
+					],
+					primary_findings: [
+						{
+							finding_id: 'finding_claim_1',
+							claim_id: 'claim_1',
+							title: 'heat treatment -> tensile strength',
+							statement: 'Heat treatment changes tensile strength.',
+							variables: ['heat treatment'],
+							outcomes: ['tensile strength'],
+							support_grade: 'partial',
+							review_status: 'pending_review',
+							evidence_ref_ids: ['ev_1'],
+							evidence_bundle: {
+								direct_result: ['ev_1']
+							}
+						}
+					],
+					review_queue_findings: [
+						{
+							finding_id: 'finding_claim_review',
+							claim_id: 'claim_review',
+							title: 'background -> tensile strength',
+							statement: 'Background-only candidate.',
+							variables: ['background'],
+							outcomes: ['tensile strength'],
+							support_grade: 'insufficient',
+							review_status: 'needs_review',
+							evidence_ref_ids: [],
+							evidence_bundle: {
+								background: ['ev_background']
+							}
+						}
+					],
+					evidence_items: [
+						{
+							evidence_ref_id: 'ev_1',
+							document_id: 'doc_1',
+							title: 'P001 Table 2 / p. 5',
+							source_label: 'P001 Table 2',
+							source_kind: 'table',
+							table_audit: {
+								columns: ['Condition', 'Strength', 'Elongation'],
+								relevant_rows: [
+									{ row_index: 1, cells: ['As built', '450', '12'] },
+									{ row_index: 2, cells: ['Parsed short row', '470'], aligned: false }
+								]
+							},
+							traceability_status: 'traceable',
+							evidence_role: 'direct_support'
+						}
+					]
+				}
+			},
+			pipeline_nodes: {},
+			errors: [],
+			warnings: []
+		});
+
+		const analysis = await fetchGoalAnalysis('col_123', 'goal_1');
+		const finding = analysis.understanding?.presentation.findings[0];
+
+		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/goals/goal_1/analysis');
+		expect(finding).toMatchObject({
+			finding_id: 'finding_claim_1',
+			variables: ['heat treatment'],
+			outcomes: ['tensile strength'],
+			support_grade: 'partial',
+			review_status: 'pending_review'
+		});
+		expect(finding?.evidence_bundle.direct_result).toEqual(['ev_1']);
+		expect(finding?.synthesis_status).toBe('condition_dependent');
+		expect(finding?.common_conditions).toEqual(['LPBF 316L']);
+		expect(finding?.incomparable_conditions).toEqual(['different tensile temperatures']);
+		expect(finding?.paper_contributions).toEqual([
+			{
+				document_id: 'doc_1',
+				title: 'Heat treatment study',
+				source_filename: 'heat-treatment.pdf',
+				role: 'supporting',
+				statement: 'The paper reports a condition-specific strength change.',
+				evidence_ref_ids: ['ev_1']
+			}
+		]);
+		expect(finding?.relation_chain).toEqual([
+			{
+				relation_id: 'rel_1',
+				variable: 'heat treatment',
+				mediators: ['recrystallization'],
+				outcome: 'tensile strength',
+				direction: 'condition-dependent',
+				statement: 'The source reports a condition-specific association.'
+			}
+		]);
+		expect(analysis.understanding?.presentation.summary.primary_finding_count).toBe(1);
+		expect(analysis.understanding?.presentation.summary.review_queue_finding_count).toBe(1);
+		expect(analysis.understanding?.presentation.primary_findings.map((item) => item.finding_id)).toEqual([
+			'finding_claim_1'
+		]);
+		expect(
+			analysis.understanding?.presentation.review_queue_findings.map((item) => item.finding_id)
+		).toEqual(['finding_claim_review']);
+		expect(analysis.understanding?.evidence_refs[0].evidence_role).toBe('direct_support');
+		expect(analysis.understanding?.presentation.evidence_items[0].evidence_role).toBe(
+			'direct_support'
+		);
+		expect(
+			analysis.understanding?.presentation.evidence_items[0].table_audit?.relevant_rows
+		).toEqual([
+			{ row_index: 1, cells: ['As built', '450', '12'], aligned: true },
+			{ row_index: 2, cells: ['Parsed short row', '470'], aligned: false }
+		]);
+	});
+
 	it('posts research understanding feedback through the same-origin collection contract', async () => {
 		requestJson.mockResolvedValueOnce({
 			feedback_id: 'ruf_1',
 			collection_id: 'col_123',
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			review_status: 'incorrect',
 			issue_type: 'evidence_not_grounded',
@@ -290,6 +671,7 @@ describe('research view shared helpers', () => {
 		const feedback = await createResearchUnderstandingFeedback('col_123', {
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			review_status: 'incorrect',
 			issue_type: 'evidence_not_grounded',
@@ -304,6 +686,7 @@ describe('research view shared helpers', () => {
 				body: JSON.stringify({
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					review_status: 'incorrect',
 					issue_type: 'evidence_not_grounded',
@@ -315,6 +698,79 @@ describe('research view shared helpers', () => {
 		expect(feedback.feedback_id).toBe('ruf_1');
 	});
 
+	it('posts research understanding review decisions through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			status: 'pass',
+			dry_run: true,
+			total_rows: 1,
+			written_count: 0,
+			skipped_count: 0,
+			counts: { accept: 1 },
+			errors: [],
+			warnings: [],
+			review_progress: { ready_to_write: true },
+			decision_progress_by_goal: [],
+			affected_goals: [],
+			readiness_summary: {}
+		});
+
+		const payload = {
+			dry_run: true,
+			fail_on_warnings: true,
+			rows: [
+				{
+					goal_id: 'goal_1',
+					finding_id: 'finding_1',
+					action: 'accept'
+				}
+			]
+		};
+		const summary = await importResearchUnderstandingReviewDecisions('col 123', payload);
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col%20123/research-understanding/review-decisions/import',
+			{
+				method: 'POST',
+				body: JSON.stringify(payload)
+			}
+		);
+		expect(summary.review_progress.ready_to_write).toBe(true);
+	});
+
+	it('posts decision board TSV review imports through the same-origin collection contract', async () => {
+		requestJson.mockResolvedValueOnce({
+			status: 'pass',
+			dry_run: true,
+			total_rows: 1,
+			written_count: 0,
+			skipped_count: 0,
+			counts: { correct: 1 },
+			errors: [],
+			warnings: [],
+			review_progress: { ready_to_write: true },
+			decision_progress_by_goal: [],
+			affected_goals: [],
+			readiness_summary: {}
+		});
+
+		const payload = {
+			dry_run: true,
+			fail_on_warnings: true,
+			decision_board_tsv:
+				'expert_action\tcollection_id\tgoal_id\tfinding_id\ncorrect\tcol 123\tgoal_1\tfinding_1\n'
+		};
+		const summary = await importResearchUnderstandingReviewDecisions('col 123', payload);
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col%20123/research-understanding/review-decisions/import',
+			{
+				method: 'POST',
+				body: JSON.stringify(payload)
+			}
+		);
+		expect(summary.counts.correct).toBe(1);
+	});
+
 	it('lists research understanding feedback through the same-origin collection contract', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
@@ -324,6 +780,7 @@ describe('research view shared helpers', () => {
 					collection_id: 'col_123',
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					review_status: 'incorrect',
 					issue_type: 'evidence_not_grounded',
@@ -352,6 +809,7 @@ describe('research view shared helpers', () => {
 			collection_id: 'col_123',
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			curated_claim_type: 'mechanism',
 			curated_status: 'limited',
@@ -366,6 +824,7 @@ describe('research view shared helpers', () => {
 		const curation = await createResearchUnderstandingCuration('col_123', {
 			scope_type: 'objective',
 			scope_id: 'obj_1',
+			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			curated_claim_type: 'mechanism',
 			curated_status: 'limited',
@@ -383,6 +842,7 @@ describe('research view shared helpers', () => {
 				body: JSON.stringify({
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					curated_claim_type: 'mechanism',
 					curated_status: 'limited',
@@ -406,6 +866,7 @@ describe('research view shared helpers', () => {
 					collection_id: 'col_123',
 					scope_type: 'objective',
 					scope_id: 'obj_1',
+					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					curated_claim_type: 'mechanism',
 					curated_status: 'limited',
@@ -442,11 +903,11 @@ describe('research view shared helpers', () => {
 			item_count: 1,
 			items: [
 				{
-					gold_item_id: 'gold_claim_1',
+					gold_item_id: 'gold_finding_1',
 					document_id: '',
-					family: 'research_understanding_claims',
-					item_key: 'objective:obj_1:claim_1',
-					payload: { claim_id: 'claim_1', claim_type: 'mechanism' },
+					family: 'research_understanding_findings',
+					item_key: 'objective:obj_1:finding_1',
+					payload: { finding_id: 'finding_1', claim_id: 'claim_1', claim_type: 'mechanism' },
 					evidence_refs: [{ evidence_ref_id: 'ev_1' }],
 					metadata: { curation_id: 'ruc_1' }
 				}
@@ -462,7 +923,270 @@ describe('research view shared helpers', () => {
 			'/collections/col_123/research-understanding/gold-draft?scope_type=objective&scope_id=obj_1'
 		);
 		expect(draft.item_count).toBe(1);
-		expect(draft.items[0].family).toBe('research_understanding_claims');
+		expect(draft.items[0].family).toBe('research_understanding_findings');
+	});
+
+	it('normalizes research understanding dataset review risk summaries', async () => {
+		requestJson.mockResolvedValueOnce({
+			schema_version: 'research_understanding_dataset.v1',
+			dataset_id: 'rud_col_123_goal_goal_1',
+			collection_id: 'col_123',
+			scope_type: 'goal',
+			scope_id: 'goal_1',
+			task_type: 'research_understanding_finding',
+			metric_profile: 'research_understanding_finding.v1',
+			label_status_filter: null,
+			dataset_use_status_filter: null,
+			item_count: 2,
+			label_counts: {
+				candidate: 2,
+				silver: 0,
+				gold: 0,
+				rejected: 0
+			},
+			quality_summary: {
+				training_ready_sample_count: 0,
+				training_message_sample_count: 0,
+				protocol_ready_sample_count: 1,
+				review_candidate_sample_count: 2,
+				next_review_finding_id: 'finding_1',
+				by_dataset_use_status: {
+					training_ready: 0,
+					review_candidate: 2,
+					rejected: 0
+				},
+				by_presentation_bucket: {
+					primary: 1,
+					review_queue: 1
+				},
+				by_error_category: {
+					unreviewed: 2
+				},
+				by_review_reason: {
+					single_paper_evidence: 2,
+					partial_support: 1
+				},
+				by_system_warning: {
+					table_row_alignment_uncertain: 1
+				},
+				by_review_candidate_reason: {
+					single_paper_evidence: 1
+				},
+				by_review_candidate_warning: {
+					table_row_alignment_uncertain: 1
+				},
+				optimization_breakdown: {
+					by_variable: {
+						'scan speed': {
+							issue_type: {
+								wrong_direction: 1,
+								none: 0
+							},
+							error_category: {
+								direction_error: 1
+							},
+							review_candidate_reason: {
+								table_row_needs_expert_review: 1
+							},
+							system_warning: {
+								table_row_alignment_uncertain: 1
+							}
+						}
+					},
+					by_evidence_role: {
+						table_row: {
+							issue_type: {},
+							error_category: {},
+							review_candidate_reason: {
+								table_row_needs_expert_review: 1
+							},
+							system_warning: {
+								table_row_alignment_uncertain: 1
+							}
+						}
+					}
+				},
+				top_error_categories: [{ name: 'unreviewed', count: 2 }],
+				top_issue_types: [{ name: 'unreviewed', count: 2 }],
+				top_review_reasons: [
+					{ name: 'single_paper_evidence', count: 2 },
+					{ name: 'partial_support', count: 1 }
+				],
+				top_system_warnings: [{ name: 'table_row_alignment_uncertain', count: 1 }],
+				top_variable_issue_types: [
+					{ name: 'scan speed', metric: 'wrong_direction', count: 1 }
+				],
+				top_outcome_issue_types: [{ name: 'density', metric: 'wrong_direction', count: 1 }],
+				top_direction_issue_types: [
+					{ name: 'condition-dependent', metric: 'wrong_direction', count: 1 }
+				],
+				top_evidence_role_issue_types: [
+					{ name: 'table_row', metric: 'wrong_direction', count: 1 }
+				],
+				top_variable_review_reasons: [
+					{ name: 'scan speed', metric: 'table_row_needs_expert_review', count: 1 }
+				],
+				top_outcome_review_reasons: [
+					{ name: 'density', metric: 'table_row_needs_expert_review', count: 1 }
+				],
+				top_direction_review_reasons: [
+					{
+						name: 'condition-dependent',
+						metric: 'table_row_needs_expert_review',
+						count: 1
+					}
+				],
+				top_evidence_role_review_reasons: [
+					{ name: 'table_row', metric: 'table_row_needs_expert_review', count: 1 }
+				]
+			},
+			items: [
+					{
+						sample_id: 'sample_1',
+						finding_id: 'finding_1',
+						claim_id: 'claim_1',
+						label_status: 'silver',
+						dataset_use_status: 'review_candidate',
+					review_action: {
+						code: 'verify_table_rows',
+						label: 'verify parsed table rows before accepting or correcting'
+					},
+					protocol_readiness: {
+						status: 'ready_after_review',
+						ready_after_review: true,
+						missing: ['expert_review_decision'],
+						blocking_missing: [],
+						checks: {
+							expert_review_decision: false,
+							statement: true,
+							variables: true
+						},
+						guidance: 'accept or correct before protocol use'
+					},
+							acceptance_gate: {
+								status: 'review_required',
+								accept_allowed: true,
+							requires_correction: false,
+							blocking_missing: [],
+							accept_blockers: [
+								'verify_table_rows',
+								'table_row_alignment_uncertain'
+							],
+							review_checks: ['Confirm paper-level scope.'],
+								recommended_action_code: 'verify_table_rows',
+								guidance: 'Accept only after checking source evidence.'
+						},
+						review_decision_hint: {
+							summary: 'Verify parsed table rows before accepting.',
+							preferred_next_action: 'verify_then_accept_or_correct',
+							allowed_actions: ['accept', 'reject', 'correct', 'skip'],
+							blocked_actions: [],
+							why_accept_blocked: [],
+							required_checks: ['Confirm paper-level scope.'],
+							import_note: 'accept imports only after the reviewer changes action from skip'
+						},
+						metadata: {
+							training_message_diagnostic: ['missing_message_pair']
+					}
+				}
+			],
+			warnings: []
+		});
+
+		const dataset = await fetchResearchUnderstandingDataset('col_123', {
+			scope_type: 'goal',
+			scope_id: 'goal_1'
+		});
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1'
+		);
+		expect(dataset.quality_summary.by_review_reason).toEqual({
+			single_paper_evidence: 2,
+			partial_support: 1
+		});
+		expect(dataset.quality_summary.protocol_ready_sample_count).toBe(1);
+		expect(dataset.quality_summary.by_system_warning).toEqual({
+			table_row_alignment_uncertain: 1
+		});
+		expect(dataset.quality_summary.by_review_candidate_reason).toEqual({
+			single_paper_evidence: 1
+		});
+		expect(dataset.quality_summary.by_review_candidate_warning).toEqual({
+			table_row_alignment_uncertain: 1
+		});
+		expect(dataset.quality_summary.top_review_reasons).toEqual([
+			{ name: 'single_paper_evidence', count: 2 },
+			{ name: 'partial_support', count: 1 }
+		]);
+		expect(dataset.quality_summary.top_system_warnings).toEqual([
+			{ name: 'table_row_alignment_uncertain', count: 1 }
+		]);
+		expect(dataset.quality_summary.optimization_breakdown.by_variable['scan speed']).toEqual({
+			issue_type: {
+				wrong_direction: 1
+			},
+			error_category: {
+				direction_error: 1
+			},
+			review_candidate_reason: {
+				table_row_needs_expert_review: 1
+			},
+			system_warning: {
+				table_row_alignment_uncertain: 1
+			}
+		});
+		expect(dataset.quality_summary.top_variable_issue_types).toEqual([
+			{ name: 'scan speed', metric: 'wrong_direction', count: 1 }
+		]);
+		expect(dataset.quality_summary.top_evidence_role_review_reasons).toEqual([
+			{ name: 'table_row', metric: 'table_row_needs_expert_review', count: 1 }
+		]);
+		expect(dataset.items[0]).toMatchObject({
+			sample_id: 'sample_1',
+			finding_id: 'finding_1',
+			claim_id: 'claim_1',
+			label_status: 'silver',
+			dataset_use_status: 'review_candidate',
+			review_action: {
+				code: 'verify_table_rows',
+				label: 'verify parsed table rows before accepting or correcting'
+			},
+			protocol_readiness: {
+				status: 'ready_after_review',
+				ready_after_review: true,
+				missing: ['expert_review_decision'],
+				blocking_missing: [],
+				checks: {
+					expert_review_decision: false,
+					statement: true,
+					variables: true
+				},
+				guidance: 'accept or correct before protocol use'
+			},
+					acceptance_gate: {
+						status: 'review_required',
+						accept_allowed: true,
+					requires_correction: false,
+					blocking_missing: [],
+					accept_blockers: ['verify_table_rows', 'table_row_alignment_uncertain'],
+						review_checks: ['Confirm paper-level scope.'],
+						recommended_action_code: 'verify_table_rows',
+						guidance: 'Accept only after checking source evidence.'
+				},
+				review_decision_hint: {
+					summary: 'Verify parsed table rows before accepting.',
+					preferred_next_action: 'verify_then_accept_or_correct',
+					allowed_actions: ['accept', 'reject', 'correct', 'skip'],
+					blocked_actions: [],
+					why_accept_blocked: [],
+					required_checks: ['Confirm paper-level scope.'],
+					import_note: 'accept imports only after the reviewer changes action from skip'
+				},
+				metadata: {
+					training_message_diagnostic: ['missing_message_pair']
+			}
+		});
 	});
 
 	it('shortens long internal identifiers for display fallback', () => {

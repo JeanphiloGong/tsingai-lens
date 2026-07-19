@@ -2,21 +2,29 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
-from domain.source import ArtifactStatusRecord, CollectionRecord, empty_import_manifest
+from domain.ports import CollectionPaths, CollectionRepository
+from domain.source import (
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+    empty_import_manifest,
+)
+from domain.source.ports import ObjectStore
+from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.file.object_store import FileObjectStore
 from infra.source.ingestion import (
     NormalizedImportBatch,
+    NormalizedImportDocument,
     SourceAdapter,
     SourceAdapterRequest,
     normalize_upload,
-)
-from infra.persistence.factory import (
-    build_artifact_repository,
-    build_collection_repository,
 )
 
 
@@ -43,26 +51,21 @@ class DocumentSourceUnavailableError(RuntimeError):
 
 
 class CollectionService:
-    """File-backed collection registry for the application layer."""
+    """Application operations over collection metadata and its file workspace."""
 
     def __init__(
         self,
-        root_dir: Path | None = None,
-        repository: CollectionRepository | None = None,
-        artifact_repository: ArtifactRepository | None = None,
+        repository: CollectionRepository,
+        workspace: FileCollectionWorkspace,
+        object_store: ObjectStore | None = None,
     ) -> None:
-        self.repository = repository or build_collection_repository(root_dir)
-        self.artifact_repository = (
-            artifact_repository
-            or build_artifact_repository(
-                self.repository.root_dir,
-                backend=self.repository.backend_name,
-            )
-        )
-        self.root_dir = self.repository.root_dir
+        self.repository = repository
+        self.workspace = workspace
+        self.root_dir = self.workspace.root_dir
+        self.object_store = object_store or FileObjectStore(self.root_dir)
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
-        return self.repository.get_paths(collection_id)
+        return self.workspace.get_paths(collection_id)
 
     # define a method for creating a document collection
     def create_collection(
@@ -79,45 +82,26 @@ class CollectionService:
             name=name,
             description=description,
             now_iso=now,
-        ).to_record()
-        paths = self.repository.create_collection_dirs(collection_id)
-        self.repository.write_collection(collection_id, record)
-        self.repository.write_files(collection_id, [])
-        self.artifact_repository.write(
-            collection_id,
-            ArtifactStatusRecord.empty(
-                collection_id=collection_id,
-                output_path=str(paths.output_dir),
-                updated_at=now,
-            ).to_record(),
         )
-        return record
+        self.workspace.create_collection_dirs(collection_id)
+        try:
+            self.repository.add_collection(record)
+        except Exception:
+            self.workspace.delete_collection_dir(collection_id)
+            raise
+        return record.to_record()
 
     def list_collections(self, owner_user_id: str | None = None) -> list[dict]:
-        items: list[dict] = []
-        for collection_id, record in self.repository.list_collection_records():
-            record = CollectionRecord.from_mapping(
-                record,
-                collection_id,
-                now_iso=_now_iso(),
-            ).to_record()
-            if owner_user_id is not None and record["owner_user_id"] != owner_user_id:
-                continue
-            items.append(record)
-        return items
+        return [
+            record.to_record()
+            for record in self.repository.list_collections(owner_user_id)
+        ]
 
     def get_collection(self, collection_id: str) -> dict:
         record = self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        normalized = CollectionRecord.from_mapping(
-            record,
-            collection_id,
-            now_iso=_now_iso(),
-        ).to_record()
-        if normalized != record:
-            self.repository.write_collection(collection_id, normalized)
-        return normalized
+        return record.to_record()
 
     def get_collection_for_user(self, collection_id: str, owner_user_id: str) -> dict:
         record = self.get_collection(collection_id)
@@ -133,14 +117,15 @@ class CollectionService:
             record,
             collection_id,
             now_iso=record["updated_at"],
-        ).to_record()
-        self.repository.write_collection(collection_id, normalized)
-        return normalized
+        )
+        if not self.repository.update_collection(normalized):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        return normalized.to_record()
 
     def delete_collection(self, collection_id: str) -> dict:
         paths = self.get_paths(collection_id)
         target_dir = paths.collection_dir
-        if not self.repository.collection_exists(collection_id):
+        if self.repository.read_collection(collection_id) is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
 
         resolved_root = self.root_dir.resolve()
@@ -152,27 +137,48 @@ class CollectionService:
         if target_dir.is_symlink():
             raise ValueError("collection path cannot be a symlink")
 
-        self.repository.delete_collection_dir(collection_id)
+        for record in self.repository.list_collection_files(collection_id):
+            storage_key = self._optional_text(record.storage_key)
+            stored_filename = self._optional_text(record.stored_filename)
+            if (
+                not storage_key
+                or not stored_filename
+                or storage_key
+                != self._input_storage_key(collection_id, stored_filename)
+            ):
+                raise ValueError("invalid collection object key")
+        if not self.repository.delete_collection(collection_id):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.workspace.delete_collection_dir(collection_id)
         return {
             "collection_id": collection_id,
             "deleted_at": _now_iso(),
         }
 
-    def delete_collection_for_user(self, collection_id: str, owner_user_id: str) -> dict:
+    def delete_collection_for_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> dict:
         self.get_collection_for_user(collection_id, owner_user_id)
         return self.delete_collection(collection_id)
 
     def list_files(self, collection_id: str) -> list[dict]:
-        files = self.repository.read_files(collection_id)
-        if files is None:
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        return files
+        self.get_collection(collection_id)
+        return [
+            record.to_record()
+            for record in self.repository.list_collection_files(collection_id)
+        ]
 
     def get_import_manifest(self, collection_id: str) -> dict[str, Any]:
         self.get_collection(collection_id)
-        manifest = self.repository.read_import_manifest(collection_id)
-        if manifest is None:
-            return empty_import_manifest(collection_id)
+        manifest = empty_import_manifest(collection_id)
+        manifest["handoffs"] = [
+            record.to_record()
+            for record in self.repository.list_collection_handoffs(collection_id)
+        ]
+        manifest["imports"] = [
+            record.to_record()
+            for record in self.repository.list_collection_imports(collection_id)
+        ]
         return manifest
 
     def resolve_document_source_file(
@@ -183,13 +189,12 @@ class CollectionService:
         source_filename: str | None = None,
     ) -> dict[str, Any]:
         self.get_collection(collection_id)
-        paths = self.repository.get_paths(collection_id)
         document_key = str(document_id or "").strip()
         if not document_key:
             raise DocumentSourceUnavailableError(collection_id, document_key)
 
         match_keys = self._source_match_keys(document_key, source_filename)
-        manifest = self.repository.read_import_manifest(collection_id) or {}
+        manifest = self.get_import_manifest(collection_id)
         manifest_documents = self._iter_manifest_documents(manifest)
         for document in manifest_documents:
             if self._source_document_record_matches(document, match_keys):
@@ -197,12 +202,11 @@ class CollectionService:
                     collection_id=collection_id,
                     document_id=document_key,
                     record=document,
-                    paths=paths,
                 )
 
         file_matches = [
             record
-            for record in self.repository.read_files(collection_id) or []
+            for record in self.list_files(collection_id)
             if self._source_file_record_matches(record, match_keys)
         ]
         if len(file_matches) == 1:
@@ -210,7 +214,6 @@ class CollectionService:
                 collection_id=collection_id,
                 document_id=document_key,
                 record=file_matches[0],
-                paths=paths,
             )
         if len(file_matches) > 1:
             raise DocumentSourceUnavailableError(
@@ -220,7 +223,9 @@ class CollectionService:
                 message="More than one stored source file matches this document.",
             )
         if manifest_documents:
-            raise FileNotFoundError(f"document not found: {collection_id}/{document_key}")
+            raise FileNotFoundError(
+                f"document not found: {collection_id}/{document_key}"
+            )
         raise DocumentSourceUnavailableError(collection_id, document_key)
 
     def register_goal_brief_handoff(
@@ -232,21 +237,20 @@ class CollectionService:
         source_channels: list[str] | None = None,
     ) -> dict[str, Any]:
         self.get_collection(collection_id)
-        manifest = self.get_import_manifest(collection_id)
-        handoff = {
-            "handoff_id": f"handoff_{uuid4().hex[:12]}",
-            "kind": "goal_brief",
-            "status": "awaiting_source_material",
-            "created_at": _now_iso(),
-            "source_channels": list(source_channels or ["upload"]),
-            "goal_context": {
+        handoff = CollectionHandoffRecord(
+            handoff_id=f"handoff_{uuid4().hex[:12]}",
+            collection_id=collection_id,
+            kind="goal_brief",
+            status="awaiting_source_material",
+            created_at=_now_iso(),
+            source_channels=tuple(source_channels or ["upload"]),
+            goal_context={
                 "research_brief": dict(research_brief),
                 "coverage_assessment": dict(coverage_assessment),
             },
-        }
-        manifest["handoffs"].append(handoff)
-        self.repository.write_import_manifest(collection_id, manifest)
-        return handoff
+        )
+        self.repository.add_collection_handoff(handoff)
+        return handoff.to_record()
 
     def import_from_adapter(
         self,
@@ -258,8 +262,7 @@ class CollectionService:
         max_documents: int | None = None,
         constraints: dict[str, Any] | None = None,
     ) -> list[dict]:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.get_collection(collection_id)
 
         request = SourceAdapterRequest(
             collection_id=collection_id,
@@ -277,55 +280,65 @@ class CollectionService:
         collection_id: str,
         batch: NormalizedImportBatch,
     ) -> list[dict]:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.get_collection(collection_id)
         if not batch.documents:
-            raise ValueError("normalized import batch must include at least one document")
+            raise ValueError(
+                "normalized import batch must include at least one document"
+            )
 
-        files = self.repository.read_files(collection_id) or []
         text_by_source_document = self._group_text_units(batch)
-        created_records: list[dict] = []
-        paths = self.repository.get_paths(collection_id)
+        created_files: list[CollectionFileRecord] = []
 
-        for document in batch.documents:
-            stored_filename = document.stored_filename or f"{uuid4().hex}_{Path(document.original_filename).name}"
-            payload = self._build_import_payload(
-                document=document,
-                source_document_id=document.source_document_id,
-                text_by_source_document=text_by_source_document,
-            )
-            stored_path = self.repository.write_input_file(
-                collection_id,
-                stored_filename,
-                payload,
-            )
-            created_records.append(
-                {
-                    "file_id": f"file_{uuid4().hex[:12]}",
-                    "collection_id": collection_id,
-                    "original_filename": document.original_filename,
-                    "stored_filename": stored_filename,
-                    "stored_path": str(stored_path),
-                    "media_type": document.media_type,
-                    "status": "stored",
-                    "size_bytes": len(payload),
-                    "created_at": _now_iso(),
-                }
-            )
-
-        files.extend(created_records)
-        self.repository.write_files(collection_id, files)
-        manifest = self.get_import_manifest(collection_id)
-        manifest["imports"].append(
-            self._build_manifest_import_entry(
-                collection_dir=paths.collection_dir,
+        try:
+            for document in batch.documents:
+                stored_filename = document.stored_filename or (
+                    f"{uuid4().hex}_{Path(document.original_filename).name}"
+                )
+                payload = self._build_import_payload(
+                    document=document,
+                    source_document_id=document.source_document_id,
+                    text_by_source_document=text_by_source_document,
+                )
+                storage_key = self._input_storage_key(collection_id, stored_filename)
+                payload_sha256 = sha256(payload).hexdigest()
+                self.object_store.write(storage_key, payload, payload_sha256)
+                created_files.append(
+                    CollectionFileRecord(
+                        file_id=f"file_{uuid4().hex[:12]}",
+                        collection_id=collection_id,
+                        object_id=f"obj_{uuid4().hex[:12]}",
+                        object_kind="source_input",
+                        original_filename=document.original_filename,
+                        stored_filename=stored_filename,
+                        storage_key=storage_key,
+                        sha256=payload_sha256,
+                        media_type=document.media_type,
+                        status="stored",
+                        size_bytes=len(payload),
+                        created_at=_now_iso(),
+                    )
+                )
+            import_record = self._build_import_record(
                 batch=batch,
-                created_records=created_records,
+                created_files=created_files,
             )
-        )
-        self.repository.write_import_manifest(collection_id, manifest)
-        self.update_collection(collection_id, paper_count=len(files), status="ready")
-        return created_records
+            self.repository.add_collection_import(
+                import_record,
+                updated_at=_now_iso(),
+            )
+        except Exception:
+            try:
+                registered_keys = {
+                    record.storage_key
+                    for record in self.repository.list_collection_files(collection_id)
+                }
+            except Exception:
+                registered_keys = {record.storage_key for record in created_files}
+            for record in created_files:
+                if record.storage_key not in registered_keys:
+                    self.object_store.delete(record.storage_key)
+            raise
+        return [record.to_record() for record in created_files]
 
     def add_file(
         self,
@@ -334,8 +347,7 @@ class CollectionService:
         content: bytes,
         media_type: str | None = None,
     ) -> dict:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.get_collection(collection_id)
         batch = normalize_upload(
             filename=filename,
             content=content,
@@ -345,6 +357,9 @@ class CollectionService:
         if not imported:
             raise ValueError("normalized upload produced no importable documents")
         return imported[0]
+
+    def _input_storage_key(self, collection_id: str, stored_filename: str) -> str:
+        return f"{collection_id}/input/{stored_filename}"
 
     def _group_text_units(
         self,
@@ -357,8 +372,7 @@ class CollectionService:
             )
         return {
             source_document_id: [
-                text
-                for _, text in sorted(items, key=lambda item: item[0])
+                text for _, text in sorted(items, key=lambda item: item[0])
             ]
             for source_document_id, items in grouped.items()
         }
@@ -397,23 +411,33 @@ class CollectionService:
         expected_adapter_version = getattr(adapter, "adapter_version", None)
 
         if expected_channel and batch.source_metadata.channel != expected_channel:
-            raise ValueError("source adapter batch channel does not match adapter contract")
-        if expected_adapter_name and batch.source_metadata.adapter_name != expected_adapter_name:
-            raise ValueError("source adapter batch adapter_name does not match adapter contract")
+            raise ValueError(
+                "source adapter batch channel does not match adapter contract"
+            )
+        if (
+            expected_adapter_name
+            and batch.source_metadata.adapter_name != expected_adapter_name
+        ):
+            raise ValueError(
+                "source adapter batch adapter_name does not match adapter contract"
+            )
         if expected_adapter_version is not None and (
             batch.source_metadata.adapter_version != expected_adapter_version
         ):
-            raise ValueError("source adapter batch adapter_version does not match adapter contract")
+            raise ValueError(
+                "source adapter batch adapter_version does not match adapter contract"
+            )
 
-    def _build_manifest_import_entry(
+    def _build_import_record(
         self,
         *,
-        collection_dir: Path,
         batch: NormalizedImportBatch,
-        created_records: list[dict],
-    ) -> dict[str, Any]:
-        if len(created_records) != len(batch.documents):
-            raise ValueError("normalized import record count does not match document count")
+        created_files: list[CollectionFileRecord],
+    ) -> CollectionImportRecord:
+        if len(created_files) != len(batch.documents):
+            raise ValueError(
+                "normalized import record count does not match document count"
+            )
         text_units_by_source_document: dict[str, list[dict[str, Any]]] = {}
         for text_unit in batch.text_units:
             text_units_by_source_document.setdefault(
@@ -428,50 +452,47 @@ class CollectionService:
                 }
             )
 
-        documents: list[dict[str, Any]] = []
-        for document, record in zip(batch.documents, created_records):
-            stored_path = Path(str(record["stored_path"])).resolve()
-            try:
-                storage_relpath = str(stored_path.relative_to(collection_dir))
-            except ValueError:
-                storage_relpath = document.storage_relpath
+        documents: list[CollectionImportDocumentRecord] = []
+        for document, file_record in zip(batch.documents, created_files):
             documents.append(
-                {
-                    "source_document_id": document.source_document_id,
-                    "origin_channel": document.origin_channel,
-                    "original_filename": document.original_filename,
-                    "stored_filename": record["stored_filename"],
-                    "stored_path": str(stored_path),
-                    "storage_relpath": storage_relpath,
-                    "media_type": record.get("media_type"),
-                    "checksum": document.checksum,
-                    "language": document.language,
-                    "ingest_status": document.ingest_status,
-                    "text_units": sorted(
-                        text_units_by_source_document.get(
-                            document.source_document_id,
-                            [],
-                        ),
-                        key=lambda item: item["sequence"],
+                CollectionImportDocumentRecord(
+                    source_document_id=document.source_document_id,
+                    origin_channel=document.origin_channel,
+                    file=file_record,
+                    language=document.language,
+                    ingest_status=document.ingest_status,
+                    text_units=tuple(
+                        sorted(
+                            text_units_by_source_document.get(
+                                document.source_document_id,
+                                [],
+                            ),
+                            key=lambda item: item["sequence"],
+                        )
                     ),
-                }
+                )
             )
 
-        return {
-            "import_id": f"imp_{uuid4().hex[:12]}",
-            "channel": batch.source_metadata.channel,
-            "adapter_name": batch.source_metadata.adapter_name,
-            "adapter_version": batch.source_metadata.adapter_version,
-            "raw_locator": batch.source_metadata.raw_locator,
-            "goal_context": dict(batch.source_metadata.goal_context)
-            if batch.source_metadata.goal_context
-            else None,
-            "warnings": list(batch.source_metadata.warnings),
-            "ingested_at": batch.source_metadata.ingested_at,
-            "documents": documents,
-        }
+        return CollectionImportRecord(
+            import_id=f"imp_{uuid4().hex[:12]}",
+            collection_id=created_files[0].collection_id,
+            channel=batch.source_metadata.channel,
+            adapter_name=batch.source_metadata.adapter_name,
+            adapter_version=batch.source_metadata.adapter_version,
+            raw_locator=batch.source_metadata.raw_locator,
+            goal_context=(
+                dict(batch.source_metadata.goal_context)
+                if batch.source_metadata.goal_context
+                else None
+            ),
+            warnings=tuple(batch.source_metadata.warnings),
+            ingested_at=batch.source_metadata.ingested_at,
+            documents=tuple(documents),
+        )
 
-    def _iter_manifest_documents(self, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    def _iter_manifest_documents(
+        self, manifest: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
         imports = manifest.get("imports")
         if not isinstance(imports, list):
@@ -483,9 +504,7 @@ class CollectionService:
             if not isinstance(import_documents, list):
                 continue
             documents.extend(
-                document
-                for document in import_documents
-                if isinstance(document, dict)
+                document for document in import_documents if isinstance(document, dict)
             )
         return documents
 
@@ -499,9 +518,13 @@ class CollectionService:
             record.get("document_id"),
             record.get("original_filename"),
             record.get("stored_filename"),
-            Path(str(record.get("stored_path") or "")).name,
+            record.get("storage_key"),
+            Path(str(record.get("storage_key") or "")).name,
         )
-        return any(self._source_match_value(candidate) in match_keys for candidate in candidates)
+        return any(
+            self._source_match_value(candidate) in match_keys
+            for candidate in candidates
+        )
 
     def _source_document_record_matches(
         self,
@@ -512,11 +535,13 @@ class CollectionService:
             record.get("source_document_id"),
             record.get("original_filename"),
             record.get("stored_filename"),
-            record.get("storage_relpath"),
-            Path(str(record.get("storage_relpath") or "")).name,
-            Path(str(record.get("stored_path") or "")).name,
+            record.get("storage_key"),
+            Path(str(record.get("storage_key") or "")).name,
         )
-        return any(self._source_match_value(candidate) in match_keys for candidate in candidates)
+        return any(
+            self._source_match_value(candidate) in match_keys
+            for candidate in candidates
+        )
 
     def _source_match_keys(
         self,
@@ -539,83 +564,51 @@ class CollectionService:
         collection_id: str,
         document_id: str,
         record: dict[str, Any],
-        paths: CollectionPaths,
     ) -> dict[str, Any]:
-        path = self._resolve_source_record_path(
-            collection_id=collection_id,
-            document_id=document_id,
-            record=record,
-            paths=paths,
-        )
-        filename = (
-            self._optional_text(record.get("original_filename"))
-            or self._optional_text(record.get("stored_filename"))
-            or path.name
-        )
-        return {
-            "path": path,
-            "filename": filename,
-            "media_type": self._optional_text(record.get("media_type")),
-            "source_document_id": self._optional_text(record.get("source_document_id"))
-            or document_id,
-        }
-
-    def _resolve_source_record_path(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        record: dict[str, Any],
-        paths: CollectionPaths,
-    ) -> Path:
-        candidates: list[Path] = []
-        storage_relpath = self._optional_text(record.get("storage_relpath"))
-        if storage_relpath:
-            relpath = Path(storage_relpath)
-            candidates.append(
-                relpath if relpath.is_absolute() else paths.collection_dir / relpath
-            )
-
-        stored_path = self._optional_text(record.get("stored_path"))
-        if stored_path:
-            candidates.append(Path(stored_path))
-
+        storage_key = self._optional_text(record.get("storage_key"))
+        expected_sha256 = self._optional_text(record.get("sha256"))
+        if not storage_key or not expected_sha256:
+            raise DocumentSourceUnavailableError(collection_id, document_id)
         stored_filename = self._optional_text(record.get("stored_filename"))
-        if stored_filename:
-            candidates.append(paths.input_dir / Path(stored_filename).name)
-
-        for candidate in candidates:
-            resolved = self._validate_collection_input_path(
-                collection_id=collection_id,
-                document_id=document_id,
-                candidate=candidate,
-                paths=paths,
-            )
-            if resolved.is_file():
-                return resolved
-
-        raise DocumentSourceUnavailableError(collection_id, document_id)
-
-    def _validate_collection_input_path(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        candidate: Path,
-        paths: CollectionPaths,
-    ) -> Path:
-        resolved = candidate.expanduser().resolve()
-        try:
-            resolved.relative_to(paths.collection_dir.resolve())
-            resolved.relative_to(paths.input_dir.resolve())
-        except ValueError as exc:
+        if not stored_filename or storage_key != self._input_storage_key(
+            collection_id, stored_filename
+        ):
             raise DocumentSourceUnavailableError(
                 collection_id,
                 document_id,
                 code="document_source_path_invalid",
                 message="The stored source file path is not safe to serve.",
+            )
+        try:
+            content = self.object_store.read(storage_key, expected_sha256)
+        except FileNotFoundError as exc:
+            raise DocumentSourceUnavailableError(collection_id, document_id) from exc
+        except ValueError as exc:
+            if str(exc) == "invalid storage key":
+                raise DocumentSourceUnavailableError(
+                    collection_id,
+                    document_id,
+                    code="document_source_path_invalid",
+                    message="The stored source file path is not safe to serve.",
+                ) from exc
+            raise DocumentSourceUnavailableError(
+                collection_id,
+                document_id,
+                code="document_source_integrity_failed",
+                message="The stored source file failed its integrity check.",
             ) from exc
-        return resolved
+        filename = (
+            self._optional_text(record.get("original_filename"))
+            or stored_filename
+            or Path(storage_key).name
+        )
+        return {
+            "content": content,
+            "filename": filename,
+            "media_type": self._optional_text(record.get("media_type")),
+            "source_document_id": self._optional_text(record.get("source_document_id"))
+            or document_id,
+        }
 
     def _optional_text(self, value: Any) -> str | None:
         if value is None:

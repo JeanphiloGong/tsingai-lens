@@ -8,10 +8,14 @@ from application.evaluation.prediction_snapshot_service import (
 from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
+from application.evaluation.research_understanding_review_import_service import (
+    ResearchUnderstandingReviewImportService,
+)
 
 __all__ = [
     "CoreEvaluationService",
     "EvaluationGoldService",
     "EvaluationPredictionSnapshotService",
     "ResearchUnderstandingFeedbackService",
+    "ResearchUnderstandingReviewImportService",
 ]

@@ -24,6 +24,16 @@ from domain.core.research_objective import (
 )
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
+    ArtifactVersionRecord,
+    BuildStageRecord,
+    CollectionBuildRecord,
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+    CollectionDocumentRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
@@ -34,6 +44,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    TaskRecord,
 )
 from domain.evaluation import (
     EvaluationGoldItem,
@@ -43,6 +54,7 @@ from domain.evaluation import (
     ResearchUnderstandingCuration,
     ResearchUnderstandingFeedback,
 )
+from domain.goal import ExperimentPlanRecord
 
 
 @dataclass(frozen=True)
@@ -50,65 +62,118 @@ class CollectionPaths:
     collection_dir: Path
     input_dir: Path
     output_dir: Path
-    meta_path: Path
-    files_path: Path
-    import_manifest_path: Path
-    artifacts_path: Path
 
 
 class CollectionRepository(Protocol):
-    backend_name: str
-    root_dir: Path
+    def add_collection(self, record: CollectionRecord) -> None: ...
 
-    def get_paths(self, collection_id: str) -> CollectionPaths: ...
+    def list_collections(
+        self,
+        owner_user_id: str | None = None,
+    ) -> tuple[CollectionRecord, ...]: ...
 
-    def create_collection_dirs(self, collection_id: str) -> CollectionPaths: ...
+    def read_collection(self, collection_id: str) -> CollectionRecord | None: ...
 
-    def collection_exists(self, collection_id: str) -> bool: ...
+    def update_collection(self, record: CollectionRecord) -> bool: ...
 
-    def list_collection_records(self) -> list[tuple[str, dict]]: ...
+    def add_collection_import(
+        self,
+        record: CollectionImportRecord,
+        *,
+        updated_at: str,
+    ) -> None: ...
 
-    def read_collection(self, collection_id: str) -> dict | None: ...
+    def list_collection_files(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionFileRecord, ...]: ...
 
-    def write_collection(self, collection_id: str, payload: dict) -> None: ...
+    def list_collection_imports(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionImportRecord, ...]: ...
 
-    def delete_collection_dir(self, collection_id: str) -> None: ...
+    def read_document(self, document_id: str) -> DocumentRecord | None: ...
 
-    def read_files(self, collection_id: str) -> list[dict] | None: ...
+    def read_document_version(
+        self,
+        document_version_id: str,
+    ) -> DocumentVersionRecord | None: ...
 
-    def write_files(self, collection_id: str, payload: list[dict]) -> None: ...
+    def list_collection_documents(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionDocumentRecord, ...]: ...
 
-    def read_import_manifest(self, collection_id: str) -> dict | None: ...
+    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None: ...
 
-    def write_import_manifest(self, collection_id: str, payload: dict) -> None: ...
+    def list_collection_handoffs(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionHandoffRecord, ...]: ...
 
-    def write_input_file(
-        self, collection_id: str, stored_filename: str, payload: bytes
-    ) -> Path: ...
-
-
-class TaskRepository(Protocol):
-    backend_name: str
-    root_dir: Path
-
-    def read_task(self, task_id: str) -> dict | None: ...
-
-    def write_task(self, task_id: str, payload: dict) -> None: ...
-
-    def list_tasks(self) -> list[dict]: ...
+    def delete_collection(self, collection_id: str) -> bool: ...
 
 
-class ArtifactRepository(Protocol):
-    backend_name: str
-    root_dir: Path
+class BuildRepository(Protocol):
+    def add_task(
+        self,
+        record: TaskRecord,
+        *,
+        build_id: str,
+    ) -> CollectionBuildRecord: ...
 
-    def read(self, collection_id: str) -> dict | None: ...
+    def read_task(self, task_id: str) -> TaskRecord | None: ...
 
-    def write(self, collection_id: str, payload: dict) -> None: ...
+    def list_tasks(
+        self,
+        *,
+        collection_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[TaskRecord, ...]: ...
+
+    def update_task(
+        self,
+        record: TaskRecord,
+        *,
+        stages: tuple[BuildStageRecord, ...] | None = None,
+    ) -> bool: ...
+
+    def read_build(self, task_id: str) -> CollectionBuildRecord | None: ...
+
+    def list_stages(self, task_id: str) -> tuple[BuildStageRecord, ...]: ...
+
+    def add_artifact_versions(
+        self,
+        task_id: str,
+        records: tuple[ArtifactVersionRecord, ...],
+    ) -> None: ...
+
+    def list_artifact_versions(
+        self,
+        task_id: str,
+    ) -> tuple[ArtifactVersionRecord, ...]: ...
+
+    def finish_build(
+        self,
+        record: TaskRecord,
+        *,
+        build_status: str,
+        activate: bool,
+    ) -> CollectionBuildRecord: ...
+
+    def read_active_build(
+        self,
+        collection_id: str,
+    ) -> CollectionBuildRecord | None: ...
 
 
 class GoalSessionRepository(Protocol):
     def read_session(self, session_id: str) -> dict[str, Any] | None: ...
+
+    def read_message_context(self, message_id: str) -> dict[str, Any] | None: ...
 
     def write_session(self, payload: Mapping[str, Any]) -> None: ...
 
@@ -119,6 +184,23 @@ class GoalSessionRepository(Protocol):
         session_id: str,
         messages: list[Mapping[str, Any]],
     ) -> None: ...
+
+
+class ExperimentPlanRepository(Protocol):
+    def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord: ...
+
+    def read_plan(
+        self,
+        collection_id: str,
+        goal_id: str,
+        plan_id: str,
+    ) -> ExperimentPlanRecord | None: ...
+
+    def list_plans(
+        self,
+        collection_id: str,
+        goal_id: str,
+    ) -> tuple[ExperimentPlanRecord, ...]: ...
 
 
 class SourceArtifactRepository(Protocol):
@@ -299,6 +381,7 @@ class EvaluationRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
 
@@ -312,5 +395,6 @@ class EvaluationRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
         scope_id: str | None = None,
+        finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingCuration, ...]: ...

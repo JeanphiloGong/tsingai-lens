@@ -13,7 +13,8 @@ This node owns browser-side helpers that are shared across frontend routes.
 ## Responsibilities
 
 - keep route data access consistent with the `/api/*` and `/api/v1/*` contract
-- centralize browser error handling and shared formatting logic
+- centralize browser error handling, including redirecting expired sessions to
+  login, and shared formatting logic
 - prevent route components from duplicating API and state-shaping helpers
 
 ## Important Files
@@ -30,9 +31,19 @@ This node owns browser-side helpers that are shared across frontend routes.
   research-understanding claims. Claim feedback and curations are read back by
   scope so the workbench can show saved expert review history and expert
   corrections after refresh. The same helper also reads curation-derived gold
-  drafts for evaluation handoff.
+  drafts and finding-centered dataset exports for evaluation handoff, including
+  review-decision hints that tell the workbench which accept/reject/correct
+  actions are allowed or blocked for a review candidate. Goal Findings retain
+  their synthesis status, shared and incomparable conditions, and per-paper
+  contributions so the existing detail view can explain cross-paper support
+  without adding a separate frontend resource.
 - `goalSessions.ts`
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references
+- `experimentPlans.ts`
+  Goal-scoped experiment plan draft API helper for saving and editing
+  human-reviewable protocol suggestions produced from grounded copilot answers;
+  Goal Copilot saves also carry source mode, review gate, used evidence ids,
+  and source-link counts in metadata so protocol drafts remain auditable
 - `i18n.ts`
   Shared translations and labels

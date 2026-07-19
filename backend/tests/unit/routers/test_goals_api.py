@@ -10,28 +10,29 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from application.goal.brief_service import GoalService
 from controllers.goal import intake as goals_controller
 from controllers.schemas.goal.intake import GoalIntakeRequest
 
 
-def _request(user_id: str = "local-user"):
-    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
+def _request(goal_service, user_id: str = "local-user"):
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(goal_service=goal_service)),
+        state=SimpleNamespace(current_user={"user_id": user_id}),
+    )
 
 
 @pytest.fixture()
-def goal_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+def goal_services(tmp_path):
+    collection_service = build_test_collection_service(tmp_path / "collections")
     goal_service = GoalService(collection_service)
-
-    monkeypatch.setattr(goals_controller, "goal_service", goal_service)
 
     return collection_service, goal_service
 
 
 def test_goals_route_returns_goal_contract(goal_services):
-    collection_service, _goal_service = goal_services
+    collection_service, goal_service = goal_services
 
     response = asyncio.run(
         goals_controller.intake_goal(
@@ -41,7 +42,7 @@ def test_goals_route_returns_goal_contract(goal_services):
                 intent="compare",
                 constraints={"substrate": "Al"},
             ),
-            _request(),
+            _request(goal_service),
         )
     )
 
@@ -56,7 +57,7 @@ def test_goals_route_returns_goal_contract(goal_services):
 
 
 def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
-    _collection_service, _goal_service = goal_services
+    _collection_service, goal_service = goal_services
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
@@ -68,7 +69,7 @@ def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
                     constraints={},
                     context=None,
                 ),
-                _request(),
+                _request(goal_service),
             )
         )
 

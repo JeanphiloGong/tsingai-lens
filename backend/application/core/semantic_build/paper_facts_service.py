@@ -431,13 +431,13 @@ class PaperFactsService:
 
     def __init__(
         self,
-        collection_service: CollectionService | None = None,
+        collection_service: CollectionService,
         document_profile_service: DocumentProfileService | None = None,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
         core_fact_repository: CoreFactRepository | None = None,
         source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
-        self.collection_service = collection_service or CollectionService()
+        self.collection_service = collection_service
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
             core_fact_repository=core_fact_repository,
@@ -2244,6 +2244,7 @@ class PaperFactsService:
             "process_context_axes": list(objective_context.process_context_axes),
             "target_property_axes": list(objective_context.target_property_axes),
             "excluded_property_axes": list(objective_context.excluded_property_axes),
+            "objective_evidence_lens": dict(objective_context.objective_evidence_lens),
             "routing_hints": [route_payload] if route_payload else [],
             "extraction_guidance": dict(objective_context.extraction_guidance),
             "confidence": objective_context.confidence,

@@ -258,6 +258,47 @@ describe('collections/[id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Estimated progress')).toBeInTheDocument();
 	});
 
+	it('offers retry instead of start when the latest build partially succeeded', async () => {
+		workspacePayload = buildWorkspacePayload({
+			status_summary: 'partial_ready',
+			workflow: {
+				documents: 'not_started',
+				results: 'not_started',
+				evidence: 'not_started',
+				comparisons: 'not_started'
+			},
+			latest_task: {
+				task_id: 'task_partial',
+				collection_id: 'col_123',
+				task_type: 'build',
+				status: 'partial_success',
+				current_stage: 'artifacts_ready',
+				progress_percent: 100,
+				progress_detail: {
+					phase: 'artifacts_ready',
+					unit: 'steps',
+					message: 'Build artifacts are ready.'
+				},
+				output_path: '/tmp/col_123',
+				errors: ['document_profiles: Connection error.'],
+				warnings: [],
+				created_at: '2026-07-19T05:23:33Z',
+				updated_at: '2026-07-19T05:24:42Z',
+				started_at: '2026-07-19T05:23:33Z',
+				finished_at: '2026-07-19T05:24:42Z'
+			}
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry processing' }).first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Start processing' }))
+			.not.toBeInTheDocument();
+	});
+
 	it('summarizes repeated research-view warnings in the overview', async () => {
 		researchViewPayload = {
 			collection_id: 'col_123',

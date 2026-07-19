@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +10,7 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source.collection_service import CollectionService
+from tests.support.collection_service import build_test_collection_service
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
 from application.core.semantic_build.document_profile_service import DocumentProfileService
@@ -144,25 +145,33 @@ def _store_core_comparison_artifacts(
 
 
 @pytest.fixture()
-def comparison_services(monkeypatch, tmp_path):
-    collection_service = CollectionService(tmp_path / "collections")
+def comparison_services(tmp_path):
+    collection_service = build_test_collection_service(tmp_path / "collections")
     document_profile_service = DocumentProfileService(collection_service)
     comparison_service = ComparisonService(
         collection_service=collection_service,
         document_profile_service=document_profile_service,
     )
 
-    monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
-
-    return collection_service, comparison_service
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(comparison_service=comparison_service),
+        )
+    )
+    return collection_service, comparison_service, request
 
 
 def test_comparisons_route_returns_409_when_rows_are_not_ready(comparison_services):
-    collection_service, _comparison_service = comparison_services
+    collection_service, _comparison_service, request = comparison_services
     record = collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(comparisons_controller.list_collection_comparisons(record["collection_id"]))
+        asyncio.run(
+            comparisons_controller.list_collection_comparisons(
+                record["collection_id"],
+                request,
+            )
+        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -171,10 +180,12 @@ def test_comparisons_route_returns_409_when_rows_are_not_ready(comparison_servic
 
 
 def test_comparisons_route_returns_404_for_missing_collection(comparison_services):
-    _collection_service, _comparison_service = comparison_services
+    _collection_service, _comparison_service, request = comparison_services
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(comparisons_controller.list_collection_comparisons("col_missing"))
+        asyncio.run(
+            comparisons_controller.list_collection_comparisons("col_missing", request)
+        )
 
     exc = exc_info.value
     assert exc.status_code == 404
@@ -184,14 +195,14 @@ def test_comparisons_route_returns_404_for_missing_collection(comparison_service
 def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
     comparison_services,
 ):
-    collection_service, comparison_service = comparison_services
+    collection_service, comparison_service, request = comparison_services
     record = collection_service.create_collection(name="Empty Comparisons Collection")
     collection_id = record["collection_id"]
 
     _store_core_comparison_artifacts(comparison_service, collection_id, [], [])
 
     payload = asyncio.run(
-        comparisons_controller.list_collection_comparisons(collection_id)
+        comparisons_controller.list_collection_comparisons(collection_id, request)
     )
 
     assert payload.collection_id == collection_id
@@ -202,7 +213,7 @@ def test_comparisons_route_returns_200_with_empty_rows_after_stage_generated(
 def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     comparison_services,
 ):
-    collection_service, comparison_service = comparison_services
+    collection_service, comparison_service, request = comparison_services
     record = collection_service.create_collection(name="Existing Comparisons Collection")
     collection_id = record["collection_id"]
 
@@ -245,7 +256,7 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     )
 
     payload = asyncio.run(
-        comparisons_controller.list_collection_comparisons(collection_id)
+        comparisons_controller.list_collection_comparisons(collection_id, request)
     )
 
     assert payload.count == 1
@@ -269,7 +280,7 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
 def test_comparisons_route_applies_canonical_graph_filters(
     comparison_services,
 ):
-    collection_service, comparison_service = comparison_services
+    collection_service, comparison_service, request = comparison_services
     record = collection_service.create_collection(name="Filtered Comparisons Collection")
     collection_id = record["collection_id"]
 
@@ -345,6 +356,7 @@ def test_comparisons_route_applies_canonical_graph_filters(
     payload = asyncio.run(
         comparisons_controller.list_collection_comparisons(
             collection_id,
+            request,
             material_system_normalized="oxide cathode",
             property_normalized="conductivity",
             test_condition_normalized="EIS",
@@ -360,7 +372,7 @@ def test_comparisons_route_applies_canonical_graph_filters(
 def test_comparison_route_returns_single_row(
     comparison_services,
 ):
-    collection_service, comparison_service = comparison_services
+    collection_service, comparison_service, request = comparison_services
     record = collection_service.create_collection(name="Single Comparison Collection")
     collection_id = record["collection_id"]
 
@@ -403,7 +415,11 @@ def test_comparison_route_returns_single_row(
     )
 
     payload = asyncio.run(
-        comparisons_controller.get_collection_comparison(collection_id, row_id)
+        comparisons_controller.get_collection_comparison(
+            collection_id,
+            row_id,
+            request,
+        )
     )
 
     assert payload.row_id == row_id

@@ -188,9 +188,10 @@ class DocumentMarkdownService:
         media_type = (
             self._normalize_text(figure.image_mime_type) or "application/octet-stream"
         )
+        image_suffix = Path(image_path).suffix.lower()
         return {
             "content": content,
-            "filename": image_path.rsplit("/", 1)[-1],
+            "filename": f"{figure_key}{image_suffix}",
             "media_type": media_type,
         }
 

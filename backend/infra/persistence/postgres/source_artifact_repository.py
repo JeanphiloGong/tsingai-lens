@@ -228,6 +228,11 @@ class PostgresSourceArtifactRepository:
         collection_id: str,
         build_id: str | None = None,
     ) -> SourceArtifactSet:
+        if build_id is None:
+            with self.session_factory() as session:
+                build_id = self._resolve_read_build(session, collection_id, None)
+            if build_id is None:
+                return SourceArtifactSet()
         return SourceArtifactSet(
             documents=tuple(self.list_documents(collection_id, build_id=build_id)),
             text_units=tuple(self.list_text_units(collection_id, build_id=build_id)),
@@ -244,6 +249,13 @@ class PostgresSourceArtifactRepository:
         document_id: str,
         build_id: str | None = None,
     ) -> SourceDocumentTree:
+        if build_id is None:
+            with self.session_factory() as session:
+                build_id = self._resolve_read_build(session, collection_id, None)
+            if build_id is None:
+                raise FileNotFoundError(
+                    f"source document not found: {collection_id}/{document_id}"
+                )
         document = next(
             (
                 item
@@ -718,7 +730,7 @@ class PostgresSourceArtifactRepository:
                 )
                 .order_by(
                     SourceReferenceEntryRow.source_document_id,
-                    SourceReferenceEntryRow.reference_index,
+                    SourceReferenceEntryRow.reference_index.asc().nulls_first(),
                     SourceReferenceEntryRow.reference_id,
                 )
             )
@@ -730,8 +742,8 @@ class PostgresSourceArtifactRepository:
                 )
                 .order_by(
                     SourceReferenceMentionRow.source_document_id,
-                    SourceReferenceMentionRow.source_block_id,
-                    SourceReferenceMentionRow.char_start,
+                    SourceReferenceMentionRow.source_block_id.asc().nulls_first(),
+                    SourceReferenceMentionRow.char_start.asc().nulls_first(),
                     SourceReferenceMentionRow.mention_id,
                 )
             )

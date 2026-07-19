@@ -56,7 +56,8 @@ The final Source artifact family persisted in the Source repository is:
   Text windows used by Core extraction and traceback.
 - `blocks`
   Reading-order blocks with block type, heading path, page, bbox, and
-  character range.
+  character range. Text contained within a figure region is represented by the
+  figure artifact instead of being duplicated as body blocks.
 - `figures`
   Figure rows with captions, heading context, page, bbox, image asset paths,
   and parser metadata.

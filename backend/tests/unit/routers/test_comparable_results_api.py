@@ -17,6 +17,7 @@ from application.core.semantic_build.document_profile_service import (
 from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from tests.support.collection_service import build_test_collection_service
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 from controllers.core import comparable_results as comparable_results_controller
 from domain.core import (
     CollectionComparableResult,
@@ -141,6 +142,7 @@ def comparable_result_services(tmp_path):
     comparison_service = ComparisonService(
         collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
         document_profile_service=DocumentProfileService(
             collection_service,

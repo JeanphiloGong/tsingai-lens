@@ -6,6 +6,8 @@ from time import perf_counter
 from config import DATA_DIR
 from application.auth import AuthSessionService, SessionNotFoundError
 from application.core.comparison_service import ComparisonService
+from application.core.confirmed_goal_service import ConfirmedGoalService
+from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
@@ -61,10 +63,18 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.paper_fact_repository import (
     PostgresPaperFactRepository,
 )
+from infra.persistence.postgres.objective_repository import (
+    PostgresObjectiveRepository,
+)
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from domain.ports import CoreFactRepository, PaperFactRepository, SourceArtifactRepository
+from domain.ports import (
+    CoreFactRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
+    SourceArtifactRepository,
+)
 from infra.persistence.factory import build_core_fact_repository
 from infra.persistence.file import FileCollectionWorkspace
 
@@ -100,6 +110,7 @@ def create_app(
     task_service: TaskService | None = None,
     source_artifact_repository: SourceArtifactRepository | None = None,
     paper_fact_repository: PaperFactRepository | None = None,
+    objective_repository: ObjectiveRepository | None = None,
     core_fact_repository: CoreFactRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -113,6 +124,7 @@ def create_app(
                 or task_service is None
                 or source_artifact_repository is None
                 or paper_fact_repository is None
+                or objective_repository is None
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -138,6 +150,10 @@ def create_app(
                 paper_fact_repository
                 or PostgresPaperFactRepository(session_factory)
             )
+            active_objective_repository = (
+                objective_repository
+                or PostgresObjectiveRepository(session_factory)
+            )
             active_core_fact_repository = (
                 core_fact_repository or build_core_fact_repository()
             )
@@ -145,6 +161,7 @@ def create_app(
                 active_task_service.repository,
                 active_source_artifact_repository,
                 active_paper_fact_repository,
+                active_objective_repository,
                 active_core_fact_repository,
             )
             document_profile_service = DocumentProfileService(
@@ -156,27 +173,34 @@ def create_app(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
-                core_fact_repository=active_core_fact_repository,
+                objective_repository=active_objective_repository,
                 document_profile_service=document_profile_service,
             )
             comparison_service = ComparisonService(
                 collection_service=active_collection_service,
                 paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
                 core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
+            )
+            research_understanding_service = ResearchUnderstandingService(
+                source_artifact_repository=active_source_artifact_repository,
             )
             research_objective_service = ResearchObjectiveService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
                 core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
+                research_understanding_service=research_understanding_service,
             )
             workspace_service = WorkspaceService(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
                 core_fact_repository=active_core_fact_repository,
                 document_profile_service=document_profile_service,
             )
@@ -184,13 +208,21 @@ def create_app(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
                 core_fact_repository=active_core_fact_repository,
+                research_understanding_service=research_understanding_service,
+            )
+            confirmed_goal_service = ConfirmedGoalService(
+                active_core_fact_repository,
+                active_objective_repository,
             )
 
             application.state.collection_service = active_collection_service
             application.state.task_service = active_task_service
             application.state.paper_fact_repository = active_paper_fact_repository
+            application.state.objective_repository = active_objective_repository
             application.state.core_fact_repository = active_core_fact_repository
+            application.state.confirmed_goal_service = confirmed_goal_service
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(
@@ -226,6 +258,8 @@ def create_app(
             )
             application.state.goal_analysis_service = GoalAnalysisPipelineService(
                 research_objective_service=research_objective_service,
+                confirmed_goal_service=confirmed_goal_service,
+                research_understanding_service=research_understanding_service,
             )
             yield
         finally:

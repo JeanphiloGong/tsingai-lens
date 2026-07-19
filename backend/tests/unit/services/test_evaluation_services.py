@@ -16,11 +16,13 @@ from domain.core import (
     CoreFactSet,
     MeasurementResult,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ResearchUnderstanding,
 )
 from domain.core.paper_fact import PaperFactSet
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 class FakeCollectionService:
@@ -3066,8 +3068,9 @@ def test_prediction_snapshot_service_exports_objective_first_measurements():
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         paper_fact_repository=MemoryPaperFactRepository(),
-        core_fact_repository=FakeCoreFactRepository(
-            CoreFactSet(
+        objective_repository=MemoryObjectiveRepository.from_facts(
+            "col-gold",
+            ObjectiveFactSet(
                 objective_evidence_units=(
                     ObjectiveEvidenceUnit.from_mapping(
                         {
@@ -3085,8 +3088,9 @@ def test_prediction_snapshot_service_exports_objective_first_measurements():
                         }
                     ),
                 )
-            )
+            ),
         ),
+        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=repository,
     )
 
@@ -3133,6 +3137,7 @@ def test_prediction_snapshot_service_exports_paper_fact_measurements():
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=repository,
     )
@@ -3152,6 +3157,7 @@ def test_prediction_snapshot_service_reports_not_ready_when_no_items():
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=FakeEvaluationRepository(),
     )
@@ -3165,9 +3171,11 @@ def test_prediction_snapshot_service_allows_empty_ready_core_outputs():
     service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         paper_fact_repository=MemoryPaperFactRepository(),
-        core_fact_repository=FakeCoreFactRepository(
-            CoreFactSet(research_objectives_ready=True)
+        objective_repository=MemoryObjectiveRepository.from_facts(
+            "col-gold",
+            ObjectiveFactSet(research_objectives_ready=True),
         ),
+        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=repository,
     )
 
@@ -3210,8 +3218,9 @@ def test_core_evaluation_service_scores_matching_measurements():
     snapshot_service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         paper_fact_repository=MemoryPaperFactRepository(),
-        core_fact_repository=FakeCoreFactRepository(
-            CoreFactSet(
+        objective_repository=MemoryObjectiveRepository.from_facts(
+            "col-gold",
+            ObjectiveFactSet(
                 objective_evidence_units=(
                     ObjectiveEvidenceUnit.from_mapping(
                         {
@@ -3229,8 +3238,9 @@ def test_core_evaluation_service_scores_matching_measurements():
                         }
                     ),
                 )
-            )
+            ),
         ),
+        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=repository,
     )
     snapshot_service.create_core_snapshot(
@@ -3284,8 +3294,9 @@ def test_core_evaluation_service_reports_missing_extra_and_unit_failures():
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
             paper_fact_repository=MemoryPaperFactRepository(),
-            core_fact_repository=FakeCoreFactRepository(
-                CoreFactSet(
+            objective_repository=MemoryObjectiveRepository.from_facts(
+                "col-gold",
+                ObjectiveFactSet(
                     objective_evidence_units=(
                         ObjectiveEvidenceUnit.from_mapping(
                             {
@@ -3313,8 +3324,9 @@ def test_core_evaluation_service_reports_missing_extra_and_unit_failures():
                             }
                         ),
                     )
-                )
+                ),
             ),
+            core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
             evaluation_repository=FakeEvaluationRepository(),
         ).create_core_snapshot(
             collection_id="col-gold",
@@ -3364,9 +3376,11 @@ def test_core_evaluation_service_scores_empty_prediction_as_zero_recall():
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
             paper_fact_repository=MemoryPaperFactRepository(),
-            core_fact_repository=FakeCoreFactRepository(
-                CoreFactSet(research_objectives_ready=True)
+            objective_repository=MemoryObjectiveRepository.from_facts(
+                "col-gold",
+                ObjectiveFactSet(research_objectives_ready=True),
             ),
+            core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
             evaluation_repository=FakeEvaluationRepository(),
         ).create_core_snapshot(
             collection_id="col-gold",
@@ -3414,8 +3428,9 @@ def test_core_evaluation_service_matches_objective_first_comparison_values():
     snapshot = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         paper_fact_repository=MemoryPaperFactRepository(),
-        core_fact_repository=FakeCoreFactRepository(
-            CoreFactSet(
+        objective_repository=MemoryObjectiveRepository.from_facts(
+            "col-gold",
+            ObjectiveFactSet(
                 objective_evidence_units=(
                     ObjectiveEvidenceUnit.from_mapping(
                         {
@@ -3437,8 +3452,9 @@ def test_core_evaluation_service_matches_objective_first_comparison_values():
                         }
                     ),
                 )
-            )
+            ),
         ),
+        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
         evaluation_repository=FakeEvaluationRepository(),
     ).create_core_snapshot(
         collection_id="col-gold",
@@ -3486,8 +3502,9 @@ def test_core_evaluation_service_reports_numeric_and_evidence_failures():
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
             paper_fact_repository=MemoryPaperFactRepository(),
-            core_fact_repository=FakeCoreFactRepository(
-                CoreFactSet(
+            objective_repository=MemoryObjectiveRepository.from_facts(
+                "col-gold",
+                ObjectiveFactSet(
                     objective_evidence_units=(
                         ObjectiveEvidenceUnit.from_mapping(
                             {
@@ -3502,8 +3519,9 @@ def test_core_evaluation_service_reports_numeric_and_evidence_failures():
                             }
                         ),
                     )
-                )
+                ),
             ),
+            core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
             evaluation_repository=FakeEvaluationRepository(),
         ).create_core_snapshot(
             collection_id="col-gold",

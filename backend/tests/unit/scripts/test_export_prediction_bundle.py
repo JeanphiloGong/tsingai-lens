@@ -25,6 +25,7 @@ from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _load_exporter_module():
@@ -73,6 +74,11 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
         exporter,
         "PostgresPaperFactRepository",
         lambda _session_factory: paper_fact_repositories[0],
+    )
+    monkeypatch.setattr(
+        exporter,
+        "PostgresObjectiveRepository",
+        lambda _session_factory: MemoryObjectiveRepository(),
     )
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
 
@@ -1456,6 +1462,11 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
         exporter,
         "PostgresPaperFactRepository",
         lambda _session_factory: MemoryPaperFactRepository(),
+    )
+    monkeypatch.setattr(
+        exporter,
+        "PostgresObjectiveRepository",
+        lambda _session_factory: MemoryObjectiveRepository(),
     )
 
     exporter.export_prediction_bundle(

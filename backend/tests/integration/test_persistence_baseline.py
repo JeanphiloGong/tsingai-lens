@@ -12,6 +12,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     MethodFact,
+    ObjectiveFactSet,
     ResearchObjective,
     ResearchUnderstanding,
     SampleVariant,
@@ -55,6 +56,7 @@ from infra.persistence.sqlite import (
 )
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -82,11 +84,13 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     build_repository = PostgresBuildRepository(auth_repository.session_factory)
     source_repository = SqliteSourceArtifactRepository(db_path)
     paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
     core_repository = SqliteCoreFactRepository(db_path)
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_repository,
     )
     goal_session_repository = SqliteGoalSessionRepository(db_path)
@@ -225,18 +229,15 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ),
     )
 
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        tuple(
-            ResearchObjective.from_mapping(item)
-            for item in records["research_objectives"]
+        "build_baseline",
+        ObjectiveFactSet(
+            research_objectives=tuple(
+                ResearchObjective.from_mapping(item)
+                for item in records["research_objectives"]
+            ),
         ),
-        (),
-        (),
-        (),
-        (),
-        (),
     )
     paper_fact_repository.replace_document_profiles(
         collection_id,
@@ -381,7 +382,10 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ]
 
     paper_facts = paper_fact_repository.read(collection_id)
-    core_facts = core_repository.read_collection_facts(collection_id)
+    objective_facts = objective_repository.read(
+        collection_id,
+        build_id="build_baseline",
+    )
     core_families = {
         "core_document_profiles": [
             item.to_record() for item in paper_facts.document_profiles
@@ -403,7 +407,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             item.to_record() for item in paper_facts.measurement_results
         ],
         "research_objectives": [
-            item.to_record() for item in core_facts.research_objectives
+            item.to_record() for item in objective_facts.research_objectives
         ],
         "confirmed_goals": [
             item.to_record()

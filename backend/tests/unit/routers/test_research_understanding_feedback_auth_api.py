@@ -166,6 +166,9 @@ def feedback_client(
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
 
     from tests.support.collection_service import build_test_collection_service
+    from tests.support.objective_repository import MemoryObjectiveRepository
+    from tests.support.paper_fact_repository import MemoryPaperFactRepository
+    from tests.support.source_artifact_repository import MemorySourceArtifactRepository
     from controllers.core import research_understanding_feedback
     from main import create_app
 
@@ -181,6 +184,9 @@ def feedback_client(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             task_service=TaskService(MemoryBuildRepository()),
+            source_artifact_repository=MemorySourceArtifactRepository(),
+            paper_fact_repository=MemoryPaperFactRepository(),
+            objective_repository=MemoryObjectiveRepository(),
         )
     ) as client:
         yield client, feedback_service
@@ -202,6 +208,9 @@ def real_feedback_client(
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
 
     from tests.support.collection_service import build_test_collection_service
+    from tests.support.objective_repository import MemoryObjectiveRepository
+    from tests.support.paper_fact_repository import MemoryPaperFactRepository
+    from tests.support.source_artifact_repository import MemorySourceArtifactRepository
     from controllers.core import research_understanding_feedback
     from main import create_app
 
@@ -223,6 +232,9 @@ def real_feedback_client(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             task_service=TaskService(MemoryBuildRepository()),
+            source_artifact_repository=MemorySourceArtifactRepository(),
+            paper_fact_repository=MemoryPaperFactRepository(),
+            objective_repository=MemoryObjectiveRepository(),
         )
     ) as client:
         yield client

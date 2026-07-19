@@ -16,14 +16,7 @@ from domain.core import (
     ConfirmedGoal,
     ComparisonRowRecord,
     CoreFactSet,
-    ObjectiveContext,
-    ObjectiveEvidenceRoute,
-    ObjectiveEvidenceUnit,
-    ObjectiveLogicChain,
-    ObjectivePaperFrame,
-    PaperSkim,
     PairwiseComparisonRelation,
-    ResearchObjective,
     ResearchUnderstanding,
 )
 
@@ -40,238 +33,6 @@ class _TableSpec:
     real_columns: frozenset[str] = frozenset()
     boolean_columns: frozenset[str] = frozenset()
     index_columns: tuple[str, ...] = ()
-
-
-_OBJECTIVE_TABLES: tuple[_TableSpec, ...] = (
-    _TableSpec(
-        table_name="core_paper_skims",
-        attr_name="paper_skims",
-        record_cls=PaperSkim,
-        id_column="document_id",
-        columns=(
-            "document_id",
-            "title",
-            "source_filename",
-            "doc_role",
-            "candidate_materials",
-            "candidate_processes",
-            "candidate_properties",
-            "changed_variables",
-            "possible_objectives",
-            "evidence_density",
-            "confidence",
-            "warnings",
-        ),
-        json_columns=frozenset(
-            {
-                "candidate_materials",
-                "candidate_processes",
-                "candidate_properties",
-                "changed_variables",
-                "possible_objectives",
-                "warnings",
-            }
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("document_id", "doc_role"),
-    ),
-    _TableSpec(
-        table_name="core_research_objectives",
-        attr_name="research_objectives",
-        record_cls=ResearchObjective,
-        id_column="objective_id",
-        columns=(
-            "objective_id",
-            "question",
-            "material_scope",
-            "process_axes",
-            "property_axes",
-            "comparison_intent",
-            "seed_document_ids",
-            "excluded_document_ids",
-            "confidence",
-            "reason",
-        ),
-        json_columns=frozenset(
-            {
-                "material_scope",
-                "process_axes",
-                "property_axes",
-                "seed_document_ids",
-                "excluded_document_ids",
-            }
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("objective_id",),
-    ),
-    _TableSpec(
-        table_name="core_objective_contexts",
-        attr_name="objective_contexts",
-        record_cls=ObjectiveContext,
-        id_column="objective_id",
-        columns=(
-            "objective_id",
-            "question",
-            "material_scope",
-            "variable_process_axes",
-            "process_context_axes",
-            "target_property_axes",
-            "excluded_property_axes",
-            "routing_hints",
-            "extraction_guidance",
-            "confidence",
-        ),
-        json_columns=frozenset(
-            {
-                "material_scope",
-                "variable_process_axes",
-                "process_context_axes",
-                "target_property_axes",
-                "excluded_property_axes",
-                "routing_hints",
-                "extraction_guidance",
-            }
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("objective_id",),
-    ),
-    _TableSpec(
-        table_name="core_objective_paper_frames",
-        attr_name="objective_paper_frames",
-        record_cls=ObjectivePaperFrame,
-        id_column="frame_id",
-        columns=(
-            "frame_id",
-            "objective_id",
-            "document_id",
-            "relevance",
-            "paper_role",
-            "background",
-            "material_match",
-            "changed_variables",
-            "measured_property_scope",
-            "test_environment_scope",
-            "relevant_sections",
-            "relevant_tables",
-            "excluded_tables",
-        ),
-        json_columns=frozenset(
-            {
-                "material_match",
-                "changed_variables",
-                "measured_property_scope",
-                "test_environment_scope",
-                "relevant_sections",
-                "relevant_tables",
-                "excluded_tables",
-            }
-        ),
-        index_columns=("objective_id", "document_id", "relevance", "paper_role"),
-    ),
-    _TableSpec(
-        table_name="core_objective_evidence_routes",
-        attr_name="objective_evidence_routes",
-        record_cls=ObjectiveEvidenceRoute,
-        id_column="route_id",
-        columns=(
-            "route_id",
-            "objective_id",
-            "document_id",
-            "source_kind",
-            "source_ref",
-            "role",
-            "extractable",
-            "reason",
-            "table_schema",
-            "column_roles",
-            "join_keys",
-            "join_plan",
-            "confidence",
-        ),
-        json_columns=frozenset(
-            {"table_schema", "column_roles", "join_keys", "join_plan"}
-        ),
-        boolean_columns=frozenset({"extractable"}),
-        real_columns=frozenset({"confidence"}),
-        index_columns=(
-            "objective_id",
-            "document_id",
-            "source_kind",
-            "source_ref",
-            "role",
-            "extractable",
-        ),
-    ),
-    _TableSpec(
-        table_name="core_objective_evidence_units",
-        attr_name="objective_evidence_units",
-        record_cls=ObjectiveEvidenceUnit,
-        id_column="evidence_unit_id",
-        columns=(
-            "evidence_unit_id",
-            "objective_id",
-            "document_id",
-            "unit_kind",
-            "property_normalized",
-            "material_system",
-            "sample_context",
-            "process_context",
-            "resolved_condition",
-            "test_condition",
-            "value_payload",
-            "unit",
-            "baseline_context",
-            "interpretation",
-            "source_refs",
-            "evidence_anchor_ids",
-            "join_keys",
-            "resolution_status",
-            "confidence",
-        ),
-        json_columns=frozenset(
-            {
-                "material_system",
-                "sample_context",
-                "process_context",
-                "resolved_condition",
-                "test_condition",
-                "value_payload",
-                "baseline_context",
-                "source_refs",
-                "evidence_anchor_ids",
-                "join_keys",
-            }
-        ),
-        real_columns=frozenset({"confidence"}),
-        index_columns=(
-            "objective_id",
-            "document_id",
-            "unit_kind",
-            "property_normalized",
-            "resolution_status",
-        ),
-    ),
-    _TableSpec(
-        table_name="core_objective_logic_chains",
-        attr_name="objective_logic_chains",
-        record_cls=ObjectiveLogicChain,
-        id_column="logic_chain_id",
-        columns=(
-            "logic_chain_id",
-            "objective_id",
-            "chain_scope",
-            "document_id",
-            "question",
-            "evidence_unit_ids",
-            "chain_payload",
-            "summary",
-            "confidence",
-        ),
-        json_columns=frozenset({"evidence_unit_ids", "chain_payload"}),
-        real_columns=frozenset({"confidence"}),
-        index_columns=("objective_id", "chain_scope", "document_id"),
-    ),
-)
 
 
 _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
@@ -419,7 +180,7 @@ _COMPARISON_TABLES: tuple[_TableSpec, ...] = (
     ),
 )
 
-_ALL_TABLES = (*_OBJECTIVE_TABLES, *_COMPARISON_TABLES)
+_ALL_TABLES = _COMPARISON_TABLES
 _STATUS_TABLE = "core_fact_collection_status"
 _RESEARCH_UNDERSTANDING_TABLE = "core_research_understanding_artifacts"
 _CONFIRMED_GOAL_TABLE = "core_confirmed_goals"
@@ -433,43 +194,6 @@ class SqliteCoreFactRepository:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path or (DATA_DIR / "lens.sqlite")).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def replace_collection_research_objectives(
-        self,
-        collection_id: str,
-        paper_skims: tuple[PaperSkim, ...],
-        research_objectives: tuple[ResearchObjective, ...],
-        objective_contexts: tuple[ObjectiveContext, ...],
-        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
-        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
-        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
-        objective_logic_chains: tuple[ObjectiveLogicChain, ...],
-    ) -> None:
-        self._ensure_schema()
-        records_by_attr = {
-            "paper_skims": paper_skims,
-            "research_objectives": research_objectives,
-            "objective_contexts": objective_contexts,
-            "objective_paper_frames": objective_paper_frames,
-            "objective_evidence_routes": objective_evidence_routes,
-            "objective_evidence_units": objective_evidence_units,
-            "objective_logic_chains": objective_logic_chains,
-        }
-        with self._connection() as connection:
-            for spec in _OBJECTIVE_TABLES:
-                self._delete_collection(connection, spec, collection_id)
-            for spec in _OBJECTIVE_TABLES:
-                self._insert_records(
-                    connection,
-                    spec,
-                    collection_id,
-                    records_by_attr[spec.attr_name],
-                )
-            self._upsert_status(
-                connection,
-                collection_id,
-                research_objectives_ready=any(records_by_attr.values()),
-            )
 
     def replace_collection_comparison_artifacts(
         self,
@@ -772,29 +496,9 @@ class SqliteCoreFactRepository:
             f"""
             CREATE TABLE IF NOT EXISTS {_STATUS_TABLE} (
                 collection_id TEXT PRIMARY KEY,
-                research_objectives_ready INTEGER NOT NULL DEFAULT 0,
                 comparison_artifacts_ready INTEGER NOT NULL DEFAULT 0
             )
             """
-        )
-        self._ensure_status_column(
-            connection,
-            "research_objectives_ready",
-            "INTEGER NOT NULL DEFAULT 0",
-        )
-
-    def _ensure_status_column(
-        self,
-        connection: sqlite3.Connection,
-        column_name: str,
-        column_definition: str,
-    ) -> None:
-        rows = connection.execute(f"PRAGMA table_info({_STATUS_TABLE})").fetchall()
-        existing = {str(row["name"]) for row in rows}
-        if column_name in existing:
-            return
-        connection.execute(
-            f"ALTER TABLE {_STATUS_TABLE} ADD COLUMN {column_name} {column_definition}"
         )
 
     def _upsert_status(
@@ -802,44 +506,33 @@ class SqliteCoreFactRepository:
         connection: sqlite3.Connection,
         collection_id: str,
         *,
-        research_objectives_ready: bool | None = None,
         comparison_artifacts_ready: bool | None = None,
     ) -> None:
         current = connection.execute(
             f"""
-            SELECT
-                research_objectives_ready,
-                comparison_artifacts_ready
+            SELECT comparison_artifacts_ready
             FROM {_STATUS_TABLE}
             WHERE collection_id = ?
             """,
             (collection_id,),
         ).fetchone()
-        next_research_objectives_ready = (
-            bool(current["research_objectives_ready"]) if current else False
-        )
         next_comparison_artifacts_ready = (
             bool(current["comparison_artifacts_ready"]) if current else False
         )
-        if research_objectives_ready is not None:
-            next_research_objectives_ready = bool(research_objectives_ready)
         if comparison_artifacts_ready is not None:
             next_comparison_artifacts_ready = bool(comparison_artifacts_ready)
         connection.execute(
             f"""
             INSERT INTO {_STATUS_TABLE} (
                 collection_id,
-                research_objectives_ready,
                 comparison_artifacts_ready
             )
-            VALUES (?, ?, ?)
+            VALUES (?, ?)
             ON CONFLICT(collection_id) DO UPDATE SET
-                research_objectives_ready = excluded.research_objectives_ready,
                 comparison_artifacts_ready = excluded.comparison_artifacts_ready
             """,
             (
                 collection_id,
-                int(next_research_objectives_ready),
                 int(next_comparison_artifacts_ready),
             ),
         )
@@ -852,9 +545,7 @@ class SqliteCoreFactRepository:
     ) -> dict[str, bool]:
         row = connection.execute(
             f"""
-            SELECT
-                research_objectives_ready,
-                comparison_artifacts_ready
+            SELECT comparison_artifacts_ready
             FROM {_STATUS_TABLE}
             WHERE collection_id = ?
             """,
@@ -862,15 +553,11 @@ class SqliteCoreFactRepository:
         ).fetchone()
         if row is not None:
             return {
-                "research_objectives_ready": bool(row["research_objectives_ready"]),
                 "comparison_artifacts_ready": bool(
                     row["comparison_artifacts_ready"]
                 ),
             }
         return {
-            "research_objectives_ready": any(
-                records_by_attr[spec.attr_name] for spec in _OBJECTIVE_TABLES
-            ),
             "comparison_artifacts_ready": any(
                 records_by_attr[spec.attr_name] for spec in _COMPARISON_TABLES
             ),

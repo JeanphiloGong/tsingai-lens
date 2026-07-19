@@ -15,6 +15,7 @@ from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
+from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
@@ -37,6 +38,7 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _request(goal_session_service, user_id: str = "local-user"):
@@ -88,16 +90,21 @@ def goal_session_services(tmp_path):
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+    )
+    research_understanding_service = ResearchUnderstandingService(
+        source_artifact_repository=source_repository,
     )
     workspace_service = WorkspaceService(
         collection_service=collection_service,
         task_service=task_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
     )
@@ -105,12 +112,15 @@ def goal_session_services(tmp_path):
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
+        research_understanding_service=research_understanding_service,
     )
     comparison_service = ComparisonService(
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
     )
@@ -118,7 +128,7 @@ def goal_session_services(tmp_path):
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        core_fact_repository=core_fact_repository,
+        objective_repository=objective_repository,
         document_profile_service=document_profile_service,
     )
     service = GoalSessionService(
@@ -127,7 +137,9 @@ def goal_session_services(tmp_path):
             collection_service=collection_service,
             source_artifact_repository=source_repository,
             paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
             core_fact_repository=core_fact_repository,
+            research_understanding_service=research_understanding_service,
         ),
         workspace_service=workspace_service,
         research_objective_service=research_objective_service,

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from application.core.confirmed_goal_service import (
     ConfirmedGoalNotFoundError,
-    ConfirmedGoalService,
 )
 from controllers.schemas.core.confirmed_goals import (
     ConfirmedGoalCreateRequest,
@@ -15,7 +14,6 @@ from controllers.schemas.core.confirmed_goals import (
 from domain.core import ConfirmedGoal
 
 router = APIRouter(prefix="/collections", tags=["confirmed-goals"])
-confirmed_goal_service = ConfirmedGoalService()
 
 
 @router.post(
@@ -26,9 +24,10 @@ confirmed_goal_service = ConfirmedGoalService()
 async def create_confirmed_goal(
     collection_id: str,
     payload: ConfirmedGoalCreateRequest,
+    request: Request,
 ) -> ConfirmedGoalResponse:
     goal = await run_in_threadpool(
-        confirmed_goal_service.create_goal,
+        request.app.state.confirmed_goal_service.create_goal,
         collection_id=collection_id,
         question=payload.question,
         source_type=payload.source_type,
@@ -45,9 +44,12 @@ async def create_confirmed_goal(
     response_model=ConfirmedGoalListResponse,
     summary="读取 collection confirmed goals",
 )
-async def list_confirmed_goals(collection_id: str) -> ConfirmedGoalListResponse:
+async def list_confirmed_goals(
+    collection_id: str,
+    request: Request,
+) -> ConfirmedGoalListResponse:
     goals = await run_in_threadpool(
-        confirmed_goal_service.list_goals,
+        request.app.state.confirmed_goal_service.list_goals,
         collection_id,
     )
     return ConfirmedGoalListResponse(
@@ -64,10 +66,11 @@ async def list_confirmed_goals(collection_id: str) -> ConfirmedGoalListResponse:
 async def get_confirmed_goal(
     collection_id: str,
     goal_id: str,
+    request: Request,
 ) -> ConfirmedGoalResponse:
     try:
         goal = await run_in_threadpool(
-            confirmed_goal_service.get_goal,
+            request.app.state.confirmed_goal_service.get_goal,
             collection_id,
             goal_id,
         )

@@ -21,6 +21,7 @@ from domain.core import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
@@ -31,6 +32,7 @@ from domain.core import (
 )
 from domain.ports import (
     CoreFactRepository,
+    ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
 )
@@ -345,50 +347,38 @@ class ResearchObjectiveService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
         core_fact_repository: CoreFactRepository,
         document_profile_service: DocumentProfileService,
+        research_understanding_service: ResearchUnderstandingService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._structured_extractor = structured_extractor
         self.paper_fact_repository = paper_fact_repository
+        self.objective_repository = objective_repository
         self.core_fact_repository = core_fact_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
-        self.research_understanding_service = ResearchUnderstandingService(
-            source_artifact_repository=self.source_artifact_repository,
-        )
+        self.research_understanding_service = research_understanding_service
 
     def read_paper_skims(self, collection_id: str) -> tuple[PaperSkim, ...]:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if facts.research_objectives_ready:
-            return facts.paper_skims
-        self.build_objective_candidates(collection_id)
-        return self.core_fact_repository.read_collection_facts(collection_id).paper_skims
+        return self.objective_repository.read(collection_id).paper_skims
 
     def read_research_objectives(
         self,
         collection_id: str,
     ) -> tuple[ResearchObjective, ...]:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if facts.research_objectives_ready:
-            return facts.research_objectives
-        return self.build_objective_candidates(collection_id)
+        return self.objective_repository.read(collection_id).research_objectives
 
     def read_objective_contexts(
         self,
         collection_id: str,
     ) -> tuple[ObjectiveContext, ...]:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if facts.research_objectives_ready:
-            return facts.objective_contexts
-        self.build_objective_candidates(collection_id)
-        return self.core_fact_repository.read_collection_facts(
-            collection_id
-        ).objective_contexts
+        return self.objective_repository.read(collection_id).objective_contexts
 
     def list_objective_workspaces(self, collection_id: str) -> dict[str, Any]:
         facts = self._read_objective_workspace_facts(collection_id)
@@ -504,7 +494,7 @@ class ResearchObjectiveService:
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
         *,
-        build_id: str | None = None,
+        build_id: str,
     ) -> tuple[ResearchObjective, ...]:
         objective_inputs = self._build_objective_candidate_inputs(
             collection_id,
@@ -569,17 +559,21 @@ class ResearchObjectiveService:
             progress_callback=progress_callback,
         )
 
-        self.core_fact_repository.replace_collection_research_objectives(
+        self.objective_repository.replace(
             collection_id,
-            paper_skims,
-            research_objectives,
-            objective_contexts,
-            objective_paper_frames,
-            objective_evidence_routes,
-            objective_evidence_units,
-            objective_logic_chains,
+            build_id,
+            ObjectiveFactSet(
+                research_objectives_ready=True,
+                paper_skims=paper_skims,
+                research_objectives=research_objectives,
+                objective_contexts=objective_contexts,
+                objective_paper_frames=objective_paper_frames,
+                objective_evidence_routes=objective_evidence_routes,
+                objective_evidence_units=objective_evidence_units,
+                objective_logic_chains=objective_logic_chains,
+            ),
         )
-        self.persist_objective_understandings(collection_id)
+        self.persist_objective_understandings(collection_id, build_id=build_id)
         logger.info(
             "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s objective_evidence_units=%s objective_logic_chains=%s",
             collection_id,
@@ -595,22 +589,22 @@ class ResearchObjectiveService:
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
         *,
-        build_id: str | None = None,
+        build_id: str,
     ) -> tuple[ResearchObjective, ...]:
         objective_inputs = self._build_objective_candidate_inputs(
             collection_id,
             progress_callback=progress_callback,
             build_id=build_id,
         )
-        self.core_fact_repository.replace_collection_research_objectives(
+        self.objective_repository.replace(
             collection_id,
-            objective_inputs["paper_skims"],
-            objective_inputs["research_objectives"],
-            objective_inputs["objective_contexts"],
-            (),
-            (),
-            (),
-            (),
+            build_id,
+            ObjectiveFactSet(
+                research_objectives_ready=True,
+                paper_skims=objective_inputs["paper_skims"],
+                research_objectives=objective_inputs["research_objectives"],
+                objective_contexts=objective_inputs["objective_contexts"],
+            ),
         )
         logger.info(
             "Research objective candidates finished collection_id=%s paper_skim_count=%s objective_count=%s",
@@ -624,7 +618,6 @@ class ResearchObjectiveService:
         self,
         goal: ConfirmedGoal,
         progress_callback: ProgressCallback | None = None,
-        force_rebuild: bool = False,
     ) -> ResearchUnderstanding:
         objective_inputs = self._build_confirmed_goal_analysis_inputs(
             goal,
@@ -634,136 +627,64 @@ class ResearchObjectiveService:
             goal,
             candidates=objective_inputs["research_objectives"],
         )
-        persisted_facts = self.core_fact_repository.read_collection_facts(
-            goal.collection_id
-        )
+        active_facts = self.objective_repository.read(goal.collection_id)
         objective_contexts = self._build_objective_contexts(
             paper_skims=objective_inputs["paper_skims"],
             objectives=(objective,),
             tables=objective_inputs["artifacts"].tables,
         )
-        objective_paper_frames = self._goal_stage_records(
-            persisted_facts.objective_paper_frames,
-            objective_id=objective.objective_id,
+        objective_paper_frames = self._build_objective_paper_frames(
+            collection_id=goal.collection_id,
+            extractor=objective_inputs["extractor"],
+            objectives=(objective,),
+            objective_contexts=objective_contexts,
+            paper_skims=objective_inputs["paper_skims"],
+            documents=objective_inputs["artifacts"].documents,
+            profiles_by_document_id=objective_inputs["profiles_by_document_id"],
+            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
+            tables_by_document_id=objective_inputs["tables_by_document_id"],
+            document_trees_by_document_id=objective_inputs[
+                "document_trees_by_document_id"
+            ],
+            progress_callback=progress_callback,
         )
-        if force_rebuild:
-            objective_paper_frames = ()
-        if not objective_paper_frames:
-            objective_paper_frames = self._build_objective_paper_frames(
-                collection_id=goal.collection_id,
-                extractor=objective_inputs["extractor"],
-                objectives=(objective,),
-                objective_contexts=objective_contexts,
-                paper_skims=objective_inputs["paper_skims"],
-                documents=objective_inputs["artifacts"].documents,
-                profiles_by_document_id=objective_inputs["profiles_by_document_id"],
-                blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-                tables_by_document_id=objective_inputs["tables_by_document_id"],
-                document_trees_by_document_id=objective_inputs["document_trees_by_document_id"],
-                progress_callback=progress_callback,
-            )
-            self._persist_goal_objective_stage(
-                goal.collection_id,
-                objective_id=objective.objective_id,
-                paper_skims=objective_inputs["paper_skims"],
-                research_objective=objective,
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-            )
-            persisted_facts = self.core_fact_repository.read_collection_facts(
-                goal.collection_id
-            )
-
-        objective_evidence_routes = self._goal_stage_records(
-            persisted_facts.objective_evidence_routes,
-            objective_id=objective.objective_id,
+        objective_evidence_routes = self._build_objective_evidence_routes(
+            collection_id=goal.collection_id,
+            extractor=objective_inputs["extractor"],
+            objectives=(objective,),
+            objective_contexts=objective_contexts,
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
+            tables_by_document_id=objective_inputs["tables_by_document_id"],
+            document_trees_by_document_id=objective_inputs[
+                "document_trees_by_document_id"
+            ],
+            progress_callback=progress_callback,
         )
-        if force_rebuild:
-            objective_evidence_routes = ()
-        if not objective_evidence_routes:
-            objective_evidence_routes = self._build_objective_evidence_routes(
-                collection_id=goal.collection_id,
-                extractor=objective_inputs["extractor"],
-                objectives=(objective,),
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-                blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-                tables_by_document_id=objective_inputs["tables_by_document_id"],
-                document_trees_by_document_id=objective_inputs["document_trees_by_document_id"],
-                progress_callback=progress_callback,
-            )
-            self._persist_goal_objective_stage(
-                goal.collection_id,
-                objective_id=objective.objective_id,
-                paper_skims=objective_inputs["paper_skims"],
-                research_objective=objective,
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-                objective_evidence_routes=objective_evidence_routes,
-            )
-            persisted_facts = self.core_fact_repository.read_collection_facts(
-                goal.collection_id
-            )
-
-        objective_evidence_units = self._goal_stage_records(
-            persisted_facts.objective_evidence_units,
-            objective_id=objective.objective_id,
+        objective_evidence_units = self._build_objective_evidence_units(
+            collection_id=goal.collection_id,
+            extractor=objective_inputs["extractor"],
+            objectives=(objective,),
+            objective_contexts=objective_contexts,
+            objective_paper_frames=objective_paper_frames,
+            objective_evidence_routes=objective_evidence_routes,
+            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
+            tables_by_document_id=objective_inputs["tables_by_document_id"],
+            document_trees_by_document_id=objective_inputs[
+                "document_trees_by_document_id"
+            ],
+            table_cells_by_document_id=objective_inputs[
+                "table_cells_by_document_id"
+            ],
+            progress_callback=progress_callback,
         )
-        if force_rebuild:
-            objective_evidence_units = ()
-        if not objective_evidence_units:
-            objective_evidence_units = self._build_objective_evidence_units(
-                collection_id=goal.collection_id,
-                extractor=objective_inputs["extractor"],
-                objectives=(objective,),
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-                objective_evidence_routes=objective_evidence_routes,
-                blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-                tables_by_document_id=objective_inputs["tables_by_document_id"],
-                document_trees_by_document_id=objective_inputs["document_trees_by_document_id"],
-                table_cells_by_document_id=objective_inputs["table_cells_by_document_id"],
-                progress_callback=progress_callback,
-            )
-            self._persist_goal_objective_stage(
-                goal.collection_id,
-                objective_id=objective.objective_id,
-                paper_skims=objective_inputs["paper_skims"],
-                research_objective=objective,
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-                objective_evidence_routes=objective_evidence_routes,
-                objective_evidence_units=objective_evidence_units,
-            )
-            persisted_facts = self.core_fact_repository.read_collection_facts(
-                goal.collection_id
-            )
-
-        objective_logic_chains = self._goal_stage_records(
-            persisted_facts.objective_logic_chains,
-            objective_id=objective.objective_id,
+        objective_logic_chains = self._build_objective_logic_chains(
+            collection_id=goal.collection_id,
+            objectives=(objective,),
+            objective_contexts=objective_contexts,
+            objective_evidence_units=objective_evidence_units,
+            progress_callback=progress_callback,
         )
-        if force_rebuild:
-            objective_logic_chains = ()
-        if not objective_logic_chains:
-            objective_logic_chains = self._build_objective_logic_chains(
-                collection_id=goal.collection_id,
-                objectives=(objective,),
-                objective_contexts=objective_contexts,
-                objective_evidence_units=objective_evidence_units,
-                progress_callback=progress_callback,
-            )
-            self._persist_goal_objective_stage(
-                goal.collection_id,
-                objective_id=objective.objective_id,
-                paper_skims=objective_inputs["paper_skims"],
-                research_objective=objective,
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-                objective_evidence_routes=objective_evidence_routes,
-                objective_evidence_units=objective_evidence_units,
-                objective_logic_chains=objective_logic_chains,
-            )
         context = objective_contexts[0] if objective_contexts else None
         evidence_units = self._objective_detail_evidence_units(
             objective_evidence_units,
@@ -793,9 +714,7 @@ class ResearchObjectiveService:
                     "paper_frames": self._objective_paper_frame_views(
                         list(objective_paper_frames),
                         collection_id=goal.collection_id,
-                        facts=self.core_fact_repository.read_collection_facts(
-                            goal.collection_id
-                        ),
+                        facts=active_facts,
                     ),
                     "evidence_routes": [
                         route.to_record() for route in objective_evidence_routes
@@ -869,73 +788,6 @@ class ResearchObjectiveService:
         record["comparison_intent"] = self._build_comparison_intent(record)
         return ResearchObjective.from_mapping(record)
 
-    def _persist_goal_objective_stage(
-        self,
-        collection_id: str,
-        *,
-        objective_id: str,
-        paper_skims: tuple[PaperSkim, ...],
-        research_objective: ResearchObjective,
-        objective_contexts: tuple[ObjectiveContext, ...],
-        objective_paper_frames: tuple[ObjectivePaperFrame, ...] = (),
-        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...] = (),
-        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...] = (),
-        objective_logic_chains: tuple[ObjectiveLogicChain, ...] = (),
-    ) -> None:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        research_objectives = self._replace_objective_records(
-            facts.research_objectives,
-            (research_objective,),
-            objective_id=objective_id,
-        )
-        persisted_contexts = self._replace_objective_records(
-            facts.objective_contexts,
-            objective_contexts,
-            objective_id=objective_id,
-        )
-        persisted_frames = self._replace_objective_records(
-            facts.objective_paper_frames,
-            objective_paper_frames,
-            objective_id=objective_id,
-        )
-        persisted_routes = self._replace_objective_records(
-            facts.objective_evidence_routes,
-            objective_evidence_routes,
-            objective_id=objective_id,
-        )
-        persisted_units = self._replace_objective_records(
-            facts.objective_evidence_units,
-            objective_evidence_units,
-            objective_id=objective_id,
-        )
-        persisted_chains = self._replace_objective_records(
-            facts.objective_logic_chains,
-            objective_logic_chains,
-            objective_id=objective_id,
-        )
-        self.core_fact_repository.replace_collection_research_objectives(
-            collection_id,
-            paper_skims or facts.paper_skims,
-            research_objectives,
-            persisted_contexts,
-            persisted_frames,
-            persisted_routes,
-            persisted_units,
-            persisted_chains,
-        )
-
-    def _goal_stage_records(
-        self,
-        records: tuple[Any, ...],
-        *,
-        objective_id: str,
-    ) -> tuple[Any, ...]:
-        return tuple(
-            record
-            for record in records
-            if getattr(record, "objective_id", None) == objective_id
-        )
-
     def _evidence_units_with_route_evidence_roles(
         self,
         units: tuple[ObjectiveEvidenceUnit, ...],
@@ -988,22 +840,6 @@ class ResearchObjectiveService:
         if changed:
             record["source_refs"] = source_refs
         return record
-
-    def _replace_objective_records(
-        self,
-        existing_records: tuple[Any, ...],
-        replacement_records: tuple[Any, ...],
-        *,
-        objective_id: str,
-    ) -> tuple[Any, ...]:
-        return (
-            *(
-                record
-                for record in existing_records
-                if getattr(record, "objective_id", None) != objective_id
-            ),
-            *replacement_records,
-        )
 
     def _build_objective_candidate_inputs(
         self,
@@ -1174,7 +1010,7 @@ class ResearchObjectiveService:
         progress_callback: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         source_inputs = self._load_objective_source_inputs(goal.collection_id)
-        facts = self.core_fact_repository.read_collection_facts(goal.collection_id)
+        facts = self.objective_repository.read(goal.collection_id)
         if facts.research_objectives_ready and facts.paper_skims:
             return {
                 **source_inputs,
@@ -1230,8 +1066,10 @@ class ResearchObjectiveService:
     def persist_objective_understandings(
         self,
         collection_id: str,
+        *,
+        build_id: str | None = None,
     ) -> tuple[ResearchUnderstanding, ...]:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id, build_id=build_id)
         understandings: list[ResearchUnderstanding] = []
         for objective in facts.research_objectives:
             objective_id = objective.objective_id
@@ -1331,7 +1169,7 @@ class ResearchObjectiveService:
 
     def _read_objective_workspace_facts(self, collection_id: str):
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         if facts.research_objectives_ready:
             return facts
         if not self.collection_service.list_files(collection_id):

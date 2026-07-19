@@ -34,6 +34,7 @@ from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 try:
     from fastapi.testclient import TestClient
@@ -667,6 +668,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     task_service = TaskService(build_repository)
     source_artifact_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
@@ -681,6 +683,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             task_service=task_service,
             source_artifact_repository=source_artifact_repository,
             paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
             core_fact_repository=core_fact_repository,
         )
     ) as client:

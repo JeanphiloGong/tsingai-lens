@@ -11,7 +11,12 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfilesNotReadyError,
 )
 from application.source.task_service import TaskService
-from domain.ports import CoreFactRepository, PaperFactRepository, SourceArtifactRepository
+from domain.ports import (
+    CoreFactRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
+    SourceArtifactRepository,
+)
 
 
 class WorkspaceService:
@@ -23,12 +28,14 @@ class WorkspaceService:
         task_service: TaskService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
         core_fact_repository: CoreFactRepository,
         document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
         self.paper_fact_repository = paper_fact_repository
+        self.objective_repository = objective_repository
         self.core_fact_repository = core_fact_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
@@ -38,8 +45,9 @@ class WorkspaceService:
             collection_id
         )
         paper_facts = self.paper_fact_repository.read(collection_id)
+        objective_facts = self.objective_repository.read(collection_id)
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
-        objective_evidence_ready = bool(core_facts.objective_evidence_units)
+        objective_evidence_ready = bool(objective_facts.objective_evidence_units)
         evidence_cards_generated = bool(
             paper_facts.paper_facts_generated or objective_evidence_ready
         )
@@ -56,7 +64,7 @@ class WorkspaceService:
             and evidence_cards_ready
             and (
                 objective_evidence_ready
-                or core_facts.objective_logic_chains
+                or objective_facts.objective_logic_chains
                 or core_facts.comparable_results
                 or core_facts.collection_comparable_results
                 or core_facts.comparison_rows

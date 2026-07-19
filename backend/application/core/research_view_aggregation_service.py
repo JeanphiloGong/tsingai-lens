@@ -10,10 +10,16 @@ from application.source.collection_service import CollectionService
 from domain.core import ResearchUnderstanding
 from domain.core.fact_store import CoreFactSet
 from domain.core.paper_fact import PaperFactSet
+from domain.core.research_objective import ObjectiveFactSet
 from domain.core.objective_material_projection import (
     project_objective_material_rows,
 )
-from domain.ports import CoreFactRepository, PaperFactRepository, SourceArtifactRepository
+from domain.ports import (
+    CoreFactRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
+    SourceArtifactRepository,
+)
 
 
 _PROCESS_COLUMN_ORDER = (
@@ -141,14 +147,15 @@ class ResearchViewAggregationService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
         core_fact_repository: CoreFactRepository,
+        research_understanding_service: ResearchUnderstandingService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
+        self.objective_repository = objective_repository
         self.core_fact_repository = core_fact_repository
-        self.research_understanding_service = ResearchUnderstandingService(
-            source_artifact_repository
-        )
+        self.research_understanding_service = research_understanding_service
 
     def get_collection_research_view(self, collection_id: str) -> dict[str, Any]:
         collection = self.collection_service.get_collection(collection_id)
@@ -161,7 +168,7 @@ class ResearchViewAggregationService:
             self.paper_fact_repository.read(collection_id)
         )
         projection = self._comparison_projection_from_facts(facts)
-        objective_material_rows = self._objective_material_rows_from_facts(facts)
+        objective_material_rows = self._objective_material_rows(collection_id)
         if objective_material_rows:
             overview = self._build_objective_collection_overview(
                 collection_id,
@@ -287,8 +294,8 @@ class ResearchViewAggregationService:
                 "warnings": [],
             }
 
-        facts = self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows_from_facts(facts)
+        self._load_collection_facts(collection_id)
+        objective_material_rows = self._objective_material_rows(collection_id)
         if objective_material_rows:
             materials = self._build_objective_material_summaries(
                 collection_id,
@@ -325,7 +332,7 @@ class ResearchViewAggregationService:
             raise ResearchViewMaterialNotFoundError(collection_id, material_id)
 
         facts = self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows_from_facts(facts)
+        objective_material_rows = self._objective_material_rows(collection_id)
         if objective_material_rows:
             profile = self._build_objective_material_profile(
                 collection_id,
@@ -353,7 +360,7 @@ class ResearchViewAggregationService:
     ) -> tuple[ResearchUnderstanding, ...]:
         self.collection_service.get_collection(collection_id)
         facts = self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows_from_facts(facts)
+        objective_material_rows = self._objective_material_rows(collection_id)
         if not objective_material_rows:
             existing_non_material = tuple(
                 item
@@ -480,15 +487,20 @@ class ResearchViewAggregationService:
 
     def _load_collection_facts(self, collection_id: str) -> CoreFactSet:
         paper_facts = self.paper_fact_repository.read(collection_id)
+        objective_facts = self.objective_repository.read(collection_id)
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
-        if not paper_facts.has_paper_facts() and not core_facts.objective_evidence_units:
+        if (
+            not paper_facts.has_paper_facts()
+            and not objective_facts.objective_evidence_units
+        ):
             raise ResearchViewNotReadyError(collection_id)
         return core_facts
 
-    def _objective_material_rows_from_facts(
+    def _objective_material_rows(
         self,
-        facts: CoreFactSet,
+        collection_id: str,
     ) -> list[dict[str, Any]]:
+        facts = self.objective_repository.read(collection_id)
         rows = [
             row.to_record()
             for row in project_objective_material_rows(facts.objective_evidence_units)
@@ -503,7 +515,7 @@ class ResearchViewAggregationService:
 
     def _objective_material_scopes(
         self,
-        facts: CoreFactSet,
+        facts: ObjectiveFactSet,
     ) -> dict[str, str]:
         scopes: dict[str, str] = {}
         for objective in facts.research_objectives:

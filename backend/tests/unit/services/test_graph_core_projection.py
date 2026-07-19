@@ -5,14 +5,15 @@ from types import SimpleNamespace
 
 from application.derived.graph_projection_service import load_core_graph_payload
 from domain.core.document_profile import DocumentProfile
-from domain.core.fact_store import CoreFactSet
 from domain.core.research_objective import (
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ResearchObjective,
 )
 from infra.persistence.sqlite import SqliteCoreFactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _profile(document_id: str = "paper-1") -> dict:
@@ -102,8 +103,8 @@ def _logic_chain() -> dict:
     }
 
 
-def _core_graph_fact_set(collection_id: str) -> CoreFactSet:
-    return CoreFactSet(
+def _core_graph_fact_set(collection_id: str) -> ObjectiveFactSet:
+    return ObjectiveFactSet(
         research_objectives_ready=True,
         research_objectives=(ResearchObjective.from_mapping(_objective()),),
         objective_evidence_units=(
@@ -393,19 +394,15 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
     collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
 
     collection = collection_service.create_collection("Objective Graph Collection")
     collection_id = collection["collection_id"]
 
-    core_fact_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=_core_graph_fact_set(collection_id).research_objectives,
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=_core_graph_fact_set(collection_id).objective_evidence_units,
-        objective_logic_chains=_core_graph_fact_set(collection_id).objective_logic_chains,
+        "build_test",
+        _core_graph_fact_set(collection_id),
     )
     paper_fact_repository.replace_document_profiles(
         collection_id,
@@ -419,6 +416,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         min_weight=0.0,
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
 
@@ -439,6 +437,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         min_weight=0.0,
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
 
@@ -472,19 +471,15 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
 
     collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
     fact_set = _core_graph_fact_set(collection_id)
-    core_fact_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=fact_set.research_objectives,
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=fact_set.objective_evidence_units,
-        objective_logic_chains=fact_set.objective_logic_chains,
+        "build_test",
+        fact_set,
     )
     paper_fact_repository.replace_document_profiles(
         collection_id,
@@ -497,6 +492,7 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
         node_id="step:chain-1:measurement_results",
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
 

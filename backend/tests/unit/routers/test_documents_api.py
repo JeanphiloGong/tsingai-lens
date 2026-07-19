@@ -65,6 +65,7 @@ from tests.support.pbf_acceptance_fixture import (
     pbf_acceptance_test_conditions,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _store_document_profiles(
@@ -240,6 +241,7 @@ def document_services(tmp_path):
     comparison_service = ComparisonService(
         collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
     )

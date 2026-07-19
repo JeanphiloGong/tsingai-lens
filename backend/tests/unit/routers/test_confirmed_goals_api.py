@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from controllers.core import confirmed_goals as goal_controller
 from controllers.schemas.core.confirmed_goals import ConfirmedGoalCreateRequest
@@ -39,9 +40,16 @@ class FakeConfirmedGoalService:
         return self.goals[0]
 
 
-def test_confirmed_goal_route_creates_goal_from_question(monkeypatch):
+def _request(service: FakeConfirmedGoalService) -> SimpleNamespace:
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(confirmed_goal_service=service),
+        )
+    )
+
+
+def test_confirmed_goal_route_creates_goal_from_question():
     service = FakeConfirmedGoalService()
-    monkeypatch.setattr(goal_controller, "confirmed_goal_service", service)
 
     response = asyncio.run(
         goal_controller.create_confirmed_goal(
@@ -53,6 +61,7 @@ def test_confirmed_goal_route_creates_goal_from_question(monkeypatch):
                 process_hints=["LPBF"],
                 property_hints=["density"],
             ),
+            _request(service),
         )
     )
 
@@ -70,22 +79,28 @@ def test_confirmed_goal_route_creates_goal_from_question(monkeypatch):
     }
 
 
-def test_confirmed_goal_route_lists_collection_goals(monkeypatch):
+def test_confirmed_goal_route_lists_collection_goals():
     service = FakeConfirmedGoalService()
-    monkeypatch.setattr(goal_controller, "confirmed_goal_service", service)
 
-    response = asyncio.run(goal_controller.list_confirmed_goals("col-1"))
+    response = asyncio.run(
+        goal_controller.list_confirmed_goals("col-1", _request(service))
+    )
 
     assert response.collection_id == "col-1"
     assert response.goals[0].source_type == "user_input"
     assert service.listed_collection_id == "col-1"
 
 
-def test_confirmed_goal_route_reads_one_goal(monkeypatch):
+def test_confirmed_goal_route_reads_one_goal():
     service = FakeConfirmedGoalService()
-    monkeypatch.setattr(goal_controller, "confirmed_goal_service", service)
 
-    response = asyncio.run(goal_controller.get_confirmed_goal("col-1", "goal-1"))
+    response = asyncio.run(
+        goal_controller.get_confirmed_goal(
+            "col-1",
+            "goal-1",
+            _request(service),
+        )
+    )
 
     assert response.question == "How does laser power affect density?"
     assert service.get_args == ("col-1", "goal-1")

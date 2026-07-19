@@ -33,6 +33,16 @@ from infra.persistence.postgres.models.paper_fact import (
     PaperFactStructureFeature,
     PaperFactTestCondition,
 )
+from infra.persistence.postgres.models.objective import (
+    ObjectiveBuild,
+    ObjectiveContextRecord,
+    ObjectiveEvidenceRouteRecord,
+    ObjectiveEvidenceUnitRecord,
+    ObjectiveLogicChainRecord,
+    ObjectivePaperFrameRecord,
+    ObjectivePaperSkim,
+    ObjectiveResearchRecord,
+)
 from infra.persistence.postgres.models.source import (
     SourceBlock,
     SourceBlockTextUnit,
@@ -64,6 +74,14 @@ __all__ = [
     "CollectionImportDocument",
     "Document",
     "DocumentVersion",
+    "ObjectiveBuild",
+    "ObjectiveContextRecord",
+    "ObjectiveEvidenceRouteRecord",
+    "ObjectiveEvidenceUnitRecord",
+    "ObjectiveLogicChainRecord",
+    "ObjectivePaperFrameRecord",
+    "ObjectivePaperSkim",
+    "ObjectiveResearchRecord",
     "PaperFactBaselineReference",
     "PaperFactBuild",
     "PaperFactCharacterizationObservation",

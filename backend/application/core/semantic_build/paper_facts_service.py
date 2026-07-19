@@ -56,15 +56,15 @@ from domain.core.evidence_backbone import (
     TestCondition,
 )
 from domain.core.document_profile import DocumentProfile
-from domain.core.fact_store import CoreFactSet
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
 )
 from domain.ports import (
-    CoreFactRepository,
+    ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
 )
@@ -435,14 +435,14 @@ class PaperFactsService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
-        core_fact_repository: CoreFactRepository,
+        objective_repository: ObjectiveRepository,
         document_profile_service: DocumentProfileService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.document_profile_service = document_profile_service
         self._structured_extractor = structured_extractor
-        self.core_fact_repository = core_fact_repository
+        self.objective_repository = objective_repository
         self.paper_fact_repository = paper_fact_repository
         self.source_artifact_repository = source_artifact_repository
 
@@ -569,7 +569,7 @@ class PaperFactsService:
         }
 
     def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         cards = self._objective_evidence_cards_from_facts(collection_id, facts)
         if cards:
             return cards
@@ -600,7 +600,10 @@ class PaperFactsService:
         except DocumentProfilesNotReadyError as exc:
             raise PaperFactsNotReadyError(collection_id) from exc
 
-        objective_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        objective_facts = self.objective_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
         objective_contexts = (
             objective_facts.objective_contexts
             if objective_facts.research_objectives_ready
@@ -1210,11 +1213,10 @@ class PaperFactsService:
                 structure_features=structure_features,
             ),
         )
-        objective_evidence_units = (
-            self.core_fact_repository.read_collection_facts(
-                collection_id
-            ).objective_evidence_units
-        )
+        objective_evidence_units = self.objective_repository.read(
+            collection_id,
+            build_id=build_id,
+        ).objective_evidence_units
 
         logger.info(
             "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s objective_evidence_units=%s",
@@ -1248,9 +1250,9 @@ class PaperFactsService:
         collection_id: str,
     ) -> tuple[dict[str, Any], ...]:
         self.collection_service.get_collection(collection_id)
-        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        objective_facts = self.objective_repository.read(collection_id)
         cards_table = self._objective_evidence_cards_from_facts(
-            collection_id, core_facts
+            collection_id, objective_facts
         )
         if cards_table:
             logger.info(
@@ -1274,7 +1276,7 @@ class PaperFactsService:
     def _objective_evidence_cards_from_facts(
         self,
         collection_id: str,
-        facts: CoreFactSet,
+        facts: ObjectiveFactSet,
     ) -> tuple[dict[str, Any], ...]:
         if not facts.objective_evidence_units:
             return ()
@@ -1573,7 +1575,7 @@ class PaperFactsService:
         self,
         collection_id: str,
     ) -> tuple[ObjectiveContext, ...]:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         if not facts.research_objectives_ready:
             return ()
         return facts.objective_contexts

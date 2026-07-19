@@ -73,16 +73,15 @@ class FakeConfirmedGoalService:
 
 class FakeResearchObjectiveService:
     def __init__(self, understanding_payload: dict | None = None) -> None:
-        self.force_rebuild_values: list[bool] = []
+        self.analysis_count = 0
         self.understanding_payload = understanding_payload
 
     def analyze_confirmed_goal(
         self,
         goal: ConfirmedGoal,
         progress_callback=None,
-        force_rebuild: bool = False,
     ) -> ResearchUnderstanding:
-        self.force_rebuild_values.append(force_rebuild)
+        self.analysis_count += 1
         if progress_callback is not None:
             progress_callback(
                 {
@@ -145,7 +144,7 @@ def test_goal_analysis_pipeline_service_marks_goal_ready():
     assert result["understanding"].scope.scope_type == "goal"
     assert result["understanding"].scope.goal_id == "goal_1"
     assert result["pipeline_nodes"]["analyze_goal"]["status"] == "succeeded"
-    assert research_objective_service.force_rebuild_values == [True]
+    assert research_objective_service.analysis_count == 1
     assert confirmed_goal_service.progress_updates == [
         {
             "phase": "objective_evidence_routing_started",

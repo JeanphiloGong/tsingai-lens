@@ -6,10 +6,14 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveNotFoundError,
     ResearchObjectiveService,
 )
-from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from application.core.research_understanding_service import ResearchUnderstandingService
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     DocumentProfile,
+    ObjectiveFactSet,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
@@ -23,13 +27,15 @@ from infra.persistence.sqlite.source_artifact_repository import (
     SqliteSourceArtifactRepository,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _seed_objective_collection(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
-    repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     objective = ResearchObjective.from_mapping(
         {
             "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
@@ -41,67 +47,69 @@ def _seed_objective_collection(tmp_path):
             "confidence": 0.88,
         }
     )
-    repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (
-            PaperSkim.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "title": "LPBF 316L Corrosion",
-                    "source_filename": "paper-1.pdf",
-                    "doc_role": "experimental",
-                    "candidate_materials": ["316L stainless steel"],
-                }
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(
+                PaperSkim.from_mapping(
+                    {
+                        "document_id": "paper-1",
+                        "title": "LPBF 316L Corrosion",
+                        "source_filename": "paper-1.pdf",
+                        "doc_role": "experimental",
+                        "candidate_materials": ["316L stainless steel"],
+                    }
+                ),
+            ),
+            research_objectives=(objective,),
+            objective_contexts=(
+                ObjectiveContext.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "question": objective.question,
+                        "material_scope": ["316L stainless steel"],
+                        "variable_process_axes": ["heat treatment"],
+                        "process_context_axes": ["LPBF"],
+                        "target_property_axes": ["corrosion resistance"],
+                        "confidence": 0.88,
+                    }
+                ),
+            ),
+            objective_paper_frames=(
+                ObjectivePaperFrame.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "relevance": "high",
+                        "paper_role": "primary_experiment",
+                        "background": "Studies LPBF 316L corrosion after heat treatment.",
+                        "material_match": ["316L stainless steel"],
+                        "changed_variables": ["heat treatment"],
+                        "measured_property_scope": ["corrosion resistance"],
+                        "test_environment_scope": ["NaCl"],
+                        "relevant_sections": ["Results"],
+                        "relevant_tables": ["table-1"],
+                    }
+                ),
+            ),
+            objective_evidence_routes=(
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "source_kind": "table",
+                        "source_ref": "table-1",
+                        "role": "current_experimental_evidence",
+                        "extractable": True,
+                        "reason": "Contains corrosion results.",
+                        "table_schema": {"column_headers": ["sample", "icorr"]},
+                        "confidence": 0.81,
+                    }
+                ),
             ),
         ),
-        (objective,),
-        (
-            ObjectiveContext.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "question": objective.question,
-                    "material_scope": ["316L stainless steel"],
-                    "variable_process_axes": ["heat treatment"],
-                    "process_context_axes": ["LPBF"],
-                    "target_property_axes": ["corrosion resistance"],
-                    "confidence": 0.88,
-                }
-            ),
-        ),
-        (
-            ObjectivePaperFrame.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "background": "Studies LPBF 316L corrosion after heat treatment.",
-                    "material_match": ["316L stainless steel"],
-                    "changed_variables": ["heat treatment"],
-                    "measured_property_scope": ["corrosion resistance"],
-                    "test_environment_scope": ["NaCl"],
-                    "relevant_sections": ["Results"],
-                    "relevant_tables": ["table-1"],
-                }
-            ),
-        ),
-        (
-            ObjectiveEvidenceRoute.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "source_kind": "table",
-                    "source_ref": "table-1",
-                    "role": "current_experimental_evidence",
-                    "extractable": True,
-                    "reason": "Contains corrosion results.",
-                    "table_schema": {"column_headers": ["sample", "icorr"]},
-                    "confidence": 0.81,
-                }
-            ),
-        ),
-        (),
-        (),
     )
     paper_fact_repository = MemoryPaperFactRepository()
     paper_fact_repository.replace_document_profiles(
@@ -127,10 +135,14 @@ def _seed_objective_collection(tmp_path):
     )
     service = ResearchObjectiveService(
         collection_service=collection_service,
-        core_fact_repository=repository,
+        objective_repository=objective_repository,
+        core_fact_repository=core_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         document_profile_service=document_profile_service,
+        research_understanding_service=ResearchUnderstandingService(
+            source_artifact_repository=source_repository,
+        ),
     )
     service.persist_objective_understandings(collection_id)
     return collection_id, objective.objective_id, service
@@ -177,7 +189,7 @@ def test_objective_workspace_detail_returns_frames_and_reserved_fields(tmp_path)
 
 def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
     collection_id, objective_id, service = _seed_objective_collection(tmp_path)
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     corrosion_unit = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-corrosion",
@@ -229,38 +241,41 @@ def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
             "confidence": 0.83,
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        facts.paper_skims,
-        facts.research_objectives,
-        facts.objective_contexts,
-        facts.objective_paper_frames,
-        facts.objective_evidence_routes,
-        (
-            corrosion_unit,
-            elongation_unit,
-            density_unit,
-        ),
-        (
-            ObjectiveLogicChain.from_mapping(
-                {
-                    "objective_id": objective_id,
-                    "chain_scope": "objective",
-                    "question": facts.research_objectives[0].question,
-                    "evidence_unit_ids": [
-                        corrosion_unit.evidence_unit_id,
-                        elongation_unit.evidence_unit_id,
-                        density_unit.evidence_unit_id,
-                    ],
-                    "chain_payload": {
-                        "measurement_value_ranges": [
-                            {"property_normalized": "elongation"},
-                            {"property_normalized": "relative density"},
-                        ]
-                    },
-                    "summary": "Polluted persisted logic chain.",
-                    "confidence": 0.7,
-                }
+        "build_test",
+        ObjectiveFactSet(
+            paper_skims=facts.paper_skims,
+            research_objectives=facts.research_objectives,
+            objective_contexts=facts.objective_contexts,
+            objective_paper_frames=facts.objective_paper_frames,
+            objective_evidence_routes=facts.objective_evidence_routes,
+            objective_evidence_units=(
+                corrosion_unit,
+                elongation_unit,
+                density_unit,
+            ),
+            objective_logic_chains=(
+                ObjectiveLogicChain.from_mapping(
+                    {
+                        "objective_id": objective_id,
+                        "chain_scope": "objective",
+                        "question": facts.research_objectives[0].question,
+                        "evidence_unit_ids": [
+                            corrosion_unit.evidence_unit_id,
+                            elongation_unit.evidence_unit_id,
+                            density_unit.evidence_unit_id,
+                        ],
+                        "chain_payload": {
+                            "measurement_value_ranges": [
+                                {"property_normalized": "elongation"},
+                                {"property_normalized": "relative density"},
+                            ]
+                        },
+                        "summary": "Polluted persisted logic chain.",
+                        "confidence": 0.7,
+                    }
+                ),
             ),
         ),
     )
@@ -282,7 +297,7 @@ def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
 
 def test_objective_workspace_detail_returns_research_understanding(tmp_path):
     collection_id, objective_id, service = _seed_objective_collection(tmp_path)
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     measurement = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-corrosion",
@@ -354,29 +369,32 @@ def test_objective_workspace_detail_returns_research_understanding(tmp_path):
             "confidence": 0.77,
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        facts.paper_skims,
-        facts.research_objectives,
-        facts.objective_contexts,
-        facts.objective_paper_frames,
-        facts.objective_evidence_routes,
-        (measurement, comparison, mechanism),
-        (
-            ObjectiveLogicChain.from_mapping(
-                {
-                    "objective_id": objective_id,
-                    "chain_scope": "objective",
-                    "question": facts.research_objectives[0].question,
-                    "evidence_unit_ids": [
-                        measurement.evidence_unit_id,
-                        comparison.evidence_unit_id,
-                        mechanism.evidence_unit_id,
-                    ],
-                    "chain_payload": {},
-                    "summary": "Persisted summary.",
-                    "confidence": 0.7,
-                }
+        "build_test",
+        ObjectiveFactSet(
+            paper_skims=facts.paper_skims,
+            research_objectives=facts.research_objectives,
+            objective_contexts=facts.objective_contexts,
+            objective_paper_frames=facts.objective_paper_frames,
+            objective_evidence_routes=facts.objective_evidence_routes,
+            objective_evidence_units=(measurement, comparison, mechanism),
+            objective_logic_chains=(
+                ObjectiveLogicChain.from_mapping(
+                    {
+                        "objective_id": objective_id,
+                        "chain_scope": "objective",
+                        "question": facts.research_objectives[0].question,
+                        "evidence_unit_ids": [
+                            measurement.evidence_unit_id,
+                            comparison.evidence_unit_id,
+                            mechanism.evidence_unit_id,
+                        ],
+                        "chain_payload": {},
+                        "summary": "Persisted summary.",
+                        "confidence": 0.7,
+                    }
+                ),
             ),
         ),
     )
@@ -402,7 +420,7 @@ def test_objective_workspace_detail_filters_textual_measurement_without_numeric_
     tmp_path,
 ):
     collection_id, objective_id, service = _seed_objective_collection(tmp_path)
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     explicit_elongation_unit = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-elongation-value",
@@ -436,38 +454,41 @@ def test_objective_workspace_detail_filters_textual_measurement_without_numeric_
             "confidence": 0.71,
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        facts.paper_skims,
-        facts.research_objectives,
-        (
-            ObjectiveContext.from_mapping(
-                {
-                    **facts.objective_contexts[0].to_record(),
-                    "target_property_axes": ["elongation"],
-                }
+        "build_test",
+        ObjectiveFactSet(
+            paper_skims=facts.paper_skims,
+            research_objectives=facts.research_objectives,
+            objective_contexts=(
+                ObjectiveContext.from_mapping(
+                    {
+                        **facts.objective_contexts[0].to_record(),
+                        "target_property_axes": ["elongation"],
+                    }
+                ),
             ),
-        ),
-        facts.objective_paper_frames,
-        facts.objective_evidence_routes,
-        (
-            explicit_elongation_unit,
-            textual_elongation_unit,
-        ),
-        (
-            ObjectiveLogicChain.from_mapping(
-                {
-                    "objective_id": objective_id,
-                    "chain_scope": "objective",
-                    "question": facts.research_objectives[0].question,
-                    "evidence_unit_ids": [
-                        explicit_elongation_unit.evidence_unit_id,
-                        textual_elongation_unit.evidence_unit_id,
-                    ],
-                    "chain_payload": {},
-                    "summary": "Polluted persisted logic chain.",
-                    "confidence": 0.7,
-                }
+            objective_paper_frames=facts.objective_paper_frames,
+            objective_evidence_routes=facts.objective_evidence_routes,
+            objective_evidence_units=(
+                explicit_elongation_unit,
+                textual_elongation_unit,
+            ),
+            objective_logic_chains=(
+                ObjectiveLogicChain.from_mapping(
+                    {
+                        "objective_id": objective_id,
+                        "chain_scope": "objective",
+                        "question": facts.research_objectives[0].question,
+                        "evidence_unit_ids": [
+                            explicit_elongation_unit.evidence_unit_id,
+                            textual_elongation_unit.evidence_unit_id,
+                        ],
+                        "chain_payload": {},
+                        "summary": "Polluted persisted logic chain.",
+                        "confidence": 0.7,
+                    }
+                ),
             ),
         ),
     )
@@ -489,7 +510,7 @@ def test_objective_workspace_detail_filters_relative_change_interpretation(
     tmp_path,
 ):
     collection_id, objective_id, service = _seed_objective_collection(tmp_path)
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     explicit_elongation_unit = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-elongation-value",
@@ -523,38 +544,41 @@ def test_objective_workspace_detail_filters_relative_change_interpretation(
             "confidence": 0.62,
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        facts.paper_skims,
-        facts.research_objectives,
-        (
-            ObjectiveContext.from_mapping(
-                {
-                    **facts.objective_contexts[0].to_record(),
-                    "target_property_axes": ["elongation"],
-                }
+        "build_test",
+        ObjectiveFactSet(
+            paper_skims=facts.paper_skims,
+            research_objectives=facts.research_objectives,
+            objective_contexts=(
+                ObjectiveContext.from_mapping(
+                    {
+                        **facts.objective_contexts[0].to_record(),
+                        "target_property_axes": ["elongation"],
+                    }
+                ),
             ),
-        ),
-        facts.objective_paper_frames,
-        facts.objective_evidence_routes,
-        (
-            explicit_elongation_unit,
-            relative_change_unit,
-        ),
-        (
-            ObjectiveLogicChain.from_mapping(
-                {
-                    "objective_id": objective_id,
-                    "chain_scope": "objective",
-                    "question": facts.research_objectives[0].question,
-                    "evidence_unit_ids": [
-                        explicit_elongation_unit.evidence_unit_id,
-                        relative_change_unit.evidence_unit_id,
-                    ],
-                    "chain_payload": {},
-                    "summary": "Polluted persisted logic chain.",
-                    "confidence": 0.7,
-                }
+            objective_paper_frames=facts.objective_paper_frames,
+            objective_evidence_routes=facts.objective_evidence_routes,
+            objective_evidence_units=(
+                explicit_elongation_unit,
+                relative_change_unit,
+            ),
+            objective_logic_chains=(
+                ObjectiveLogicChain.from_mapping(
+                    {
+                        "objective_id": objective_id,
+                        "chain_scope": "objective",
+                        "question": facts.research_objectives[0].question,
+                        "evidence_unit_ids": [
+                            explicit_elongation_unit.evidence_unit_id,
+                            relative_change_unit.evidence_unit_id,
+                        ],
+                        "chain_payload": {},
+                        "summary": "Polluted persisted logic chain.",
+                        "confidence": 0.7,
+                    }
+                ),
             ),
         ),
     )

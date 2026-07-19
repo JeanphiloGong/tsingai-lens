@@ -8,7 +8,7 @@ from application.derived.core_fact_projection import build_core_fact_projection_
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
-from domain.ports import CoreFactRepository, PaperFactRepository
+from domain.ports import CoreFactRepository, ObjectiveRepository, PaperFactRepository
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
@@ -77,20 +77,22 @@ def load_graph_payload(
     *,
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
+    objective_repository: ObjectiveRepository,
     core_fact_repository: CoreFactRepository,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     collection_service.get_collection(collection_id)
     paper_facts = paper_fact_repository.read(collection_id)
+    objective_facts = objective_repository.read(collection_id)
     core_facts = core_fact_repository.read_collection_facts(collection_id)
     evidence_cards_ready = bool(
-        paper_facts.evidence_cards_ready or core_facts.objective_evidence_units
+        paper_facts.evidence_cards_ready or objective_facts.objective_evidence_units
     )
     graph_ready = bool(
         paper_facts.document_profiles
         and evidence_cards_ready
         and (
-            core_facts.objective_evidence_units
-            or core_facts.objective_logic_chains
+            objective_facts.objective_evidence_units
+            or objective_facts.objective_logic_chains
             or core_facts.comparable_results
             or core_facts.collection_comparable_results
             or core_facts.comparison_rows
@@ -105,6 +107,7 @@ def load_graph_payload(
             ),
             missing_artifacts=_missing_core_graph_inputs(
                 paper_facts,
+                objective_facts,
                 core_facts,
             ),
         )
@@ -115,13 +118,13 @@ def load_graph_payload(
             profile.to_record() for profile in paper_facts.document_profiles
         ),
         research_objectives=tuple(
-            objective.to_record() for objective in core_facts.research_objectives
+            objective.to_record() for objective in objective_facts.research_objectives
         ),
         objective_evidence_units=tuple(
-            unit.to_record() for unit in core_facts.objective_evidence_units
+            unit.to_record() for unit in objective_facts.objective_evidence_units
         ),
         objective_logic_chains=tuple(
-            chain.to_record() for chain in core_facts.objective_logic_chains
+            chain.to_record() for chain in objective_facts.objective_logic_chains
         ),
         max_nodes=max_nodes,
         min_weight=min_weight,
@@ -130,15 +133,22 @@ def load_graph_payload(
     )
 
 
-def _missing_core_graph_inputs(paper_facts: Any, core_facts: Any) -> list[str]:
+def _missing_core_graph_inputs(
+    paper_facts: Any,
+    objective_facts: Any,
+    core_facts: Any,
+) -> list[str]:
     missing: list[str] = []
     if not paper_facts.document_profiles:
         missing.append("core_fact_repository.document_profiles")
-    if not (paper_facts.evidence_cards_ready or core_facts.objective_evidence_units):
+    if not (
+        paper_facts.evidence_cards_ready
+        or objective_facts.objective_evidence_units
+    ):
         missing.append("core_fact_repository.evidence_cards")
     if not (
-        core_facts.objective_evidence_units
-        or core_facts.objective_logic_chains
+        objective_facts.objective_evidence_units
+        or objective_facts.objective_logic_chains
         or core_facts.comparable_results
         or core_facts.collection_comparable_results
         or core_facts.comparison_rows
@@ -154,6 +164,7 @@ def get_collection_graph(
     *,
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
+    objective_repository: ObjectiveRepository,
     core_fact_repository: CoreFactRepository,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, truncated = load_graph_payload(
@@ -162,6 +173,7 @@ def get_collection_graph(
         min_weight=min_weight,
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
     return {
@@ -179,6 +191,7 @@ def build_graphml(
     *,
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
+    objective_repository: ObjectiveRepository,
     core_fact_repository: CoreFactRepository,
 ) -> tuple[bytes, str]:
     nodes_payload, edges_payload, _ = load_graph_payload(
@@ -187,6 +200,7 @@ def build_graphml(
         min_weight=min_weight,
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
     return to_graphml(nodes_payload, edges_payload), f"{collection_id}.graphml"
@@ -198,6 +212,7 @@ def get_collection_graph_neighbors(
     *,
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
+    objective_repository: ObjectiveRepository,
     core_fact_repository: CoreFactRepository,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, _ = load_graph_payload(
@@ -206,6 +221,7 @@ def get_collection_graph_neighbors(
         min_weight=0.0,
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
 

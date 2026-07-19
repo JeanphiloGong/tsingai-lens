@@ -36,22 +36,23 @@ The stable data ownership and identity contract lives in
   file provenance, import provenance, Goal-intake handoffs, tasks, collection
   builds, stage state, artifact versions, active-build selection, and
   build-versioned Source structure, figures, references, document profiles,
-  and reusable paper facts through SQLAlchemy mappings and direct aggregate
-  repositories.
+  reusable paper facts, research objectives, contexts, paper frames, evidence
+  routes, evidence units, and logic chains through SQLAlchemy mappings and
+  direct aggregate repositories.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
   Handwritten repositories share `backend/data/lens.sqlite` for Goal sessions
-  and plans, objectives, comparisons, confirmed goals, understandings, and
-  evaluation/review state. These remaining repositories currently create
-  schema at runtime. SQLite Source and paper-fact tables are isolated
+  and plans, comparisons, confirmed goals, understandings, and evaluation/review
+  state. These remaining repositories currently create schema at runtime.
+  SQLite Source, paper-fact, and objective tables are isolated
   test/legacy residue and are not composed into maintained runtime readers,
   writers, or supported scripts.
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
 `factory.py` constructs SQLite repositories only for the remaining Goal, Core,
-and evaluation families. Auth, collection, build, Source, and paper-fact
+and evaluation families. Auth, collection, build, Source, paper-fact, and objective
 aggregates are composed directly in `main.py`; none has a repository factory or
 runtime fallback. Source pipeline JSON and Parquet
 outputs live under `infra/source/` runtime storage and are rebuildable
@@ -64,8 +65,8 @@ services remain caller-owned.
 
 `postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
 `postgres/models/collection.py`, `postgres/models/document.py`,
-`postgres/models/build.py`, `postgres/models/source.py`, and
-`postgres/models/paper_fact.py` own their storage
+`postgres/models/build.py`, `postgres/models/source.py`,
+`postgres/models/paper_fact.py`, and `postgres/models/objective.py` own their storage
 mappings; the matching direct
 aggregate repositories own explicit row/domain mapping and short transactions.
 `../../migrations/` owns the version history and is the only PostgreSQL schema
@@ -110,8 +111,18 @@ baselines, measurements, characterization observations, and structure
 features. Writes name one pending build and validate each Source document and
 document version in the same transaction. Default reads resolve only the
 active successful build. Callers that also need objectives or comparisons
-receive the remaining Core repository explicitly; no composite repository or
-SQLite paper-fact fallback exists.
+receive the Objective and remaining Core repositories explicitly; no composite
+repository or SQLite paper-fact fallback exists.
+
+`PostgresObjectiveRepository` is the single structured owner for research
+objectives, contexts, paper frames, evidence routes, evidence units, logic
+chains, and their ordered document, Source, paper-fact anchor, and evidence-unit
+links. Writes replace one explicitly named pending build; default reads resolve
+only the active successful build. Goal analysis reads that active aggregate,
+derives goal-specific stages in memory, and persists only the final
+understanding through its current owner. It does not mutate the active
+collection objective build. No SQLite objective read, write, fallback, or dual
+path remains.
 
 ## Target Boundary
 

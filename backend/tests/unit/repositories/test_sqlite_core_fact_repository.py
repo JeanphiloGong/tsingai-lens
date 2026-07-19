@@ -5,13 +5,6 @@ from domain.core import (
     ComparableResult,
     ConfirmedGoal,
     ComparisonRowRecord,
-    ObjectiveContext,
-    ObjectiveEvidenceRoute,
-    ObjectiveEvidenceUnit,
-    ObjectiveLogicChain,
-    ObjectivePaperFrame,
-    PaperSkim,
-    ResearchObjective,
     ResearchUnderstanding,
 )
 from infra.persistence.sqlite import SqliteCoreFactRepository
@@ -39,152 +32,32 @@ def test_sqlite_core_fact_repository_round_trips_comparison_facts(tmp_path):
     assert empty_comparison.comparison_rows == ()
 
 
-def test_sqlite_core_fact_repository_round_trips_research_objectives(tmp_path):
+def test_sqlite_core_fact_repository_does_not_own_research_objectives(tmp_path):
     repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "title": "LPBF 316L corrosion study",
-            "source_filename": "paper.pdf",
-            "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "candidate_processes": ["LPBF", "heat treatment"],
-            "candidate_properties": ["corrosion"],
-            "changed_variables": ["heat treatment temperature"],
-            "possible_objectives": [
-                "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
-            ],
-            "evidence_density": "high",
-            "confidence": 0.91,
-            "warnings": [],
-        }
-    )
-    objective = ResearchObjective.from_mapping(
-        {
-            "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
-            "material_scope": ["316L stainless steel"],
-            "process_axes": ["LPBF", "heat treatment"],
-            "property_axes": ["corrosion"],
-            "comparison_intent": "compare as-built and heat-treated corrosion behavior",
-            "seed_document_ids": ["paper-1"],
-            "excluded_document_ids": [],
-            "confidence": 0.88,
-            "reason": "paper skim points to a repeated comparison axis",
-        }
-    )
-    objective_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "question": objective.question,
-            "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["heat treatment"],
-            "process_context_axes": ["LPBF"],
-            "target_property_axes": ["corrosion"],
-            "excluded_property_axes": [],
-            "routing_hints": [
-                {
-                    "table_id": "table-1",
-                    "role": "result_table",
-                    "matched_property_axes": ["corrosion"],
-                }
-            ],
-            "extraction_guidance": {
-                "do_not_treat_as_variables": ["LPBF"],
-                "do_not_treat_as_result_properties": ["heat treatment"],
-            },
-            "confidence": 0.88,
-        }
-    )
-    objective_frame = ObjectivePaperFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "background": "The paper directly studies LPBF 316L corrosion.",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment temperature"],
-            "measured_property_scope": ["corrosion"],
-            "test_environment_scope": ["3.5 wt.% NaCl"],
-            "relevant_sections": ["Results"],
-            "relevant_tables": ["table-3"],
-            "excluded_tables": ["table-1"],
-        }
-    )
-    evidence_route = ObjectiveEvidenceRoute.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "source_kind": "table",
-            "source_ref": "table-3",
-            "role": "current_experimental_evidence",
-            "extractable": True,
-            "reason": "Table contains corrosion measurements by sample.",
-            "table_schema": {"columns": ["sample", "icorr"]},
-            "column_roles": {"sample": "sample_key", "icorr": "measurement"},
-            "join_keys": {"sample_column": "sample"},
-            "join_plan": {"join_on": "sample_label"},
-            "confidence": 0.84,
-        }
-    )
-    evidence_unit = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "unit_kind": "measurement",
-            "property_normalized": "corrosion_current_density",
-            "material_system": {"name": "316L stainless steel"},
-            "sample_context": {"label": "HT-SLM"},
-            "process_context": {"process": "LPBF", "heat_treatment": "HT"},
-            "resolved_condition": {"medium": "3.5 wt.% NaCl"},
-            "test_condition": {"method": "potentiodynamic polarization"},
-            "value_payload": {"value": 1.2, "kind": "scalar"},
-            "unit": "uA/cm2",
-            "baseline_context": {"label": "as-built"},
-            "source_refs": [{"source_kind": "table", "source_ref": "table-3"}],
-            "evidence_anchor_ids": ["anc-1"],
-            "join_keys": {"sample_no": "2"},
-            "resolution_status": "resolved",
-            "confidence": 0.8,
-        }
-    )
-    logic_chain = ObjectiveLogicChain.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "chain_scope": "paper",
-            "document_id": "paper-1",
-            "question": objective.question,
-            "evidence_unit_ids": [evidence_unit.evidence_unit_id],
-            "chain_payload": {"claim": "HT changes corrosion behavior."},
-            "summary": "Paper-level evidence chain for LPBF 316L corrosion.",
-            "confidence": 0.79,
-        }
-    )
+    facts = repository.read_collection_facts("col_test")
 
-    repository.replace_collection_research_objectives(
-        "col_test",
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (objective_frame,),
-        (evidence_route,),
-        (evidence_unit,),
-        (logic_chain,),
-    )
-    restored = repository.read_collection_facts("col_test")
+    assert not hasattr(repository, "replace_collection_research_objectives")
+    assert not hasattr(facts, "research_objectives_ready")
+    assert not hasattr(facts, "research_objectives")
 
-    assert restored.research_objectives_ready is True
-    assert restored.paper_skims[0].candidate_materials == ("316L stainless steel",)
-    assert restored.research_objectives[0].objective_id.startswith("obj_")
-    assert restored.research_objectives[0].seed_document_ids == ("paper-1",)
-    assert restored.objective_contexts[0].objective_id == objective.objective_id
-    assert restored.objective_contexts[0].routing_hints[0]["table_id"] == "table-1"
-    assert restored.objective_paper_frames[0].relevance == "high"
-    assert restored.objective_evidence_routes[0].source_ref == "table-3"
-    assert restored.objective_evidence_units[0].resolution_status == "resolved"
-    assert restored.objective_logic_chains[0].evidence_unit_ids == (
-        evidence_unit.evidence_unit_id,
-    )
+    with repository._connection() as connection:
+        table_names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        status_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(core_fact_collection_status)"
+            ).fetchall()
+        }
+
+    assert not any(name.startswith("core_objective_") for name in table_names)
+    assert "core_paper_skims" not in table_names
+    assert "core_research_objectives" not in table_names
+    assert "research_objectives_ready" not in status_columns
 
 
 def test_sqlite_core_fact_repository_does_not_own_paper_facts(tmp_path):

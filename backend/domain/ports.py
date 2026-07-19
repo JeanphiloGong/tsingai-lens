@@ -15,13 +15,7 @@ from domain.core.fact_store import CoreFactSet
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ConfirmedGoal,
-    ObjectiveContext,
-    ObjectiveEvidenceRoute,
-    ObjectiveEvidenceUnit,
-    ObjectiveLogicChain,
-    ObjectivePaperFrame,
-    PaperSkim,
-    ResearchObjective,
+    ObjectiveFactSet,
 )
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
@@ -322,20 +316,26 @@ class PaperFactRepository(Protocol):
     ) -> PaperFactSet: ...
 
 
-class CoreFactRepository(Protocol):
+class ObjectiveRepository(Protocol):
     backend_name: str
 
-    def replace_collection_research_objectives(
+    def replace(
         self,
         collection_id: str,
-        paper_skims: tuple[PaperSkim, ...],
-        research_objectives: tuple[ResearchObjective, ...],
-        objective_contexts: tuple[ObjectiveContext, ...],
-        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
-        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
-        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
-        objective_logic_chains: tuple[ObjectiveLogicChain, ...],
+        build_id: str,
+        facts: ObjectiveFactSet,
     ) -> None: ...
+
+    def read(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> ObjectiveFactSet: ...
+
+
+class CoreFactRepository(Protocol):
+    backend_name: str
 
     def replace_collection_comparison_artifacts(
         self,

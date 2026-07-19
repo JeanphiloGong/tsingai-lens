@@ -627,6 +627,18 @@ class ObjectiveLogicChain:
         }
 
 
+@dataclass(frozen=True)
+class ObjectiveFactSet:
+    research_objectives_ready: bool = False
+    paper_skims: tuple[PaperSkim, ...] = ()
+    research_objectives: tuple[ResearchObjective, ...] = ()
+    objective_contexts: tuple[ObjectiveContext, ...] = ()
+    objective_paper_frames: tuple[ObjectivePaperFrame, ...] = ()
+    objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...] = ()
+    objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...] = ()
+    objective_logic_chains: tuple[ObjectiveLogicChain, ...] = ()
+
+
 def build_research_objective_id(question: str) -> str:
     normalized_question = (_normalize_text(question) or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
@@ -800,6 +812,7 @@ __all__ = [
     "ObjectiveContext",
     "ObjectiveEvidenceRoute",
     "ObjectiveEvidenceUnit",
+    "ObjectiveFactSet",
     "ObjectiveLogicChain",
     "ObjectivePaperFrame",
     "PAPER_RELEVANCE_VALUES",

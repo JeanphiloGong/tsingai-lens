@@ -6,6 +6,7 @@ from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
     ResearchViewNotReadyError,
 )
+from application.core.research_understanding_service import ResearchUnderstandingService
 from controllers.schemas.core.research_view import MaterialProfileResponse
 from domain.core import (
     BaselineReference,
@@ -17,6 +18,7 @@ from domain.core import (
     MeasurementResult,
     MethodFact,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ResearchUnderstanding,
     ResearchObjective,
     SampleVariant,
@@ -26,6 +28,7 @@ from domain.core import (
 )
 from domain.core.paper_fact import PaperFactSet
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 class FakeCollectionService:
@@ -51,21 +54,11 @@ class FakeCoreFactRepository:
     def __init__(
         self,
         comparison_rows: list[dict] | None,
-        objective_units: list[dict] | None = None,
-        research_objectives: list[dict] | None = None,
     ) -> None:
         self.facts = CoreFactSet(
-            research_objectives=self._records(
-                research_objectives if research_objectives is not None else [],
-                ResearchObjective,
-            ),
             comparison_rows=self._records(
                 comparison_rows if comparison_rows is not None else [],
                 ComparisonRowRecord,
-            ),
-            objective_evidence_units=self._records(
-                objective_units if objective_units is not None else [],
-                ObjectiveEvidenceUnit,
             ),
         )
         self.research_understandings: dict[tuple[str, str], ResearchUnderstanding] = {}
@@ -384,11 +377,17 @@ def _service(
     profiles, frames = _frames()
     paper_fact_repository = _paper_fact_repository(profiles, frames)
     core_fact_repository = FakeCoreFactRepository(comparison_rows)
+    objective_repository = MemoryObjectiveRepository()
+    source_repository = SimpleNamespace()
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(has_files=has_files),
-        source_artifact_repository=SimpleNamespace(),
+        source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
+        research_understanding_service=ResearchUnderstandingService(
+            source_repository
+        ),
     )
 
 
@@ -411,16 +410,33 @@ def _service_from_frames(
     research_objectives: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    core_fact_repository = FakeCoreFactRepository(
-        comparison_rows,
-        objective_units,
-        research_objectives,
+    core_fact_repository = FakeCoreFactRepository(comparison_rows)
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
+        "col-1",
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            research_objectives=tuple(
+                ResearchObjective.from_mapping(record)
+                for record in research_objectives or []
+            ),
+            objective_evidence_units=tuple(
+                ObjectiveEvidenceUnit.from_mapping(record)
+                for record in objective_units or []
+            ),
+        ),
     )
+    source_repository = SimpleNamespace()
     return ResearchViewAggregationService(
         collection_service=FakeCollectionService(),
-        source_artifact_repository=SimpleNamespace(),
+        source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
+        research_understanding_service=ResearchUnderstandingService(
+            source_repository
+        ),
     )
 
 

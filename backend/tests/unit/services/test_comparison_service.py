@@ -8,7 +8,8 @@ from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
-from domain.core import CoreFactSet, ObjectiveEvidenceUnit
+from domain.core import CoreFactSet, ObjectiveEvidenceUnit, ObjectiveFactSet
+from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
@@ -43,8 +44,12 @@ class FakeCoreFactRepository:
 
 
 def test_comparison_service_projects_rows_from_objective_measurements():
-    repository = FakeCoreFactRepository(
-        CoreFactSet(
+    repository = FakeCoreFactRepository(CoreFactSet())
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
+        "col-1",
+        "build_test",
+        ObjectiveFactSet(
             objective_evidence_units=(
                 ObjectiveEvidenceUnit.from_mapping(
                     {
@@ -70,12 +75,13 @@ def test_comparison_service_projects_rows_from_objective_measurements():
                     }
                 ),
             ),
-        )
+        ),
     )
     service = ComparisonService(
         collection_service=FakeCollectionService(),
         document_profile_service=SimpleNamespace(),
         paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=objective_repository,
         core_fact_repository=repository,
     )
 
@@ -92,8 +98,12 @@ def test_comparison_service_projects_rows_from_objective_measurements():
 
 
 def test_comparison_service_does_not_fall_back_to_paper_facts_for_empty_objective_rows():
-    repository = FakeCoreFactRepository(
-        CoreFactSet(
+    repository = FakeCoreFactRepository(CoreFactSet())
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
+        "col-1",
+        "build_test",
+        ObjectiveFactSet(
             objective_evidence_units=(
                 ObjectiveEvidenceUnit.from_mapping(
                     {
@@ -107,12 +117,13 @@ def test_comparison_service_does_not_fall_back_to_paper_facts_for_empty_objectiv
                     }
                 ),
             ),
-        )
+        ),
     )
     service = ComparisonService(
         collection_service=FakeCollectionService(),
         document_profile_service=SimpleNamespace(),
         paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=objective_repository,
         core_fact_repository=repository,
     )
 

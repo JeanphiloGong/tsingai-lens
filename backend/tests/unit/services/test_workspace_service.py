@@ -13,6 +13,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
 )
 from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
@@ -20,6 +21,7 @@ from infra.persistence.memory import MemoryBuildRepository
 from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
 from infra.source.runtime.source_evidence import build_blocks
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 
@@ -45,6 +47,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
     task_service = TaskService(MemoryBuildRepository())
     paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     profile_service = DocumentProfileService(
         collection_service,
@@ -56,6 +59,7 @@ def test_workspace_service_builds_collection_overview(tmp_path):
         task_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=profile_service,
     )
@@ -88,6 +92,7 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
     source_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
@@ -98,6 +103,7 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
         task_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=profile_service,
     )
@@ -163,6 +169,7 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
     task_service = TaskService(MemoryBuildRepository())
     paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     profile_service = DocumentProfileService(
         collection_service,
@@ -174,6 +181,7 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
         task_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=profile_service,
     )
@@ -292,6 +300,7 @@ def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path
     task_service = TaskService(MemoryBuildRepository())
     paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     profile_service = DocumentProfileService(
         collection_service,
@@ -303,6 +312,7 @@ def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path
         task_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=profile_service,
     )
@@ -351,15 +361,13 @@ def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path
         "build_test",
         document_profiles,
     )
-    core_fact_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=(),
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=objective_evidence_units,
-        objective_logic_chains=(),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            objective_evidence_units=objective_evidence_units,
+        ),
     )
 
     overview = workspace_service.get_workspace_overview(collection_id)

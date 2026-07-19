@@ -26,6 +26,9 @@ from application.core.semantic_build.research_objective_service import (
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
+from application.core.research_understanding_service import (
+    ResearchUnderstandingService,
+)
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     ConfirmedGoal,
@@ -33,6 +36,7 @@ from domain.core import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
@@ -40,11 +44,10 @@ from domain.core import (
     build_research_objective_id,
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
-from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
-    SqliteSourceArtifactRepository,
-)
+from infra.persistence.sqlite import SqliteCoreFactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 
 def _build_research_objective_service(
@@ -58,12 +61,14 @@ def _build_research_objective_service(
             kwargs.get("document_profile_service"),
             "source_artifact_repository",
             None,
-        ) or SqliteSourceArtifactRepository(
-            collection_service.root_dir.parent / "lens.sqlite"
-        )
+        ) or MemorySourceArtifactRepository()
     paper_fact_repository = kwargs.pop(
         "paper_fact_repository",
         MemoryPaperFactRepository(),
+    )
+    objective_repository = kwargs.pop(
+        "objective_repository",
+        MemoryObjectiveRepository(),
     )
     core_fact_repository = kwargs.pop(
         "core_fact_repository",
@@ -76,12 +81,21 @@ def _build_research_objective_service(
             source_artifact_repository=source_repository,
             paper_fact_repository=paper_fact_repository,
         )
+    research_understanding_service = kwargs.pop(
+        "research_understanding_service",
+        ResearchUnderstandingService(
+            source_artifact_repository=source_repository,
+            structured_extractor=kwargs.get("structured_extractor"),
+        ),
+    )
     return _ResearchObjectiveService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
+        research_understanding_service=research_understanding_service,
         **kwargs,
     )
 
@@ -90,7 +104,9 @@ def _seed_document_profiles(
     service: _ResearchObjectiveService,
     collection_id: str,
 ) -> None:
-    documents = service.source_artifact_repository.list_documents(collection_id)
+    documents = service.source_artifact_repository.read_collection_artifacts(
+        collection_id
+    ).documents
     profiles: list[DocumentProfile] = []
     for document in documents:
         metadata = dict(document.metadata)
@@ -113,6 +129,40 @@ def _seed_document_profiles(
         "build_test",
         tuple(profiles),
     )
+
+
+def test_research_objective_reads_do_not_trigger_generation(tmp_path):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection_id = collection_service.create_collection("Empty objectives")[
+        "collection_id"
+    ]
+    extractor = _ObjectiveExtractor()
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+    )
+
+    assert service.read_paper_skims(collection_id) == ()
+    assert service.read_research_objectives(collection_id) == ()
+    assert service.read_objective_contexts(collection_id) == ()
+    assert extractor.skim_payloads == []
+    assert extractor.discovery_payloads == []
+
+
+def test_memory_objective_repository_requires_explicit_activation():
+    repository = MemoryObjectiveRepository()
+    active = ObjectiveFactSet(research_objectives_ready=True)
+    pending = ObjectiveFactSet()
+
+    repository.replace("col-1", "build_test", active)
+    repository.replace("col-1", "build_pending", pending)
+
+    assert repository.read("col-1") == active
+    assert repository.read("col-1", build_id="build_pending") == pending
+
+    repository.activate("build_pending")
+
+    assert repository.read("col-1") == pending
 
 
 class _ObjectiveExtractor:
@@ -9741,6 +9791,7 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -9838,11 +9889,14 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     _seed_document_profiles(service, collection_id)
 
     with caplog.at_level("INFO"):
-        objectives = service.build_research_objectives(collection_id)
+        objectives = service.build_research_objectives(
+            collection_id,
+            build_id="build_test",
+        )
 
     assert len(objectives) == 1
     assert objectives[0].question.startswith("How does heat treatment")
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
     assert len(facts.paper_skims) == 2
     assert facts.paper_skims[0].source_filename == "paper-1.pdf"
@@ -10024,6 +10078,7 @@ def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10052,7 +10107,10 @@ def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(collection_id)
+    objectives = service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )
 
     assert len(objectives) == 1
     objective = objectives[0]
@@ -10078,6 +10136,7 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10106,7 +10165,10 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(collection_id)
+    objectives = service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )
 
     assert len(objectives) == 2
     structure_objective = next(
@@ -10144,6 +10206,7 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10224,8 +10287,8 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     )
     _seed_document_profiles(service, collection_id)
 
-    service.build_research_objectives(collection_id)
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    service.build_research_objectives(collection_id, build_id="build_test")
+    facts = service.objective_repository.read(collection_id)
     contexts = facts.objective_contexts
 
     assert len(contexts) == 2
@@ -10410,6 +10473,7 @@ def test_research_objective_service_list_prunes_overbroad_display_axes(
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10436,7 +10500,7 @@ def test_research_objective_service_list_prunes_overbroad_display_axes(
     )
     _seed_document_profiles(service, collection_id)
 
-    service.build_research_objectives(collection_id)
+    service.build_research_objectives(collection_id, build_id="build_test")
     workspace = service.list_objective_workspaces(collection_id)
 
     objective = workspace["objectives"][0]
@@ -10524,6 +10588,7 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10546,10 +10611,13 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(collection_id)
+    objectives = service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )
 
     assert len(objectives) == 1
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert len(facts.research_objectives) == 1
 
 
@@ -10628,6 +10696,7 @@ def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails
     service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10690,15 +10759,15 @@ def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails
             "target_property_axes": ["crystallographic texture", "yield strength"],
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (),
-        (),
-        (),
-        (),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(paper_skim,),
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+        ),
     )
     goal = ConfirmedGoal.from_mapping(
         {
@@ -10712,14 +10781,10 @@ def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails
 
     understanding = service.analyze_confirmed_goal(goal)
 
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
-    assert len(facts.objective_paper_frames) == 1
-    frame = facts.objective_paper_frames[0]
-    assert frame.relevance == "medium"
-    assert frame.paper_role == "primary_experiment"
-    assert frame.relevant_sections
-    assert facts.objective_evidence_units
+    assert facts.objective_paper_frames == ()
+    assert facts.objective_evidence_units == ()
     assert understanding.scope.scope_type == "goal"
 
 
@@ -10736,6 +10801,7 @@ def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails
     service.research_understanding_service.structured_extractor = service._structured_extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10805,15 +10871,15 @@ def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails
             "target_property_axes": ["corrosion current"],
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (),
-        (),
-        (),
-        (),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(paper_skim,),
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+        ),
     )
     goal = ConfirmedGoal.from_mapping(
         {
@@ -10832,14 +10898,14 @@ def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails
 
     assert understanding.scope.scope_type == "goal"
     assert failing_extractor.route_payloads
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
-    assert len(facts.objective_paper_frames) == 1
-    assert facts.objective_evidence_routes
-    assert facts.objective_evidence_units
-    assert facts.objective_logic_chains
+    facts = service.objective_repository.read(collection_id)
+    assert facts.objective_paper_frames == ()
+    assert facts.objective_evidence_routes == ()
+    assert facts.objective_evidence_units == ()
+    assert facts.objective_logic_chains == ()
 
 
-def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
+def test_confirmed_goal_analysis_does_not_mutate_active_objective_facts(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -10853,6 +10919,7 @@ def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
     service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10968,16 +11035,21 @@ def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
             "summary": "stale chain",
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (stale_frame,),
-        (stale_route,),
-        (stale_unit,),
-        (stale_chain,),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(paper_skim,),
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_paper_frames=(stale_frame,),
+            objective_evidence_routes=(stale_route,),
+            objective_evidence_units=(stale_unit,),
+            objective_logic_chains=(stale_chain,),
+        ),
     )
+    active_facts = service.objective_repository.read(collection_id)
     goal = ConfirmedGoal.from_mapping(
         {
             "collection_id": collection_id,
@@ -10988,19 +11060,12 @@ def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
         }
     )
 
-    understanding = service.analyze_confirmed_goal(goal, force_rebuild=True)
+    understanding = service.analyze_confirmed_goal(goal)
 
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
     assert extractor.route_payloads
-    assert "oeu_stale" not in {
-        unit.evidence_unit_id for unit in facts.objective_evidence_units
-    }
-    assert "stale-block" not in {
-        route.source_ref for route in facts.objective_evidence_routes
-    }
-    assert facts.objective_evidence_units
-    assert facts.objective_logic_chains
+    assert facts == active_facts
     assert understanding.scope.scope_type == "goal"
 
 
@@ -11017,6 +11082,7 @@ def _build_duplicate_paper_objectives(
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -11044,4 +11110,7 @@ def _build_duplicate_paper_objectives(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    return service.build_research_objectives(collection_id)
+    return service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )

@@ -63,6 +63,7 @@ from domain.core.research_objective import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ResearchObjective,
 )
@@ -72,6 +73,7 @@ from infra.persistence.sqlite import (
 )
 from tests.support.collection_service import build_test_collection_service
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 
@@ -88,9 +90,9 @@ def _build_paper_facts_service(*, collection_service, **kwargs) -> _PaperFactsSe
     paper_fact_repository = kwargs.pop(
         "paper_fact_repository", MemoryPaperFactRepository()
     )
-    core_fact_repository = kwargs.pop(
-        "core_fact_repository",
-        SqliteCoreFactRepository(collection_service.root_dir.parent / "lens.sqlite"),
+    objective_repository = kwargs.pop(
+        "objective_repository",
+        MemoryObjectiveRepository(),
     )
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
@@ -110,7 +112,7 @@ def _build_paper_facts_service(*, collection_service, **kwargs) -> _PaperFactsSe
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        core_fact_repository=core_fact_repository,
+        objective_repository=objective_repository,
         document_profile_service=document_profile_service,
         **kwargs,
     )
@@ -615,7 +617,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Route Gated Facts")
     collection_id = collection["collection_id"]
-    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     source_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
     extractor = CountingEvidenceExtractor()
@@ -629,7 +631,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
         collection_service=collection_service,
         document_profile_service=document_profile_service,
         structured_extractor=extractor,
-        core_fact_repository=core_repository,
+        objective_repository=objective_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
     )
@@ -806,14 +808,15 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             "chain_payload": {"schema_version": "objective_logic_chain.v1"},
         }
     )
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        (objective,),
-        (objective_context,),
-        (),
-        (
-            ObjectiveEvidenceRoute.from_mapping(
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_evidence_routes=(
+                ObjectiveEvidenceRoute.from_mapping(
                 {
                     "objective_id": objective.objective_id,
                     "document_id": "paper-1",
@@ -823,7 +826,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     "extractable": True,
                 }
             ),
-            ObjectiveEvidenceRoute.from_mapping(
+                ObjectiveEvidenceRoute.from_mapping(
                 {
                     "objective_id": objective.objective_id,
                     "document_id": "paper-1",
@@ -833,7 +836,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     "extractable": False,
                 }
             ),
-            ObjectiveEvidenceRoute.from_mapping(
+                ObjectiveEvidenceRoute.from_mapping(
                 {
                     "objective_id": objective.objective_id,
                     "document_id": "paper-1",
@@ -843,7 +846,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     "extractable": True,
                 }
             ),
-            ObjectiveEvidenceRoute.from_mapping(
+                ObjectiveEvidenceRoute.from_mapping(
                 {
                     "objective_id": objective.objective_id,
                     "document_id": "paper-1",
@@ -853,9 +856,10 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     "extractable": False,
                 }
             ),
+            ),
+            objective_evidence_units=(existing_unit,),
+            objective_logic_chains=(existing_chain,),
         ),
-        (existing_unit,),
-        (existing_chain,),
     )
 
     with caplog.at_level("INFO"):
@@ -871,7 +875,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     assert target_rows[0]["row_summary"] == "Sample A | 560 MPa"
     assert all("balance" not in row["row_summary"] for row in target_rows)
 
-    facts = core_repository.read_collection_facts(collection_id)
+    facts = objective_repository.read(collection_id)
     assert facts.objective_evidence_units == (existing_unit,)
     assert facts.objective_logic_chains == (existing_chain,)
     assert any(
@@ -889,14 +893,15 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     extractor.text_window_payloads.clear()
     extractor.table_batch_payloads.clear()
     caplog.clear()
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        (objective,),
-        (objective_context,),
-        (),
-        (
-            ObjectiveEvidenceRoute.from_mapping(
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_evidence_routes=(
+                ObjectiveEvidenceRoute.from_mapping(
                 {
                     "objective_id": objective.objective_id,
                     "document_id": "paper-1",
@@ -906,9 +911,10 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     "extractable": True,
                 }
             ),
+            ),
+            objective_evidence_units=(existing_unit,),
+            objective_logic_chains=(existing_chain,),
         ),
-        (existing_unit,),
-        (existing_chain,),
     )
 
     with caplog.at_level("INFO"):
@@ -934,10 +940,10 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Evidence Cards")
     collection_id = collection["collection_id"]
-    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
     service = _build_paper_facts_service(
         collection_service=collection_service,
-        core_fact_repository=core_repository,
+        objective_repository=objective_repository,
     )
     unit = ObjectiveEvidenceUnit.from_mapping(
         {
@@ -964,15 +970,13 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
             "confidence": 0.88,
         }
     )
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        (),
-        (),
-        (),
-        (),
-        (unit,),
-        (),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            objective_evidence_units=(unit,),
+        ),
     )
 
     def fail_build_paper_facts(collection_id: str):  # noqa: ARG001
@@ -2451,6 +2455,7 @@ def test_comparison_service_lists_corpus_results_without_manifest_cache_artifact
             paper_fact_repository=paper_fact_repository,
         ),
         paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
     )
 
@@ -2498,6 +2503,7 @@ def test_comparison_service_reflects_repository_updates_without_manifest_cache(
             paper_fact_repository=paper_fact_repository,
         ),
         paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
     )
 

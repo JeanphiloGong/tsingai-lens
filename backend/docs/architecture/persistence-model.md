@@ -54,7 +54,8 @@ accidentally preserve it.
 | Goal sessions and experiment plans | `lens.sqlite` Goal tables | No | PostgreSQL |
 | Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Document profiles and reusable paper facts | PostgreSQL build-versioned paper-fact tables | No | PostgreSQL |
-| Objectives, comparisons, goals, and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
+| Research objectives, contexts, paper frames, evidence routes, evidence units, and logic chains | PostgreSQL build-versioned objective tables | No | PostgreSQL |
+| Comparisons, confirmed goals, and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
 | Feedback, curation, and evaluation | `lens.sqlite` evaluation tables | No | PostgreSQL |
 | Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
 | Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
@@ -100,14 +101,30 @@ also need objectives or comparisons receive the PostgreSQL paper-fact
 repository and the remaining SQLite Core repository separately. There is no
 combined repository, fallback read, or dual write.
 
+Research objectives and their evidence chain now use the same direct build
+boundary. `PostgresObjectiveRepository` replaces one explicitly named pending
+build and normal reads follow `collection_active_builds`. Document selections,
+Source routes, evidence-anchor links, evidence-unit inputs, and logic-chain
+inputs are ordered relational links; variable semantic payloads remain JSONB.
+Every document, Source locator, and optional paper-fact anchor is validated
+against the same collection and build before commit. SQLite Core owns none of
+these records and provides no fallback path.
+
+Confirmed-goal analysis reads the active objective candidates, derives its
+goal-specific frames, routes, evidence units, and logic chain in memory, and
+persists only the final `ResearchUnderstanding` through the still-temporary
+SQLite Core owner. It never rewrites an active collection objective build.
+Confirmed goals and understandings move to Goal-owned PostgreSQL records in
+later cutover slices.
+
 ### Legacy SQLite Inventory
 
 The inspected `backend/data/lens.sqlite` contains 53 legacy application tables. They
 are grouped here by real responsibility rather than by the repository class
 that happens to contain them. Its two auth tables are retained legacy data for
 future offline import only; the current runtime neither reads nor writes them.
-The paper-fact tables remain in this untouched legacy snapshot but are no
-longer created, read, or written by `SqliteCoreFactRepository`.
+The paper-fact and objective tables remain in this untouched legacy snapshot
+but are no longer created, read, or written by `SqliteCoreFactRepository`.
 
 | Responsibility | Count | Current tables |
 | --- | ---: | --- |

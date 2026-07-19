@@ -29,6 +29,9 @@ from infra.persistence.postgres.source_artifact_repository import (  # noqa: E40
 from infra.persistence.postgres.paper_fact_repository import (  # noqa: E402
     PostgresPaperFactRepository,
 )
+from infra.persistence.postgres.objective_repository import (  # noqa: E402
+    PostgresObjectiveRepository,
+)
 from infra.persistence.sqlite import SqliteCoreFactRepository  # noqa: E402
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
@@ -337,6 +340,9 @@ def _load_artifacts(
             session_factory
         ).read_collection_artifacts(collection_id)
         paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
+        objective_facts = PostgresObjectiveRepository(session_factory).read(
+            collection_id
+        )
     finally:
         engine.dispose()
     core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
@@ -344,10 +350,10 @@ def _load_artifacts(
         "documents": [record.to_record() for record in source_artifacts.documents],
         "document_profiles": [record.to_record() for record in paper_facts.document_profiles],
         "objective_evidence_units": [
-            record.to_record() for record in core_facts.objective_evidence_units
+            record.to_record() for record in objective_facts.objective_evidence_units
         ],
         "objective_logic_chains": [
-            record.to_record() for record in core_facts.objective_logic_chains
+            record.to_record() for record in objective_facts.objective_logic_chains
         ],
         "evidence_anchors": [
             record.to_record() for record in paper_facts.evidence_anchors

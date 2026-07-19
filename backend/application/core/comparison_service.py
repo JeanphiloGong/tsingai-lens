@@ -26,7 +26,7 @@ from domain.core.comparison import (
     ComparisonRowRecord,
 )
 from domain.core.fact_store import CoreFactSet
-from domain.ports import CoreFactRepository, PaperFactRepository
+from domain.ports import CoreFactRepository, ObjectiveRepository, PaperFactRepository
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +110,13 @@ class ComparisonService:
         self,
         collection_service: CollectionService,
         paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
         core_fact_repository: CoreFactRepository,
         document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
+        self.objective_repository = objective_repository
         self.core_fact_repository = core_fact_repository
         self.document_profile_service = document_profile_service
         self.comparison_row_projector = ComparisonRowProjector()
@@ -555,7 +557,7 @@ class ComparisonService:
         self,
         collection_id: str,
     ) -> ComparisonSemanticRecords | None:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         if not facts.objective_evidence_units:
             return None
         semantic_records = project_objective_comparison_semantics(

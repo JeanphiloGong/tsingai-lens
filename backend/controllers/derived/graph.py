@@ -65,6 +65,7 @@ async def get_collection_graph(
             min_weight=min_weight,
             collection_service=request.app.state.collection_service,
             paper_fact_repository=request.app.state.paper_fact_repository,
+            objective_repository=request.app.state.objective_repository,
             core_fact_repository=request.app.state.core_fact_repository,
         )
     except FileNotFoundError as exc:
@@ -98,6 +99,7 @@ async def export_collection_graphml(
             min_weight=min_weight,
             collection_service=request.app.state.collection_service,
             paper_fact_repository=request.app.state.paper_fact_repository,
+            objective_repository=request.app.state.objective_repository,
             core_fact_repository=request.app.state.core_fact_repository,
         )
     except FileNotFoundError as exc:
@@ -138,6 +140,7 @@ async def get_collection_graph_neighbors(
             node_id=node_id,
             collection_service=request.app.state.collection_service,
             paper_fact_repository=request.app.state.paper_fact_repository,
+            objective_repository=request.app.state.objective_repository,
             core_fact_repository=request.app.state.core_fact_repository,
         )
     except FileNotFoundError as exc:

@@ -16,8 +16,9 @@ from application.core.semantic_build.paper_facts_service import PaperFactsServic
 from controllers.core import evidence as evidence_controller
 from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
 from domain.core.paper_fact import PaperFactSet
-from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 @pytest.fixture()
@@ -25,7 +26,6 @@ def evidence_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
@@ -35,7 +35,7 @@ def evidence_services(tmp_path):
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        core_fact_repository=core_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
         document_profile_service=document_profile_service,
     )
 

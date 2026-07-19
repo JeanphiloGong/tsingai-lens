@@ -39,14 +39,12 @@ class GoalAnalysisPipelineService:
     def __init__(
         self,
         research_objective_service: ResearchObjectiveService,
-        confirmed_goal_service: ConfirmedGoalService | None = None,
-        research_understanding_service: ResearchUnderstandingService | None = None,
+        confirmed_goal_service: ConfirmedGoalService,
+        research_understanding_service: ResearchUnderstandingService,
     ) -> None:
-        self.confirmed_goal_service = confirmed_goal_service or ConfirmedGoalService()
+        self.confirmed_goal_service = confirmed_goal_service
         self.research_objective_service = research_objective_service
-        self.research_understanding_service = (
-            research_understanding_service or ResearchUnderstandingService()
-        )
+        self.research_understanding_service = research_understanding_service
 
     async def run_goal_analysis(self, collection_id: str, goal_id: str) -> dict:
         context = GoalAnalysisContext(

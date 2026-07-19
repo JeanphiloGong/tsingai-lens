@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from domain.core import ConfirmedGoal, ResearchObjective, ResearchUnderstanding
-from domain.ports import CoreFactRepository
-from infra.persistence.factory import build_core_fact_repository
+from domain.ports import CoreFactRepository, ObjectiveRepository
 
 
 class ConfirmedGoalNotFoundError(FileNotFoundError):
@@ -17,8 +16,13 @@ class ConfirmedGoalNotFoundError(FileNotFoundError):
 class ConfirmedGoalService:
     """Manage user- or benchmark-confirmed research questions."""
 
-    def __init__(self, repository: CoreFactRepository | None = None) -> None:
-        self.repository = repository or build_core_fact_repository()
+    def __init__(
+        self,
+        repository: CoreFactRepository,
+        objective_repository: ObjectiveRepository,
+    ) -> None:
+        self.repository = repository
+        self.objective_repository = objective_repository
 
     def create_goal(
         self,
@@ -119,7 +123,7 @@ class ConfirmedGoalService:
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective | None:
-        facts = self.repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         for objective in facts.research_objectives:
             if objective.objective_id == objective_id:
                 return objective

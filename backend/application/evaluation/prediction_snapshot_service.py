@@ -6,11 +6,17 @@ from typing import Any
 from application.source.collection_service import CollectionService
 from domain.core import CoreFactSet
 from domain.core.paper_fact import PaperFactSet
+from domain.core.research_objective import ObjectiveFactSet
 from domain.evaluation import (
     EvaluationPredictionItem,
     EvaluationPredictionSnapshot,
 )
-from domain.ports import CoreFactRepository, EvaluationRepository, PaperFactRepository
+from domain.ports import (
+    CoreFactRepository,
+    EvaluationRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
+)
 from infra.persistence.factory import (
     build_evaluation_repository,
 )
@@ -34,11 +40,13 @@ class EvaluationPredictionSnapshotService:
         self,
         collection_service: CollectionService,
         paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
         core_fact_repository: CoreFactRepository,
         evaluation_repository: EvaluationRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
+        self.objective_repository = objective_repository
         self.core_fact_repository = core_fact_repository
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()
@@ -54,14 +62,17 @@ class EvaluationPredictionSnapshotService:
     ) -> EvaluationPredictionSnapshot:
         self.collection_service.get_collection(collection_id)
         paper_facts = self.paper_fact_repository.read(collection_id)
+        objective_facts = self.objective_repository.read(collection_id)
         core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         items = self._prediction_items(
             paper_facts,
+            objective_facts,
             core_facts,
             fact_source=fact_source,
         )
         if not items and not self._facts_ready_for_source(
             paper_facts,
+            objective_facts,
             core_facts,
             fact_source=fact_source,
         ):
@@ -73,7 +84,11 @@ class EvaluationPredictionSnapshotService:
             target_layer="core",
             fact_source=fact_source,
             system_context=system_context or {},
-            artifact_counts=self._artifact_counts(paper_facts, core_facts),
+            artifact_counts=self._artifact_counts(
+                paper_facts,
+                objective_facts,
+                core_facts,
+            ),
             items=tuple(items),
         )
         self.evaluation_repository.upsert_prediction_snapshot(snapshot)
@@ -82,19 +97,20 @@ class EvaluationPredictionSnapshotService:
     def _prediction_items(
         self,
         paper_facts: PaperFactSet,
+        objective_facts: ObjectiveFactSet,
         core_facts: CoreFactSet,
         *,
         fact_source: str,
     ) -> list[EvaluationPredictionItem]:
         if fact_source == "objective_first":
-            return self._objective_first_items(core_facts)
+            return self._objective_first_items(objective_facts)
         if fact_source == "paper_facts":
             return self._paper_fact_items(paper_facts, core_facts)
         raise ValueError(f"unsupported fact_source: {fact_source}")
 
     def _objective_first_items(
         self,
-        facts: CoreFactSet,
+        facts: ObjectiveFactSet,
     ) -> list[EvaluationPredictionItem]:
         items: list[EvaluationPredictionItem] = []
         for unit in facts.objective_evidence_units:
@@ -215,12 +231,13 @@ class EvaluationPredictionSnapshotService:
     def _facts_ready_for_source(
         self,
         paper_facts: PaperFactSet,
+        objective_facts: ObjectiveFactSet,
         core_facts: CoreFactSet,
         *,
         fact_source: str,
     ) -> bool:
         if fact_source == "objective_first":
-            return bool(core_facts.research_objectives_ready)
+            return bool(objective_facts.research_objectives_ready)
         if fact_source == "paper_facts":
             return bool(
                 paper_facts.paper_facts_ready
@@ -231,6 +248,7 @@ class EvaluationPredictionSnapshotService:
     def _artifact_counts(
         self,
         paper_facts: PaperFactSet,
+        objective_facts: ObjectiveFactSet,
         core_facts: CoreFactSet,
     ) -> dict[str, int]:
         return {
@@ -239,8 +257,8 @@ class EvaluationPredictionSnapshotService:
             "pairwise_comparison_relations": len(
                 core_facts.pairwise_comparison_relations
             ),
-            "objective_evidence_units": len(core_facts.objective_evidence_units),
-            "objective_logic_chains": len(core_facts.objective_logic_chains),
+            "objective_evidence_units": len(objective_facts.objective_evidence_units),
+            "objective_logic_chains": len(objective_facts.objective_logic_chains),
         }
 
     def _measurement_item_key(

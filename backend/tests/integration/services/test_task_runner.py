@@ -11,8 +11,13 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 from application.source.artifact_registry_service import ArtifactRegistryService
-from application.core.semantic_build.document_profile_service import DocumentProfileService
-from application.core.semantic_build.research_objective_service import ResearchObjectiveService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from application.core.semantic_build.research_objective_service import (
+    ResearchObjectiveService,
+)
+from application.core.research_understanding_service import ResearchUnderstandingService
 from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
@@ -32,6 +37,7 @@ from infra.source.runtime.source_evidence import (
     build_table_rows,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 class DummyWorkflowOutput:
@@ -198,6 +204,7 @@ def _write_source_artifact_outputs(
 def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN001
     source_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
@@ -208,13 +215,18 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
         document_profile_service=document_profile_service,
+        research_understanding_service=ResearchUnderstandingService(
+            source_artifact_repository=source_repository,
+        ),
     )
     artifact_registry = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
     )
     runner = CollectionBuildPipelineService(
@@ -328,11 +340,12 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
-    core_facts = SqliteCoreFactRepository(
-        tmp_path / "lens.sqlite"
-    ).read_collection_facts(collection["collection_id"])
-    assert core_facts.research_objectives_ready is True
-    assert core_facts.paper_skims
+    objective_facts = artifact_registry.objective_repository.read(
+        collection["collection_id"],
+        build_id=artifact_registry.repository.read_build(task["task_id"]).build_id,
+    )
+    assert objective_facts.research_objectives_ready is True
+    assert objective_facts.paper_skims
 
 
 def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):

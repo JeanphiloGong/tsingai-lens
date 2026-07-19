@@ -12,6 +12,7 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
 )
 from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
@@ -21,6 +22,7 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def test_artifact_registry_ignores_absent_legacy_graph_outputs(tmp_path):
@@ -32,6 +34,7 @@ def test_artifact_registry_ignores_absent_legacy_graph_outputs(tmp_path):
         MemoryBuildRepository(),
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=core_repository,
     )
 
@@ -170,6 +173,7 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
         MemoryBuildRepository(),
         source_artifact_repository=structure_repository,
         paper_fact_repository=paper_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=core_repository,
     )
 
@@ -266,15 +270,14 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
         "build_test",
         document_profiles,
     )
-    core_repository.replace_collection_research_objectives(
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=(),
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=objective_evidence_units,
-        objective_logic_chains=(),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            objective_evidence_units=objective_evidence_units,
+        ),
     )
     core_repository.replace_collection_comparison_artifacts(
         collection_id,
@@ -286,6 +289,7 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
         MemoryBuildRepository(),
         source_artifact_repository=structure_repository,
         paper_fact_repository=paper_repository,
+        objective_repository=objective_repository,
         core_fact_repository=core_repository,
     )
 
@@ -348,6 +352,7 @@ def test_artifact_registry_persists_version_rows_and_rebuilds_task_projection(
         repository,
         source_artifact_repository=structure_repository,
         paper_fact_repository=paper_repository,
+        objective_repository=MemoryObjectiveRepository(),
         core_fact_repository=core_repository,
     )
 

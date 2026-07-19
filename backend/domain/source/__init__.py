@@ -53,6 +53,13 @@ from domain.source.collection import (
     CollectionRecord,
     empty_import_manifest,
 )
+from domain.source.document import (
+    CollectionDocumentRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
+    collection_document_identity,
+    document_identity_for_sha256,
+)
 
 __all__ = [
     "ArtifactVersionRecord",
@@ -64,6 +71,9 @@ __all__ = [
     "CollectionImportRecord",
     "CollectionRecord",
     "CollectionBuildRecord",
+    "CollectionDocumentRecord",
+    "DocumentRecord",
+    "DocumentVersionRecord",
     "SourceBlock",
     "SourceBlockType",
     "SourceArtifactSet",
@@ -90,6 +100,8 @@ __all__ = [
     "build_source_document_tree",
     "build_source_table_rows_from_cells",
     "build_table_caption_blocks",
+    "collection_document_identity",
+    "document_identity_for_sha256",
     "empty_import_manifest",
     "extract_unit_hint",
     "find_nearest_caption_block",

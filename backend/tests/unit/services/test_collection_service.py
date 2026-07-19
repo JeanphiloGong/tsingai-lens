@@ -76,6 +76,43 @@ def test_delete_collection_removes_collection_directory(tmp_path):
         service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
 
 
+def test_identical_uploads_share_identity_but_keep_collection_scoped_downloads(
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
+    first = service.create_collection("First")
+    second = service.create_collection("Second")
+    payload = b"%PDF-1.4\nshared content\n"
+
+    first_file = service.add_file(first["collection_id"], "first.pdf", payload)
+    second_file = service.add_file(second["collection_id"], "second.pdf", payload)
+    first_membership = service.repository.list_collection_documents(
+        first["collection_id"]
+    )[0]
+    second_membership = service.repository.list_collection_documents(
+        second["collection_id"]
+    )[0]
+    second_source_id = service.get_import_manifest(second["collection_id"])["imports"][
+        0
+    ]["documents"][0]["source_document_id"]
+
+    assert first_membership.document_id == second_membership.document_id
+    assert first_membership.document_version_id == second_membership.document_version_id
+    assert first_file["storage_key"] != second_file["storage_key"]
+    with pytest.raises(FileNotFoundError, match="document not found"):
+        service.resolve_document_source_file(
+            first["collection_id"],
+            second_source_id,
+        )
+
+    service.delete_collection(first["collection_id"])
+
+    assert (
+        service.object_store.read(second_file["storage_key"], second_file["sha256"])
+        == payload
+    )
+
+
 def test_delete_collection_raises_for_missing_collection(tmp_path):
     service = build_test_collection_service(tmp_path / "collections")
 

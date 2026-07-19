@@ -34,15 +34,16 @@ must name the authoritative records from which they can be rebuilt.
 
 ## Current Runtime Model
 
-The current runtime is split between PostgreSQL auth, collection, file
-provenance, and build-lineage records; uploaded and generated files; and five
-handwritten SQLite repositories. This table records that split so later
-migrations do not accidentally preserve it.
+The current runtime is split between PostgreSQL auth, collection, canonical
+document, file-provenance, and build-lineage records; uploaded and generated
+files; and five handwritten SQLite repositories. This table records that split
+so later migrations do not accidentally preserve it.
 
 | Current family | Current runtime owner | Rebuildable now? | Target authority |
 | --- | --- | --- | --- |
 | Collection identity and metadata | PostgreSQL `collections` | No | PostgreSQL |
 | Stored-object metadata and collection file membership | PostgreSQL `stored_objects` and `collection_files` | No | PostgreSQL |
+| Canonical documents, immutable versions, and collection membership | PostgreSQL `documents`, `document_versions`, and `collection_documents` | No | PostgreSQL |
 | Import provenance and Goal-intake handoffs | PostgreSQL `collection_imports`, `collection_import_documents`, and `collection_handoffs` | No | PostgreSQL |
 | Uploaded PDF and text bytes | `collections/<id>/input/` | No | Object storage |
 | Task status, progress, and errors | PostgreSQL `tasks` | No | PostgreSQL |
@@ -61,9 +62,12 @@ migrations do not accidentally preserve it.
 | Legacy document indexes, graph store, and file Goal sessions | `documents/`, `graph_store.json`, and `collections/_goal_sessions/` | Legacy residue, not a supported authority | Offline migration input or removal after approved cleanup |
 
 The collection aggregate is now one direct relational boundary. One import
-transaction inserts stored-object metadata, collection file membership, the
-import record, and ordered imported-document links, then updates collection
-count and status. `FileCollectionWorkspace` owns collection directories and
+transaction creates or reuses canonical document identity and collection
+membership, inserts collection-scoped stored-object and file provenance, then
+records ordered imported-document links and updates collection count and
+status. Identical content shares one immutable `DocumentVersion`, while each
+collection retains its own object replica, storage key, and authorization
+boundary. `FileCollectionWorkspace` owns collection directories and
 scratch/output paths only. `FileObjectStore` owns immutable input bytes by validated
 storage key and SHA-256. No maintained runtime or export path reads
 `files.json`, `import_manifest.json`, or an input-directory scan as collection
@@ -104,7 +108,11 @@ identity, constraint, or query requires it.
 - `Document` is reusable bibliographic identity. `DocumentVersion` is immutable
   content identity and carries the content SHA-256.
 - `CollectionDocument` is membership in a user's working scope. Removing a
-  membership does not delete the reusable document.
+  membership does not delete the reusable document while another durable
+  reference remains.
+- Current ingestion derives opaque internal IDs from validated content SHA-256
+  and reuses one version for identical bytes. It does not merge different
+  content versions by filename, DOI, or parser-local identity.
 - A storage key locates bytes. PostgreSQL metadata records its SHA-256, media
   type, byte size, object kind, and creation time.
 - Source and Core records identify the immutable build that produced them.
@@ -125,7 +133,8 @@ erDiagram
     COLLECTION ||--o{ COLLECTION_DOCUMENT : contains
     DOCUMENT ||--o{ COLLECTION_DOCUMENT : appears_in
     DOCUMENT ||--o{ DOCUMENT_VERSION : versions
-    STORED_OBJECT ||--o{ DOCUMENT_VERSION : supplies_bytes
+    DOCUMENT_VERSION ||--o{ STORED_OBJECT : has_replica
+    COLLECTION_DOCUMENT ||--o{ COLLECTION_FILE : records_file
     COLLECTION ||--o{ IMPORT_RECORD : records
     STORED_OBJECT ||--o{ IMPORT_RECORD : imports
 
@@ -165,9 +174,9 @@ Concrete migration names may differ, but these identity rules may not.
 | --- | --- | --- |
 | User and auth | `user_id`, `session_id` | Session references one user; token hash is unique; expiry is typed. |
 | Collection | `collection_id` | References one owning user and at most one active successful collection build. |
-| Collection membership | `collection_document_id` | References collection and document; pair is unique. |
-| Document and version | `document_id`, `document_version_id` | Version references document and stored object; content identity is immutable. |
-| Stored object, collection file, and import | `object_id`, `file_id`, `import_id` | Storage key and SHA-256 are constrained; file references collection and object; imported document references one import and file in the same collection. |
+| Collection membership | `collection_document_id` | References collection, document, and its exact version; the collection/document pair is unique. |
+| Document and version | `document_id`, `document_version_id` | Version references document; SHA-256 is unique and immutable. |
+| Stored object, collection file, and import | `object_id`, `file_id`, `import_id` | Each collection-scoped object replica references one version; each file references an object and a membership in the same collection; imported document references one import and file in that collection. |
 | Task and build | `task_id`, `collection_build_id`, `build_stage_id` | Build references collection and task; stage references build; stage kind and version are unique within a build. |
 | Artifact version | `artifact_version_id` | References its build stage and optional stored object; schema and content versions are typed. |
 | Source records | Existing domain IDs per record family | Every record references a Source build stage and document version; join tables use declared foreign keys. |
@@ -249,6 +258,12 @@ SQLAlchemy models own storage shape. Domain records own scientific meaning and
 invariants. Pydantic models own HTTP input and output. A repository performs
 the explicit mapping; one class must not serve all three roles.
 
+Canonical document registration remains inside `CollectionRepository`, not a
+separate document repository. Import and collection deletion must update
+document identity, exact-version membership, physical replicas, provenance,
+and collection count in one transaction; splitting those writes would add a
+coordination layer without creating a second aggregate.
+
 ## Deletion And Recovery
 
 | Event | Required result |
@@ -268,11 +283,13 @@ restore the accepted snapshot and application version; do not merge two live
 authorities.
 
 For the current collection aggregate, deletion validates all storage keys,
-deletes collection-owned relational records and stored-object metadata in one
-transaction, then removes the collection directory. A relational failure
-therefore leaves bytes intact. A later filesystem cleanup failure may leave
-purgeable orphan bytes, but cannot leave live metadata pointing to missing
-evidence.
+deletes collection-owned relational records, memberships, and stored-object
+replicas in one transaction, then removes the collection directory. Shared
+versions survive while another membership or replica exists; the final
+unreferenced version and document are removed in the same transaction. A
+relational failure therefore leaves bytes intact. A later filesystem cleanup
+failure may leave purgeable orphan bytes, but cannot leave live metadata
+pointing to missing evidence.
 
 ## Contract Summary
 

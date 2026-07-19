@@ -70,6 +70,12 @@ class StoredObject(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     media_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    document_version_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("document_versions.document_version_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -91,6 +97,15 @@ class CollectionFile(Base):
             "file_order",
             name="uq_collection_files_collection_file_order",
         ),
+        ForeignKeyConstraint(
+            ["collection_id", "collection_document_id"],
+            [
+                "collection_documents.collection_id",
+                "collection_documents.collection_document_id",
+            ],
+            name="fk_collection_files_collection_document",
+            ondelete="RESTRICT",
+        ),
     )
 
     file_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -105,6 +120,7 @@ class CollectionFile(Base):
         nullable=False,
         unique=True,
     )
+    collection_document_id: Mapped[str] = mapped_column(String(64), nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False)

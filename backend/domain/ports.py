@@ -31,6 +31,9 @@ from domain.source import (
     CollectionHandoffRecord,
     CollectionImportRecord,
     CollectionRecord,
+    CollectionDocumentRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
@@ -89,6 +92,18 @@ class CollectionRepository(Protocol):
         self,
         collection_id: str,
     ) -> tuple[CollectionImportRecord, ...]: ...
+
+    def read_document(self, document_id: str) -> DocumentRecord | None: ...
+
+    def read_document_version(
+        self,
+        document_version_id: str,
+    ) -> DocumentVersionRecord | None: ...
+
+    def list_collection_documents(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionDocumentRecord, ...]: ...
 
     def add_collection_handoff(self, record: CollectionHandoffRecord) -> None: ...
 

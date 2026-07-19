@@ -9,11 +9,16 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from domain.source import (
+    CollectionDocumentRecord,
     CollectionFileRecord,
     CollectionHandoffRecord,
     CollectionImportDocumentRecord,
     CollectionImportRecord,
     CollectionRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
+    collection_document_identity,
+    document_identity_for_sha256,
 )
 from infra.persistence.postgres.models.collection import (
     Collection,
@@ -22,6 +27,11 @@ from infra.persistence.postgres.models.collection import (
     CollectionImport,
     CollectionImportDocument,
     StoredObject,
+)
+from infra.persistence.postgres.models.document import (
+    CollectionDocument,
+    Document,
+    DocumentVersion,
 )
 
 
@@ -139,6 +149,40 @@ class PostgresCollectionRepository:
             document_rows: list[CollectionImportDocument] = []
             for document_order, document in enumerate(record.documents):
                 file_record = document.file
+                document_id, document_version_id = document_identity_for_sha256(
+                    file_record.sha256
+                )
+                collection_document_id = collection_document_identity(
+                    record.collection_id,
+                    document_id,
+                )
+                if session.get(Document, document_id) is None:
+                    session.add(
+                        Document(
+                            document_id=document_id,
+                            created_at=_datetime(file_record.created_at),
+                        )
+                    )
+                if session.get(DocumentVersion, document_version_id) is None:
+                    session.add(
+                        DocumentVersion(
+                            document_version_id=document_version_id,
+                            document_id=document_id,
+                            sha256=file_record.sha256,
+                            media_type=file_record.media_type,
+                            created_at=_datetime(file_record.created_at),
+                        )
+                    )
+                if session.get(CollectionDocument, collection_document_id) is None:
+                    session.add(
+                        CollectionDocument(
+                            collection_document_id=collection_document_id,
+                            collection_id=record.collection_id,
+                            document_id=document_id,
+                            document_version_id=document_version_id,
+                            created_at=_datetime(file_record.created_at),
+                        )
+                    )
                 object_rows.append(
                     StoredObject(
                         object_id=file_record.object_id,
@@ -147,6 +191,7 @@ class PostgresCollectionRepository:
                         sha256=file_record.sha256,
                         size_bytes=file_record.size_bytes,
                         media_type=file_record.media_type,
+                        document_version_id=document_version_id,
                         created_at=_datetime(file_record.created_at),
                     )
                 )
@@ -155,6 +200,7 @@ class PostgresCollectionRepository:
                         file_id=file_record.file_id,
                         collection_id=file_record.collection_id,
                         object_id=file_record.object_id,
+                        collection_document_id=collection_document_id,
                         original_filename=file_record.original_filename,
                         stored_filename=file_record.stored_filename,
                         status=file_record.status,
@@ -183,9 +229,47 @@ class PostgresCollectionRepository:
             session.flush()
             session.add_all(document_rows)
 
-            collection.paper_count = next_file_order + len(record.documents)
+            session.flush()
+            collection.paper_count = int(
+                session.scalar(
+                    select(func.count(CollectionDocument.collection_document_id)).where(
+                        CollectionDocument.collection_id == record.collection_id
+                    )
+                )
+            )
             collection.status = "ready"
             collection.updated_at = _datetime(updated_at)
+
+    def read_document(self, document_id: str) -> DocumentRecord | None:
+        with self.session_factory() as session:
+            row = session.get(Document, document_id)
+            return _to_document_record(row) if row is not None else None
+
+    def read_document_version(
+        self,
+        document_version_id: str,
+    ) -> DocumentVersionRecord | None:
+        with self.session_factory() as session:
+            row = session.get(DocumentVersion, document_version_id)
+            return _to_document_version_record(row) if row is not None else None
+
+    def list_collection_documents(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionDocumentRecord, ...]:
+        statement = (
+            select(CollectionDocument)
+            .where(CollectionDocument.collection_id == collection_id)
+            .order_by(
+                CollectionDocument.created_at,
+                CollectionDocument.collection_document_id,
+            )
+        )
+        with self.session_factory() as session:
+            return tuple(
+                _to_collection_document_record(row)
+                for row in session.scalars(statement)
+            )
 
     def list_collection_files(
         self,
@@ -301,6 +385,17 @@ class PostgresCollectionRepository:
                     )
                 )
             )
+            memberships = tuple(
+                session.scalars(
+                    select(CollectionDocument).where(
+                        CollectionDocument.collection_id == collection_id
+                    )
+                )
+            )
+            document_version_ids = {
+                membership.document_version_id for membership in memberships
+            }
+            document_ids = {membership.document_id for membership in memberships}
             session.execute(
                 delete(CollectionImportDocument).where(
                     CollectionImportDocument.collection_id == collection_id
@@ -325,6 +420,38 @@ class PostgresCollectionRepository:
                 session.execute(
                     delete(StoredObject).where(StoredObject.object_id.in_(object_ids))
                 )
+            session.execute(
+                delete(CollectionDocument).where(
+                    CollectionDocument.collection_id == collection_id
+                )
+            )
+            session.flush()
+            for document_version_id in document_version_ids:
+                has_membership = session.scalar(
+                    select(func.count(CollectionDocument.collection_document_id)).where(
+                        CollectionDocument.document_version_id == document_version_id
+                    )
+                )
+                has_object = session.scalar(
+                    select(func.count(StoredObject.object_id)).where(
+                        StoredObject.document_version_id == document_version_id
+                    )
+                )
+                if not has_membership and not has_object:
+                    version = session.get(DocumentVersion, document_version_id)
+                    if version is not None:
+                        session.delete(version)
+            session.flush()
+            for document_id in document_ids:
+                has_version = session.scalar(
+                    select(func.count(DocumentVersion.document_version_id)).where(
+                        DocumentVersion.document_id == document_id
+                    )
+                )
+                if not has_version:
+                    document = session.get(Document, document_id)
+                    if document is not None:
+                        session.delete(document)
             session.delete(row)
             return True
 
@@ -339,6 +466,35 @@ def _to_record(row: Collection) -> CollectionRecord:
         paper_count=row.paper_count,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+    )
+
+
+def _to_document_record(row: Document) -> DocumentRecord:
+    return DocumentRecord(
+        document_id=row.document_id,
+        created_at=_iso(row.created_at),
+    )
+
+
+def _to_document_version_record(row: DocumentVersion) -> DocumentVersionRecord:
+    return DocumentVersionRecord(
+        document_version_id=row.document_version_id,
+        document_id=row.document_id,
+        sha256=row.sha256,
+        media_type=row.media_type,
+        created_at=_iso(row.created_at),
+    )
+
+
+def _to_collection_document_record(
+    row: CollectionDocument,
+) -> CollectionDocumentRecord:
+    return CollectionDocumentRecord(
+        collection_document_id=row.collection_document_id,
+        collection_id=row.collection_id,
+        document_id=row.document_id,
+        document_version_id=row.document_version_id,
+        created_at=_iso(row.created_at),
     )
 
 

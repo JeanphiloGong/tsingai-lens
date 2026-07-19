@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 import os
 from pathlib import Path
 
@@ -104,7 +105,7 @@ def _collection_import(
         original_filename=f"{suffix}.pdf",
         stored_filename=f"stored-{suffix}.pdf",
         storage_key=f"{collection_id}/input/stored-{suffix}.pdf",
-        sha256=suffix[0] * 64,
+        sha256=sha256(suffix.encode("utf-8")).hexdigest(),
         media_type="application/pdf",
         status="stored",
         size_bytes=len(suffix),
@@ -291,7 +292,7 @@ def test_collection_import_rolls_back_all_state_for_invalid_object_integrity(
         documents=(replace(import_record.documents[0], file=invalid_file),),
     )
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
         collection_repository.add_collection_import(
             invalid_import,
             updated_at="2026-07-19T08:02:00+00:00",
@@ -414,7 +415,7 @@ def test_postgresql_enforces_collection_contract() -> None:
             invalid_import,
             documents=(replace(invalid_import.documents[0], file=invalid_file),),
         )
-        with pytest.raises(IntegrityError):
+        with pytest.raises(ValueError, match="lowercase SHA-256"):
             repository.add_collection_import(
                 invalid_import,
                 updated_at=now.isoformat(),

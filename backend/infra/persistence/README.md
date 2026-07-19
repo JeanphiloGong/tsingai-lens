@@ -32,9 +32,10 @@ The stable data ownership and identity contract lives in
   aggregates. Neither implementation is selectable at runtime.
 - `postgres/`
   Owns users, browser sessions, collection metadata, stored-object metadata,
-  collection file membership, import provenance, Goal-intake handoffs, tasks,
-  collection builds, stage state, artifact versions, and active-build
-  selection through SQLAlchemy mappings and direct aggregate repositories.
+  canonical documents and versions, collection-document membership, collection
+  file provenance, import provenance, Goal-intake handoffs, tasks, collection
+  builds, stage state, artifact versions, and active-build selection through
+  SQLAlchemy mappings and direct aggregate repositories.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
@@ -58,18 +59,27 @@ and build repositories and disposes its owned engine at shutdown; injected test
 services remain caller-owned.
 
 `postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
-`postgres/models/collection.py`, and `postgres/models/build.py` own their
-storage mappings; the matching direct repositories own explicit row/domain
-mapping and short transactions.
+`postgres/models/collection.py`, `postgres/models/document.py`, and
+`postgres/models/build.py` own their storage mappings; the matching direct
+aggregate repositories own explicit row/domain mapping and short transactions.
 `../../migrations/` owns the version history and is the only PostgreSQL schema
 change path; repositories never create tables.
 
 `PostgresCollectionRepository` is the single structured owner for collection
-metadata, files, imports, imported-document links, and handoffs. Import
-registration and collection count/status changes commit in one transaction.
-Collection deletion commits relational removal before the workspace directory
-is deleted. Maintained callers do not read or write collection file or import
-manifest JSON and do not scan input directories as a fallback authority.
+metadata, canonical documents and versions, exact-version collection
+membership, object/file replicas, imports, imported-document links, and
+handoffs. Import registration creates or reuses document identity and commits
+membership, provenance, and membership-based collection count/status in one
+transaction. Identical content may have separate collection-scoped object
+replicas but only one immutable version. Collection deletion removes final
+unreferenced document identity and commits relational removal before the
+workspace directory is deleted. Maintained callers do not read or write
+collection file or import manifest JSON and do not scan input directories as a
+fallback authority.
+
+There is no separate document repository or service. Canonical registration is
+part of collection import, and keeping one repository preserves the single
+transaction that also owns file provenance and collection count.
 
 `PostgresBuildRepository` is the single structured owner for tasks, collection
 builds, ordered stages, immutable artifact versions, and active-build

@@ -16,6 +16,11 @@ from infra.persistence.postgres.models.collection import (
     CollectionImportDocument,
     StoredObject,
 )
+from infra.persistence.postgres.models.document import (
+    CollectionDocument,
+    Document,
+    DocumentVersion,
+)
 
 __all__ = [
     "ArtifactVersion",
@@ -25,10 +30,13 @@ __all__ = [
     "Collection",
     "CollectionActiveBuild",
     "CollectionBuild",
+    "CollectionDocument",
     "CollectionFile",
     "CollectionHandoff",
     "CollectionImport",
     "CollectionImportDocument",
+    "Document",
+    "DocumentVersion",
     "StoredObject",
     "Task",
 ]

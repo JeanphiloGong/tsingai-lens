@@ -3,10 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 from domain.source import (
+    CollectionDocumentRecord,
     CollectionFileRecord,
     CollectionHandoffRecord,
     CollectionImportRecord,
     CollectionRecord,
+    DocumentRecord,
+    DocumentVersionRecord,
+    collection_document_identity,
+    document_identity_for_sha256,
 )
 
 
@@ -18,6 +23,9 @@ class MemoryCollectionRepository:
         self._files: dict[str, list[CollectionFileRecord]] = {}
         self._imports: dict[str, list[CollectionImportRecord]] = {}
         self._handoffs: dict[str, list[CollectionHandoffRecord]] = {}
+        self._documents: dict[str, DocumentRecord] = {}
+        self._document_versions: dict[str, DocumentVersionRecord] = {}
+        self._collection_documents: dict[str, list[CollectionDocumentRecord]] = {}
 
     def add_collection(self, record: CollectionRecord) -> None:
         if record.collection_id in self._collections:
@@ -75,12 +83,51 @@ class MemoryCollectionRepository:
         if any(item.import_id == record.import_id for item in imports):
             raise ValueError("collection import already exists")
 
+        identities = [
+            (*document_identity_for_sha256(file_record.sha256), file_record)
+            for file_record in incoming_files
+        ]
         files.extend(incoming_files)
         imports.append(record)
+        memberships = self._collection_documents.setdefault(record.collection_id, [])
+        membership_ids = {item.collection_document_id for item in memberships}
+        for document_id, document_version_id, file_record in identities:
+            collection_document_id = collection_document_identity(
+                record.collection_id,
+                document_id,
+            )
+            self._documents.setdefault(
+                document_id,
+                DocumentRecord(
+                    document_id=document_id,
+                    created_at=file_record.created_at,
+                ),
+            )
+            self._document_versions.setdefault(
+                document_version_id,
+                DocumentVersionRecord(
+                    document_version_id=document_version_id,
+                    document_id=document_id,
+                    sha256=file_record.sha256,
+                    media_type=file_record.media_type,
+                    created_at=file_record.created_at,
+                ),
+            )
+            if collection_document_id not in membership_ids:
+                memberships.append(
+                    CollectionDocumentRecord(
+                        collection_document_id=collection_document_id,
+                        collection_id=record.collection_id,
+                        document_id=document_id,
+                        document_version_id=document_version_id,
+                        created_at=file_record.created_at,
+                    )
+                )
+                membership_ids.add(collection_document_id)
         self._collections[record.collection_id] = replace(
             collection,
             status="ready",
-            paper_count=len(files),
+            paper_count=len(memberships),
             updated_at=updated_at,
         )
 
@@ -95,6 +142,21 @@ class MemoryCollectionRepository:
         collection_id: str,
     ) -> tuple[CollectionImportRecord, ...]:
         return tuple(self._imports.get(collection_id, ()))
+
+    def read_document(self, document_id: str) -> DocumentRecord | None:
+        return self._documents.get(document_id)
+
+    def read_document_version(
+        self,
+        document_version_id: str,
+    ) -> DocumentVersionRecord | None:
+        return self._document_versions.get(document_version_id)
+
+    def list_collection_documents(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionDocumentRecord, ...]:
+        return tuple(self._collection_documents.get(collection_id, ()))
 
     def add_collection_handoff(self, record: CollectionHandoffRecord) -> None:
         if record.collection_id not in self._collections:
@@ -116,4 +178,19 @@ class MemoryCollectionRepository:
         self._files.pop(collection_id, None)
         self._imports.pop(collection_id, None)
         self._handoffs.pop(collection_id, None)
+        removed_memberships = self._collection_documents.pop(collection_id, [])
+        remaining_version_ids = {
+            membership.document_version_id
+            for memberships in self._collection_documents.values()
+            for membership in memberships
+        }
+        for membership in removed_memberships:
+            if membership.document_version_id not in remaining_version_ids:
+                self._document_versions.pop(membership.document_version_id, None)
+        remaining_document_ids = {
+            version.document_id for version in self._document_versions.values()
+        }
+        for membership in removed_memberships:
+            if membership.document_id not in remaining_document_ids:
+                self._documents.pop(membership.document_id, None)
         return True

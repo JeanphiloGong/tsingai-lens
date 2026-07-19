@@ -39,7 +39,6 @@ from infra.persistence.file import (
 )
 from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.sqlite import (
-    SqliteAuthRepository,
     SqliteCoreFactRepository,
     SqliteEvaluationRepository,
     SqliteExperimentPlanRepository,
@@ -53,7 +52,10 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = BACKEND_ROOT / "tests" / "fixtures" / "persistence_revision"
 
 
-def test_current_repositories_round_trip_the_reviewed_persistence_baseline(tmp_path) -> None:
+def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
+    tmp_path,
+    auth_session_service,
+) -> None:
     scenario = json.loads((FIXTURE_DIR / "scenario.json").read_text(encoding="utf-8"))
     expected = json.loads(
         (FIXTURE_DIR / "expected-baseline.json").read_text(encoding="utf-8")
@@ -66,7 +68,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(tmp_p
     object_store = FileObjectStore(collection_repository.root_dir)
     task_repository = FileTaskRepository(tmp_path / "tasks")
     artifact_repository = FileArtifactRepository(tmp_path / "collections")
-    auth_repository = SqliteAuthRepository(db_path)
+    auth_repository = auth_session_service.repository
     source_repository = SqliteSourceArtifactRepository(db_path)
     core_repository = SqliteCoreFactRepository(db_path)
     goal_session_repository = SqliteGoalSessionRepository(db_path)
@@ -89,8 +91,14 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(tmp_p
     task_repository.write_task(records["tasks"][0]["task_id"], records["tasks"][0])
     artifact_repository.write(collection_id, records["artifacts"][0])
 
-    auth_repository.write_user(records["auth_users"][0])
-    auth_repository.write_session(records["auth_sessions"][0])
+    auth_repository.add_user(records["auth_users"][0])
+    session_token_hash = sha256(b"synthetic-baseline-session-token").hexdigest()
+    auth_repository.add_session(
+        {
+            **records["auth_sessions"][0],
+            "token_hash": session_token_hash,
+        }
+    )
 
     source_repository.replace_collection_artifacts(
         collection_id,
@@ -209,7 +217,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(tmp_p
         auth_repository.read_user(records["auth_users"][0]["user_id"])
     ]
     observed_records["auth_sessions"] = [
-        auth_repository.read_session(records["auth_sessions"][0]["session_id"])
+        auth_repository.read_session_by_token_hash(session_token_hash)
     ]
 
     source = source_repository.read_collection_artifacts(collection_id)

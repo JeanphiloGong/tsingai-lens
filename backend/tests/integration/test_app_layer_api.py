@@ -566,7 +566,7 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 
 
 @pytest.fixture()
-def app_client(monkeypatch, tmp_path):
+def app_client(monkeypatch, tmp_path, auth_session_service):
     from controllers.source import collections as collections_controller
     from controllers.core import comparable_results as comparable_results_controller
     from controllers.core import comparisons as comparisons_controller
@@ -694,7 +694,7 @@ def app_client(monkeypatch, tmp_path):
     monkeypatch.setattr(research_view_controller, "research_view_service", research_view_service)
     monkeypatch.setattr(comparisons_controller, "comparison_service", comparison_service)
     monkeypatch.setattr(results_controller, "comparison_service", comparison_service)
-    client = TestClient(create_app())
+    client = TestClient(create_app(auth_session_service=auth_session_service))
     login_response = client.post(
         f"{API_V1_PREFIX}/auth/login",
         json={"email": "admin@example.com", "password": "admin-password"},

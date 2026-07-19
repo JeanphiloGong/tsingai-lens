@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import os
 from time import perf_counter
 
@@ -25,6 +27,12 @@ from controllers.source import collections, references, tasks
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from infra.persistence.database import (
+    DatabaseSettings,
+    build_database_engine,
+    build_session_factory,
+)
+from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 
 from utils.logger import (
     REQUEST_ID_HEADER,
@@ -51,16 +59,38 @@ def _parse_cors_allowed_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    auth_session_service: AuthSessionService | None = None,
+) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        if auth_session_service is not None:
+            yield
+            return
+
+        engine = build_database_engine(DatabaseSettings())
+        service = AuthSessionService(
+            PostgresAuthRepository(build_session_factory(engine))
+        )
+        application.state.auth_session_service = service
+        try:
+            service.ensure_bootstrap_user()
+            yield
+        finally:
+            engine.dispose()
+
     app = FastAPI(
         title="TsingAI-Lens API",
         version="0.9.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
+        lifespan=lifespan,
     )
-    app.state.auth_session_service = AuthSessionService()
-    app.state.auth_session_service.ensure_bootstrap_user()
+    if auth_session_service is not None:
+        app.state.auth_session_service = auth_session_service
+        auth_session_service.ensure_bootstrap_user()
     cors_allowed_origins = _parse_cors_allowed_origins()
     app.add_middleware(
         CORSMiddleware,

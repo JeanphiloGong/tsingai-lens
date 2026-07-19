@@ -29,29 +29,35 @@ The stable data ownership and identity contract lives in
 - `memory/`
   Test and isolated-run implementations for collection, task, and artifact
   state.
+- `postgres/`
+  Owns users and browser sessions through SQLAlchemy mappings and one direct
+  `PostgresAuthRepository`. The application creates its engine, session factory,
+  repository, and auth service in the FastAPI lifespan.
 - `sqlite/`
-  Six handwritten repositories share `backend/data/lens.sqlite` for auth, Goal
+  Five handwritten repositories share `backend/data/lens.sqlite` for Goal
   sessions and plans, Source records, Core and Goal workflow records, and
-  evaluation/review state. These repositories currently create schema at
-  runtime.
+  evaluation/review state. These remaining repositories currently create
+  schema at runtime.
 - `mysql/`
   Unimplemented placeholder selected only by the legacy collection/task/artifact
   backend switch.
 
 `factory.py` currently selects file, memory, or the unimplemented MySQL path
 only for collection, task, and artifact repositories. It constructs SQLite
-directly for every other family. Source pipeline JSON and Parquet outputs live
-under `infra/source/` runtime storage and are rebuildable intermediates, not a
-second persistence authority.
+directly for the remaining Goal, Source, Core, and evaluation families. Auth is
+composed directly in `main.py`; there is no auth repository factory or SQLite
+fallback. Source pipeline JSON and Parquet outputs live under `infra/source/`
+runtime storage and are rebuildable intermediates, not a second persistence
+authority.
 
 `database.py` owns the validated synchronous SQLAlchemy engine and session
-factory for the PostgreSQL cutover. It is intentionally not connected to
-application startup or current repositories until their direct cutover slices.
+factory. The auth lifespan uses this contract and disposes its owned engine at
+shutdown; injected test services remain caller-owned.
 
-`postgres/base.py` owns the declarative metadata for future PostgreSQL models.
-`../../migrations/` owns the version history and is the only PostgreSQL schema
-change path. The initial revision is deliberately empty; business tables arrive
-with their direct repository cutovers.
+`postgres/base.py` owns declarative metadata, `postgres/models/auth.py` owns the
+two auth mappings, and `postgres/auth_repository.py` owns their direct reads and
+writes. `../../migrations/` owns the version history and is the only PostgreSQL
+schema change path; repositories never create tables.
 
 ## Target Boundary
 

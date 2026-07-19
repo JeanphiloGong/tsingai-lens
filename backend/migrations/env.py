@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy.engine import Connection
 
 from infra.persistence.database import DatabaseSettings, build_database_engine
+from infra.persistence.postgres import models as _postgres_models  # noqa: F401
 from infra.persistence.postgres.base import Base
 
 

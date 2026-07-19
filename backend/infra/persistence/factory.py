@@ -28,7 +28,6 @@ from infra.persistence.memory import (
     MemoryTaskRepository,
 )
 from infra.persistence.sqlite import (
-    SqliteAuthRepository,
     SqliteCoreFactRepository,
     SqliteEvaluationRepository,
     SqliteExperimentPlanRepository,
@@ -102,12 +101,6 @@ def build_experiment_plan_repository(
     db_path: Path | None = None,
 ) -> ExperimentPlanRepository:
     return SqliteExperimentPlanRepository(db_path or (DATA_DIR / "lens.sqlite"))
-
-
-def build_auth_repository(
-    db_path: Path | None = None,
-) -> SqliteAuthRepository:
-    return SqliteAuthRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_source_artifact_repository(

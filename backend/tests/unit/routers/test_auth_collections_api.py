@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import subprocess
+import sys
+from unittest.mock import Mock
+
 from fastapi.testclient import TestClient
+import pytest
 
 
-def _build_client(monkeypatch, tmp_path) -> TestClient:
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _build_client(monkeypatch, tmp_path, auth_session_service) -> TestClient:
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
@@ -13,7 +23,6 @@ def _build_client(monkeypatch, tmp_path) -> TestClient:
     monkeypatch.setattr("infra.persistence.file.collection_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.sqlite.auth_repository.DATA_DIR", tmp_path)
 
     from controllers.source import collections as collections_controller
     from application.source.collection_service import CollectionService
@@ -22,7 +31,7 @@ def _build_client(monkeypatch, tmp_path) -> TestClient:
     collections_controller.collection_service = CollectionService(
         tmp_path / "collections"
     )
-    return TestClient(create_app())
+    return TestClient(create_app(auth_session_service=auth_session_service))
 
 
 def _login(client: TestClient, email: str = "admin@example.com", password: str = "admin-password"):
@@ -32,8 +41,43 @@ def _login(client: TestClient, email: str = "admin@example.com", password: str =
     )
 
 
-def test_collections_api_requires_login(monkeypatch, tmp_path):
-    client = _build_client(monkeypatch, tmp_path)
+def test_main_app_import_defers_database_connection() -> None:
+    env = os.environ.copy()
+    env.pop("LENS_DATABASE_URL", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-c", "import main"],
+        cwd=BACKEND_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) -> None:
+    from main import create_app
+
+    engine = Mock()
+    service = Mock()
+    service.ensure_bootstrap_user.side_effect = RuntimeError("bootstrap failed")
+    monkeypatch.setattr("main.DatabaseSettings", lambda: object())
+    monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
+    monkeypatch.setattr("main.build_session_factory", lambda _engine: object())
+    monkeypatch.setattr("main.PostgresAuthRepository", lambda _factory: object())
+    monkeypatch.setattr("main.AuthSessionService", lambda _repository: service)
+
+    with pytest.raises(RuntimeError, match="bootstrap failed"):
+        with TestClient(create_app()):
+            pass
+
+    engine.dispose.assert_called_once_with()
+
+
+def test_collections_api_requires_login(monkeypatch, tmp_path, auth_session_service):
+    client = _build_client(monkeypatch, tmp_path, auth_session_service)
 
     response = client.get("/api/v1/collections")
 
@@ -41,8 +85,8 @@ def test_collections_api_requires_login(monkeypatch, tmp_path):
     assert response.json()["detail"]["code"] == "authentication_required"
 
 
-def test_login_me_and_logout_flow(monkeypatch, tmp_path):
-    client = _build_client(monkeypatch, tmp_path)
+def test_login_me_and_logout_flow(monkeypatch, tmp_path, auth_session_service):
+    client = _build_client(monkeypatch, tmp_path, auth_session_service)
 
     login = _login(client)
     assert login.status_code == 200
@@ -59,8 +103,12 @@ def test_login_me_and_logout_flow(monkeypatch, tmp_path):
     assert after_logout.status_code == 401
 
 
-def test_collection_list_is_scoped_to_authenticated_owner(monkeypatch, tmp_path):
-    client = _build_client(monkeypatch, tmp_path)
+def test_collection_list_is_scoped_to_authenticated_owner(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+):
+    client = _build_client(monkeypatch, tmp_path, auth_session_service)
     assert _login(client).status_code == 200
 
     created = client.post("/api/v1/collections", json={"name": "Admin papers"})
@@ -87,8 +135,12 @@ def test_collection_list_is_scoped_to_authenticated_owner(monkeypatch, tmp_path)
     assert other_get.json()["detail"]["code"] == "collection_not_found"
 
 
-def test_public_static_data_mount_is_removed(monkeypatch, tmp_path):
-    client = _build_client(monkeypatch, tmp_path)
+def test_public_static_data_mount_is_removed(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+):
+    client = _build_client(monkeypatch, tmp_path, auth_session_service)
     leaked_path = tmp_path / "leak.txt"
     leaked_path.write_text("secret", encoding="utf-8")
 

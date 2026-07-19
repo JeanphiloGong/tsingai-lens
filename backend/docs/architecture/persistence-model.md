@@ -35,8 +35,8 @@ must name the authoritative records from which they can be rebuilt.
 ## Current Runtime Model
 
 The current runtime is split between JSON files, uploaded and generated files,
-and six handwritten SQLite repositories. This table records that split so the
-migration does not accidentally preserve it.
+PostgreSQL auth records, and five handwritten SQLite repositories. This table
+records that split so the migration does not accidentally preserve it.
 
 | Current family | Current runtime owner | Rebuildable now? | Target authority |
 | --- | --- | --- | --- |
@@ -46,7 +46,7 @@ migration does not accidentally preserve it.
 | Uploaded PDF and text bytes | `collections/<id>/input/` | No | Object storage |
 | Task status, progress, and errors | `tasks/<id>.json` | No | PostgreSQL |
 | Artifact readiness and paths | `collections/<id>/artifacts.json` | No | PostgreSQL metadata; binary exports in object storage |
-| Users and auth sessions | `lens.sqlite` auth tables | No | PostgreSQL |
+| Users and auth sessions | PostgreSQL `auth_users` and `auth_sessions` | No | PostgreSQL |
 | Goal sessions and experiment plans | `lens.sqlite` Goal tables | No | PostgreSQL |
 | Source document structure and references | `lens.sqlite` Source tables | No | PostgreSQL |
 | Core facts, objectives, comparisons, goals, and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
@@ -58,11 +58,12 @@ migration does not accidentally preserve it.
 | Trace payloads and logs | `traces/` and log paths | Yes for product behavior; retained only for diagnostics | Local scratch or object storage when an explicit retention rule requires it |
 | Legacy document indexes, graph store, and file Goal sessions | `documents/`, `graph_store.json`, and `collections/_goal_sessions/` | Legacy residue, not a supported authority | Offline migration input or removal after approved cleanup |
 
-### SQLite Inventory
+### Legacy SQLite Inventory
 
 The inspected `backend/data/lens.sqlite` contains 53 application tables. They
 are grouped here by real responsibility rather than by the repository class
-that happens to contain them.
+that happens to contain them. Its two auth tables are retained legacy data for
+future offline import only; the current runtime neither reads nor writes them.
 
 | Responsibility | Count | Current tables |
 | --- | ---: | --- |

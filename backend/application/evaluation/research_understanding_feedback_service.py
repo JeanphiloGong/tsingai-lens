@@ -20,6 +20,8 @@ from infra.persistence.factory import (
 
 DATASET_SCHEMA_VERSION = "research_understanding_dataset.v1"
 DATASET_TASK_TYPE = "research_understanding_finding"
+TRAINING_SCHEMA_VERSION = "research_understanding_finding_training.v1"
+TRAINING_PROMPT_VERSION = "research_understanding_finding_training_prompt.v1"
 DATASET_LABEL_STATUSES = ("candidate", "silver", "gold", "rejected")
 DATASET_USE_STATUSES = ("training_ready", "review_candidate", "rejected")
 _ACCEPTANCE_REVIEW_CHECKS = {
@@ -576,6 +578,7 @@ class ResearchUnderstandingFeedbackService:
                 collection_id=collection_id,
                 scope_type=scope_type,
                 scope_id=scope_id,
+                research_objective=_text(understanding.scope.title),
                 finding=finding,
                 evidence_refs=evidence_refs,
                 evidence_items=evidence_items,
@@ -659,6 +662,7 @@ class ResearchUnderstandingFeedbackService:
         collection_id: str,
         scope_type: str,
         scope_id: str,
+        research_objective: str,
         finding: Mapping[str, Any],
         evidence_refs: Mapping[str, Mapping[str, Any]],
         evidence_items: Mapping[str, Mapping[str, Any]],
@@ -691,6 +695,7 @@ class ResearchUnderstandingFeedbackService:
         )
         system_prediction = _system_prediction(finding)
         system_prediction["presentation_bucket"] = presentation_bucket
+        finding_level = _training_finding_level(finding)
         base_evidence_ref_ids = _strings(finding.get("evidence_ref_ids"))
         evidence_ref_ids_list: list[str] = []
         bundle = _mapping(finding.get("evidence_bundle"))
@@ -761,6 +766,8 @@ class ResearchUnderstandingFeedbackService:
         ]
         training_messages = (
             _training_messages(
+                research_objective=research_objective,
+                finding_level=finding_level,
                 system_prediction=system_prediction,
                 expert_target=_mapping(expert_target),
                 evidence_records=training_evidence_records,
@@ -824,6 +831,15 @@ class ResearchUnderstandingFeedbackService:
                 label_status,
             ),
             "task_type": DATASET_TASK_TYPE,
+            "training_schema_version": TRAINING_SCHEMA_VERSION,
+            "training_prompt_version": TRAINING_PROMPT_VERSION,
+            "research_objective": research_objective,
+            "finding_level": finding_level,
+            "document_ids": list(
+                _strings(
+                    [record.get("document_id") for record in training_evidence_records]
+                )
+            ),
             "collection_id": collection_id,
             "scope_type": scope_type,
             "scope_id": scope_id,
@@ -1825,14 +1841,21 @@ def _expert_target_from_feedback(
     }
 
 
+def _training_finding_level(finding: Mapping[str, Any]) -> str:
+    return "cross_paper" if _int(finding.get("paper_count")) > 1 else "paper_level"
+
+
 def _training_messages(
     *,
+    research_objective: str,
+    finding_level: str,
     system_prediction: Mapping[str, Any],
     expert_target: Mapping[str, Any],
     evidence_records: list[dict[str, Any]],
     context_records: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
-    if not expert_target:
+    research_objective = _text(research_objective)
+    if not expert_target or not research_objective:
         return []
     statement = _text(expert_target.get("statement")) or _text(
         system_prediction.get("statement")
@@ -1864,8 +1887,19 @@ def _training_messages(
             or f"evidence {index}"
         )
         page = _text(record.get("page"))
-        location = f" p. {page}" if page else ""
-        evidence_lines.append(f"[E{index}] {source_label}{location}: {text}")
+        header = " | ".join(
+            item
+            for item in (
+                f"E{index}",
+                f"evidence_ref_id={_text(record.get('evidence_ref_id'))}",
+                f"role={_text(record.get('evidence_role')) or 'direct_result'}",
+                f"document_id={_text(record.get('document_id'))}",
+                f"source={source_label}",
+                f"page={page}" if page else "",
+            )
+            if item and not item.endswith("=")
+        )
+        evidence_lines.append(f"[{header}]: {text}")
     for index, record in enumerate(condition_records[:8], start=1):
         text = _text(record.get("training_source_text")) or _text(record.get("quote"))
         if not text:
@@ -1879,8 +1913,19 @@ def _training_messages(
             or f"condition {index}"
         )
         page = _text(record.get("page"))
-        location = f" p. {page}" if page else ""
-        condition_lines.append(f"[CE{index}] {source_label}{location}: {text}")
+        header = " | ".join(
+            item
+            for item in (
+                f"CE{index}",
+                f"evidence_ref_id={_text(record.get('evidence_ref_id'))}",
+                f"role={_text(record.get('evidence_role')) or 'condition_context'}",
+                f"document_id={_text(record.get('document_id'))}",
+                f"source={source_label}",
+                f"page={page}" if page else "",
+            )
+            if item and not item.endswith("=")
+        )
+        condition_lines.append(f"[{header}]: {text}")
     context_lines = []
     for index, record in enumerate(context_records[:4], start=1):
         parts = [
@@ -1929,9 +1974,21 @@ def _training_messages(
             )
         ),
     }
+    task_instruction = (
+        "Synthesize one evidence-grounded cross-paper materials research finding. "
+        "Preserve agreement, conflict, and condition dependence across papers."
+        if finding_level == "cross_paper"
+        else "Extract one evidence-grounded materials research finding from the source paper. "
+        "Do not generalize it beyond that paper."
+    )
     user_lines = [
-        "Extract one evidence-grounded materials research finding from the source evidence.",
+        task_instruction,
+        "",
+        "Research objective:",
+        research_objective,
+        f"Finding level: {finding_level}",
         "Return only a JSON object with statement, variables, mediators, outcomes, direction, scope_summary, support_grade, generalization_status, generalization_note, and evidence_ref_ids.",
+        "Use only evidence_ref_id values shown in the evidence headers.",
         "",
         "Evidence:",
         *(evidence_lines or ["No source evidence text available."]),

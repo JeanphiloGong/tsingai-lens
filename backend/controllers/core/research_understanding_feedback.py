@@ -146,6 +146,7 @@ def _dataset_jsonl_response(
             else {"messages": item.training_messages}
             for item in response.items
             if item.training_messages
+            and not item.metadata.get("training_message_diagnostic")
         ]
     else:
         rows = [item.model_dump(mode="json") for item in response.items]
@@ -165,6 +166,9 @@ def _training_jsonl_row(
     return {
         "messages": item.training_messages,
         "metadata": {
+            "schema_version": item.training_schema_version,
+            "task_type": item.task_type,
+            "prompt_version": item.training_prompt_version,
             "collection_id": collection_id,
             "scope_type": item.scope_type,
             "goal_id": item.scope_id if item.scope_type == "goal" else "",
@@ -172,6 +176,10 @@ def _training_jsonl_row(
             "sample_id": item.sample_id,
             "finding_id": item.finding_id,
             "claim_id": item.claim_id or "",
+            "finding_fingerprint": item.finding_fingerprint,
+            "research_objective": item.research_objective,
+            "finding_level": item.finding_level,
+            "document_ids": item.document_ids,
             "label_status": item.label_status,
             "dataset_use_status": item.dataset_use_status,
             "trace_status": item.trace_status,

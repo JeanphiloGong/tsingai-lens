@@ -1106,11 +1106,47 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
         "condition_context",
     ]
     assert sample["dataset_use_status"] == "training_ready"
+    assert sample["research_objective"] == "How does preheating affect ductility?"
+    assert sample["finding_level"] == "paper_level"
+    assert sample["training_schema_version"] == (
+        "research_understanding_finding_training.v1"
+    )
+    assert sample["training_prompt_version"] == (
+        "research_understanding_finding_training_prompt.v1"
+    )
+    assert sample["document_ids"] == ["doc-1"]
     user_message = sample["training_messages"][0]["content"]
+    assert "Research objective:\nHow does preheating affect ductility?" in user_message
+    assert "Finding level: paper_level" in user_message
     assert "Preheating increased ductility by 14%." in user_message
-    assert "Evidence:\n[E1]" in user_message
-    assert "Condition evidence:\n[CE1]" in user_message
+    assert (
+        "Evidence:\n[E1 | evidence_ref_id=ev-1 | role=direct_result | "
+        "document_id=doc-1" in user_message
+    )
+    assert (
+        "Condition evidence:\n[CE1 | evidence_ref_id=ev-condition | "
+        "role=condition_context | document_id=doc-1" in user_message
+    )
     assert "non-preheated and 150 C preheated groups" in user_message
+
+
+def test_research_understanding_training_finding_level_uses_paper_count():
+    assert ruf_service._training_finding_level({"paper_count": 1}) == "paper_level"
+    assert ruf_service._training_finding_level({"paper_count": 2}) == "cross_paper"
+
+
+def test_research_understanding_training_messages_require_research_objective():
+    assert (
+        ruf_service._training_messages(
+            research_objective="",
+            finding_level="paper_level",
+            system_prediction={"statement": "Preheating increases ductility."},
+            expert_target={"statement": "Preheating increases ductility."},
+            evidence_records=[],
+            context_records=[],
+        )
+        == []
+    )
 
 
 def test_research_understanding_feedback_service_derives_dataset_input_blocks_when_matched_trace_failed():

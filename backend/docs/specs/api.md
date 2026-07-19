@@ -803,7 +803,11 @@ decision_template | decision_board_tsv | agent_review_prompt_jsonl | review_pack
 envelope，`jsonl` 返回 newline-delimited 完整 sample，
 `messages_jsonl` 返回 newline-delimited `{"messages": [...]}` 行，便于常见
 chat evaluation/fine-tuning 工具直接消费；`training_jsonl` 在 message 行外附带
-traceable training metadata。`review_jsonl` 返回可编辑的人工复核模板，
+traceable training metadata，包括训练 schema/prompt 版本、task type、研究目标、
+Finding 层级、Finding fingerprint、相关 document IDs、专家状态和 evidence ref IDs。
+`messages_jsonl` 与 `training_jsonl` 都只写出通过 `training_message_diagnostic`
+校验的 message 对；有 Gold/`training_ready` Finding 但 message 校验失败时不会输出空壳样本。
+`review_jsonl` 返回可编辑的人工复核模板，
 每行默认 `action=skip`，并包含 `allowed_actions`、`reject_issue_options`、
 `review_instructions`、`review_risk_flags`、候选 Finding 字段、推荐动作、证据片段、
 `acceptance_gate` 和 `protocol_readiness`。`decision_template` 返回更紧凑的 newline-delimited
@@ -977,6 +981,11 @@ paper-level finding 训练成跨论文结论。它用于离线 evaluation/fine-t
 `available`/`failed` 输入导出；历史 trace 缺少文本输入块、或 matched trace 失败但
 evidence 已能定位到原文时，导出使用 `trace_status=evidence_derived`，并从
 resolved evidence quote/source text 重建 `input_blocks`。
+user message 还会显式包含当前 `scope.title` 研究目标、由 `paper_count` 派生的
+`paper_level | cross_paper` Finding 层级，以及每条 Evidence 的
+`evidence_ref_id`、evidence role、document ID、source label 和 page。assistant
+只能返回输入 Evidence header 中出现的 `evidence_ref_id`，避免生成无法从输入复制的
+内部引用。缺少研究目标时不会生成 training messages。
 训练 message readiness 会校验 assistant JSON 的 statement、variables、outcomes、
 direction/scope、support_grade、generalization_status 和 evidence_ref_ids 与
 `expert_target` / `system_prediction` / `training_evidence_refs` 对齐，避免只含

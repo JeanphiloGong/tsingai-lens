@@ -412,6 +412,7 @@ const translations: Record<Language, Translations> = {
 				reviewImportWarningsTitle: 'Import warnings',
 				reviewImportErrorsTitle: 'Import errors',
 				datasetNoTrainingReady: 'No training-ready samples',
+				datasetNoValidatedTrainingData: 'No validated training data',
 				datasetTrainingMessagesNote:
 					'Training exports include evidence-grounded user/assistant messages for evaluation or fine-tuning preparation.',
 				datasetLabelBoundaryNote:
@@ -3931,6 +3932,7 @@ const translations: Record<Language, Translations> = {
 				reviewImportWarningsTitle: '导入警告',
 				reviewImportErrorsTitle: '导入错误',
 				datasetNoTrainingReady: '暂无可训练样本',
+				datasetNoValidatedTrainingData: '暂无有效训练数据',
 				datasetTrainingMessagesNote:
 					'训练导出包含基于证据的 user/assistant messages，可用于评价或微调准备。',
 				datasetLabelBoundaryNote:

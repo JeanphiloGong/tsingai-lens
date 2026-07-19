@@ -600,6 +600,11 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
 
     sample_id: str
     task_type: str
+    training_schema_version: str
+    training_prompt_version: str
+    research_objective: str
+    finding_level: str
+    document_ids: list[str] = Field(default_factory=list)
     collection_id: str
     scope_type: str
     scope_id: str

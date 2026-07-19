@@ -4645,7 +4645,7 @@
 									{$t('research.understanding.datasetLabelBoundaryNote')}
 								</p>
 								<div class="research-understanding-workbench__dataset-actions">
-									{#if datasetTrainingReadySampleCount > 0}
+									{#if datasetTrainingMessageSampleCount > 0}
 										<a href={trainingDatasetDownloadUrl()} download>
 											{$t('research.understanding.datasetDownloadTrainingData')}
 										</a>
@@ -4654,7 +4654,11 @@
 											class="research-understanding-workbench__dataset-action-disabled"
 											aria-disabled="true"
 										>
-											{$t('research.understanding.datasetNoTrainingReady')}
+											{$t(
+												datasetTrainingReadySampleCount > 0
+													? 'research.understanding.datasetNoValidatedTrainingData'
+													: 'research.understanding.datasetNoTrainingReady'
+											)}
 										</span>
 									{/if}
 								</div>
@@ -4842,7 +4846,7 @@
 										{/if}
 									{/if}
 								</div>
-								{#if datasetTrainingReadySampleCount > 0}
+								{#if datasetTrainingMessageSampleCount > 0}
 									<p class="research-understanding-workbench__dataset-note">
 										{$t('research.understanding.datasetTrainingMessagesNote')}
 									</p>

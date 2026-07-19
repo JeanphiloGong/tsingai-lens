@@ -2780,11 +2780,10 @@ describe('ResearchUnderstandingWorkbench', () => {
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Training messages 0');
 		expect(datasetText).toContain('Protocol ready 0');
-		const exportLink = browserPage.getByRole('link', { name: 'Export training data' });
-		await expect.element(exportLink).toBeInTheDocument();
-		const exportUrl = new URL(exportLink.element().getAttribute('href') ?? '', 'http://localhost');
-		expect(exportUrl.searchParams.get('format')).toBe('training_jsonl');
-		expect(exportUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Export training data' }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('No validated training data')).toBeInTheDocument();
 	});
 
 	it('opens the next review candidate detail from the review loop', async () => {

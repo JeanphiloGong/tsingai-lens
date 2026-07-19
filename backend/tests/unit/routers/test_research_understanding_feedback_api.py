@@ -301,6 +301,15 @@ class FakeResearchUnderstandingFeedbackService:
                     "sample_id": "rus-1",
                     "finding_fingerprint": "finding.v1:test",
                     "task_type": "research_understanding_finding",
+                    "training_schema_version": (
+                        "research_understanding_finding_training.v1"
+                    ),
+                    "training_prompt_version": (
+                        "research_understanding_finding_training_prompt.v1"
+                    ),
+                    "research_objective": "How does preheating affect ductility?",
+                    "finding_level": "paper_level",
+                    "document_ids": ["doc-1"],
                     "collection_id": kwargs["collection_id"],
                     "scope_type": kwargs["scope_type"],
                     "scope_id": kwargs["scope_id"],
@@ -338,6 +347,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "evidence_refs": [
                         {
                             "evidence_ref_id": "ev-1",
+                            "document_id": "doc-1",
                             "label": "P001 Section 3.2",
                             "source_ref": "blk_1",
                             "page": "9",
@@ -359,6 +369,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "training_evidence_refs": [
                         {
                             "evidence_ref_id": "ev-1",
+                            "document_id": "doc-1",
                             "label": "P001 Section 3.2",
                             "source_ref": "blk_1",
                             "page": "9",
@@ -1116,6 +1127,9 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
     assert set(line) == {"messages", "metadata"}
     assert line["messages"][0]["role"] == "user"
     assert line["metadata"] == {
+        "schema_version": "research_understanding_finding_training.v1",
+        "task_type": "research_understanding_finding",
+        "prompt_version": "research_understanding_finding_training_prompt.v1",
         "collection_id": "col-1",
         "scope_type": "goal",
         "goal_id": "goal-1",
@@ -1123,6 +1137,10 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
         "sample_id": "rus-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
+        "finding_fingerprint": "finding.v1:test",
+        "research_objective": "How does preheating affect ductility?",
+        "finding_level": "paper_level",
+        "document_ids": ["doc-1"],
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "trace_status": "unavailable",
@@ -1142,6 +1160,37 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
         "dataset_use_status": "training_ready",
         "task_type": None,
     }
+
+
+def test_research_understanding_training_jsonl_skips_invalid_training_messages(
+    monkeypatch,
+):
+    service = FakeResearchUnderstandingFeedbackService()
+    original_export = service.export_dataset
+
+    def export_with_invalid_messages(**kwargs):  # noqa: ANN003
+        dataset = original_export(**kwargs)
+        dataset["items"][0]["metadata"] = {
+            "training_message_diagnostic": ["mismatched_assistant_statement"]
+        }
+        return dataset
+
+    service.export_dataset = export_with_invalid_messages
+    monkeypatch.setattr(feedback_controller, "feedback_service", service)
+
+    response = asyncio.run(
+        feedback_controller.export_research_understanding_dataset(
+            "col-1",
+            scope_type="goal",
+            scope_id="goal-1",
+            label_status="gold",
+            dataset_use_status="training_ready",
+            task_type=None,
+            format="training_jsonl",
+        )
+    )
+
+    assert response.body == b""
 
 
 def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):

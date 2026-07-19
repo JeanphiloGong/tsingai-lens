@@ -38,6 +38,10 @@ artifacts.
   UIs can show whether confirmed findings actually have message rows available
   for export, and from `protocol_ready_sample_count` so Goal Copilot only
   drafts experiments from actionable, traceable reviewed findings. Dataset
+  messages include the persisted research objective, paper/cross-paper Finding
+  level, and explicit evidence IDs with document and page provenance. JSONL
+  training exports omit rows that fail the message diagnostic even when their
+  Finding is otherwise marked `training_ready`. Dataset
   export also exposes editable review JSONL templates for human accept/reject/
   correct review. Each dataset sample carries an `acceptance_gate` and
   `review_decision_hint` so API, UI, and review-packet exports share the same

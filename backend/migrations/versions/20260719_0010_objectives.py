@@ -358,7 +358,7 @@ def upgrade() -> None:
         ),
         sa.Column("confidence", sa.Float(), nullable=False),
         sa.CheckConstraint(
-            "(source_kind = 'text_window' AND source_block_id IS NOT NULL AND source_table_id IS NULL AND source_figure_id IS NULL) OR (source_kind = 'table' AND source_block_id IS NULL AND source_table_id IS NOT NULL AND source_figure_id IS NULL) OR (source_kind = 'figure' AND source_block_id IS NULL AND source_table_id IS NULL AND source_figure_id IS NOT NULL)",
+            "(source_kind = 'text_window' AND source_block_id IS NOT NULL AND source_ref = source_block_id AND source_table_id IS NULL AND source_figure_id IS NULL) OR (source_kind = 'table' AND source_block_id IS NULL AND source_ref = source_table_id AND source_table_id IS NOT NULL AND source_figure_id IS NULL) OR (source_kind = 'figure' AND source_block_id IS NULL AND source_ref = source_figure_id AND source_table_id IS NULL AND source_figure_id IS NOT NULL)",
             name=op.f("ck_objective_evidence_routes_typed_source_valid"),
         ),
         sa.CheckConstraint(
@@ -808,7 +808,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "(source_kind = 'text_window' AND source_block_id IS NOT NULL AND source_table_id IS NULL AND source_figure_id IS NULL) OR (source_kind = 'table' AND source_block_id IS NULL AND source_table_id IS NOT NULL AND source_figure_id IS NULL) OR (source_kind = 'figure' AND source_block_id IS NULL AND source_table_id IS NULL AND source_figure_id IS NOT NULL)",
+            "(source_kind = 'text_window' AND source_block_id IS NOT NULL AND source_ref = source_block_id AND source_table_id IS NULL AND source_figure_id IS NULL) OR (source_kind = 'table' AND source_block_id IS NULL AND source_ref = source_table_id AND source_table_id IS NOT NULL AND source_figure_id IS NULL) OR (source_kind = 'figure' AND source_block_id IS NULL AND source_ref = source_figure_id AND source_table_id IS NULL AND source_figure_id IS NOT NULL)",
             name=op.f("ck_objective_unit_source_refs_typed_source_valid"),
         ),
         sa.ForeignKeyConstraint(

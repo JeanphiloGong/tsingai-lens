@@ -205,9 +205,14 @@ class PostgresObjectiveRepository:
                     objective_unit_source_refs.c.position,
                 )
             ).mappings():
-                source_refs[str(row["evidence_unit_id"])].append(
-                    dict(row["metadata_json"])
+                source_ref = dict(row["metadata_json"])
+                source_ref.update(
+                    {
+                        "source_kind": str(row["source_kind"]),
+                        "source_ref": str(row["source_ref"]),
+                    }
                 )
+                source_refs[str(row["evidence_unit_id"])].append(source_ref)
 
             return ObjectiveFactSet(
                 research_objectives_ready=marker.research_objectives_ready,

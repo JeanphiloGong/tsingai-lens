@@ -573,7 +573,6 @@ class ResearchObjectiveService:
                 objective_logic_chains=objective_logic_chains,
             ),
         )
-        self.persist_objective_understandings(collection_id, build_id=build_id)
         logger.info(
             "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s objective_evidence_units=%s objective_logic_chains=%s",
             collection_id,
@@ -1066,10 +1065,8 @@ class ResearchObjectiveService:
     def persist_objective_understandings(
         self,
         collection_id: str,
-        *,
-        build_id: str | None = None,
     ) -> tuple[ResearchUnderstanding, ...]:
-        facts = self.objective_repository.read(collection_id, build_id=build_id)
+        facts = self.objective_repository.read(collection_id)
         understandings: list[ResearchUnderstanding] = []
         for objective in facts.research_objectives:
             objective_id = objective.objective_id

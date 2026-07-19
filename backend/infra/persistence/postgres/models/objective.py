@@ -296,10 +296,13 @@ class ObjectiveEvidenceRouteRecord(Base):
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
         CheckConstraint(
             "(source_kind = 'text_window' AND source_block_id IS NOT NULL "
+            "AND source_ref = source_block_id "
             "AND source_table_id IS NULL AND source_figure_id IS NULL) OR "
             "(source_kind = 'table' AND source_block_id IS NULL "
+            "AND source_ref = source_table_id "
             "AND source_table_id IS NOT NULL AND source_figure_id IS NULL) OR "
             "(source_kind = 'figure' AND source_block_id IS NULL "
+            "AND source_ref = source_figure_id "
             "AND source_table_id IS NULL AND source_figure_id IS NOT NULL)",
             name="typed_source_valid",
         ),
@@ -463,10 +466,13 @@ objective_unit_source_refs = Table(
     Column("metadata_json", _JSON_DOCUMENT, nullable=False),
     CheckConstraint(
         "(source_kind = 'text_window' AND source_block_id IS NOT NULL "
+        "AND source_ref = source_block_id "
         "AND source_table_id IS NULL AND source_figure_id IS NULL) OR "
         "(source_kind = 'table' AND source_block_id IS NULL "
+        "AND source_ref = source_table_id "
         "AND source_table_id IS NOT NULL AND source_figure_id IS NULL) OR "
         "(source_kind = 'figure' AND source_block_id IS NULL "
+        "AND source_ref = source_figure_id "
         "AND source_table_id IS NULL AND source_figure_id IS NOT NULL)",
         name="typed_source_valid",
     ),

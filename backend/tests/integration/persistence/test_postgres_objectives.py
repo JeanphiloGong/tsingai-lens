@@ -36,6 +36,7 @@ from infra.persistence.postgres.models.objective import (
     ObjectiveLogicChainRecord,
     ObjectivePaperFrameRecord,
     ObjectivePaperSkim,
+    objective_unit_source_refs,
 )
 from infra.persistence.postgres.paper_fact_repository import PostgresPaperFactRepository
 from infra.persistence.postgres.source_artifact_repository import (
@@ -288,6 +289,81 @@ def test_objective_repository_rejects_missing_paper_fact_anchor(
         )
 
 
+def test_typed_source_identity_rejects_mismatched_public_reference(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    _write_build(
+        source_repository,
+        builds,
+        "build_source_identity",
+        _objective_facts(),
+    )
+
+    with pytest.raises(IntegrityError):
+        with source_repository.session_factory.begin() as session:
+            route = session.get(
+                ObjectiveEvidenceRouteRecord,
+                ("build_source_identity", "route-1"),
+            )
+            assert route is not None
+            route.source_ref = "block-1"
+
+    with pytest.raises(IntegrityError):
+        with source_repository.session_factory.begin() as session:
+            session.execute(
+                objective_unit_source_refs.update()
+                .where(
+                    objective_unit_source_refs.c.build_id == "build_source_identity",
+                    objective_unit_source_refs.c.evidence_unit_id == "unit-1",
+                    objective_unit_source_refs.c.position == 0,
+                )
+                .values(source_ref="block-1")
+            )
+
+
+def test_objective_unit_read_uses_relational_source_identity(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    _write_build(
+        source_repository,
+        builds,
+        "build_relational_source_identity",
+        _objective_facts(),
+    )
+
+    with source_repository.session_factory.begin() as session:
+        session.execute(
+            objective_unit_source_refs.update()
+            .where(
+                objective_unit_source_refs.c.build_id
+                == "build_relational_source_identity",
+                objective_unit_source_refs.c.evidence_unit_id == "unit-1",
+                objective_unit_source_refs.c.position == 0,
+            )
+            .values(
+                metadata_json={
+                    "source_kind": "figure",
+                    "source_ref": "figure-not-authoritative",
+                    "page": 1,
+                }
+            )
+        )
+
+    facts = repository.read(
+        "col_source",
+        build_id="build_relational_source_identity",
+    )
+
+    assert facts.objective_evidence_units[0].source_refs[0] == {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "page": 1,
+    }
+
+
 def test_objective_document_lineage_is_owned_by_source_documents() -> None:
     document_scoped_models = (
         ObjectivePaperSkim,
@@ -411,6 +487,14 @@ def test_postgresql_enforces_objective_contract() -> None:
             )
             == facts
         )
+        with pytest.raises(IntegrityError):
+            with sessions.begin() as session:
+                route = session.get(
+                    ObjectiveEvidenceRouteRecord,
+                    ("build_objectives_postgresql", "route-1"),
+                )
+                assert route is not None
+                route.source_ref = "block-1"
         with pytest.raises(IntegrityError):
             with sessions.begin() as session:
                 context = session.get(

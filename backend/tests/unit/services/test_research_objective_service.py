@@ -9779,7 +9779,10 @@ def test_structured_objective_evidence_unit_wraps_scalar_value_payload():
     }
 
 
-def test_research_objective_service_builds_and_persists_db_records(tmp_path, caplog):
+def test_research_objective_service_builds_and_persists_objective_records(
+    tmp_path,
+    caplog,
+):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Collection")
     collection_id = collection["collection_id"]
@@ -9898,6 +9901,7 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     assert objectives[0].question.startswith("How does heat treatment")
     facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
+    assert service.core_fact_repository.list_research_understandings(collection_id) == ()
     assert len(facts.paper_skims) == 2
     assert facts.paper_skims[0].source_filename == "paper-1.pdf"
     assert facts.research_objectives[0].excluded_document_ids == ("paper-2",)

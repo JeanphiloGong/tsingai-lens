@@ -121,6 +121,16 @@ from the semantic aggregate; rows are never persisted in PostgreSQL, SQLite,
 files, or JSON authority. Empty ready comparison builds remain distinguishable
 from builds that never generated comparison semantics.
 
+Runtime projections use focused aggregate reads. Workspace, graph,
+research-view, and prediction-snapshot operations request only the PaperFact,
+Objective, Comparison, or Understanding families they consume. Within one
+operation, each consumed semantic aggregate is read at most once and the
+already-loaded value is passed into projection builders. Research-view does
+not resolve comparison projection for material-list or document-only paths.
+`tests/integration/test_focused_core_reads.py` records these call bounds and
+representative response counts, including generated-but-empty comparison
+semantics.
+
 Confirmed-goal analysis reads the active objective candidates, derives its
 goal-specific frames, routes, evidence units, and logic chain in memory, and
 persists only the final `ResearchUnderstanding` through the still-temporary

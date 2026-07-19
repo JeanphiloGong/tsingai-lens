@@ -171,21 +171,22 @@ class ResearchViewAggregationService:
         if not files:
             return self._empty_collection_payload(collection_id, collection)
 
-        facts = self._load_collection_facts(collection_id)
-        frames = self._core_fact_records(self.paper_fact_repository.read(collection_id))
-        projection = self._comparison_projection_from_facts(facts)
-        objective_material_rows = self._objective_material_rows(collection_id)
+        paper_facts, objective_facts = self._load_collection_facts(collection_id)
+        frames = self._core_fact_records(paper_facts)
+        comparison_facts = self._load_comparison_projection(collection_id)
+        projection = self._comparison_projection_from_facts(comparison_facts)
+        objective_material_rows = self._objective_material_rows(objective_facts)
         if objective_material_rows:
             overview = self._build_objective_collection_overview(
                 collection_id,
-                facts,
                 objective_material_rows,
                 projection,
+                frames["document_profiles"],
             )
             paper_coverage = self._build_objective_collection_paper_coverage(
                 collection_id,
-                facts,
                 objective_material_rows,
+                frames["document_profiles"],
             )
             comparable_groups = self._build_comparable_groups(
                 collection_id,
@@ -300,8 +301,8 @@ class ResearchViewAggregationService:
                 "warnings": [],
             }
 
-        self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows(collection_id)
+        _, objective_facts = self._load_collection_facts(collection_id)
+        objective_material_rows = self._objective_material_rows(objective_facts)
         if objective_material_rows:
             materials = self._build_objective_material_summaries(
                 collection_id,
@@ -337,14 +338,14 @@ class ResearchViewAggregationService:
         if not self.collection_service.list_files(collection_id):
             raise ResearchViewMaterialNotFoundError(collection_id, material_id)
 
-        facts = self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows(collection_id)
+        paper_facts, objective_facts = self._load_collection_facts(collection_id)
+        objective_material_rows = self._objective_material_rows(objective_facts)
         if objective_material_rows:
             profile = self._build_objective_material_profile(
                 collection_id,
                 material_id,
-                facts,
                 objective_material_rows,
+                self._records_list(paper_facts.document_profiles),
             )
             if profile is None:
                 raise ResearchViewMaterialNotFoundError(collection_id, material_id)
@@ -365,8 +366,8 @@ class ResearchViewAggregationService:
         collection_id: str,
     ) -> tuple[ResearchUnderstanding, ...]:
         self.collection_service.get_collection(collection_id)
-        facts = self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows(collection_id)
+        paper_facts, objective_facts = self._load_collection_facts(collection_id)
+        objective_material_rows = self._objective_material_rows(objective_facts)
         if not objective_material_rows:
             existing_non_material = tuple(
                 item
@@ -393,8 +394,8 @@ class ResearchViewAggregationService:
             profile = self._build_objective_material_profile(
                 collection_id,
                 material_id,
-                facts,
                 objective_material_rows,
+                self._records_list(paper_facts.document_profiles),
             )
             if profile is None:
                 continue
@@ -492,13 +493,13 @@ class ResearchViewAggregationService:
         return self._clean_value(profile)
 
     def _load_fact_frames(self, collection_id: str) -> _FactRows:
-        self._load_collection_facts(collection_id)
-        return self._core_fact_records(self.paper_fact_repository.read(collection_id))
+        paper_facts, _ = self._load_collection_facts(collection_id)
+        return self._core_fact_records(paper_facts)
 
     def _load_collection_facts(
         self,
         collection_id: str,
-    ) -> ComparisonProjectionRecords | None:
+    ) -> tuple[PaperFactSet, ObjectiveFactSet]:
         paper_facts = self.paper_fact_repository.read(collection_id)
         objective_facts = self.objective_repository.read(collection_id)
         if (
@@ -506,6 +507,12 @@ class ResearchViewAggregationService:
             and not objective_facts.objective_evidence_units
         ):
             raise ResearchViewNotReadyError(collection_id)
+        return paper_facts, objective_facts
+
+    def _load_comparison_projection(
+        self,
+        collection_id: str,
+    ) -> ComparisonProjectionRecords | None:
         try:
             return self.comparison_service.read_comparison_projection(collection_id)
         except ComparisonRowsNotReadyError:
@@ -513,9 +520,8 @@ class ResearchViewAggregationService:
 
     def _objective_material_rows(
         self,
-        collection_id: str,
+        facts: ObjectiveFactSet,
     ) -> list[dict[str, Any]]:
-        facts = self.objective_repository.read(collection_id)
         rows = [
             row.to_record()
             for row in project_objective_material_rows(facts.objective_evidence_units)
@@ -672,9 +678,9 @@ class ResearchViewAggregationService:
     def _build_objective_collection_overview(
         self,
         collection_id: str,
-        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
         projection: list[dict[str, Any]] | None,
+        profiles: list[dict[str, Any]],
     ) -> dict[str, Any]:
         document_ids = {
             document_id
@@ -718,8 +724,7 @@ class ResearchViewAggregationService:
             comparable_group_count = len(self._group_comparison_rows(projection))
         return {
             "collection_id": collection_id,
-            "document_count": len(document_ids)
-            or len(self.paper_fact_repository.read(collection_id).document_profiles),
+            "document_count": len(document_ids) or len(profiles),
             "sample_variant_count": len(sample_keys),
             "measurement_count": sum(
                 1
@@ -750,12 +755,9 @@ class ResearchViewAggregationService:
     def _build_objective_collection_paper_coverage(
         self,
         collection_id: str,
-        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
+        profiles: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        profiles = self._records_list(
-            self.paper_fact_repository.read(collection_id).document_profiles
-        )
         coverage: list[dict[str, Any]] = []
         for document_id in sorted(
             {
@@ -1893,8 +1895,8 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         material_id: str,
-        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
+        profiles: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         index = self._build_objective_material_index(rows)
         material_key = self._objective_material_key_from_material_id(material_id, index)
@@ -1908,8 +1910,8 @@ class ResearchViewAggregationService:
         papers = self._build_objective_paper_coverage(
             collection_id,
             material_key,
-            facts,
             material_rows,
+            profiles,
         )
         warnings = self._dedupe_warnings(
             [
@@ -2301,12 +2303,9 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         material_key: str,
-        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
+        profiles: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        profiles = self._records_list(
-            self.paper_fact_repository.read(collection_id).document_profiles
-        )
         material_id = self._material_id_from_key(material_key)
         coverage: list[dict[str, Any]] = []
         for document_id in sorted(

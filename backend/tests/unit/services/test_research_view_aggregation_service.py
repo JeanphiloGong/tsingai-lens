@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
@@ -624,6 +625,25 @@ def test_collection_research_view_builds_coverage_and_comparable_groups():
     assert payload["materials"] == []
 
 
+def test_collection_research_view_reads_each_semantic_family_once():
+    service = _service(comparison_rows=_comparison_rows())
+    service.paper_fact_repository.read = Mock(wraps=service.paper_fact_repository.read)
+    service.objective_repository.read = Mock(wraps=service.objective_repository.read)
+    service.comparison_service.read_comparison_projection = Mock(
+        wraps=service.comparison_service.read_comparison_projection
+    )
+
+    payload = service.get_collection_research_view("col-1")
+
+    assert payload["overview"]["measurement_count"] == 4
+    assert payload["overview"]["comparable_group_count"] == 1
+    service.paper_fact_repository.read.assert_called_once_with("col-1")
+    service.objective_repository.read.assert_called_once_with("col-1")
+    service.comparison_service.read_comparison_projection.assert_called_once_with(
+        "col-1"
+    )
+
+
 def test_collection_research_view_returns_empty_state_for_empty_collection():
     service = _service(has_files=False)
 
@@ -813,6 +833,11 @@ def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):
         },
         objective_units=_objective_units(),
     )
+    service.paper_fact_repository.read = Mock(wraps=service.paper_fact_repository.read)
+    service.objective_repository.read = Mock(wraps=service.objective_repository.read)
+    service.comparison_service.read_comparison_projection = Mock(
+        wraps=service.comparison_service.read_comparison_projection
+    )
 
     def fail_matrix_build(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("material list should not build cross-paper matrices")
@@ -824,6 +849,9 @@ def test_collection_materials_does_not_build_comparison_matrices(monkeypatch):
     assert materials["state"] == "ready"
     assert materials["materials"][0]["material_id"] == "mat-316l-stainless-steel"
     assert materials["materials"][0]["comparison_count"] == 0
+    service.paper_fact_repository.read.assert_called_once_with("col-1")
+    service.objective_repository.read.assert_called_once_with("col-1")
+    service.comparison_service.read_comparison_projection.assert_not_called()
 
 
 def test_document_material_profile_stays_inside_one_paper():

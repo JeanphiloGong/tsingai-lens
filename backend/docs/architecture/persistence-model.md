@@ -57,7 +57,8 @@ accidentally preserve it.
 | Research objectives, contexts, paper frames, evidence routes, evidence units, and logic chains | PostgreSQL build-versioned objective tables | No | PostgreSQL |
 | Comparable results, collection assessments, and pairwise comparison relations | PostgreSQL build-versioned comparison tables | No | PostgreSQL |
 | Comparison rows | In-memory deterministic projection | Yes | No durable store |
-| Confirmed goals and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
+| Confirmed goals | `lens.sqlite` `core_confirmed_goals` through `SqliteConfirmedGoalRepository` | No | PostgreSQL |
+| Research understandings | `lens.sqlite` `core_research_understanding_artifacts` through `SqliteResearchUnderstandingRepository` | No | PostgreSQL |
 | Feedback, curation, and evaluation | `lens.sqlite` evaluation tables | No | PostgreSQL |
 | Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
 | Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
@@ -134,9 +135,12 @@ semantics.
 Confirmed-goal analysis reads the active objective candidates, derives its
 goal-specific frames, routes, evidence units, and logic chain in memory, and
 persists only the final `ResearchUnderstanding` through the still-temporary
-SQLite Core owner. It never rewrites an active collection objective build.
-Confirmed goals and understandings move to Goal-owned PostgreSQL records in
-later cutover slices.
+`SqliteResearchUnderstandingRepository`. Confirmed-goal lifecycle state uses
+the separate `SqliteConfirmedGoalRepository`. The broad `CoreFactRepository`,
+its SQLite implementation, and its factory no longer exist; each service
+receives only the narrow state family it consumes. Goal analysis never rewrites
+an active collection objective build. Later cutover slices replace these two
+temporary SQLite implementations directly with PostgreSQL repositories.
 
 ### Legacy SQLite Inventory
 
@@ -145,8 +149,8 @@ are grouped here by real responsibility rather than by the repository class
 that happens to contain them. Its two auth tables are retained legacy data for
 future offline import only; the current runtime neither reads nor writes them.
 The paper-fact, objective, and comparison tables remain in this untouched
-legacy snapshot but are no longer created, read, or written by
-`SqliteCoreFactRepository`.
+legacy snapshot but are no longer created, read, or written by any maintained
+SQLite repository.
 
 | Responsibility | Count | Current tables |
 | --- | ---: | --- |

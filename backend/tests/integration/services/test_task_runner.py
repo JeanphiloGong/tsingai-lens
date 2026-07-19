@@ -28,7 +28,7 @@ from domain.source import (
 )
 from infra.persistence.memory import MemoryBuildRepository
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
+    SqliteResearchUnderstandingRepository,
 )
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import (
@@ -207,7 +207,9 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    research_understanding_repository = SqliteResearchUnderstandingRepository(
+        tmp_path / "lens.sqlite"
+    )
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
@@ -218,7 +220,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         research_understanding_service=ResearchUnderstandingService(
             source_artifact_repository=source_repository,

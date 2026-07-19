@@ -348,7 +348,7 @@ class ComparisonRepository(Protocol):
     ) -> ComparisonFactSet: ...
 
 
-class CoreFactRepository(Protocol):
+class ResearchUnderstandingRepository(Protocol):
     backend_name: str
 
     def replace_collection_research_understandings(
@@ -375,6 +375,10 @@ class CoreFactRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
     ) -> tuple[ResearchUnderstanding, ...]: ...
+
+
+class ConfirmedGoalRepository(Protocol):
+    backend_name: str
 
     def upsert_confirmed_goal(self, goal: ConfirmedGoal) -> ConfirmedGoal: ...
 

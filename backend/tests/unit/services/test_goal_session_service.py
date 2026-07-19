@@ -1446,7 +1446,7 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     )
     feedback_service = ResearchUnderstandingFeedbackService(
         evaluation_repository=SqliteEvaluationRepository(tmp_path / "lens.sqlite"),
-        core_fact_repository=_SingleUnderstandingRepository(understanding),
+        research_understanding_repository=_SingleUnderstandingRepository(understanding),
         research_understanding_service=(
             _PassthroughResearchUnderstandingProjectionService()
         ),

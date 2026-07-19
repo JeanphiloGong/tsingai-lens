@@ -31,7 +31,7 @@ from domain.core import (
     is_question_shaped_objective,
 )
 from domain.ports import (
-    CoreFactRepository,
+    ResearchUnderstandingRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
@@ -348,7 +348,7 @@ class ResearchObjectiveService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        core_fact_repository: CoreFactRepository,
+        research_understanding_repository: ResearchUnderstandingRepository,
         document_profile_service: DocumentProfileService,
         research_understanding_service: ResearchUnderstandingService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
@@ -357,7 +357,7 @@ class ResearchObjectiveService:
         self._structured_extractor = structured_extractor
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.core_fact_repository = core_fact_repository
+        self.research_understanding_repository = research_understanding_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
         self.research_understanding_service = research_understanding_service
@@ -479,10 +479,12 @@ class ResearchObjectiveService:
             "existing_comparison_rows": [],
             "warnings": [],
         }
-        understanding = self.core_fact_repository.read_research_understanding(
-            collection_id,
-            "objective",
-            objective_id,
+        understanding = (
+            self.research_understanding_repository.read_research_understanding(
+                collection_id,
+                "objective",
+                objective_id,
+            )
         )
         payload["understanding"] = self.research_understanding_service.with_presentation(
             understanding
@@ -725,7 +727,7 @@ class ResearchObjectiveService:
                 }
             )
         )
-        self.core_fact_repository.upsert_research_understanding(
+        self.research_understanding_repository.upsert_research_understanding(
             goal.collection_id,
             understanding,
         )
@@ -1139,11 +1141,13 @@ class ResearchObjectiveService:
             )
         existing_non_objective = tuple(
             item
-            for item in self.core_fact_repository.list_research_understandings(collection_id)
+            for item in self.research_understanding_repository.list_research_understandings(
+                collection_id
+            )
             if item.scope.scope_type != "objective"
         )
         persisted = (*existing_non_objective, *understandings)
-        self.core_fact_repository.replace_collection_research_understandings(
+        self.research_understanding_repository.replace_collection_research_understandings(
             collection_id,
             persisted,
         )

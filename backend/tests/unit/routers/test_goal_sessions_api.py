@@ -34,7 +34,7 @@ from controllers.schemas.goal.session import (
 from infra.persistence.factory import build_goal_session_repository
 from infra.persistence.memory import MemoryBuildRepository
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
+    SqliteResearchUnderstandingRepository,
     SqliteSourceArtifactRepository,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
@@ -90,7 +90,9 @@ def goal_session_services(tmp_path):
     task_service = TaskService(MemoryBuildRepository())
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    research_understanding_repository = SqliteResearchUnderstandingRepository(
+        tmp_path / "lens.sqlite"
+    )
     comparison_repository = MemoryComparisonRepository()
     objective_repository = MemoryObjectiveRepository()
     document_profile_service = DocumentProfileService(
@@ -115,7 +117,7 @@ def goal_session_services(tmp_path):
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         research_understanding_service=research_understanding_service,
     )
@@ -140,7 +142,7 @@ def goal_session_services(tmp_path):
             source_artifact_repository=source_repository,
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
-            core_fact_repository=core_fact_repository,
+            research_understanding_repository=research_understanding_repository,
             comparison_service=comparison_service,
             research_understanding_service=research_understanding_service,
         ),

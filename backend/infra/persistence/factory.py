@@ -6,16 +6,18 @@ from pathlib import Path
 
 from config import DATA_DIR
 from domain.ports import (
-    CoreFactRepository,
+    ConfirmedGoalRepository,
     EvaluationRepository,
     ExperimentPlanRepository,
     GoalSessionRepository,
+    ResearchUnderstandingRepository,
 )
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
+    SqliteConfirmedGoalRepository,
     SqliteEvaluationRepository,
     SqliteExperimentPlanRepository,
     SqliteGoalSessionRepository,
+    SqliteResearchUnderstandingRepository,
 )
 
 
@@ -31,10 +33,16 @@ def build_experiment_plan_repository(
     return SqliteExperimentPlanRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
-def build_core_fact_repository(
+def build_confirmed_goal_repository(
     db_path: Path | None = None,
-) -> CoreFactRepository:
-    return SqliteCoreFactRepository(db_path or (DATA_DIR / "lens.sqlite"))
+) -> ConfirmedGoalRepository:
+    return SqliteConfirmedGoalRepository(db_path or (DATA_DIR / "lens.sqlite"))
+
+
+def build_research_understanding_repository(
+    db_path: Path | None = None,
+) -> ResearchUnderstandingRepository:
+    return SqliteResearchUnderstandingRepository(db_path or (DATA_DIR / "lens.sqlite"))
 
 
 def build_evaluation_repository(

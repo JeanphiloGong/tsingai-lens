@@ -11,9 +11,9 @@ from domain.evaluation import (
     ResearchUnderstandingCuration,
     ResearchUnderstandingFeedback,
 )
-from domain.ports import CoreFactRepository, EvaluationRepository
+from domain.ports import ResearchUnderstandingRepository, EvaluationRepository
 from infra.persistence.factory import (
-    build_core_fact_repository,
+    build_research_understanding_repository,
     build_evaluation_repository,
 )
 
@@ -86,13 +86,18 @@ class ResearchUnderstandingFeedbackService:
     def __init__(
         self,
         evaluation_repository: EvaluationRepository | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
+        research_understanding_repository: (
+            ResearchUnderstandingRepository | None
+        ) = None,
         research_understanding_service: ResearchUnderstandingService | None = None,
     ) -> None:
         self.evaluation_repository = (
             evaluation_repository or build_evaluation_repository()
         )
-        self.core_fact_repository = core_fact_repository or build_core_fact_repository()
+        self.research_understanding_repository = (
+            research_understanding_repository
+            or build_research_understanding_repository()
+        )
         self.research_understanding_service = (
             research_understanding_service or ResearchUnderstandingService()
         )
@@ -337,10 +342,12 @@ class ResearchUnderstandingFeedbackService:
         if dataset_use_status and dataset_use_status not in DATASET_USE_STATUSES:
             raise ValueError(f"unsupported dataset_use_status: {dataset_use_status}")
 
-        understanding = self.core_fact_repository.read_research_understanding(
-            collection_id,
-            scope_type,
-            scope_id,
+        understanding = (
+            self.research_understanding_repository.read_research_understanding(
+                collection_id,
+                scope_type,
+                scope_id,
+            )
         )
         if understanding is None:
             return self._dataset_payload(
@@ -397,9 +404,11 @@ class ResearchUnderstandingFeedbackService:
         if dataset_use_status and dataset_use_status not in DATASET_USE_STATUSES:
             raise ValueError(f"unsupported dataset_use_status: {dataset_use_status}")
 
-        understandings = self.core_fact_repository.list_research_understandings(
-            collection_id,
-            scope_type,
+        understandings = (
+            self.research_understanding_repository.list_research_understandings(
+                collection_id,
+                scope_type,
+            )
         )
         items: list[dict[str, object]] = []
         warnings: list[str] = []
@@ -626,10 +635,12 @@ class ResearchUnderstandingFeedbackService:
         scope_type: str,
         scope_id: str,
     ) -> tuple[Mapping[str, Any], ...]:
-        understanding = self.core_fact_repository.read_research_understanding(
-            collection_id,
-            scope_type,
-            scope_id,
+        understanding = (
+            self.research_understanding_repository.read_research_understanding(
+                collection_id,
+                scope_type,
+                scope_id,
+            )
         )
         if understanding is None:
             return ()

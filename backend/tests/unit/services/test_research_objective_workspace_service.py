@@ -22,7 +22,9 @@ from domain.core import (
     PaperSkim,
     ResearchObjective,
 )
-from infra.persistence.sqlite.core_fact_repository import SqliteCoreFactRepository
+from infra.persistence.sqlite.research_understanding_repository import (
+    SqliteResearchUnderstandingRepository,
+)
 from infra.persistence.sqlite.source_artifact_repository import (
     SqliteSourceArtifactRepository,
 )
@@ -34,7 +36,9 @@ def _seed_objective_collection(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
-    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    research_understanding_repository = SqliteResearchUnderstandingRepository(
+        tmp_path / "lens.sqlite"
+    )
     objective_repository = MemoryObjectiveRepository()
     objective = ResearchObjective.from_mapping(
         {
@@ -136,7 +140,7 @@ def _seed_objective_collection(tmp_path):
     service = ResearchObjectiveService(
         collection_service=collection_service,
         objective_repository=objective_repository,
-        core_fact_repository=core_repository,
+        research_understanding_repository=research_understanding_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         document_profile_service=document_profile_service,

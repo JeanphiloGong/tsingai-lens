@@ -49,7 +49,7 @@ class FakeCollectionService:
         return [{"filename": "paper.pdf"}]
 
 
-class FakeCoreFactRepository:
+class FakeResearchUnderstandingRepository:
     backend_name = "fake"
 
     def __init__(self) -> None:
@@ -356,7 +356,7 @@ def _service(
 ) -> ResearchViewAggregationService:
     profiles, frames = _frames()
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    core_fact_repository = FakeCoreFactRepository()
+    research_understanding_repository = FakeResearchUnderstandingRepository()
     objective_repository = MemoryObjectiveRepository()
     source_repository = SimpleNamespace()
     collection_service = FakeCollectionService(has_files=has_files)
@@ -365,7 +365,7 @@ def _service(
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         comparison_service=_comparison_service(
             collection_service,
             paper_fact_repository,
@@ -395,7 +395,7 @@ def _service_from_frames(
     research_objectives: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    core_fact_repository = FakeCoreFactRepository()
+    research_understanding_repository = FakeResearchUnderstandingRepository()
     objective_repository = MemoryObjectiveRepository()
     objective_repository.replace(
         "col-1",
@@ -419,7 +419,7 @@ def _service_from_frames(
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         comparison_service=_comparison_service(
             collection_service,
             paper_fact_repository,

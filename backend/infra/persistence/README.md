@@ -52,9 +52,10 @@ The stable data ownership and identity contract lives in
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
-`factory.py` constructs SQLite repositories only for the remaining Goal, Core,
-and evaluation families. Auth, collection, build, Source, paper-fact,
-objective, and comparison aggregates are composed directly in `main.py`; none
+`factory.py` constructs SQLite repositories only for the remaining Goal,
+Understanding, and evaluation families. Auth, collection, build, Source,
+paper-fact, objective, and comparison aggregates are composed directly in
+`main.py`; none
 has a repository factory or
 runtime fallback. Source pipeline JSON and Parquet
 outputs live under `infra/source/` runtime storage and are rebuildable
@@ -133,6 +134,14 @@ default reads resolve only the active successful build. `ComparisonService`
 regenerates `ComparisonRowRecord` values from those semantic records for every
 row-facing read. No comparison-row table, SQLite comparison read, fallback, or
 dual write exists.
+
+The former broad Core persistence path has been deleted.
+`SqliteConfirmedGoalRepository` and `SqliteResearchUnderstandingRepository`
+are direct temporary owners for their respective legacy tables, and services
+receive the matching narrow repository contract explicitly. Sharing the same
+SQLite file does not combine their contracts or runtime ownership. Their later
+PostgreSQL cutovers replace these concrete implementations directly; there is
+no aggregate facade, fallback alias, or compatibility path.
 
 ## Target Boundary
 

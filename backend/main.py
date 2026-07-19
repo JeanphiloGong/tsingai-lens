@@ -74,12 +74,16 @@ from infra.persistence.postgres.source_artifact_repository import (
 )
 from domain.ports import (
     ComparisonRepository,
-    CoreFactRepository,
+    ConfirmedGoalRepository,
     ObjectiveRepository,
     PaperFactRepository,
+    ResearchUnderstandingRepository,
     SourceArtifactRepository,
 )
-from infra.persistence.factory import build_core_fact_repository
+from infra.persistence.factory import (
+    build_confirmed_goal_repository,
+    build_research_understanding_repository,
+)
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -116,7 +120,8 @@ def create_app(
     paper_fact_repository: PaperFactRepository | None = None,
     objective_repository: ObjectiveRepository | None = None,
     comparison_repository: ComparisonRepository | None = None,
-    core_fact_repository: CoreFactRepository | None = None,
+    confirmed_goal_repository: ConfirmedGoalRepository | None = None,
+    research_understanding_repository: ResearchUnderstandingRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -161,8 +166,12 @@ def create_app(
             active_comparison_repository = (
                 comparison_repository or PostgresComparisonRepository(session_factory)
             )
-            active_core_fact_repository = (
-                core_fact_repository or build_core_fact_repository()
+            active_confirmed_goal_repository = (
+                confirmed_goal_repository or build_confirmed_goal_repository()
+            )
+            active_research_understanding_repository = (
+                research_understanding_repository
+                or build_research_understanding_repository()
             )
             artifact_registry_service = ArtifactRegistryService(
                 active_task_service.repository,
@@ -198,7 +207,9 @@ def create_app(
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
                 objective_repository=active_objective_repository,
-                core_fact_repository=active_core_fact_repository,
+                research_understanding_repository=(
+                    active_research_understanding_repository
+                ),
                 document_profile_service=document_profile_service,
                 research_understanding_service=research_understanding_service,
             )
@@ -216,13 +227,16 @@ def create_app(
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
                 objective_repository=active_objective_repository,
-                core_fact_repository=active_core_fact_repository,
+                research_understanding_repository=(
+                    active_research_understanding_repository
+                ),
                 comparison_service=comparison_service,
                 research_understanding_service=research_understanding_service,
             )
             confirmed_goal_service = ConfirmedGoalService(
-                active_core_fact_repository,
+                active_confirmed_goal_repository,
                 active_objective_repository,
+                active_research_understanding_repository,
             )
 
             application.state.collection_service = active_collection_service
@@ -230,7 +244,12 @@ def create_app(
             application.state.paper_fact_repository = active_paper_fact_repository
             application.state.objective_repository = active_objective_repository
             application.state.comparison_repository = active_comparison_repository
-            application.state.core_fact_repository = active_core_fact_repository
+            application.state.confirmed_goal_repository = (
+                active_confirmed_goal_repository
+            )
+            application.state.research_understanding_repository = (
+                active_research_understanding_repository
+            )
             application.state.confirmed_goal_service = confirmed_goal_service
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service

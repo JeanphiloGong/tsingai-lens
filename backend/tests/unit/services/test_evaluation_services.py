@@ -609,7 +609,7 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -678,7 +678,7 @@ def test_research_understanding_feedback_service_excludes_unversioned_gold_draft
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -757,7 +757,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -996,7 +996,9 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_fr
     understanding = ResearchUnderstanding.from_mapping(record)
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(understanding),
+        research_understanding_repository=FakeResearchUnderstandingRepository(
+            understanding
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             record
         ),
@@ -1094,7 +1096,9 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(understanding),
+        research_understanding_repository=FakeResearchUnderstandingRepository(
+            understanding
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             record
         ),
@@ -1186,7 +1190,9 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_wh
     understanding = ResearchUnderstanding.from_mapping(record)
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(understanding),
+        research_understanding_repository=FakeResearchUnderstandingRepository(
+            understanding
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             record
         ),
@@ -1339,7 +1345,7 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
     projection_service = FakeResearchUnderstandingProjectionService(projected)
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=projection_service,
     )
 
@@ -1390,7 +1396,7 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
     ]
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
         ),
@@ -1456,7 +1462,7 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
         ),
@@ -1629,7 +1635,7 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
         ),
@@ -1811,7 +1817,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
         ),
@@ -1869,7 +1875,7 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
         ),
@@ -1900,7 +1906,7 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
     projection_service = FakeResearchUnderstandingProjectionService(projected)
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=projection_service,
     )
 
@@ -1956,7 +1962,7 @@ def test_research_understanding_protocol_source_version_tracks_expert_target_cha
     repository = FakeEvaluationRepository()
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2055,7 +2061,7 @@ def test_research_understanding_feedback_service_invalidates_rejection_when_find
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(stored),
+        research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
         ),
@@ -2112,7 +2118,7 @@ def test_research_understanding_feedback_service_ignores_unversioned_claim_curat
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2184,7 +2190,7 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2244,7 +2250,7 @@ def test_research_understanding_feedback_service_curation_match_keeps_unmatched_
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2288,7 +2294,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2327,7 +2333,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
 def test_research_understanding_feedback_service_filters_dataset_by_task_type():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2419,7 +2425,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2517,7 +2523,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2599,7 +2605,7 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2673,7 +2679,7 @@ def test_research_understanding_feedback_service_requires_training_message_scope
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2719,7 +2725,7 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2795,7 +2801,7 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             None,
             understandings=(goal_one, goal_two),
         ),
@@ -2856,7 +2862,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2905,7 +2911,7 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -2949,7 +2955,7 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -3008,7 +3014,7 @@ def test_research_understanding_feedback_service_keeps_ai_curation_silver():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -3064,7 +3070,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(
+        research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
@@ -3093,7 +3099,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
 def test_research_understanding_feedback_service_reports_missing_dataset_scope():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(None),
+        research_understanding_repository=FakeResearchUnderstandingRepository(None),
     )
 
     dataset = service.export_dataset(

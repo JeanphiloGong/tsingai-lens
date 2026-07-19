@@ -44,7 +44,7 @@ from domain.core import (
     build_research_objective_id,
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
-from infra.persistence.sqlite import SqliteCoreFactRepository
+from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.source_artifact_repository import MemorySourceArtifactRepository
@@ -70,9 +70,11 @@ def _build_research_objective_service(
         "objective_repository",
         MemoryObjectiveRepository(),
     )
-    core_fact_repository = kwargs.pop(
-        "core_fact_repository",
-        SqliteCoreFactRepository(collection_service.root_dir.parent / "lens.sqlite"),
+    research_understanding_repository = kwargs.pop(
+        "research_understanding_repository",
+        SqliteResearchUnderstandingRepository(
+            collection_service.root_dir.parent / "lens.sqlite"
+        ),
     )
     document_profile_service = kwargs.pop("document_profile_service", None)
     if document_profile_service is None:
@@ -93,7 +95,7 @@ def _build_research_objective_service(
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         research_understanding_service=research_understanding_service,
         **kwargs,
@@ -9901,7 +9903,12 @@ def test_research_objective_service_builds_and_persists_objective_records(
     assert objectives[0].question.startswith("How does heat treatment")
     facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
-    assert service.core_fact_repository.list_research_understandings(collection_id) == ()
+    assert (
+        service.research_understanding_repository.list_research_understandings(
+            collection_id
+        )
+        == ()
+    )
     assert len(facts.paper_skims) == 2
     assert facts.paper_skims[0].source_filename == "paper-1.pdf"
     assert facts.research_objectives[0].excluded_document_ids == ("paper-2",)

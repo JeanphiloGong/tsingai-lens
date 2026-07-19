@@ -184,7 +184,7 @@ def test_research_view_reads_each_consumed_family_once_and_records_payload_volum
         source_artifact_repository=Mock(),
         paper_fact_repository=paper_repository,
         objective_repository=objective_repository,
-        core_fact_repository=Mock(),
+        research_understanding_repository=Mock(),
         comparison_service=comparison_service,
         research_understanding_service=Mock(),
     )

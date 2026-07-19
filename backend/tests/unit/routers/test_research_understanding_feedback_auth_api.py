@@ -217,7 +217,7 @@ def real_feedback_client(
     collection_service = build_test_collection_service(tmp_path / "collections")
     feedback_service = ResearchUnderstandingFeedbackService(
         evaluation_repository=PersistingEvaluationRepository(),
-        core_fact_repository=StaticResearchUnderstandingRepository(
+        research_understanding_repository=StaticResearchUnderstandingRepository(
             _sample_understanding()
         ),
         research_understanding_service=PassthroughResearchUnderstandingService(),

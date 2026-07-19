@@ -19,7 +19,7 @@ from domain.core.objective_material_projection import (
     project_objective_material_rows,
 )
 from domain.ports import (
-    CoreFactRepository,
+    ResearchUnderstandingRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
@@ -154,14 +154,14 @@ class ResearchViewAggregationService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        core_fact_repository: CoreFactRepository,
+        research_understanding_repository: ResearchUnderstandingRepository,
         comparison_service: ComparisonService,
         research_understanding_service: ResearchUnderstandingService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.core_fact_repository = core_fact_repository
+        self.research_understanding_repository = research_understanding_repository
         self.comparison_service = comparison_service
         self.research_understanding_service = research_understanding_service
 
@@ -349,10 +349,12 @@ class ResearchViewAggregationService:
             )
             if profile is None:
                 raise ResearchViewMaterialNotFoundError(collection_id, material_id)
-            understanding = self.core_fact_repository.read_research_understanding(
-                collection_id,
-                "material",
-                profile["material_id"],
+            understanding = (
+                self.research_understanding_repository.read_research_understanding(
+                    collection_id,
+                    "material",
+                    profile["material_id"],
+                )
             )
             profile["understanding"] = (
                 self.research_understanding_service.with_presentation(understanding)
@@ -371,12 +373,12 @@ class ResearchViewAggregationService:
         if not objective_material_rows:
             existing_non_material = tuple(
                 item
-                for item in self.core_fact_repository.list_research_understandings(
+                for item in self.research_understanding_repository.list_research_understandings(
                     collection_id
                 )
                 if item.scope.scope_type != "material"
             )
-            self.core_fact_repository.replace_collection_research_understandings(
+            self.research_understanding_repository.replace_collection_research_understandings(
                 collection_id,
                 existing_non_material,
             )
@@ -408,13 +410,13 @@ class ResearchViewAggregationService:
             )
         existing_non_material = tuple(
             item
-            for item in self.core_fact_repository.list_research_understandings(
+            for item in self.research_understanding_repository.list_research_understandings(
                 collection_id
             )
             if item.scope.scope_type != "material"
         )
         persisted = (*existing_non_material, *understandings)
-        self.core_fact_repository.replace_collection_research_understandings(
+        self.research_understanding_repository.replace_collection_research_understandings(
             collection_id,
             persisted,
         )

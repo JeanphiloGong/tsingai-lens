@@ -124,7 +124,9 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
         PostgresSourceArtifactRepository,
     )
-    from infra.persistence.sqlite import SqliteCoreFactRepository  # noqa: PLC0415
+    from infra.persistence.sqlite import (  # noqa: PLC0415
+        SqliteResearchUnderstandingRepository,
+    )
 
     engine = build_database_engine(DatabaseSettings())
     try:
@@ -137,7 +139,7 @@ def check_collection_frontend_projection(
         paper_fact_repository = PostgresPaperFactRepository(session_factory)
         objective_repository = PostgresObjectiveRepository(session_factory)
         comparison_repository = PostgresComparisonRepository(session_factory)
-        core_fact_repository = SqliteCoreFactRepository(
+        research_understanding_repository = SqliteResearchUnderstandingRepository(
             backend_root / "data" / "lens.sqlite"
         )
         document_profile_service = DocumentProfileService(
@@ -160,7 +162,7 @@ def check_collection_frontend_projection(
             source_artifact_repository=source_artifact_repository,
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
-            core_fact_repository=core_fact_repository,
+            research_understanding_repository=research_understanding_repository,
             document_profile_service=document_profile_service,
             research_understanding_service=research_understanding_service,
         )
@@ -170,7 +172,7 @@ def check_collection_frontend_projection(
             source_artifact_repository=source_artifact_repository,
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
-            core_fact_repository=core_fact_repository,
+            research_understanding_repository=research_understanding_repository,
             comparison_service=comparison_service,
             research_understanding_service=research_understanding_service,
         ).get_collection_material_research_view(

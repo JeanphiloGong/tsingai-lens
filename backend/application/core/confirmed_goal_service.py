@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from domain.core import ConfirmedGoal, ResearchObjective, ResearchUnderstanding
-from domain.ports import CoreFactRepository, ObjectiveRepository
+from domain.ports import (
+    ConfirmedGoalRepository,
+    ObjectiveRepository,
+    ResearchUnderstandingRepository,
+)
 
 
 class ConfirmedGoalNotFoundError(FileNotFoundError):
@@ -18,11 +22,13 @@ class ConfirmedGoalService:
 
     def __init__(
         self,
-        repository: CoreFactRepository,
+        repository: ConfirmedGoalRepository,
         objective_repository: ObjectiveRepository,
+        research_understanding_repository: ResearchUnderstandingRepository,
     ) -> None:
         self.repository = repository
         self.objective_repository = objective_repository
+        self.research_understanding_repository = research_understanding_repository
 
     def create_goal(
         self,
@@ -112,7 +118,7 @@ class ConfirmedGoalService:
         collection_id: str,
         goal_id: str,
     ) -> ResearchUnderstanding | None:
-        return self.repository.read_research_understanding(
+        return self.research_understanding_repository.read_research_understanding(
             collection_id,
             "goal",
             goal_id,

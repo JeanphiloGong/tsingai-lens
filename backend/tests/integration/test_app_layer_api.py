@@ -28,7 +28,8 @@ from domain.source import (
     build_source_document_tree,
 )
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
+    SqliteConfirmedGoalRepository,
+    SqliteResearchUnderstandingRepository,
 )
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
@@ -714,7 +715,10 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    confirmed_goal_repository = SqliteConfirmedGoalRepository(tmp_path / "lens.sqlite")
+    research_understanding_repository = SqliteResearchUnderstandingRepository(
+        tmp_path / "lens.sqlite"
+    )
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
@@ -732,7 +736,8 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
             comparison_repository=comparison_repository,
-            core_fact_repository=core_fact_repository,
+            confirmed_goal_repository=confirmed_goal_repository,
+            research_understanding_repository=research_understanding_repository,
         )
     ) as client:
         login_response = client.post(

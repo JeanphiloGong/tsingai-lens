@@ -198,7 +198,7 @@ def build_services(
     from infra.persistence.postgres.source_artifact_repository import (
         PostgresSourceArtifactRepository,
     )
-    from infra.persistence.sqlite import SqliteCoreFactRepository
+    from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
 
     collection_service = CollectionService(
         repository=PostgresCollectionRepository(session_factory),
@@ -206,7 +206,9 @@ def build_services(
     )
     source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
     paper_fact_repository = PostgresPaperFactRepository(session_factory)
-    core_fact_repository = SqliteCoreFactRepository(collections_root.parent / "lens.sqlite")
+    research_understanding_repository = SqliteResearchUnderstandingRepository(
+        collections_root.parent / "lens.sqlite"
+    )
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         source_artifact_repository=source_artifact_repository,
@@ -216,7 +218,7 @@ def build_services(
         collection_service,
         source_artifact_repository,
         paper_fact_repository,
-        core_fact_repository,
+        research_understanding_repository,
         document_profile_service,
         PaperFactsService,
         CoreLLMStructuredExtractor,
@@ -499,7 +501,7 @@ def main() -> int:
         collection_service,
         source_artifact_repository,
         paper_fact_repository,
-        core_fact_repository,
+        research_understanding_repository,
         document_profile_service,
         paper_facts_service_class,
         extractor_class,
@@ -529,7 +531,7 @@ def main() -> int:
         collection_service=collection_service,
         source_artifact_repository=source_artifact_repository,
         paper_fact_repository=paper_fact_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         structured_extractor=inner_extractor,
     )
@@ -552,7 +554,7 @@ def main() -> int:
         collection_service=collection_service,
         source_artifact_repository=source_artifact_repository,
         paper_fact_repository=paper_fact_repository,
-        core_fact_repository=core_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         structured_extractor=timing_extractor,
     )

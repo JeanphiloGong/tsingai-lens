@@ -48,10 +48,11 @@ from infra.persistence.postgres.collection_repository import (
 )
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
+    SqliteConfirmedGoalRepository,
     SqliteEvaluationRepository,
     SqliteExperimentPlanRepository,
     SqliteGoalSessionRepository,
+    SqliteResearchUnderstandingRepository,
     SqliteSourceArtifactRepository,
 )
 from scripts.persistence.capture_baseline import capture_baseline
@@ -87,7 +88,8 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    core_repository = SqliteCoreFactRepository(db_path)
+    confirmed_goal_repository = SqliteConfirmedGoalRepository(db_path)
+    research_understanding_repository = SqliteResearchUnderstandingRepository(db_path)
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
@@ -280,9 +282,11 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ),
     )
     for item in records["confirmed_goals"]:
-        core_repository.upsert_confirmed_goal(ConfirmedGoal.from_mapping(item))
+        confirmed_goal_repository.upsert_confirmed_goal(
+            ConfirmedGoal.from_mapping(item)
+        )
     for item in records["research_understandings"]:
-        core_repository.upsert_research_understanding(
+        research_understanding_repository.upsert_research_understanding(
             collection_id,
             ResearchUnderstanding.from_mapping(item),
         )
@@ -413,11 +417,13 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ],
         "confirmed_goals": [
             item.to_record()
-            for item in core_repository.list_confirmed_goals(collection_id)
+            for item in confirmed_goal_repository.list_confirmed_goals(collection_id)
         ],
         "research_understandings": [
             item.to_record()
-            for item in core_repository.list_research_understandings(collection_id)
+            for item in research_understanding_repository.list_research_understandings(
+                collection_id
+            )
         ],
     }
     for family, actual_items in core_families.items():

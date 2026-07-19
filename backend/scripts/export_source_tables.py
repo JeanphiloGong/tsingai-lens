@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -17,6 +18,8 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
+from infra.persistence.file.object_store import FileObjectStore
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -28,7 +31,6 @@ from infra.source.contracts.artifact_schemas import (
     TEXT_UNITS_FINAL_COLUMNS,
 )
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,15 +173,26 @@ def _reparse_collection_inputs(
         raise SystemExit(f"no input PDFs found for collection: {collection_dir}")
 
     config = SourceRuntimeConfig(root_dir=str(backend_root))
+    object_store = FileObjectStore(collection_dir.parent)
     converter = build_pdf_converter()
     bundles = []
     for index, item in enumerate(inputs, start=1):
-        source_path = Path(str(item["source_path"])).expanduser().resolve()
-        print(f"[{index}/{len(inputs)}] parsing {source_path.name}", flush=True)
+        storage_key = str(item.get("storage_key") or "").strip()
+        if storage_key:
+            payload = object_store.read(
+                storage_key,
+                str(item.get("sha256") or "").strip(),
+            )
+            source_name = Path(storage_key).name
+        else:
+            source_path = Path(str(item["source_path"])).expanduser().resolve()
+            payload = source_path.read_bytes()
+            source_name = source_path.name
+        print(f"[{index}/{len(inputs)}] parsing {source_name}", flush=True)
         bundles.append(
             build_pdf_bundle(
                 row=pd.Series(item),
-                payload=source_path.read_bytes(),
+                payload=payload,
                 config=config,
                 converter=converter,
             )
@@ -203,15 +216,20 @@ def _collection_input_rows(collection_dir: Path) -> list[dict[str, Any]]:
         rows = []
         for item in payload.get("imports") or []:
             for document in item.get("documents") or []:
-                source_path = str(document.get("stored_path") or "").strip()
-                if not source_path.lower().endswith(".pdf"):
+                storage_key = str(document.get("storage_key") or "").strip()
+                stored_filename = str(document.get("stored_filename") or "").strip()
+                if not storage_key.lower().endswith(".pdf"):
                     continue
+                if storage_key != f"{collection_dir.name}/input/{stored_filename}":
+                    raise ValueError("invalid collection object key")
                 rows.append(
                     {
                         "id": document.get("source_document_id"),
-                        "title": document.get("original_filename") or Path(source_path).name,
+                        "title": document.get("original_filename") or Path(storage_key).name,
                         "creation_date": item.get("ingested_at"),
-                        "source_path": source_path,
+                        "source_path": storage_key,
+                        "storage_key": storage_key,
+                        "sha256": document.get("sha256"),
                         "source_type": "pdf",
                     }
                 )
@@ -223,15 +241,20 @@ def _collection_input_rows(collection_dir: Path) -> list[dict[str, Any]]:
         payload = json.loads(files_path.read_text(encoding="utf-8"))
         rows = []
         for item in payload:
-            source_path = str(item.get("stored_path") or "").strip()
-            if not source_path.lower().endswith(".pdf"):
+            storage_key = str(item.get("storage_key") or "").strip()
+            stored_filename = str(item.get("stored_filename") or "").strip()
+            if not storage_key.lower().endswith(".pdf"):
                 continue
+            if storage_key != f"{collection_dir.name}/input/{stored_filename}":
+                raise ValueError("invalid collection object key")
             rows.append(
                 {
                     "id": item.get("file_id"),
-                    "title": item.get("original_filename") or Path(source_path).name,
+                    "title": item.get("original_filename") or Path(storage_key).name,
                     "creation_date": item.get("created_at"),
-                    "source_path": source_path,
+                    "source_path": storage_key,
+                    "storage_key": storage_key,
+                    "sha256": item.get("sha256"),
                     "source_type": "pdf",
                 }
             )

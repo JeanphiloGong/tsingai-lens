@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from infra.persistence.file import (
     FileCollectionRepository,
     FileTaskRepository,
 )
+from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.sqlite import (
     SqliteAuthRepository,
     SqliteCoreFactRepository,
@@ -61,6 +63,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(tmp_p
     db_path = tmp_path / "lens.sqlite"
 
     collection_repository = FileCollectionRepository(tmp_path / "collections")
+    object_store = FileObjectStore(collection_repository.root_dir)
     task_repository = FileTaskRepository(tmp_path / "tasks")
     artifact_repository = FileArtifactRepository(tmp_path / "collections")
     auth_repository = SqliteAuthRepository(db_path)
@@ -77,10 +80,11 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(tmp_p
         collection_id,
         records["import_manifests"][0],
     )
-    collection_repository.write_input_file(
-        collection_id,
-        records["collection_files"][0]["stored_filename"],
-        b"Synthetic fixture content; no paper or user data.",
+    object_payload = b"Synthetic fixture content; no paper or user data."
+    object_store.write(
+        f"{collection_id}/input/{records['collection_files'][0]['stored_filename']}",
+        object_payload,
+        sha256(object_payload).hexdigest(),
     )
     task_repository.write_task(records["tasks"][0]["task_id"], records["tasks"][0])
     artifact_repository.write(collection_id, records["artifacts"][0])

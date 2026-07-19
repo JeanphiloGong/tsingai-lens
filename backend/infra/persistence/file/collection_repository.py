@@ -71,10 +71,3 @@ class FileCollectionRepository:
 
     def write_import_manifest(self, collection_id: str, payload: dict) -> None:
         write_json(self.get_paths(collection_id).import_manifest_path, payload)
-
-    def write_input_file(self, collection_id: str, stored_filename: str, payload: bytes) -> Path:
-        paths = self.get_paths(collection_id)
-        stored_path = paths.input_dir / stored_filename
-        stored_path.parent.mkdir(parents=True, exist_ok=True)
-        stored_path.write_bytes(payload)
-        return stored_path

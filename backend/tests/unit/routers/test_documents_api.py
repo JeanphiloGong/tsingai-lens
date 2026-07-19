@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 try:
@@ -492,9 +492,10 @@ def test_document_source_route_streams_manifest_source_file(document_services):
     )
     record = collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
-    paths = collection_service.get_paths(collection_id)
-    source_path = paths.input_dir / "paper-1.pdf"
-    source_path.write_bytes(b"%PDF-1.4\nfixture\n")
+    payload = b"%PDF-1.4\nfixture\n"
+    storage_key = f"{collection_id}/input/paper-1.pdf"
+    digest = sha256(payload).hexdigest()
+    collection_service.object_store.write(storage_key, payload, digest)
     collection_service.repository.write_import_manifest(
         collection_id,
         {
@@ -506,7 +507,8 @@ def test_document_source_route_streams_manifest_source_file(document_services):
                             "source_document_id": "paper-1",
                             "original_filename": "paper-1.pdf",
                             "stored_filename": "paper-1.pdf",
-                            "storage_relpath": "input/paper-1.pdf",
+                            "storage_key": storage_key,
+                            "sha256": digest,
                             "media_type": "application/pdf",
                         }
                     ]
@@ -519,7 +521,7 @@ def test_document_source_route_streams_manifest_source_file(document_services):
         documents_controller.get_collection_document_source(collection_id, "paper-1")
     )
 
-    assert Path(response.path).read_bytes() == b"%PDF-1.4\nfixture\n"
+    assert response.body == payload
     assert response.media_type == "application/pdf"
     assert response.headers["content-disposition"].startswith("inline;")
 
@@ -532,9 +534,10 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
     )
     record = collection_service.create_collection(name="Profile Source File Collection")
     collection_id = record["collection_id"]
-    paths = collection_service.get_paths(collection_id)
-    source_path = paths.input_dir / "stored-paper.pdf"
-    source_path.write_bytes(b"%PDF-1.4\nprofile fixture\n")
+    payload = b"%PDF-1.4\nprofile fixture\n"
+    storage_key = f"{collection_id}/input/stored-paper.pdf"
+    digest = sha256(payload).hexdigest()
+    collection_service.object_store.write(storage_key, payload, digest)
     _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -561,7 +564,8 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
                             "source_document_id": "srcdoc-from-upload",
                             "original_filename": "paper.pdf",
                             "stored_filename": "stored-paper.pdf",
-                            "storage_relpath": "input/stored-paper.pdf",
+                            "storage_key": storage_key,
+                            "sha256": digest,
                             "media_type": "application/pdf",
                         }
                     ]
@@ -577,7 +581,7 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
         )
     )
 
-    assert Path(response.path).read_bytes() == b"%PDF-1.4\nprofile fixture\n"
+    assert response.body == payload
     assert response.media_type == "application/pdf"
 
 
@@ -603,15 +607,12 @@ def test_document_source_route_returns_409_when_source_is_unavailable(document_s
 
 def test_document_source_route_rejects_manifest_path_outside_collection(
     document_services,
-    tmp_path,
 ):
     collection_service, _document_profile_service, _comparison_service, _markdown_service = (
         document_services
     )
     record = collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
-    outside_path = tmp_path / "outside.pdf"
-    outside_path.write_bytes(b"%PDF-1.4\noutside\n")
     collection_service.repository.write_import_manifest(
         collection_id,
         {
@@ -622,7 +623,8 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
                         {
                             "source_document_id": "paper-1",
                             "original_filename": "paper-1.pdf",
-                            "stored_path": str(outside_path),
+                            "storage_key": "../outside.pdf",
+                            "sha256": sha256(b"outside").hexdigest(),
                             "media_type": "application/pdf",
                         }
                     ]
@@ -640,6 +642,52 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     assert exc.status_code == 409
     assert exc.detail["code"] == "document_source_path_invalid"
     assert "outside.pdf" not in str(exc.detail)
+
+
+def test_document_source_route_rejects_another_collections_storage_key(
+    document_services,
+):
+    collection_service, _document_profile_service, _comparison_service, _markdown_service = (
+        document_services
+    )
+    first = collection_service.create_collection(name="First source collection")
+    second = collection_service.create_collection(name="Second source collection")
+    payload = b"%PDF-1.4\nsecond collection\n"
+    storage_key = f"{second['collection_id']}/input/paper-2.pdf"
+    digest = sha256(payload).hexdigest()
+    collection_service.object_store.write(storage_key, payload, digest)
+    collection_service.repository.write_import_manifest(
+        first["collection_id"],
+        {
+            "collection_id": first["collection_id"],
+            "handoffs": [],
+            "imports": [
+                {
+                    "documents": [
+                        {
+                            "source_document_id": "paper-1",
+                            "original_filename": "paper-2.pdf",
+                            "stored_filename": "paper-2.pdf",
+                            "storage_key": storage_key,
+                            "sha256": digest,
+                            "media_type": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_source(
+                first["collection_id"],
+                "paper-1",
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "document_source_path_invalid"
 
 
 def test_document_figure_image_route_streams_extracted_asset(document_services):

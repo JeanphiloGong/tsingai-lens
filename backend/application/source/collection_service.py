@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
 from domain.source import ArtifactStatusRecord, CollectionRecord, empty_import_manifest
-from infra.source.ingestion import (
-    NormalizedImportBatch,
-    SourceAdapter,
-    SourceAdapterRequest,
-    normalize_upload,
-)
+from domain.source.ports import ObjectStore
 from infra.persistence.factory import (
     build_artifact_repository,
     build_collection_repository,
+)
+from infra.persistence.file.object_store import FileObjectStore
+from infra.source.ingestion import (
+    NormalizedImportBatch,
+    NormalizedImportDocument,
+    SourceAdapter,
+    SourceAdapterRequest,
+    normalize_upload,
 )
 
 
@@ -50,6 +54,7 @@ class CollectionService:
         root_dir: Path | None = None,
         repository: CollectionRepository | None = None,
         artifact_repository: ArtifactRepository | None = None,
+        object_store: ObjectStore | None = None,
     ) -> None:
         self.repository = repository or build_collection_repository(root_dir)
         self.artifact_repository = (
@@ -60,6 +65,7 @@ class CollectionService:
             )
         )
         self.root_dir = self.repository.root_dir
+        self.object_store = object_store or FileObjectStore(self.root_dir)
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
         return self.repository.get_paths(collection_id)
@@ -152,6 +158,17 @@ class CollectionService:
         if target_dir.is_symlink():
             raise ValueError("collection path cannot be a symlink")
 
+        for record in self.repository.read_files(collection_id) or []:
+            storage_key = self._optional_text(record.get("storage_key"))
+            stored_filename = self._optional_text(record.get("stored_filename"))
+            if (
+                not storage_key
+                or not stored_filename
+                or storage_key
+                != self._input_storage_key(collection_id, stored_filename)
+            ):
+                raise ValueError("invalid collection object key")
+            self.object_store.delete(storage_key)
         self.repository.delete_collection_dir(collection_id)
         return {
             "collection_id": collection_id,
@@ -183,7 +200,6 @@ class CollectionService:
         source_filename: str | None = None,
     ) -> dict[str, Any]:
         self.get_collection(collection_id)
-        paths = self.repository.get_paths(collection_id)
         document_key = str(document_id or "").strip()
         if not document_key:
             raise DocumentSourceUnavailableError(collection_id, document_key)
@@ -197,7 +213,6 @@ class CollectionService:
                     collection_id=collection_id,
                     document_id=document_key,
                     record=document,
-                    paths=paths,
                 )
 
         file_matches = [
@@ -210,7 +225,6 @@ class CollectionService:
                 collection_id=collection_id,
                 document_id=document_key,
                 record=file_matches[0],
-                paths=paths,
             )
         if len(file_matches) > 1:
             raise DocumentSourceUnavailableError(
@@ -285,7 +299,6 @@ class CollectionService:
         files = self.repository.read_files(collection_id) or []
         text_by_source_document = self._group_text_units(batch)
         created_records: list[dict] = []
-        paths = self.repository.get_paths(collection_id)
 
         for document in batch.documents:
             stored_filename = document.stored_filename or f"{uuid4().hex}_{Path(document.original_filename).name}"
@@ -294,18 +307,17 @@ class CollectionService:
                 source_document_id=document.source_document_id,
                 text_by_source_document=text_by_source_document,
             )
-            stored_path = self.repository.write_input_file(
-                collection_id,
-                stored_filename,
-                payload,
-            )
+            storage_key = self._input_storage_key(collection_id, stored_filename)
+            payload_sha256 = sha256(payload).hexdigest()
+            self.object_store.write(storage_key, payload, payload_sha256)
             created_records.append(
                 {
                     "file_id": f"file_{uuid4().hex[:12]}",
                     "collection_id": collection_id,
                     "original_filename": document.original_filename,
                     "stored_filename": stored_filename,
-                    "stored_path": str(stored_path),
+                    "storage_key": storage_key,
+                    "sha256": payload_sha256,
                     "media_type": document.media_type,
                     "status": "stored",
                     "size_bytes": len(payload),
@@ -318,7 +330,6 @@ class CollectionService:
         manifest = self.get_import_manifest(collection_id)
         manifest["imports"].append(
             self._build_manifest_import_entry(
-                collection_dir=paths.collection_dir,
                 batch=batch,
                 created_records=created_records,
             )
@@ -345,6 +356,9 @@ class CollectionService:
         if not imported:
             raise ValueError("normalized upload produced no importable documents")
         return imported[0]
+
+    def _input_storage_key(self, collection_id: str, stored_filename: str) -> str:
+        return f"{collection_id}/input/{stored_filename}"
 
     def _group_text_units(
         self,
@@ -408,7 +422,6 @@ class CollectionService:
     def _build_manifest_import_entry(
         self,
         *,
-        collection_dir: Path,
         batch: NormalizedImportBatch,
         created_records: list[dict],
     ) -> dict[str, Any]:
@@ -430,21 +443,15 @@ class CollectionService:
 
         documents: list[dict[str, Any]] = []
         for document, record in zip(batch.documents, created_records):
-            stored_path = Path(str(record["stored_path"])).resolve()
-            try:
-                storage_relpath = str(stored_path.relative_to(collection_dir))
-            except ValueError:
-                storage_relpath = document.storage_relpath
             documents.append(
                 {
                     "source_document_id": document.source_document_id,
                     "origin_channel": document.origin_channel,
                     "original_filename": document.original_filename,
                     "stored_filename": record["stored_filename"],
-                    "stored_path": str(stored_path),
-                    "storage_relpath": storage_relpath,
+                    "storage_key": record["storage_key"],
+                    "sha256": record["sha256"],
                     "media_type": record.get("media_type"),
-                    "checksum": document.checksum,
                     "language": document.language,
                     "ingest_status": document.ingest_status,
                     "text_units": sorted(
@@ -499,7 +506,8 @@ class CollectionService:
             record.get("document_id"),
             record.get("original_filename"),
             record.get("stored_filename"),
-            Path(str(record.get("stored_path") or "")).name,
+            record.get("storage_key"),
+            Path(str(record.get("storage_key") or "")).name,
         )
         return any(self._source_match_value(candidate) in match_keys for candidate in candidates)
 
@@ -512,9 +520,8 @@ class CollectionService:
             record.get("source_document_id"),
             record.get("original_filename"),
             record.get("stored_filename"),
-            record.get("storage_relpath"),
-            Path(str(record.get("storage_relpath") or "")).name,
-            Path(str(record.get("stored_path") or "")).name,
+            record.get("storage_key"),
+            Path(str(record.get("storage_key") or "")).name,
         )
         return any(self._source_match_value(candidate) in match_keys for candidate in candidates)
 
@@ -539,83 +546,52 @@ class CollectionService:
         collection_id: str,
         document_id: str,
         record: dict[str, Any],
-        paths: CollectionPaths,
     ) -> dict[str, Any]:
-        path = self._resolve_source_record_path(
-            collection_id=collection_id,
-            document_id=document_id,
-            record=record,
-            paths=paths,
-        )
-        filename = (
-            self._optional_text(record.get("original_filename"))
-            or self._optional_text(record.get("stored_filename"))
-            or path.name
-        )
-        return {
-            "path": path,
-            "filename": filename,
-            "media_type": self._optional_text(record.get("media_type")),
-            "source_document_id": self._optional_text(record.get("source_document_id"))
-            or document_id,
-        }
-
-    def _resolve_source_record_path(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        record: dict[str, Any],
-        paths: CollectionPaths,
-    ) -> Path:
-        candidates: list[Path] = []
-        storage_relpath = self._optional_text(record.get("storage_relpath"))
-        if storage_relpath:
-            relpath = Path(storage_relpath)
-            candidates.append(
-                relpath if relpath.is_absolute() else paths.collection_dir / relpath
-            )
-
-        stored_path = self._optional_text(record.get("stored_path"))
-        if stored_path:
-            candidates.append(Path(stored_path))
-
+        storage_key = self._optional_text(record.get("storage_key"))
+        expected_sha256 = self._optional_text(record.get("sha256"))
+        if not storage_key or not expected_sha256:
+            raise DocumentSourceUnavailableError(collection_id, document_id)
         stored_filename = self._optional_text(record.get("stored_filename"))
-        if stored_filename:
-            candidates.append(paths.input_dir / Path(stored_filename).name)
-
-        for candidate in candidates:
-            resolved = self._validate_collection_input_path(
-                collection_id=collection_id,
-                document_id=document_id,
-                candidate=candidate,
-                paths=paths,
-            )
-            if resolved.is_file():
-                return resolved
-
-        raise DocumentSourceUnavailableError(collection_id, document_id)
-
-    def _validate_collection_input_path(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        candidate: Path,
-        paths: CollectionPaths,
-    ) -> Path:
-        resolved = candidate.expanduser().resolve()
-        try:
-            resolved.relative_to(paths.collection_dir.resolve())
-            resolved.relative_to(paths.input_dir.resolve())
-        except ValueError as exc:
+        if (
+            not stored_filename
+            or storage_key != self._input_storage_key(collection_id, stored_filename)
+        ):
             raise DocumentSourceUnavailableError(
                 collection_id,
                 document_id,
                 code="document_source_path_invalid",
                 message="The stored source file path is not safe to serve.",
+            )
+        try:
+            content = self.object_store.read(storage_key, expected_sha256)
+        except FileNotFoundError as exc:
+            raise DocumentSourceUnavailableError(collection_id, document_id) from exc
+        except ValueError as exc:
+            if str(exc) == "invalid storage key":
+                raise DocumentSourceUnavailableError(
+                    collection_id,
+                    document_id,
+                    code="document_source_path_invalid",
+                    message="The stored source file path is not safe to serve.",
+                ) from exc
+            raise DocumentSourceUnavailableError(
+                collection_id,
+                document_id,
+                code="document_source_integrity_failed",
+                message="The stored source file failed its integrity check.",
             ) from exc
-        return resolved
+        filename = (
+            self._optional_text(record.get("original_filename"))
+            or stored_filename
+            or Path(storage_key).name
+        )
+        return {
+            "content": content,
+            "filename": filename,
+            "media_type": self._optional_text(record.get("media_type")),
+            "source_document_id": self._optional_text(record.get("source_document_id"))
+            or document_id,
+        }
 
     def _optional_text(self, value: Any) -> str | None:
         if value is None:

@@ -83,11 +83,6 @@ class CollectionRepository(Protocol):
 
     def write_import_manifest(self, collection_id: str, payload: dict) -> None: ...
 
-    def write_input_file(
-        self, collection_id: str, stored_filename: str, payload: bytes
-    ) -> Path: ...
-
-
 class TaskRepository(Protocol):
     backend_name: str
     root_dir: Path

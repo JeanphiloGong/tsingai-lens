@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import mimetypes
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
@@ -255,7 +256,7 @@ async def get_collection_document_markdown(
 async def get_collection_document_source(
     collection_id: str,
     document_id: str,
-) -> FileResponse:
+) -> Response:
     source_filename: str | None = None
     try:
         profile = document_profile_service.get_document_profile(collection_id, document_id)
@@ -286,11 +287,16 @@ async def get_collection_document_source(
         or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )
-    return FileResponse(
-        payload["path"],
+    encoded_filename = quote(filename)
+    content_disposition = (
+        f"inline; filename*=utf-8''{encoded_filename}"
+        if encoded_filename != filename
+        else f'inline; filename="{filename}"'
+    )
+    return Response(
+        content=payload["content"],
         media_type=media_type,
-        filename=filename,
-        content_disposition_type="inline",
+        headers={"content-disposition": content_disposition},
     )
 
 

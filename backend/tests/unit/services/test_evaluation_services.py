@@ -32,6 +32,7 @@ class FakeCollectionService:
                     "document_id": "doc-1",
                     "original_filename": "paper-1.pdf",
                     "stored_filename": "paper-1.pdf",
+                    "storage_key": "col-gold/input/paper-1.pdf",
                 }
             ]
         }
@@ -58,6 +59,7 @@ class FakeCollectionService:
                             "source_document_id": "doc-1",
                             "original_filename": "paper-1.pdf",
                             "stored_filename": "paper-1.pdf",
+                            "storage_key": "col-gold/input/paper-1.pdf",
                         }
                     ]
                 }
@@ -517,6 +519,30 @@ def test_evaluation_gold_service_registers_gold_set_for_collection():
     assert repository.gold_set == gold_set
     assert repository.gold_items[0].gold_id == "gold-v1"
     assert repository.gold_items[0].payload["value"] == 520
+
+
+def test_evaluation_gold_service_accepts_collection_file_storage_key():
+    repository = FakeEvaluationRepository()
+    service = EvaluationGoldService(
+        collection_service=FakeCollectionService(),
+        evaluation_repository=repository,
+    )
+
+    service.register_gold_set(
+        collection_id="col-gold",
+        gold_id="gold-by-storage-key",
+        items=[
+            {
+                "gold_item_id": "gold-storage-key-1",
+                "document_id": "col-gold/input/paper-1.pdf",
+                "family": "measurement_results",
+                "item_key": "paper-1:sample-a:yield_strength",
+                "payload": {"metric": "yield_strength", "value": 520, "unit": "MPa"},
+            }
+        ],
+    )
+
+    assert repository.gold_items[0].document_id == "col-gold/input/paper-1.pdf"
 
 
 def test_evaluation_gold_service_rejects_missing_collection():

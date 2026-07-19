@@ -83,11 +83,3 @@ class MemoryCollectionRepository:
     def write_import_manifest(self, collection_id: str, payload: dict) -> None:
         self.create_collection_dirs(collection_id)
         self._import_manifests[collection_id] = deepcopy(payload)
-
-    def write_input_file(
-        self, collection_id: str, stored_filename: str, payload: bytes
-    ) -> Path:
-        paths = self.create_collection_dirs(collection_id)
-        stored_path = paths.input_dir / stored_filename
-        stored_path.write_bytes(payload)
-        return stored_path

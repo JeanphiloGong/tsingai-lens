@@ -93,7 +93,10 @@ async def upload_collection_file(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"文件上传失败: {exc}") from exc
-    return CollectionFileResponse(**record)
+    return CollectionFileResponse(
+        **record,
+        stored_path=str(record["storage_key"]),
+    )
 
 
 @router.get(
@@ -108,7 +111,10 @@ async def list_collection_files(
     try:
         collection_service.get_collection_for_user(collection_id, current_user_id(request))
         items = [
-            CollectionFileResponse(**record)
+            CollectionFileResponse(
+                **record,
+                stored_path=str(record["storage_key"]),
+            )
             for record in collection_service.list_files(collection_id)
         ]
     except FileNotFoundError as exc:

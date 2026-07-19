@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import base64
+from hashlib import sha256
 import json
-from pathlib import Path
 
 import pytest
 
@@ -56,16 +56,23 @@ def test_delete_collection_removes_collection_directory(tmp_path):
     collection_id = record["collection_id"]
     paths = service.get_paths(collection_id)
 
-    service.add_file(collection_id, "paper.txt", b"Experimental Section\nMix.")
+    uploaded = service.add_file(
+        collection_id,
+        "paper.txt",
+        b"Experimental Section\nMix.",
+    )
 
     assert paths.collection_dir.exists()
     assert paths.meta_path.exists()
     assert paths.files_path.exists()
+    assert service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
 
     result = service.delete_collection(collection_id)
 
     assert result["collection_id"] == collection_id
     assert not paths.collection_dir.exists()
+    with pytest.raises(FileNotFoundError):
+        service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
 
 
 def test_delete_collection_raises_for_missing_collection(tmp_path):
@@ -77,6 +84,34 @@ def test_delete_collection_raises_for_missing_collection(tmp_path):
         assert "collection not found" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected FileNotFoundError")
+
+
+def test_delete_collection_rejects_another_collections_storage_key(tmp_path):
+    service = CollectionService(tmp_path / "collections")
+    first = service.create_collection(name="First collection")
+    second = service.create_collection(name="Second collection")
+    second_file = service.add_file(
+        second["collection_id"],
+        "paper.txt",
+        b"Second collection bytes",
+    )
+    service.repository.write_files(
+        first["collection_id"],
+        [
+            {
+                **second_file,
+                "collection_id": first["collection_id"],
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="invalid collection object key"):
+        service.delete_collection(first["collection_id"])
+
+    assert service.object_store.read(
+        second_file["storage_key"],
+        second_file["sha256"],
+    ) == b"Second collection bytes"
 
 
 def test_collection_service_returns_empty_import_manifest_for_existing_collection(tmp_path):
@@ -170,8 +205,15 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
     assert records[0]["original_filename"] == "paper.txt"
     assert records[0]["stored_filename"] == "normalized_paper.txt"
     assert records[0]["media_type"] == "text/plain"
-    assert Path(records[0]["stored_path"]).read_text(encoding="utf-8") == (
-        "Experimental Section\nMix and anneal."
+    expected_payload = b"Experimental Section\nMix and anneal."
+    expected_sha256 = sha256(expected_payload).hexdigest()
+    assert records[0]["storage_key"] == (
+        f"{collection_id}/input/normalized_paper.txt"
+    )
+    assert records[0]["sha256"] == expected_sha256
+    assert "stored_path" not in records[0]
+    assert service.object_store.read(records[0]["storage_key"], expected_sha256) == (
+        expected_payload
     )
     assert service.get_collection(collection_id)["paper_count"] == 1
     assert service.list_files(collection_id)[0]["stored_filename"] == "normalized_paper.txt"
@@ -187,8 +229,10 @@ def test_collection_service_imports_normalized_batch_and_updates_collection(tmp_
     document_entry = import_entry["documents"][0]
     assert document_entry["source_document_id"] == "srcdoc_1"
     assert document_entry["stored_filename"] == "normalized_paper.txt"
-    assert document_entry["storage_relpath"] == "input/normalized_paper.txt"
-    assert document_entry["checksum"] == "abc123"
+    assert document_entry["storage_key"] == records[0]["storage_key"]
+    assert document_entry["sha256"] == expected_sha256
+    assert "stored_path" not in document_entry
+    assert "storage_relpath" not in document_entry
     assert document_entry["text_units"] == [
         {
             "text_unit_id": "tu_0",
@@ -251,7 +295,11 @@ def test_collection_service_add_file_uses_normalized_upload(monkeypatch, tmp_pat
         "media_type": "application/pdf",
     }
     assert record["stored_filename"] == "normalized_upload.pdf"
-    assert Path(record["stored_path"]).read_bytes() == b"%PDF-1.4 fake"
+    assert record["storage_key"] == f"{collection_id}/input/normalized_upload.pdf"
+    assert record["sha256"] == sha256(b"%PDF-1.4 fake").hexdigest()
+    assert service.object_store.read(record["storage_key"], record["sha256"]) == (
+        b"%PDF-1.4 fake"
+    )
     manifest = service.get_import_manifest(collection_id)
     assert manifest["handoffs"] == []
     assert len(manifest["imports"]) == 1
@@ -319,8 +367,11 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
 
     assert len(records) == 1
     assert records[0]["stored_filename"] == "search_result_1.txt"
-    assert Path(records[0]["stored_path"]).read_text(encoding="utf-8") == (
-        "Search adapter normalized text"
+    assert service.object_store.read(
+        records[0]["storage_key"],
+        records[0]["sha256"],
+    ) == (
+        b"Search adapter normalized text"
     )
 
     manifest = service.get_import_manifest(collection["collection_id"])

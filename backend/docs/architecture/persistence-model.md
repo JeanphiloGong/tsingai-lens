@@ -55,7 +55,9 @@ accidentally preserve it.
 | Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Document profiles and reusable paper facts | PostgreSQL build-versioned paper-fact tables | No | PostgreSQL |
 | Research objectives, contexts, paper frames, evidence routes, evidence units, and logic chains | PostgreSQL build-versioned objective tables | No | PostgreSQL |
-| Comparisons, confirmed goals, and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
+| Comparable results, collection assessments, and pairwise comparison relations | PostgreSQL build-versioned comparison tables | No | PostgreSQL |
+| Comparison rows | In-memory deterministic projection | Yes | No durable store |
+| Confirmed goals and understandings | `lens.sqlite` Core tables | No | PostgreSQL |
 | Feedback, curation, and evaluation | `lens.sqlite` evaluation tables | No | PostgreSQL |
 | Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
 | Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
@@ -96,10 +98,10 @@ image directories.
 Document profiles and reusable paper facts follow the same build boundary.
 `PostgresPaperFactRepository` writes only to an explicitly named pending build;
 ordinary reads follow the active successful build. Every row resolves through
-its Source document to the exact immutable document version. Services that
-also need objectives or comparisons receive the PostgreSQL paper-fact
-repository and the remaining SQLite Core repository separately. There is no
-combined repository, fallback read, or dual write.
+its Source document to the exact immutable document version. Services that also
+need objectives or comparisons receive their direct PostgreSQL aggregate
+repositories separately. There is no combined repository, fallback read, or
+dual write.
 
 Research objectives and their evidence chain now use the same direct build
 boundary. `PostgresObjectiveRepository` replaces one explicitly named pending
@@ -109,6 +111,15 @@ inputs are ordered relational links; variable semantic payloads remain JSONB.
 Every document, Source locator, and optional paper-fact anchor is validated
 against the same collection and build before commit. SQLite Core owns none of
 these records and provides no fallback path.
+
+Comparison semantics now follow the same direct build boundary.
+`PostgresComparisonRepository` stores comparable results, collection-scoped
+assessments, pairwise relations, and ordered evidence lineage under one
+explicit pending build. Normal reads follow `collection_active_builds`.
+`ComparisonService` deterministically regenerates collection comparison rows
+from the semantic aggregate; rows are never persisted in PostgreSQL, SQLite,
+files, or JSON authority. Empty ready comparison builds remain distinguishable
+from builds that never generated comparison semantics.
 
 Confirmed-goal analysis reads the active objective candidates, derives its
 goal-specific frames, routes, evidence units, and logic chain in memory, and
@@ -123,8 +134,9 @@ The inspected `backend/data/lens.sqlite` contains 53 legacy application tables. 
 are grouped here by real responsibility rather than by the repository class
 that happens to contain them. Its two auth tables are retained legacy data for
 future offline import only; the current runtime neither reads nor writes them.
-The paper-fact and objective tables remain in this untouched legacy snapshot
-but are no longer created, read, or written by `SqliteCoreFactRepository`.
+The paper-fact, objective, and comparison tables remain in this untouched
+legacy snapshot but are no longer created, read, or written by
+`SqliteCoreFactRepository`.
 
 | Responsibility | Count | Current tables |
 | --- | ---: | --- |

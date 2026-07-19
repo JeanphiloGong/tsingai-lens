@@ -57,6 +57,7 @@ from infra.persistence.sqlite import (
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -85,13 +86,14 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     source_repository = SqliteSourceArtifactRepository(db_path)
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
+    comparison_repository = MemoryComparisonRepository()
     core_repository = SqliteCoreFactRepository(db_path)
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_repository,
+        comparison_repository=comparison_repository,
     )
     goal_session_repository = SqliteGoalSessionRepository(db_path)
     experiment_plan_repository = SqliteExperimentPlanRepository(db_path)

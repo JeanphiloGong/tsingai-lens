@@ -8,6 +8,12 @@ from infra.persistence.postgres.models.build import (
     CollectionBuild,
     Task,
 )
+from infra.persistence.postgres.models.comparison import (
+    CollectionComparableResultRecord,
+    ComparableResultRecord,
+    ComparisonBuild,
+    PairwiseComparisonRelationRecord,
+)
 from infra.persistence.postgres.models.collection import (
     Collection,
     CollectionFile,
@@ -66,7 +72,10 @@ __all__ = [
     "BuildStage",
     "Collection",
     "CollectionActiveBuild",
+    "CollectionComparableResultRecord",
     "CollectionBuild",
+    "ComparableResultRecord",
+    "ComparisonBuild",
     "CollectionDocument",
     "CollectionFile",
     "CollectionHandoff",
@@ -82,6 +91,7 @@ __all__ = [
     "ObjectivePaperFrameRecord",
     "ObjectivePaperSkim",
     "ObjectiveResearchRecord",
+    "PairwiseComparisonRelationRecord",
     "PaperFactBaselineReference",
     "PaperFactBuild",
     "PaperFactCharacterizationObservation",

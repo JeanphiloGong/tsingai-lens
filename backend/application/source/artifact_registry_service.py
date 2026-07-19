@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from domain.ports import (
     BuildRepository,
-    CoreFactRepository,
+    ComparisonRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
@@ -109,13 +109,13 @@ class ArtifactRegistryService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        core_fact_repository: CoreFactRepository,
+        comparison_repository: ComparisonRepository,
     ) -> None:
         self.repository = repository
         self.source_artifact_repository = source_artifact_repository
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.core_fact_repository = core_fact_repository
+        self.comparison_repository = comparison_repository
 
     def build_registry(
         self,
@@ -143,13 +143,23 @@ class ArtifactRegistryService:
             collection_id,
             build_id=build_id,
         )
-        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        comparison_facts = self.comparison_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
         objective_evidence_ready = bool(objective_facts.objective_evidence_units)
         evidence_cards_generated = bool(
             paper_facts.paper_facts_generated or objective_evidence_ready
         )
         evidence_cards_ready = bool(
             paper_facts.evidence_cards_ready or objective_evidence_ready
+        )
+        comparison_rows_ready = bool(
+            comparison_facts.comparable_results
+            and any(
+                result.included
+                for result in comparison_facts.collection_comparable_results
+            )
         )
         source_artifacts_generated = not source_artifacts.is_empty()
         payload = ArtifactStatusRecord.build(
@@ -179,17 +189,17 @@ class ArtifactRegistryService:
             sample_variants_ready=bool(paper_facts.sample_variants),
             measurement_results_generated=paper_facts.paper_facts_generated,
             measurement_results_ready=bool(paper_facts.measurement_results),
-            comparable_results_generated=core_facts.comparison_artifacts_generated,
-            comparable_results_ready=bool(core_facts.comparable_results),
+            comparable_results_generated=comparison_facts.comparison_artifacts_generated,
+            comparable_results_ready=bool(comparison_facts.comparable_results),
             collection_comparable_results_generated=(
-                core_facts.comparison_artifacts_generated
+                comparison_facts.comparison_artifacts_generated
             ),
             collection_comparable_results_ready=bool(
-                core_facts.collection_comparable_results
+                comparison_facts.collection_comparable_results
             ),
             collection_comparable_results_stale=False,
-            comparison_rows_generated=core_facts.comparison_artifacts_generated,
-            comparison_rows_ready=bool(core_facts.comparison_rows),
+            comparison_rows_generated=comparison_facts.comparison_artifacts_generated,
+            comparison_rows_ready=comparison_rows_ready,
             comparison_rows_stale=False,
             graph_stale=False,
             blocks_generated=source_artifacts_generated,

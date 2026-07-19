@@ -14,13 +14,11 @@ except ImportError:  # pragma: no cover
 
 from tests.support.collection_service import build_test_collection_service
 from application.core.comparison_service import ComparisonService
-from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
 from controllers.core import documents as documents_controller
@@ -29,7 +27,7 @@ from domain.core import (
     CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
-    ComparisonRowRecord,
+    ComparisonFactSet,
     DocumentProfile,
     MeasurementResult,
     SampleVariant,
@@ -66,6 +64,7 @@ from tests.support.pbf_acceptance_fixture import (
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _store_document_profiles(
@@ -180,17 +179,6 @@ def _store_core_document_semantics(
 ) -> None:
     comparable_results = comparable_results or []
     scoped_results = scoped_results or []
-    comparison_rows: tuple[ComparisonRowRecord, ...] = ()
-    if comparable_results and scoped_results:
-        comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
-            collection_id=collection_id,
-            comparable_results=(
-                ComparableResult.from_mapping(row) for row in comparable_results
-            ),
-            scoped_results=(
-                CollectionComparableResult.from_mapping(row) for row in scoped_results
-            ),
-        )
     comparison_service.paper_fact_repository.replace_paper_facts(
         collection_id,
         "build_test",
@@ -219,11 +207,18 @@ def _store_core_document_semantics(
             ),
         ),
     )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
-        tuple(CollectionComparableResult.from_mapping(row) for row in scoped_results),
-        comparison_rows,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row) for row in scoped_results
+            ),
+        ),
     )
 
 
@@ -232,7 +227,7 @@ def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    comparison_repository = MemoryComparisonRepository()
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
@@ -242,7 +237,7 @@ def document_services(tmp_path):
         collection_service,
         paper_fact_repository=paper_fact_repository,
         objective_repository=MemoryObjectiveRepository(),
-        core_fact_repository=core_fact_repository,
+        comparison_repository=comparison_repository,
         document_profile_service=document_profile_service,
     )
     document_markdown_service = DocumentMarkdownService(
@@ -1143,11 +1138,10 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
             ),
         ),
     )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        (),
-        (),
-        (),
+        "build_test",
+        ComparisonFactSet(comparison_artifacts_ready=True),
     )
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

@@ -11,6 +11,7 @@ from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _load_trace_module():
@@ -140,6 +141,11 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
         "PostgresPaperFactRepository",
         lambda _session_factory: paper_fact_repository,
     )
+    monkeypatch.setattr(
+        trace,
+        "PostgresComparisonRepository",
+        lambda _session_factory: MemoryComparisonRepository(),
+    )
 
     trace_dir = trace.export_trace(
         backend_root=backend_root,
@@ -152,9 +158,9 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     assert summary["artifact_rows"]["evidence_cards"] == 1
     assert (trace_dir / "artifacts" / "tables.json").is_file()
     assert (trace_dir / "artifacts" / "tables.csv").is_file()
-    assert "Table 1 Mechanical Results" in (
-        trace_dir / "source_tables.md"
-    ).read_text(encoding="utf-8")
+    assert "Table 1 Mechanical Results" in (trace_dir / "source_tables.md").read_text(
+        encoding="utf-8"
+    )
     extraction_trace = (trace_dir / "extraction_trace.md").read_text(encoding="utf-8")
     assert "A reached 560 MPa." in extraction_trace
     assert "quote=A | 560" in extraction_trace

@@ -39,6 +39,7 @@ from infra.persistence.sqlite import (
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _request(goal_session_service, user_id: str = "local-user"):
@@ -90,6 +91,7 @@ def goal_session_services(tmp_path):
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
+    comparison_repository = MemoryComparisonRepository()
     objective_repository = MemoryObjectiveRepository()
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
@@ -105,7 +107,7 @@ def goal_session_services(tmp_path):
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        comparison_repository=comparison_repository,
         document_profile_service=document_profile_service,
     )
     research_objective_service = ResearchObjectiveService(
@@ -121,7 +123,7 @@ def goal_session_services(tmp_path):
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        comparison_repository=comparison_repository,
         document_profile_service=document_profile_service,
     )
     paper_facts_service = PaperFactsService(
@@ -139,6 +141,7 @@ def goal_session_services(tmp_path):
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
             core_fact_repository=core_fact_repository,
+            comparison_service=comparison_service,
             research_understanding_service=research_understanding_service,
         ),
         workspace_service=workspace_service,

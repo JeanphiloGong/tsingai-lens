@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 import json
 import math
 import sqlite3
@@ -11,177 +10,10 @@ from typing import Any
 
 from config import DATA_DIR
 from domain.core import (
-    CollectionComparableResult,
-    ComparableResult,
     ConfirmedGoal,
-    ComparisonRowRecord,
-    CoreFactSet,
-    PairwiseComparisonRelation,
     ResearchUnderstanding,
 )
 
-
-@dataclass(frozen=True)
-class _TableSpec:
-    table_name: str
-    attr_name: str
-    record_cls: type
-    id_column: str
-    columns: tuple[str, ...]
-    json_columns: frozenset[str] = frozenset()
-    integer_columns: frozenset[str] = frozenset()
-    real_columns: frozenset[str] = frozenset()
-    boolean_columns: frozenset[str] = frozenset()
-    index_columns: tuple[str, ...] = ()
-
-
-_COMPARISON_TABLES: tuple[_TableSpec, ...] = (
-    _TableSpec(
-        table_name="core_comparable_results",
-        attr_name="comparable_results",
-        record_cls=ComparableResult,
-        id_column="comparable_result_id",
-        columns=(
-            "comparable_result_id",
-            "source_result_id",
-            "source_document_id",
-            "binding",
-            "normalized_context",
-            "axis",
-            "value",
-            "evidence",
-            "variant_label",
-            "baseline_reference",
-            "result_source_type",
-            "epistemic_status",
-            "normalization_version",
-        ),
-        json_columns=frozenset(
-            {"binding", "normalized_context", "axis", "value", "evidence"}
-        ),
-        index_columns=("source_document_id", "source_result_id"),
-    ),
-    _TableSpec(
-        table_name="core_collection_comparable_results",
-        attr_name="collection_comparable_results",
-        record_cls=CollectionComparableResult,
-        id_column="comparable_result_id",
-        columns=(
-            "collection_id",
-            "comparable_result_id",
-            "assessment",
-            "epistemic_status",
-            "included",
-            "sort_order",
-            "policy_family",
-            "policy_version",
-            "comparable_result_normalization_version",
-            "assessment_input_fingerprint",
-            "reassessment_triggers",
-        ),
-        json_columns=frozenset({"assessment", "reassessment_triggers"}),
-        integer_columns=frozenset({"sort_order"}),
-        boolean_columns=frozenset({"included"}),
-        index_columns=("comparable_result_id", "included", "sort_order"),
-    ),
-    _TableSpec(
-        table_name="core_pairwise_comparison_relations",
-        attr_name="pairwise_comparison_relations",
-        record_cls=PairwiseComparisonRelation,
-        id_column="relation_id",
-        columns=(
-            "relation_id",
-            "collection_id",
-            "document_id",
-            "current_variant_id",
-            "reference_variant_id",
-            "comparison_axis",
-            "property_normalized",
-            "current_result_id",
-            "reference_result_id",
-            "current_value",
-            "reference_value",
-            "unit",
-            "direction",
-            "evidence_anchor_ids",
-            "relation_payload",
-            "confidence",
-            "epistemic_status",
-            "relation_version",
-        ),
-        json_columns=frozenset({"evidence_anchor_ids", "relation_payload"}),
-        real_columns=frozenset({"current_value", "reference_value", "confidence"}),
-        index_columns=(
-            "document_id",
-            "current_variant_id",
-            "reference_variant_id",
-            "property_normalized",
-        ),
-    ),
-    _TableSpec(
-        table_name="core_comparison_rows",
-        attr_name="comparison_rows",
-        record_cls=ComparisonRowRecord,
-        id_column="row_id",
-        columns=(
-            "row_id",
-            "collection_id",
-            "comparable_result_id",
-            "source_document_id",
-            "variant_id",
-            "variant_label",
-            "variable_axis",
-            "variable_value",
-            "baseline_reference",
-            "result_source_type",
-            "result_type",
-            "result_summary",
-            "supporting_evidence_ids",
-            "supporting_anchor_ids",
-            "characterization_observation_ids",
-            "structure_feature_ids",
-            "material_system_normalized",
-            "process_normalized",
-            "property_normalized",
-            "baseline_normalized",
-            "test_condition_normalized",
-            "comparability_status",
-            "comparability_warnings",
-            "comparability_basis",
-            "requires_expert_review",
-            "assessment_epistemic_status",
-            "missing_critical_context",
-            "value",
-            "unit",
-        ),
-        json_columns=frozenset(
-            {
-                "variable_value",
-                "supporting_evidence_ids",
-                "supporting_anchor_ids",
-                "characterization_observation_ids",
-                "structure_feature_ids",
-                "comparability_warnings",
-                "comparability_basis",
-                "missing_critical_context",
-            }
-        ),
-        real_columns=frozenset({"value"}),
-        boolean_columns=frozenset({"requires_expert_review"}),
-        index_columns=(
-            "comparable_result_id",
-            "source_document_id",
-            "variant_id",
-            "material_system_normalized",
-            "property_normalized",
-            "baseline_normalized",
-            "test_condition_normalized",
-        ),
-    ),
-)
-
-_ALL_TABLES = _COMPARISON_TABLES
-_STATUS_TABLE = "core_fact_collection_status"
 _RESEARCH_UNDERSTANDING_TABLE = "core_research_understanding_artifacts"
 _CONFIRMED_GOAL_TABLE = "core_confirmed_goals"
 
@@ -194,47 +26,6 @@ class SqliteCoreFactRepository:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path or (DATA_DIR / "lens.sqlite")).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def replace_collection_comparison_artifacts(
-        self,
-        collection_id: str,
-        comparable_results: tuple[ComparableResult, ...],
-        collection_comparable_results: tuple[CollectionComparableResult, ...],
-        comparison_rows: tuple[ComparisonRowRecord, ...],
-        pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = (),
-    ) -> None:
-        self._ensure_schema()
-        records_by_attr = {
-            "comparable_results": comparable_results,
-            "collection_comparable_results": collection_comparable_results,
-            "pairwise_comparison_relations": pairwise_comparison_relations,
-            "comparison_rows": comparison_rows,
-        }
-        with self._connection() as connection:
-            for spec in _COMPARISON_TABLES:
-                self._delete_collection(connection, spec, collection_id)
-            for spec in _COMPARISON_TABLES:
-                self._insert_records(
-                    connection,
-                    spec,
-                    collection_id,
-                    records_by_attr[spec.attr_name],
-                )
-            self._upsert_status(
-                connection,
-                collection_id,
-                comparison_artifacts_ready=True,
-            )
-
-    def read_collection_facts(self, collection_id: str) -> CoreFactSet:
-        self._ensure_schema()
-        with self._connection() as connection:
-            records_by_attr = {
-                spec.attr_name: self._read_records(connection, spec, collection_id)
-                for spec in _ALL_TABLES
-            }
-            status = self._read_status(connection, collection_id, records_by_attr)
-        return CoreFactSet(**status, **records_by_attr)
 
     def replace_collection_research_understandings(
         self,
@@ -425,8 +216,7 @@ class SqliteCoreFactRepository:
                 (collection_id,),
             ).fetchall()
         return tuple(
-            ConfirmedGoal.from_mapping(self._load_json(row["payload"]))
-            for row in rows
+            ConfirmedGoal.from_mapping(self._load_json(row["payload"])) for row in rows
         )
 
     def _upsert_research_understanding_row(
@@ -484,119 +274,12 @@ class SqliteCoreFactRepository:
 
     def _ensure_schema(self) -> None:
         with self._connection() as connection:
-            self._create_status_table(connection)
-            for spec in _ALL_TABLES:
-                self._create_table(connection, spec)
-                self._create_indexes(connection, spec)
             self._create_research_understanding_table(connection)
             self._create_confirmed_goal_table(connection)
 
-    def _create_status_table(self, connection: sqlite3.Connection) -> None:
-        connection.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {_STATUS_TABLE} (
-                collection_id TEXT PRIMARY KEY,
-                comparison_artifacts_ready INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-
-    def _upsert_status(
-        self,
-        connection: sqlite3.Connection,
-        collection_id: str,
-        *,
-        comparison_artifacts_ready: bool | None = None,
+    def _create_research_understanding_table(
+        self, connection: sqlite3.Connection
     ) -> None:
-        current = connection.execute(
-            f"""
-            SELECT comparison_artifacts_ready
-            FROM {_STATUS_TABLE}
-            WHERE collection_id = ?
-            """,
-            (collection_id,),
-        ).fetchone()
-        next_comparison_artifacts_ready = (
-            bool(current["comparison_artifacts_ready"]) if current else False
-        )
-        if comparison_artifacts_ready is not None:
-            next_comparison_artifacts_ready = bool(comparison_artifacts_ready)
-        connection.execute(
-            f"""
-            INSERT INTO {_STATUS_TABLE} (
-                collection_id,
-                comparison_artifacts_ready
-            )
-            VALUES (?, ?)
-            ON CONFLICT(collection_id) DO UPDATE SET
-                comparison_artifacts_ready = excluded.comparison_artifacts_ready
-            """,
-            (
-                collection_id,
-                int(next_comparison_artifacts_ready),
-            ),
-        )
-
-    def _read_status(
-        self,
-        connection: sqlite3.Connection,
-        collection_id: str,
-        records_by_attr: dict[str, tuple[Any, ...]],
-    ) -> dict[str, bool]:
-        row = connection.execute(
-            f"""
-            SELECT comparison_artifacts_ready
-            FROM {_STATUS_TABLE}
-            WHERE collection_id = ?
-            """,
-            (collection_id,),
-        ).fetchone()
-        if row is not None:
-            return {
-                "comparison_artifacts_ready": bool(
-                    row["comparison_artifacts_ready"]
-                ),
-            }
-        return {
-            "comparison_artifacts_ready": any(
-                records_by_attr[spec.attr_name] for spec in _COMPARISON_TABLES
-            ),
-        }
-
-    def _create_table(
-        self,
-        connection: sqlite3.Connection,
-        spec: _TableSpec,
-    ) -> None:
-        columns = [
-            self._column_definition(spec, column)
-            for column in self._storage_columns(spec)
-        ]
-        connection.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {spec.table_name} (
-                {", ".join(columns)},
-                PRIMARY KEY(collection_id, {spec.id_column})
-            )
-            """
-        )
-
-    def _create_indexes(
-        self,
-        connection: sqlite3.Connection,
-        spec: _TableSpec,
-    ) -> None:
-        for column in spec.index_columns:
-            if column == "collection_id":
-                continue
-            connection.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_{spec.table_name}_{column}
-                ON {spec.table_name}(collection_id, {column})
-                """
-            )
-
-    def _create_research_understanding_table(self, connection: sqlite3.Connection) -> None:
         connection.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {_RESEARCH_UNDERSTANDING_TABLE} (
@@ -656,113 +339,6 @@ class SqliteCoreFactRepository:
             "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS now"
         ).fetchone()
         return str(row["now"])
-
-    def _column_definition(self, spec: _TableSpec, column: str) -> str:
-        if column == "collection_id" or column == spec.id_column:
-            return f"{column} TEXT NOT NULL"
-        return f"{column} {self._column_type(spec, column)}"
-
-    def _column_type(self, spec: _TableSpec, column: str) -> str:
-        if column in spec.integer_columns or column in spec.boolean_columns:
-            return "INTEGER"
-        if column in spec.real_columns:
-            return "REAL"
-        return "TEXT"
-
-    def _insert_records(
-        self,
-        connection: sqlite3.Connection,
-        spec: _TableSpec,
-        collection_id: str,
-        records: tuple[Any, ...],
-    ) -> None:
-        if not records:
-            return
-        columns = self._storage_columns(spec)
-        placeholders = ", ".join("?" for _ in columns)
-        connection.executemany(
-            f"""
-            INSERT INTO {spec.table_name} ({", ".join(columns)})
-            VALUES ({placeholders})
-            """,
-            [
-                self._record_values(spec, collection_id, record)
-                for record in records
-            ],
-        )
-
-    def _record_values(
-        self,
-        spec: _TableSpec,
-        collection_id: str,
-        record: Any,
-    ) -> tuple[Any, ...]:
-        payload = record.to_record()
-        values: list[Any] = []
-        for column in self._storage_columns(spec):
-            value = collection_id if column == "collection_id" else payload.get(column)
-            values.append(self._store_value(spec, column, value))
-        return tuple(values)
-
-    def _read_records(
-        self,
-        connection: sqlite3.Connection,
-        spec: _TableSpec,
-        collection_id: str,
-    ) -> tuple[Any, ...]:
-        rows = connection.execute(
-            f"""
-            SELECT {", ".join(spec.columns)}
-            FROM {spec.table_name}
-            WHERE collection_id = ?
-            ORDER BY {spec.id_column} ASC
-            """,
-            (collection_id,),
-        ).fetchall()
-        return tuple(
-            spec.record_cls.from_mapping(self._payload_from_row(spec, row))
-            for row in rows
-        )
-
-    def _payload_from_row(
-        self,
-        spec: _TableSpec,
-        row: sqlite3.Row,
-    ) -> dict[str, Any]:
-        payload = dict(row)
-        for column in spec.json_columns:
-            if column in payload:
-                payload[column] = self._load_json(payload[column])
-        return payload
-
-    def _delete_collection(
-        self,
-        connection: sqlite3.Connection,
-        spec: _TableSpec,
-        collection_id: str,
-    ) -> None:
-        connection.execute(
-            f"DELETE FROM {spec.table_name} WHERE collection_id = ?",
-            (collection_id,),
-        )
-
-    def _storage_columns(self, spec: _TableSpec) -> tuple[str, ...]:
-        return ("collection_id",) + tuple(
-            column for column in spec.columns if column != "collection_id"
-        )
-
-    def _store_value(self, spec: _TableSpec, column: str, value: Any) -> Any:
-        if column in spec.json_columns:
-            return json.dumps(
-                self._normalize_json_value(value),
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        if column in spec.boolean_columns:
-            return int(bool(value))
-        if isinstance(value, float) and math.isnan(value):
-            return None
-        return value
 
     def _load_json(self, value: Any) -> Any:
         if value is None:

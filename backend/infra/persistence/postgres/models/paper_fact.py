@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -368,6 +369,12 @@ class PaperFactStructureFeature(Base):
 class PaperFactMeasurementResult(Base):
     __tablename__ = "paper_fact_measurement_results"
     __table_args__ = (
+        UniqueConstraint(
+            "collection_id",
+            "build_id",
+            "result_id",
+            name="uq_paper_fact_results_collection_build_result",
+        ),
         ForeignKeyConstraint(
             ["collection_id", "build_id", "source_document_id"],
             [

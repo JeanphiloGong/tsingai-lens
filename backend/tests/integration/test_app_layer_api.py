@@ -12,10 +12,10 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from domain.core.comparison_projection import ComparisonRowProjector
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
+    ComparisonFactSet,
     build_collection_assessment_input_fingerprint,
     build_comparison_row_id,
 )
@@ -32,12 +32,18 @@ from infra.persistence.sqlite import (
 )
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
+from infra.source.runtime.source_evidence import (
+    build_blocks,
+    build_table_cells,
+    build_table_rows,
+)
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 try:
     from fastapi.testclient import TestClient
+
     FASTAPI_AVAILABLE = True
 except ImportError:  # pragma: no cover
     FASTAPI_AVAILABLE = False
@@ -267,11 +273,6 @@ def _write_core_graph_outputs(comparison_service, collection_id: str) -> None:  
         unit="mS/cm",
         sort_order=0,
     )
-    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
-        collection_id=collection_id,
-        comparable_results=(ComparableResult.from_mapping(comparable_result),),
-        scoped_results=(CollectionComparableResult.from_mapping(scoped_result),),
-    )
     comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
@@ -321,11 +322,16 @@ def _write_core_graph_outputs(comparison_service, collection_id: str) -> None:  
             ),
         ),
     )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        (ComparableResult.from_mapping(comparable_result),),
-        (CollectionComparableResult.from_mapping(scoped_result),),
-        row_records,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=(ComparableResult.from_mapping(comparable_result),),
+            collection_comparable_results=(
+                CollectionComparableResult.from_mapping(scoped_result),
+            ),
+        ),
     )
 
 
@@ -367,7 +373,9 @@ def _build_semantic_comparison_record(
         "source_document_id": source_document_id,
         "binding": {
             "variant_id": variant_id,
-            "baseline_id": f"base-{comparable_result_id}" if baseline_reference else None,
+            "baseline_id": f"base-{comparable_result_id}"
+            if baseline_reference
+            else None,
             "test_condition_id": (
                 f"tc-{comparable_result_id}" if test_condition_normalized else None
             ),
@@ -449,52 +457,53 @@ def _store_core_comparison_facts(
     scoped_results: list[dict],
     document_profiles: list[dict] | None = None,
 ) -> None:  # noqa: ANN001
-    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
-        collection_id=collection_id,
-        comparable_results=(
-            ComparableResult.from_mapping(row) for row in comparable_results
-        ),
-        scoped_results=(
-            CollectionComparableResult.from_mapping(row)
-            for row in scoped_results
-        ),
-    )
     comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
-        tuple(
-            DocumentProfile.from_mapping(row)
-            for row in (document_profiles or [])
-        ),
+        tuple(DocumentProfile.from_mapping(row) for row in (document_profiles or [])),
     )
     comparison_service.paper_fact_repository.replace_paper_facts(
         collection_id,
         "build_test",
         PaperFactSet(paper_facts_ready=True),
     )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
-        tuple(
-            CollectionComparableResult.from_mapping(row)
-            for row in scoped_results
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row) for row in scoped_results
+            ),
         ),
-        row_records,
     )
 
 
-def _create_built_collection(app_client, name: str = "Composite Set") -> tuple[str, str]:  # noqa: ANN001
+def _create_built_collection(
+    app_client, name: str = "Composite Set"
+) -> tuple[str, str]:  # noqa: ANN001
     create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+        files={
+            "file": (
+                "paper.txt",
+                b"Experimental Section\nMix and anneal.",
+                "text/plain",
+            )
+        },
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={}
+    )
     assert task_resp.status_code == 200
     task_id = task_resp.json()["task_id"]
     final_task = _wait_for_task_terminal(app_client, task_id)
@@ -514,7 +523,9 @@ def test_request_id_is_generated_and_echoed(app_client):
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
-def test_request_id_is_echoed_and_propagated_to_background_build(app_client, monkeypatch):
+def test_request_id_is_echoed_and_propagated_to_background_build(
+    app_client, monkeypatch
+):
     import application.pipeline.collection_build.service as task_runner_module
     from utils.logger import REQUEST_ID_HEADER, get_request_id
 
@@ -525,15 +536,25 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
         output_dir = Path(kwargs["config"].output.base_dir)
         return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
-    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
+    monkeypatch.setattr(
+        task_runner_module, "build_source_artifacts", fake_build_source_artifacts
+    )
 
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Request ID Set"})
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections", json={"name": "Request ID Set"}
+    )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+        files={
+            "file": (
+                "paper.txt",
+                b"Experimental Section\nMix and anneal.",
+                "text/plain",
+            )
+        },
     )
     assert upload_resp.status_code == 200
 
@@ -551,7 +572,9 @@ def test_request_id_is_echoed_and_propagated_to_background_build(app_client, mon
     assert captured["bound_request_id"] == request_id
 
 
-def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, monkeypatch):
+def test_build_task_route_schedules_blocking_entry_without_waiting(
+    app_client, monkeypatch
+):
     captured: dict[str, object] = {}
     started = threading.Event()
     release = threading.Event()
@@ -579,18 +602,28 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
         fail_run_task,
     )
 
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Blocking Entry Set"})
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections", json={"name": "Blocking Entry Set"}
+    )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+        files={
+            "file": (
+                "paper.txt",
+                b"Experimental Section\nMix and anneal.",
+                "text/plain",
+            )
+        },
     )
     assert upload_resp.status_code == 200
 
     try:
-        task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={})
+        task_resp = app_client.post(
+            f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={}
+        )
 
         assert task_resp.status_code == 200
         assert started.wait(timeout=2)
@@ -602,17 +635,27 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(app_client, m
 
 
 def test_legacy_index_task_route_is_not_registered(app_client):
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Legacy Route"})
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections", json={"name": "Legacy Route"}
+    )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+        files={
+            "file": (
+                "paper.txt",
+                b"Experimental Section\nMix and anneal.",
+                "text/plain",
+            )
+        },
     )
     assert upload_resp.status_code == 200
 
-    task_resp = app_client.post(f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={})
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={}
+    )
     assert task_resp.status_code == 404
 
 
@@ -655,6 +698,7 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     import application.pipeline.collection_build.service as task_runner_module
     from application.source.task_service import TaskService
+
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -669,13 +713,16 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     source_artifact_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
+    comparison_repository = MemoryComparisonRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
         return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
-    monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
+    monkeypatch.setattr(
+        task_runner_module, "build_source_artifacts", fake_build_source_artifacts
+    )
     with TestClient(
         create_app(
             auth_session_service=auth_session_service,
@@ -684,6 +731,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             source_artifact_repository=source_artifact_repository,
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
+            comparison_repository=comparison_repository,
             core_fact_repository=core_fact_repository,
         )
     ) as client:
@@ -719,7 +767,9 @@ def test_collection_task_flow(app_client):
     assert task_status.json()["status"] == "completed"
     assert task_status.json()["current_stage"] == "artifacts_ready"
 
-    collection_tasks = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/tasks")
+    collection_tasks = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks"
+    )
     assert collection_tasks.status_code == 200
     tasks_body = collection_tasks.json()
     assert tasks_body["collection_id"] == collection_id
@@ -781,7 +831,9 @@ def test_collection_task_flow(app_client):
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
 
-    profiles = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles")
+    profiles = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles"
+    )
     assert profiles.status_code == 200
     profiles_body = profiles.json()
     assert profiles_body["count"] == 1
@@ -789,10 +841,14 @@ def test_collection_task_flow(app_client):
     assert profiles_body["items"][0]["source_filename"] == "paper.txt"
     assert profiles_body["items"][0]["doc_type"] == "experimental"
 
-    evidence = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards")
+    evidence = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/evidence/cards"
+    )
     assert evidence.status_code == 409
 
-    comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
+    comparisons = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/comparisons"
+    )
     assert comparisons.status_code == 409
 
     document_id = profiles_body["items"][0]["document_id"]
@@ -919,36 +975,38 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     assert second_create.status_code == 200
     second_collection_id = second_create.json()["collection_id"]
 
-    shared_result, first_shared_overlay, _shared_row_id = _build_semantic_comparison_record(
-        collection_id=first_collection_id,
-        comparable_result_id="cres-corpus-shared-1",
-        source_document_id="paper-shared",
-        variant_id="var-1",
-        variant_label="A1",
-        variable_axis=None,
-        variable_value=None,
-        baseline_reference="as-prepared",
-        result_source_type="text",
-        result_type="scalar",
-        result_summary="12 mS/cm",
-        supporting_evidence_ids=["ev-shared-1"],
-        supporting_anchor_ids=["anchor-shared-1"],
-        characterization_observation_ids=[],
-        structure_feature_ids=[],
-        material_system_normalized="oxide cathode",
-        process_normalized="700 C",
-        property_normalized="conductivity",
-        baseline_normalized="as-prepared",
-        test_condition_normalized="EIS",
-        comparability_status="comparable",
-        comparability_warnings=[],
-        comparability_basis=["baseline_resolved"],
-        requires_expert_review=False,
-        assessment_epistemic_status="normalized_from_evidence",
-        missing_critical_context=[],
-        value=12.0,
-        unit="mS/cm",
-        sort_order=0,
+    shared_result, first_shared_overlay, _shared_row_id = (
+        _build_semantic_comparison_record(
+            collection_id=first_collection_id,
+            comparable_result_id="cres-corpus-shared-1",
+            source_document_id="paper-shared",
+            variant_id="var-1",
+            variant_label="A1",
+            variable_axis=None,
+            variable_value=None,
+            baseline_reference="as-prepared",
+            result_source_type="text",
+            result_type="scalar",
+            result_summary="12 mS/cm",
+            supporting_evidence_ids=["ev-shared-1"],
+            supporting_anchor_ids=["anchor-shared-1"],
+            characterization_observation_ids=[],
+            structure_feature_ids=[],
+            material_system_normalized="oxide cathode",
+            process_normalized="700 C",
+            property_normalized="conductivity",
+            baseline_normalized="as-prepared",
+            test_condition_normalized="EIS",
+            comparability_status="comparable",
+            comparability_warnings=[],
+            comparability_basis=["baseline_resolved"],
+            requires_expert_review=False,
+            assessment_epistemic_status="normalized_from_evidence",
+            missing_critical_context=[],
+            value=12.0,
+            unit="mS/cm",
+            sort_order=0,
+        )
     )
     unique_result, unique_overlay, _unique_row_id = _build_semantic_comparison_record(
         collection_id=first_collection_id,
@@ -1006,10 +1064,7 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     payload = response.json()
     assert payload["total"] == 2
     assert payload["count"] == 2
-    items_by_id = {
-        item["comparable_result_id"]: item
-        for item in payload["items"]
-    }
+    items_by_id = {item["comparable_result_id"]: item for item in payload["items"]}
     assert items_by_id["cres-corpus-shared-1"]["observed_collection_ids"] == sorted(
         [first_collection_id, second_collection_id]
     )
@@ -1026,7 +1081,10 @@ def test_comparable_results_endpoint_deduplicates_across_collections_without_row
     assert detail_payload["comparable_result_id"] == "cres-corpus-shared-1"
     assert detail_payload["observed_collection_ids"] == [second_collection_id]
     assert len(detail_payload["collection_overlays"]) == 1
-    assert detail_payload["collection_overlays"][0]["collection_id"] == second_collection_id
+    assert (
+        detail_payload["collection_overlays"][0]["collection_id"]
+        == second_collection_id
+    )
 
 
 def test_collection_results_endpoints_project_product_results_and_workspace_exposes_results(
@@ -1175,7 +1233,9 @@ def test_collection_results_endpoints_project_product_results_and_workspace_expo
         f"/collections/{collection_id}/comparisons?"
     )
 
-    comparisons = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/comparisons")
+    comparisons = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/comparisons"
+    )
     assert comparisons.status_code == 200
     comparison_payload = comparisons.json()
     assert comparison_payload["items"][0]["result_id"] == "cres-result-1"
@@ -1219,7 +1279,9 @@ def test_graph_endpoint_returns_collection_not_found_error(app_client):
 
 
 def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client):
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Pending Graph"})
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections", json={"name": "Pending Graph"}
+    )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
@@ -1228,7 +1290,9 @@ def test_graph_endpoints_return_readiness_error_until_artifacts_exist(app_client
     graph_detail = graph.json()["detail"]
     assert graph_detail["code"] == "graph_not_ready"
     assert graph_detail["collection_id"] == collection_id
-    assert "core_fact_repository.comparison_artifacts" in graph_detail["missing_artifacts"]
+    assert (
+        "core_fact_repository.comparison_artifacts" in graph_detail["missing_artifacts"]
+    )
 
     graphml = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/graphml")
     assert graphml.status_code == 409
@@ -1307,7 +1371,9 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
 
 
 def test_delete_collection_removes_app_layer_collection(app_client):
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": "Delete Me"})
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections", json={"name": "Delete Me"}
+    )
     assert create_resp.status_code == 200
     collection_id = create_resp.json()["collection_id"]
 
@@ -1328,7 +1394,9 @@ def test_delete_collection_removes_app_layer_collection(app_client):
     )
 
 
-def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app_client):
+def test_collection_contract_hides_default_method_and_ignores_legacy_payload(
+    app_client,
+):
     create_resp = app_client.post(
         f"{API_V1_PREFIX}/collections",
         json={
@@ -1349,7 +1417,9 @@ def test_collection_contract_hides_default_method_and_ignores_legacy_payload(app
     list_resp = app_client.get(f"{API_V1_PREFIX}/collections")
     assert list_resp.status_code == 200
     created_item = next(
-        item for item in list_resp.json()["items"] if item["collection_id"] == collection_id
+        item
+        for item in list_resp.json()["items"]
+        if item["collection_id"] == collection_id
     )
     assert "default_method" not in created_item
 
@@ -1379,7 +1449,13 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
 
     upload_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/files",
-        files={"file": ("paper.txt", b"Experimental Section\nMix and anneal.", "text/plain")},
+        files={
+            "file": (
+                "paper.txt",
+                b"Experimental Section\nMix and anneal.",
+                "text/plain",
+            )
+        },
     )
     assert upload_resp.status_code == 200
 

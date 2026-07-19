@@ -5,10 +5,14 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from application.core.comparison_service import (
+    ComparisonRowsNotReadyError,
+    ComparisonService,
+)
 from application.core.research_understanding_service import ResearchUnderstandingService
 from application.source.collection_service import CollectionService
 from domain.core import ResearchUnderstanding
-from domain.core.fact_store import CoreFactSet
+from domain.core.comparison_projection import ComparisonProjectionRecords
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import ObjectiveFactSet
 from domain.core.objective_material_projection import (
@@ -120,7 +124,9 @@ class ResearchViewDocumentNotFoundError(FileNotFoundError):
     def __init__(self, collection_id: str, document_id: str) -> None:
         self.collection_id = collection_id
         self.document_id = document_id
-        super().__init__(f"research view document not found: {collection_id}/{document_id}")
+        super().__init__(
+            f"research view document not found: {collection_id}/{document_id}"
+        )
 
 
 class ResearchViewMaterialNotFoundError(FileNotFoundError):
@@ -149,12 +155,14 @@ class ResearchViewAggregationService:
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
         core_fact_repository: CoreFactRepository,
+        comparison_service: ComparisonService,
         research_understanding_service: ResearchUnderstandingService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
         self.core_fact_repository = core_fact_repository
+        self.comparison_service = comparison_service
         self.research_understanding_service = research_understanding_service
 
     def get_collection_research_view(self, collection_id: str) -> dict[str, Any]:
@@ -164,9 +172,7 @@ class ResearchViewAggregationService:
             return self._empty_collection_payload(collection_id, collection)
 
         facts = self._load_collection_facts(collection_id)
-        frames = self._core_fact_records(
-            self.paper_fact_repository.read(collection_id)
-        )
+        frames = self._core_fact_records(self.paper_fact_repository.read(collection_id))
         projection = self._comparison_projection_from_facts(facts)
         objective_material_rows = self._objective_material_rows(collection_id)
         if objective_material_rows:
@@ -364,7 +370,9 @@ class ResearchViewAggregationService:
         if not objective_material_rows:
             existing_non_material = tuple(
                 item
-                for item in self.core_fact_repository.list_research_understandings(collection_id)
+                for item in self.core_fact_repository.list_research_understandings(
+                    collection_id
+                )
                 if item.scope.scope_type != "material"
             )
             self.core_fact_repository.replace_collection_research_understandings(
@@ -399,7 +407,9 @@ class ResearchViewAggregationService:
             )
         existing_non_material = tuple(
             item
-            for item in self.core_fact_repository.list_research_understandings(collection_id)
+            for item in self.core_fact_repository.list_research_understandings(
+                collection_id
+            )
             if item.scope.scope_type != "material"
         )
         persisted = (*existing_non_material, *understandings)
@@ -485,16 +495,21 @@ class ResearchViewAggregationService:
         self._load_collection_facts(collection_id)
         return self._core_fact_records(self.paper_fact_repository.read(collection_id))
 
-    def _load_collection_facts(self, collection_id: str) -> CoreFactSet:
+    def _load_collection_facts(
+        self,
+        collection_id: str,
+    ) -> ComparisonProjectionRecords | None:
         paper_facts = self.paper_fact_repository.read(collection_id)
         objective_facts = self.objective_repository.read(collection_id)
-        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
         if (
             not paper_facts.has_paper_facts()
             and not objective_facts.objective_evidence_units
         ):
             raise ResearchViewNotReadyError(collection_id)
-        return core_facts
+        try:
+            return self.comparison_service.read_comparison_projection(collection_id)
+        except ComparisonRowsNotReadyError:
+            return None
 
     def _objective_material_rows(
         self,
@@ -553,9 +568,9 @@ class ResearchViewAggregationService:
 
     def _comparison_projection_from_facts(
         self,
-        facts: CoreFactSet,
+        facts: ComparisonProjectionRecords | None,
     ) -> list[dict[str, Any]] | None:
-        if not facts.comparison_rows:
+        if facts is None or not facts.comparison_rows:
             return None
         return self._records_list(facts.comparison_rows)
 
@@ -591,9 +606,7 @@ class ResearchViewAggregationService:
         evidence_anchors = frames.get("evidence_anchors", [])
         profiles = frames.get("document_profiles", [])
         real_variants = [
-            row
-            for row in sample_variants
-            if self._is_real_sample_variant(row)
+            row for row in sample_variants if self._is_real_sample_variant(row)
         ]
         process_variables = sorted(
             {
@@ -659,7 +672,7 @@ class ResearchViewAggregationService:
     def _build_objective_collection_overview(
         self,
         collection_id: str,
-        facts: CoreFactSet,
+        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
         projection: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
@@ -677,9 +690,7 @@ class ResearchViewAggregationService:
             {
                 key
                 for row in rows
-                for key, value in self._as_mapping(
-                    row.get("process_context")
-                ).items()
+                for key, value in self._as_mapping(row.get("process_context")).items()
                 if self._has_observed_value(value)
             }
         )
@@ -739,7 +750,7 @@ class ResearchViewAggregationService:
     def _build_objective_collection_paper_coverage(
         self,
         collection_id: str,
-        facts: CoreFactSet,
+        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         profiles = self._records_list(
@@ -768,9 +779,7 @@ class ResearchViewAggregationService:
             process_keys = {
                 key
                 for row in document_rows
-                for key, value in self._as_mapping(
-                    row.get("process_context")
-                ).items()
+                for key, value in self._as_mapping(row.get("process_context")).items()
                 if self._has_observed_value(value)
             }
             measurement_count = sum(
@@ -935,7 +944,9 @@ class ResearchViewAggregationService:
                 for warning in series.get("warnings", [])
             ],
         ]
-        overview = self._build_paper_overview(document_id, document_frames, sample_matrix)
+        overview = self._build_paper_overview(
+            document_id, document_frames, sample_matrix
+        )
         state = self._derive_document_state(sample_matrix, condition_series, warnings)
         return {
             "collection_id": collection_id,
@@ -969,11 +980,7 @@ class ResearchViewAggregationService:
     ) -> dict[str, Any]:
         variants = frames.get("sample_variants", [])
         measurements = frames.get("measurement_results", [])
-        variant_rows = [
-            row
-            for row in variants
-            if self._is_real_sample_variant(row)
-        ]
+        variant_rows = [row for row in variants if self._is_real_sample_variant(row)]
         variant_ids = {
             self._safe_text(row.get("variant_id"))
             for row in variant_rows
@@ -1164,7 +1171,9 @@ class ResearchViewAggregationService:
         if not variant_id:
             return False
         process_context = self._as_mapping(variant.get("process_context"))
-        has_process = any(self._has_observed_value(value) for value in process_context.values())
+        has_process = any(
+            self._has_observed_value(value) for value in process_context.values()
+        )
         has_variable = self._has_observed_value(variant.get("variable_value")) or bool(
             self._safe_text(variant.get("variable_axis_type"))
         )
@@ -1193,7 +1202,8 @@ class ResearchViewAggregationService:
         return (
             self._safe_text(measurement.get("property_normalized"))
             or "unspecified_property",
-            self._safe_text(measurement.get("test_condition_id")) or "unspecified_condition",
+            self._safe_text(measurement.get("test_condition_id"))
+            or "unspecified_condition",
         )
 
     def _dedupe_measurements_for_cell(
@@ -1287,7 +1297,8 @@ class ResearchViewAggregationService:
                     scope="value",
                     message="Duplicate raw measurement facts were collapsed in this cell.",
                     related_object_ids=[
-                        self._safe_text(row.get("result_id")) or "" for row in measurements
+                        self._safe_text(row.get("result_id")) or ""
+                        for row in measurements
                     ],
                 )
             )
@@ -1316,7 +1327,11 @@ class ResearchViewAggregationService:
             "confidence": None,
             "evidence_refs": self._build_evidence_refs(fact_ids, anchor_ids, frames),
             "duplicate_count": duplicate_count,
-            "conflict_status": "conflicted" if conflicted else "duplicate_only" if duplicate_count else "none",
+            "conflict_status": "conflicted"
+            if conflicted
+            else "duplicate_only"
+            if duplicate_count
+            else "none",
             "warnings": self._dedupe_warnings(warnings),
         }
 
@@ -1356,7 +1371,8 @@ class ResearchViewAggregationService:
                     "evidence_ref_id": f"eref:{anchor_id}",
                     "fact_ids": self._dedupe_strings(fact_ids),
                     "anchor_ids": [anchor_id],
-                    "source_kind": self._safe_text(anchor.get("source_type")) or "anchor",
+                    "source_kind": self._safe_text(anchor.get("source_type"))
+                    or "anchor",
                     "document_id": self._safe_text(anchor.get("document_id")),
                     "locator": {
                         key: self._clean_value(anchor.get(key))
@@ -1374,7 +1390,9 @@ class ResearchViewAggregationService:
                         )
                         if self._has_observed_value(anchor.get(key))
                     },
-                    "confidence": self._numeric_or_none(anchor.get("locator_confidence")),
+                    "confidence": self._numeric_or_none(
+                        anchor.get("locator_confidence")
+                    ),
                     "traceability_status": "direct",
                 }
             )
@@ -1417,7 +1435,9 @@ class ResearchViewAggregationService:
 
         series_items: list[dict[str, Any]] = []
         for (variant_id, property_name, axis_name), records in sorted(grouped.items()):
-            points_by_value: dict[tuple[Any, str | None], list[dict[str, Any]]] = defaultdict(list)
+            points_by_value: dict[tuple[Any, str | None], list[dict[str, Any]]] = (
+                defaultdict(list)
+            )
             axis_unit: str | None = None
             for record in records:
                 condition = condition_lookup.get(
@@ -1425,7 +1445,9 @@ class ResearchViewAggregationService:
                 )
                 if not condition:
                     continue
-                axis = self._condition_axis_from_payload(condition.get("condition_payload"))
+                axis = self._condition_axis_from_payload(
+                    condition.get("condition_payload")
+                )
                 if axis is None:
                     continue
                 axis_unit = axis.get("unit")
@@ -1461,7 +1483,8 @@ class ResearchViewAggregationService:
                     ),
                     "document_id": document_id,
                     "sample_id": variant_id,
-                    "sample_label": self._safe_text(sample.get("variant_label")) or variant_id,
+                    "sample_label": self._safe_text(sample.get("variant_label"))
+                    or variant_id,
                     "property": property_name,
                     "condition_axis": {
                         "axis_name": axis_name,
@@ -1589,7 +1612,8 @@ class ResearchViewAggregationService:
                     "row_id": self._safe_text(record.get("row_id"))
                     or self._safe_text(record.get("comparable_result_id"))
                     or "",
-                    "document_id": self._safe_text(record.get("source_document_id")) or "",
+                    "document_id": self._safe_text(record.get("source_document_id"))
+                    or "",
                     "sample_id": self._safe_text(record.get("variant_id")),
                     "sample_label": self._safe_text(record.get("variant_label")),
                     "material": self._safe_text(
@@ -1604,24 +1628,29 @@ class ResearchViewAggregationService:
                     "test_condition": self._safe_text(
                         record.get("test_condition_normalized")
                     ),
-                    "property": self._safe_text(record.get("property_normalized")) or "",
+                    "property": self._safe_text(record.get("property_normalized"))
+                    or "",
                     "result": result,
                     "evidence_refs": result["evidence_refs"],
                     "warnings": result["warnings"],
                 }
             )
-        group_id = self._slug(
-            "|".join(
-                self._safe_text(group_rows[0].get(column)) or ""
-                for column in (
-                    "material_system_normalized",
-                    "process_normalized",
-                    "test_condition_normalized",
-                    "baseline_normalized",
-                    "variable_axis",
+        group_id = (
+            self._slug(
+                "|".join(
+                    self._safe_text(group_rows[0].get(column)) or ""
+                    for column in (
+                        "material_system_normalized",
+                        "process_normalized",
+                        "test_condition_normalized",
+                        "baseline_normalized",
+                        "variable_axis",
+                    )
                 )
             )
-        ) if group_rows else "empty"
+            if group_rows
+            else "empty"
+        )
         return {
             "matrix_id": f"cross-paper-matrix:{group_id}",
             "group_id": f"comparison-group:{group_id}",
@@ -1864,7 +1893,7 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         material_id: str,
-        facts: CoreFactSet,
+        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         index = self._build_objective_material_index(rows)
@@ -2272,7 +2301,7 @@ class ResearchViewAggregationService:
         self,
         collection_id: str,
         material_key: str,
-        facts: CoreFactSet,
+        facts: ComparisonProjectionRecords | None,
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         profiles = self._records_list(
@@ -2381,7 +2410,9 @@ class ResearchViewAggregationService:
         ]
 
     def _objective_material_key_from_row(self, row: dict[str, Any]) -> str | None:
-        return self._material_key_from_label(self._objective_material_label_from_row(row))
+        return self._material_key_from_label(
+            self._objective_material_label_from_row(row)
+        )
 
     def _objective_material_label_from_row(self, row: dict[str, Any]) -> str | None:
         for mapping in (
@@ -2498,7 +2529,9 @@ class ResearchViewAggregationService:
             "unit": unit,
             "normalized_value": numeric_value,
             "normalized_unit": unit,
-            "status": "observed" if numeric_value is not None or source_value else "missing",
+            "status": "observed"
+            if numeric_value is not None or source_value
+            else "missing",
             "confidence": self._numeric_or_none(row.get("confidence")),
             "evidence_refs": self._build_objective_evidence_refs([row]),
             "duplicate_count": 0,
@@ -2848,7 +2881,8 @@ class ResearchViewAggregationService:
         variant_rows = [
             row
             for row in variants
-            if self._material_key_from_variant(row, material_document_keys) == material_key
+            if self._material_key_from_variant(row, material_document_keys)
+            == material_key
             and self._is_real_sample_variant(row)
         ]
         measurements_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -2940,9 +2974,7 @@ class ResearchViewAggregationService:
         variants = frames.get("sample_variants", [])
         grouped: dict[str, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
         for variant in variants:
-            for key, value in self._as_mapping(
-                variant.get("process_context")
-            ).items():
+            for key, value in self._as_mapping(variant.get("process_context")).items():
                 if self._has_observed_value(value):
                     grouped[key].append((variant, value))
 
@@ -3130,7 +3162,9 @@ class ResearchViewAggregationService:
         frames: _FactRows,
     ) -> list[dict[str, Any]]:
         sample_matrix = self._build_sample_matrix(collection_id, document_id, frames)
-        grouped: dict[str, list[tuple[dict[str, Any], str, dict[str, Any]]]] = defaultdict(list)
+        grouped: dict[str, list[tuple[dict[str, Any], str, dict[str, Any]]]] = (
+            defaultdict(list)
+        )
         for row in sample_matrix.get("rows", []):
             for value_key, value in row.get("values", {}).items():
                 if value.get("status") not in {"observed", "normalized"}:
@@ -3147,7 +3181,9 @@ class ResearchViewAggregationService:
                 self._safe_text(row.get("variable_axis")) or "sample"
                 for row, _, _ in records
             }
-            variable_axis = next(iter(variable_axes)) if len(variable_axes) == 1 else "sample"
+            variable_axis = (
+                next(iter(variable_axes)) if len(variable_axes) == 1 else "sample"
+            )
             material = (
                 self._safe_text(records[0][0].get("material")) or "unspecified material"
             )
@@ -3228,7 +3264,8 @@ class ResearchViewAggregationService:
         return [
             group
             for group in comparable_groups
-            if self._material_key_from_label(group.get("material_system")) == material_key
+            if self._material_key_from_label(group.get("material_system"))
+            == material_key
         ]
 
     def _single_material_key_by_document(
@@ -3248,7 +3285,9 @@ class ResearchViewAggregationService:
             if not self._is_real_sample_variant(variant):
                 continue
             document_id = self._safe_text(variant.get("document_id"))
-            material_key = self._material_key_from_label(self._material_from_variant(variant))
+            material_key = self._material_key_from_label(
+                self._material_from_variant(variant)
+            )
             if document_id and material_key:
                 candidates[document_id].add(material_key)
 
@@ -3361,9 +3400,7 @@ class ResearchViewAggregationService:
             entry = index[material_key]
             if document_id := self._safe_text(measurement.get("document_id")):
                 entry["document_ids"].add(document_id)
-            if property_name := self._safe_text(
-                measurement.get("property_normalized")
-            ):
+            if property_name := self._safe_text(measurement.get("property_normalized")):
                 entry["measured_properties"].add(property_name)
 
         for group in comparable_groups:
@@ -3535,7 +3572,9 @@ class ResearchViewAggregationService:
         document_material_keys: dict[str, str] | None = None,
     ) -> str | None:
         variant = dict(variant_row)
-        material_key = self._material_key_from_label(self._material_from_variant(variant))
+        material_key = self._material_key_from_label(
+            self._material_from_variant(variant)
+        )
         if material_key is not None:
             return material_key
         if document_material_keys is None:
@@ -3722,9 +3761,7 @@ class ResearchViewAggregationService:
             variants = frames.get("sample_variants", [])
             total = int(len(variants))
             with_evidence = sum(
-                1
-                for row in variants
-                if self._as_list(row.get("source_anchor_ids"))
+                1 for row in variants if self._as_list(row.get("source_anchor_ids"))
             )
         coverage = round(with_evidence / total, 3) if total else None
         return {
@@ -3770,7 +3807,9 @@ class ResearchViewAggregationService:
             return "empty"
         if any(warning.get("severity") == "error" for warning in warnings):
             return "failed"
-        if warnings or any(material.get("state") == "partial" for material in materials):
+        if warnings or any(
+            material.get("state") == "partial" for material in materials
+        ):
             return "partial"
         return "ready"
 
@@ -3869,9 +3908,7 @@ class ResearchViewAggregationService:
         measurements = frames.get("measurement_results", [])
         test_conditions = frames.get("test_conditions", [])
         real_variants = [
-            row
-            for row in sample_variants
-            if self._is_real_sample_variant(row)
+            row for row in sample_variants if self._is_real_sample_variant(row)
         ]
         return {
             "document_id": document_id,
@@ -4030,7 +4067,9 @@ class ResearchViewAggregationService:
     ) -> str:
         if not paper_coverage:
             return "empty"
-        if comparable_groups and not any(warning["severity"] == "error" for warning in warnings):
+        if comparable_groups and not any(
+            warning["severity"] == "error" for warning in warnings
+        ):
             return "ready"
         if any(row.get("state") == "ready" for row in paper_coverage):
             return "partial"
@@ -4158,7 +4197,9 @@ class ResearchViewAggregationService:
                 severity="warning",
                 scope="comparison_row",
                 message=warning,
-                related_object_ids=[self._safe_text(row.get("comparable_result_id")) or ""],
+                related_object_ids=[
+                    self._safe_text(row.get("comparable_result_id")) or ""
+                ],
             )
             for warning in self._as_list(row.get("comparability_warnings"))
         ]
@@ -4218,7 +4259,8 @@ class ResearchViewAggregationService:
         }
         sample_count = len(
             {
-                self._safe_text(row.get("variant_id")) or self._safe_text(row.get("row_id"))
+                self._safe_text(row.get("variant_id"))
+                or self._safe_text(row.get("row_id"))
                 for row in rows
             }
         )
@@ -4274,9 +4316,7 @@ class ResearchViewAggregationService:
 
     def _record_values(self, records: list[dict[str, Any]], column: str) -> list[str]:
         return [
-            text
-            for record in records
-            if (text := self._safe_text(record.get(column)))
+            text for record in records if (text := self._safe_text(record.get(column)))
         ]
 
     def _first_record_by_value(
@@ -4291,10 +4331,7 @@ class ResearchViewAggregationService:
         return None
 
     def _record_to_dict(self, row: dict[str, Any]) -> dict[str, Any]:
-        return {
-            str(key): self._clean_value(value)
-            for key, value in dict(row).items()
-        }
+        return {str(key): self._clean_value(value) for key, value in dict(row).items()}
 
     def _as_mapping(self, value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
@@ -4313,7 +4350,12 @@ class ResearchViewAggregationService:
         return []
 
     def _numeric_value(self, value_payload: dict[str, Any]) -> float | int | None:
-        for key in ("value", "numeric_value", "normalized_value", "source_value_numeric"):
+        for key in (
+            "value",
+            "numeric_value",
+            "normalized_value",
+            "source_value_numeric",
+        ):
             value = value_payload.get(key)
             numeric = self._numeric_or_none(value)
             if numeric is not None:
@@ -4350,7 +4392,10 @@ class ResearchViewAggregationService:
     def _has_observed_value(self, value: Any) -> bool:
         if isinstance(value, (dict, list, tuple, set)):
             return bool(value)
-        return self._safe_text(value) is not None or self._numeric_or_none(value) is not None
+        return (
+            self._safe_text(value) is not None
+            or self._numeric_or_none(value) is not None
+        )
 
     def _dedupe_strings(self, values: list[Any]) -> list[str]:
         seen: set[str] = set()
@@ -4369,7 +4414,9 @@ class ResearchViewAggregationService:
     ) -> list[dict[str, Any]]:
         deduped: dict[str, dict[str, Any]] = {}
         for warning in warnings:
-            deduped.setdefault(str(warning.get("warning_id") or warning.get("code")), warning)
+            deduped.setdefault(
+                str(warning.get("warning_id") or warning.get("code")), warning
+            )
         return list(deduped.values())
 
     def _clean_value(self, value: Any) -> Any:

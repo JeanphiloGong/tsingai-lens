@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
     ResearchViewNotReadyError,
@@ -11,8 +12,6 @@ from controllers.schemas.core.research_view import MaterialProfileResponse
 from domain.core import (
     BaselineReference,
     CharacterizationObservation,
-    ComparisonRowRecord,
-    CoreFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
@@ -29,6 +28,7 @@ from domain.core import (
 from domain.core.paper_fact import PaperFactSet
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 class FakeCollectionService:
@@ -51,20 +51,8 @@ class FakeCollectionService:
 class FakeCoreFactRepository:
     backend_name = "fake"
 
-    def __init__(
-        self,
-        comparison_rows: list[dict] | None,
-    ) -> None:
-        self.facts = CoreFactSet(
-            comparison_rows=self._records(
-                comparison_rows if comparison_rows is not None else [],
-                ComparisonRowRecord,
-            ),
-        )
+    def __init__(self) -> None:
         self.research_understandings: dict[tuple[str, str], ResearchUnderstanding] = {}
-
-    def read_collection_facts(self, collection_id: str) -> CoreFactSet:  # noqa: ARG002
-        return self.facts
 
     def replace_collection_research_understandings(
         self,
@@ -93,15 +81,6 @@ class FakeCoreFactRepository:
         if scope_type is None:
             return items
         return tuple(item for item in items if item.scope.scope_type == scope_type)
-
-    def _records(
-        self,
-        records: list[dict],
-        record_cls: type,
-    ) -> tuple:
-        if not records:
-            return ()
-        return tuple(record_cls.from_mapping(record) for record in records)
 
 
 def _frames(collection_id: str = "col-1") -> tuple[list[dict], dict[str, list[dict]]]:
@@ -376,18 +355,23 @@ def _service(
 ) -> ResearchViewAggregationService:
     profiles, frames = _frames()
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    core_fact_repository = FakeCoreFactRepository(comparison_rows)
+    core_fact_repository = FakeCoreFactRepository()
     objective_repository = MemoryObjectiveRepository()
     source_repository = SimpleNamespace()
+    collection_service = FakeCollectionService(has_files=has_files)
     return ResearchViewAggregationService(
-        collection_service=FakeCollectionService(has_files=has_files),
+        collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
-        research_understanding_service=ResearchUnderstandingService(
-            source_repository
+        comparison_service=_comparison_service(
+            collection_service,
+            paper_fact_repository,
+            objective_repository,
+            comparison_rows,
         ),
+        research_understanding_service=ResearchUnderstandingService(source_repository),
     )
 
 
@@ -410,7 +394,7 @@ def _service_from_frames(
     research_objectives: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    core_fact_repository = FakeCoreFactRepository(comparison_rows)
+    core_fact_repository = FakeCoreFactRepository()
     objective_repository = MemoryObjectiveRepository()
     objective_repository.replace(
         "col-1",
@@ -428,16 +412,87 @@ def _service_from_frames(
         ),
     )
     source_repository = SimpleNamespace()
+    collection_service = FakeCollectionService()
     return ResearchViewAggregationService(
-        collection_service=FakeCollectionService(),
+        collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
         core_fact_repository=core_fact_repository,
-        research_understanding_service=ResearchUnderstandingService(
-            source_repository
+        comparison_service=_comparison_service(
+            collection_service,
+            paper_fact_repository,
+            objective_repository,
+            comparison_rows,
         ),
+        research_understanding_service=ResearchUnderstandingService(source_repository),
     )
+
+
+def _comparison_service(
+    collection_service: FakeCollectionService,
+    paper_fact_repository: MemoryPaperFactRepository,
+    objective_repository: MemoryObjectiveRepository,
+    comparison_rows: list[dict] | None,
+) -> ComparisonService:
+    comparison_repository = MemoryComparisonRepository()
+    comparison_objective_repository = objective_repository
+    if (
+        comparison_rows
+        and not objective_repository.read("col-1").objective_evidence_units
+    ):
+        comparison_objective_repository = MemoryObjectiveRepository.from_facts(
+            "col-1",
+            ObjectiveFactSet(
+                objective_evidence_units=tuple(
+                    ObjectiveEvidenceUnit.from_mapping(
+                        {
+                            "evidence_unit_id": row["comparable_result_id"],
+                            "objective_id": "obj-test",
+                            "document_id": row["source_document_id"],
+                            "unit_kind": "measurement",
+                            "material_system": {
+                                "name": row.get("material_system_normalized")
+                            },
+                            "sample_context": {
+                                "sample": row.get("variant_label"),
+                                "variant_id": row.get("variant_id"),
+                            },
+                            "process_context": {
+                                "process": row.get("process_normalized"),
+                                row.get("variable_axis") or "variable": row.get(
+                                    "variable_value"
+                                ),
+                            },
+                            "test_condition": {
+                                "condition": row.get("test_condition_normalized")
+                            },
+                            "property_normalized": row.get("property_normalized"),
+                            "value_payload": {
+                                "value": row.get("value"),
+                                "source_value_text": row.get("result_summary"),
+                                "comparison_axis": row.get("variable_axis"),
+                                "comparison_axis_value": row.get("variable_value"),
+                            },
+                            "unit": row.get("unit"),
+                            "evidence_anchor_ids": row.get("supporting_anchor_ids", []),
+                            "resolution_status": "resolved",
+                        }
+                    )
+                    for row in comparison_rows
+                ),
+            ),
+        )
+    service = ComparisonService(
+        collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=comparison_objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=SimpleNamespace(),
+    )
+    if comparison_rows:
+        service.build_comparison_rows("col-1", "build_test")
+    return service
 
 
 def _paper_fact_repository(
@@ -640,16 +695,17 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     MaterialProfileResponse.model_validate(profile)
     assert profile["state"] == "ready"
     assert profile["overview"]["sample_count"] == 2
-    assert profile["overview"]["measured_properties"] == [
-        "corrosion current density"
-    ]
+    assert profile["overview"]["measured_properties"] == ["corrosion current density"]
     assert [row["sample_label"] for row in profile["sample_matrix"]["rows"]] == [
         "as-built",
         "heat-treated",
     ]
-    assert profile["sample_matrix"]["rows"][0]["values"][
-        "corrosion current density"
-    ]["condition"] == "method: potentiodynamic polarization"
+    assert (
+        profile["sample_matrix"]["rows"][0]["values"]["corrosion current density"][
+            "condition"
+        ]
+        == "method: potentiodynamic polarization"
+    )
     assert profile["measured_properties"][0]["display_range"] == "0.4-1.2 uA/cm2"
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-as-built-icorr"]
     understanding = profile["understanding"]
@@ -659,7 +715,6 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     assert understanding["claims"]
     assert understanding["claims"][0]["evidence_ref_ids"]
     assert understanding["evidence_refs"]
-
 
 
 def test_collection_material_profile_uses_objective_profile_when_available():
@@ -690,7 +745,9 @@ def test_collection_material_profile_uses_objective_profile_when_available():
     rows = profile["sample_matrix"]["rows"]
     assert [row["sample_label"] for row in rows] == ["summary"]
     assert rows[0]["values"]["elongation"]["value"] == 33
-    assert {item["property"] for item in profile["measured_properties"]} == {"elongation"}
+    assert {item["property"] for item in profile["measured_properties"]} == {
+        "elongation"
+    }
     assert profile["overview"]["measured_properties"] == ["elongation"]
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-objective-only-note"]
     assert profile.get("understanding") is None
@@ -731,9 +788,7 @@ def test_collection_research_view_uses_objective_units_without_old_facts():
     assert payload["overview"]["sample_variant_count"] == 2
     assert payload["overview"]["measurement_count"] == 2
     assert payload["overview"]["material_systems"] == ["316L stainless steel"]
-    assert payload["overview"]["measured_properties"] == [
-        "corrosion current density"
-    ]
+    assert payload["overview"]["measured_properties"] == ["corrosion current density"]
     assert payload["paper_coverage"][0]["state"] == "ready"
     assert payload["paper_coverage"][0]["measurement_count"] == 2
     assert payload["materials"][0]["material_id"] == "mat-316l-stainless-steel"
@@ -785,7 +840,9 @@ def test_document_material_profile_stays_inside_one_paper():
     assert materials["materials"][0]["sample_count"] == 1
     assert profile["document_id"] == "paper-1"
     assert profile["sample_matrix"]["document_id"] == "paper-1"
-    assert [row["document_id"] for row in profile["sample_matrix"]["rows"]] == ["paper-1"]
+    assert [row["document_id"] for row in profile["sample_matrix"]["rows"]] == [
+        "paper-1"
+    ]
     assert len(profile["process_conditions"]) == 1
     assert {row["test_condition_id"] for row in profile["test_conditions"]} == {
         "tc-25",

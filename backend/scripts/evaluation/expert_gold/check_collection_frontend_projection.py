@@ -92,6 +92,7 @@ def check_collection_frontend_projection(
     from application.core.research_view_aggregation_service import (  # noqa: PLC0415
         ResearchViewAggregationService,
     )
+    from application.core.comparison_service import ComparisonService  # noqa: PLC0415
     from application.core.research_understanding_service import (  # noqa: PLC0415
         ResearchUnderstandingService,
     )
@@ -110,6 +111,9 @@ def check_collection_frontend_projection(
     from infra.persistence.file import FileCollectionWorkspace  # noqa: PLC0415
     from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
         PostgresCollectionRepository,
+    )
+    from infra.persistence.postgres.comparison_repository import (  # noqa: PLC0415
+        PostgresComparisonRepository,
     )
     from infra.persistence.postgres.paper_fact_repository import (  # noqa: PLC0415
         PostgresPaperFactRepository,
@@ -132,6 +136,7 @@ def check_collection_frontend_projection(
         source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
         paper_fact_repository = PostgresPaperFactRepository(session_factory)
         objective_repository = PostgresObjectiveRepository(session_factory)
+        comparison_repository = PostgresComparisonRepository(session_factory)
         core_fact_repository = SqliteCoreFactRepository(
             backend_root / "data" / "lens.sqlite"
         )
@@ -142,6 +147,13 @@ def check_collection_frontend_projection(
         )
         research_understanding_service = ResearchUnderstandingService(
             source_artifact_repository=source_artifact_repository,
+        )
+        comparison_service = ComparisonService(
+            collection_service=collection_service,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            comparison_repository=comparison_repository,
+            document_profile_service=document_profile_service,
         )
         objective_service = ResearchObjectiveService(
             collection_service=collection_service,
@@ -159,6 +171,7 @@ def check_collection_frontend_projection(
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
             core_fact_repository=core_fact_repository,
+            comparison_service=comparison_service,
             research_understanding_service=research_understanding_service,
         ).get_collection_material_research_view(
             collection_id,

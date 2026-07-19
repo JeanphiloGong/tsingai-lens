@@ -12,7 +12,7 @@ from application.core.semantic_build.document_profile_service import (
 )
 from application.source.task_service import TaskService
 from domain.ports import (
-    CoreFactRepository,
+    ComparisonRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
@@ -29,14 +29,14 @@ class WorkspaceService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        core_fact_repository: CoreFactRepository,
+        comparison_repository: ComparisonRepository,
         document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.core_fact_repository = core_fact_repository
+        self.comparison_repository = comparison_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
 
@@ -46,7 +46,7 @@ class WorkspaceService:
         )
         paper_facts = self.paper_fact_repository.read(collection_id)
         objective_facts = self.objective_repository.read(collection_id)
-        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        comparison_facts = self.comparison_repository.read(collection_id)
         objective_evidence_ready = bool(objective_facts.objective_evidence_units)
         evidence_cards_generated = bool(
             paper_facts.paper_facts_generated or objective_evidence_ready
@@ -54,10 +54,20 @@ class WorkspaceService:
         evidence_cards_ready = bool(
             paper_facts.evidence_cards_ready or objective_evidence_ready
         )
+        comparison_rows_ready = bool(
+            comparison_facts.comparable_results
+            and any(
+                result.included
+                for result in comparison_facts.collection_comparable_results
+            )
+        )
         graph_generated = bool(
             paper_facts.document_profiles
             and evidence_cards_generated
-            and (objective_evidence_ready or core_facts.comparison_artifacts_generated)
+            and (
+                objective_evidence_ready
+                or comparison_facts.comparison_artifacts_generated
+            )
         )
         graph_ready = bool(
             paper_facts.document_profiles
@@ -65,9 +75,8 @@ class WorkspaceService:
             and (
                 objective_evidence_ready
                 or objective_facts.objective_logic_chains
-                or core_facts.comparable_results
-                or core_facts.collection_comparable_results
-                or core_facts.comparison_rows
+                or comparison_facts.comparable_results
+                or comparison_facts.collection_comparable_results
             )
         )
         source_artifacts_generated = not source_artifacts.is_empty()
@@ -99,17 +108,17 @@ class WorkspaceService:
             "sample_variants_ready": bool(paper_facts.sample_variants),
             "measurement_results_generated": paper_facts.paper_facts_generated,
             "measurement_results_ready": bool(paper_facts.measurement_results),
-            "comparable_results_generated": core_facts.comparison_artifacts_generated,
-            "comparable_results_ready": bool(core_facts.comparable_results),
+            "comparable_results_generated": comparison_facts.comparison_artifacts_generated,
+            "comparable_results_ready": bool(comparison_facts.comparable_results),
             "collection_comparable_results_generated": (
-                core_facts.comparison_artifacts_generated
+                comparison_facts.comparison_artifacts_generated
             ),
             "collection_comparable_results_ready": bool(
-                core_facts.collection_comparable_results
+                comparison_facts.collection_comparable_results
             ),
             "collection_comparable_results_stale": False,
-            "comparison_rows_generated": core_facts.comparison_artifacts_generated,
-            "comparison_rows_ready": bool(core_facts.comparison_rows),
+            "comparison_rows_generated": comparison_facts.comparison_artifacts_generated,
+            "comparison_rows_ready": comparison_rows_ready,
             "comparison_rows_stale": False,
             "graph_generated": graph_generated,
             "graph_ready": graph_ready,
@@ -173,15 +182,19 @@ class WorkspaceService:
     def _build_capabilities(self, artifacts: dict) -> dict:
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
         comparisons_generated = self._comparisons_generated(artifacts)
-        research_view_generated = self._artifact_ready(
-            artifacts,
-            "evidence_cards_ready",
-        ) or self._artifact_generated(
-            artifacts,
-            "sample_variants_generated",
-        ) or self._artifact_generated(
-            artifacts,
-            "measurement_results_generated",
+        research_view_generated = (
+            self._artifact_ready(
+                artifacts,
+                "evidence_cards_ready",
+            )
+            or self._artifact_generated(
+                artifacts,
+                "sample_variants_generated",
+            )
+            or self._artifact_generated(
+                artifacts,
+                "measurement_results_generated",
+            )
         )
         return {
             "can_view_graph": graph_ready,
@@ -217,7 +230,10 @@ class WorkspaceService:
             return "graph_ready"
         if self._artifact_ready(artifacts, "evidence_cards_ready"):
             return "comparison_pending"
-        if self._artifact_ready(artifacts, "document_profiles_ready") or document_profiles_generated:
+        if (
+            self._artifact_ready(artifacts, "document_profiles_ready")
+            or document_profiles_generated
+        ):
             return "document_profiled"
         if file_count > 0:
             return "uploaded"
@@ -255,10 +271,13 @@ class WorkspaceService:
             artifacts,
             "graph_generated",
         )
-        documents_ready = self._artifact_ready(
-            artifacts,
-            "document_profiles_ready",
-        ) or document_summary.get("total_documents", 0) > 0
+        documents_ready = (
+            self._artifact_ready(
+                artifacts,
+                "document_profiles_ready",
+            )
+            or document_summary.get("total_documents", 0) > 0
+        )
         evidence_ready = self._artifact_ready(artifacts, "evidence_cards_ready")
         comparison_ready = self._comparisons_ready(artifacts)
         graph_ready = self._artifact_ready(artifacts, "graph_ready")
@@ -273,18 +292,45 @@ class WorkspaceService:
         if file_count == 0 and not any_generated:
             return {
                 "documents": {"status": "not_started", "detail": "No files uploaded."},
-                "results": {"status": "not_started", "detail": "Collection results are not generated yet."},
-                "evidence": {"status": "not_started", "detail": "Evidence cards are not generated yet."},
-                "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
-                "graph": {"status": "not_started", "detail": "Graph projection is not generated yet."},
+                "results": {
+                    "status": "not_started",
+                    "detail": "Collection results are not generated yet.",
+                },
+                "evidence": {
+                    "status": "not_started",
+                    "detail": "Evidence cards are not generated yet.",
+                },
+                "comparisons": {
+                    "status": "not_started",
+                    "detail": "Collection-scoped comparisons are not generated yet.",
+                },
+                "graph": {
+                    "status": "not_started",
+                    "detail": "Graph projection is not generated yet.",
+                },
             }
         if task_status == "running":
             return {
-                "documents": {"status": "processing", "detail": "Document profiling is in progress."},
-                "results": {"status": "not_started", "detail": "Collection results have not been prepared yet."},
-                "evidence": {"status": "not_started", "detail": "Paper facts extraction has not started yet."},
-                "comparisons": {"status": "not_started", "detail": "Collection-scoped comparisons are not generated yet."},
-                "graph": {"status": "not_started", "detail": "Graph projection has not started yet."},
+                "documents": {
+                    "status": "processing",
+                    "detail": "Document profiling is in progress.",
+                },
+                "results": {
+                    "status": "not_started",
+                    "detail": "Collection results have not been prepared yet.",
+                },
+                "evidence": {
+                    "status": "not_started",
+                    "detail": "Paper facts extraction has not started yet.",
+                },
+                "comparisons": {
+                    "status": "not_started",
+                    "detail": "Collection-scoped comparisons are not generated yet.",
+                },
+                "graph": {
+                    "status": "not_started",
+                    "detail": "Graph projection has not started yet.",
+                },
             }
 
         if documents_ready:
@@ -366,7 +412,12 @@ class WorkspaceService:
                 "status": "limited",
                 "detail": "Comparison semantics were generated, but no collection-scoped results were suitable for structured comparison.",
             }
-        elif evidence_ready or evidence_generated or documents_ready or documents_generated:
+        elif (
+            evidence_ready
+            or evidence_generated
+            or documents_ready
+            or documents_generated
+        ):
             comparisons_stage = {
                 "status": "not_started",
                 "detail": "Collection-scoped comparisons are not generated yet.",
@@ -494,13 +545,21 @@ class WorkspaceService:
             "artifacts": {
                 "documents_generated": bool(artifacts.get("documents_generated")),
                 "documents_ready": bool(artifacts.get("documents_ready")),
-                "document_profiles_generated": bool(artifacts.get("document_profiles_generated")),
-                "document_profiles_ready": bool(artifacts.get("document_profiles_ready")),
-                "evidence_anchors_generated": bool(artifacts.get("evidence_anchors_generated")),
+                "document_profiles_generated": bool(
+                    artifacts.get("document_profiles_generated")
+                ),
+                "document_profiles_ready": bool(
+                    artifacts.get("document_profiles_ready")
+                ),
+                "evidence_anchors_generated": bool(
+                    artifacts.get("evidence_anchors_generated")
+                ),
                 "evidence_anchors_ready": bool(artifacts.get("evidence_anchors_ready")),
                 "method_facts_generated": bool(artifacts.get("method_facts_generated")),
                 "method_facts_ready": bool(artifacts.get("method_facts_ready")),
-                "evidence_cards_generated": bool(artifacts.get("evidence_cards_generated")),
+                "evidence_cards_generated": bool(
+                    artifacts.get("evidence_cards_generated")
+                ),
                 "evidence_cards_ready": bool(artifacts.get("evidence_cards_ready")),
                 "characterization_observations_generated": bool(
                     artifacts.get("characterization_observations_generated")
@@ -514,7 +573,9 @@ class WorkspaceService:
                 "structure_features_ready": bool(
                     artifacts.get("structure_features_ready")
                 ),
-                "test_conditions_generated": bool(artifacts.get("test_conditions_generated")),
+                "test_conditions_generated": bool(
+                    artifacts.get("test_conditions_generated")
+                ),
                 "test_conditions_ready": bool(artifacts.get("test_conditions_ready")),
                 "baseline_references_generated": bool(
                     artifacts.get("baseline_references_generated")
@@ -522,7 +583,9 @@ class WorkspaceService:
                 "baseline_references_ready": bool(
                     artifacts.get("baseline_references_ready")
                 ),
-                "sample_variants_generated": bool(artifacts.get("sample_variants_generated")),
+                "sample_variants_generated": bool(
+                    artifacts.get("sample_variants_generated")
+                ),
                 "sample_variants_ready": bool(artifacts.get("sample_variants_ready")),
                 "measurement_results_generated": bool(
                     artifacts.get("measurement_results_generated")
@@ -545,7 +608,9 @@ class WorkspaceService:
                 "collection_comparable_results_stale": bool(
                     artifacts.get("collection_comparable_results_stale")
                 ),
-                "comparison_rows_generated": bool(artifacts.get("comparison_rows_generated")),
+                "comparison_rows_generated": bool(
+                    artifacts.get("comparison_rows_generated")
+                ),
                 "comparison_rows_ready": bool(artifacts.get("comparison_rows_ready")),
                 "comparison_rows_stale": bool(artifacts.get("comparison_rows_stale")),
                 "graph_generated": bool(artifacts.get("graph_generated")),
@@ -561,7 +626,9 @@ class WorkspaceService:
                 "table_cells_ready": bool(artifacts.get("table_cells_ready")),
                 "updated_at": artifacts["updated_at"],
             },
-            "workflow": self._build_workflow(len(files), latest_task, artifacts, document_summary),
+            "workflow": self._build_workflow(
+                len(files), latest_task, artifacts, document_summary
+            ),
             "document_summary": {
                 "total_documents": int(document_summary.get("total_documents", 0) or 0),
                 "by_doc_type": dict(document_summary.get("by_doc_type", {})),

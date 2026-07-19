@@ -23,10 +23,10 @@ from application.source.collection_service import CollectionService
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
+    ComparisonFactSet,
     ComparisonRowRecord,
 )
-from domain.core.fact_store import CoreFactSet
-from domain.ports import CoreFactRepository, ObjectiveRepository, PaperFactRepository
+from domain.ports import ComparisonRepository, ObjectiveRepository, PaperFactRepository
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +111,13 @@ class ComparisonService:
         collection_service: CollectionService,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        core_fact_repository: CoreFactRepository,
+        comparison_repository: ComparisonRepository,
         document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.core_fact_repository = core_fact_repository
+        self.comparison_repository = comparison_repository
         self.document_profile_service = document_profile_service
         self.comparison_row_projector = ComparisonRowProjector()
 
@@ -266,7 +266,9 @@ class ComparisonService:
             sibling_records=all_records,
         )
 
-    def read_comparison_rows(self, collection_id: str) -> tuple[ComparisonRowRecord, ...]:
+    def read_comparison_rows(
+        self, collection_id: str
+    ) -> tuple[ComparisonRowRecord, ...]:
         return self.read_comparison_projection(collection_id).comparison_rows
 
     def read_comparison_projection(
@@ -275,20 +277,20 @@ class ComparisonService:
     ) -> ComparisonProjectionRecords:
         facts = self._read_comparison_facts(collection_id)
         semantic_records = self._semantic_records_from_facts(facts)
-        rows = facts.comparison_rows
-        if not rows:
-            rows = self.comparison_row_projector.project_rows_from_semantic_artifacts(
-                collection_id=collection_id,
-                comparable_results=semantic_records.comparable_results,
-                scoped_results=semantic_records.collection_comparable_results,
-            )
+        rows = self.comparison_row_projector.project_rows_from_semantic_artifacts(
+            collection_id=collection_id,
+            comparable_results=semantic_records.comparable_results,
+            scoped_results=semantic_records.collection_comparable_results,
+        )
         return ComparisonProjectionRecords(
             comparable_results=semantic_records.comparable_results,
             collection_comparable_results=semantic_records.collection_comparable_results,
             comparison_rows=rows,
         )
 
-    def read_comparable_results(self, collection_id: str) -> tuple[ComparableResult, ...]:
+    def read_comparable_results(
+        self, collection_id: str
+    ) -> tuple[ComparableResult, ...]:
         return self._semantic_records_from_facts(
             self._read_comparison_facts(collection_id)
         ).comparable_results
@@ -357,7 +359,14 @@ class ComparisonService:
 
         projected_rows_by_result_id: dict[str, list[dict[str, Any]]] = {}
         if include_row_projections:
-            for row_record in facts.comparison_rows:
+            semantic_records = self._semantic_records_from_facts(facts)
+            for (
+                row_record
+            ) in self.comparison_row_projector.project_rows_from_semantic_artifacts(
+                collection_id=collection_id,
+                comparable_results=semantic_records.comparable_results,
+                scoped_results=semantic_records.collection_comparable_results,
+            ):
                 if self._safe_text(row_record.collection_id) != collection_id:
                     continue
                 if row_record.comparable_result_id not in comparable_result_ids:
@@ -376,7 +385,9 @@ class ComparisonService:
         items: list[dict[str, Any]] = []
         for record in comparable_records:
             item = self._serialize_comparable_result(record)
-            scoped_records = scoped_records_by_result_id.get(record.comparable_result_id, [])
+            scoped_records = scoped_records_by_result_id.get(
+                record.comparable_result_id, []
+            )
             item["collection_overlays"] = [
                 self._serialize_collection_comparable_result(scoped_record)
                 for scoped_record in sorted(
@@ -403,7 +414,9 @@ class ComparisonService:
             "items": items,
         }
         if include_grouped_projections:
-            projection_context = self._projection_context_from_paper_facts(collection_id)
+            projection_context = self._projection_context_from_paper_facts(
+                collection_id
+            )
             payload["variant_dossiers"] = self._build_variant_dossiers(
                 collection_id=collection_id,
                 comparable_records=comparable_records,
@@ -425,7 +438,11 @@ class ComparisonService:
         result_id: str | None = None,
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        for scoped_record, comparable_record, document_payload in self._collect_collection_result_records(
+        for (
+            scoped_record,
+            comparable_record,
+            document_payload,
+        ) in self._collect_collection_result_records(
             collection_id,
             material_system_normalized=material_system_normalized,
             property_normalized=property_normalized,
@@ -455,7 +472,9 @@ class ComparisonService:
         comparability_status: str | None = None,
         source_document_id: str | None = None,
         result_id: str | None = None,
-    ) -> list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]]:
+    ) -> list[
+        tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]
+    ]:
         return self._collect_collection_result_records_from_facts(
             collection_id,
             self._read_comparison_facts(collection_id),
@@ -471,7 +490,7 @@ class ComparisonService:
     def _collect_collection_result_records_from_facts(
         self,
         collection_id: str,
-        facts: CoreFactSet,
+        facts: ComparisonFactSet,
         *,
         material_system_normalized: str | None = None,
         property_normalized: str | None = None,
@@ -480,18 +499,27 @@ class ComparisonService:
         comparability_status: str | None = None,
         source_document_id: str | None = None,
         result_id: str | None = None,
-    ) -> list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]]:
+    ) -> list[
+        tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]
+    ]:
         comparable_lookup = {
             record.comparable_result_id: record
             for record in facts.comparable_results
             if self._safe_text(record.comparable_result_id)
         }
         document_lookup = self._document_profile_lookup(collection_id)
-        records: list[tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]] = []
+        records: list[
+            tuple[CollectionComparableResult, ComparableResult, dict[str, Any] | None]
+        ] = []
         for scoped_record in facts.collection_comparable_results:
-            if self._safe_text(scoped_record.collection_id) != collection_id or not scoped_record.included:
+            if (
+                self._safe_text(scoped_record.collection_id) != collection_id
+                or not scoped_record.included
+            ):
                 continue
-            comparable_record = comparable_lookup.get(scoped_record.comparable_result_id)
+            comparable_record = comparable_lookup.get(
+                scoped_record.comparable_result_id
+            )
             if comparable_record is None:
                 continue
             if not self._collection_result_matches_filters(
@@ -524,10 +552,12 @@ class ComparisonService:
     def build_comparison_rows(
         self,
         collection_id: str,
+        build_id: str,
     ) -> tuple[ComparisonRowRecord, ...]:
         self.collection_service.get_collection(collection_id)
         objective_semantic_records = self._build_objective_comparison_semantics(
-            collection_id
+            collection_id,
+            build_id,
         )
         if objective_semantic_records is not None:
             row_records = self.comparison_row_projector.project_rows_from_semantic_artifacts(
@@ -539,8 +569,8 @@ class ComparisonService:
                 raise ComparisonRowsNotReadyError(collection_id)
             self._store_comparison_artifacts(
                 collection_id=collection_id,
+                build_id=build_id,
                 semantic_records=objective_semantic_records,
-                row_records=row_records,
             )
             logger.info(
                 "Objective comparison projection finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
@@ -556,8 +586,9 @@ class ComparisonService:
     def _build_objective_comparison_semantics(
         self,
         collection_id: str,
+        build_id: str,
     ) -> ComparisonSemanticRecords | None:
-        facts = self.objective_repository.read(collection_id)
+        facts = self.objective_repository.read(collection_id, build_id=build_id)
         if not facts.objective_evidence_units:
             return None
         semantic_records = project_objective_comparison_semantics(
@@ -570,7 +601,7 @@ class ComparisonService:
 
     def _semantic_records_from_facts(
         self,
-        facts: CoreFactSet,
+        facts: ComparisonFactSet,
     ) -> ComparisonSemanticRecords:
         return ComparisonSemanticRecords(
             comparable_results=facts.comparable_results,
@@ -582,15 +613,18 @@ class ComparisonService:
         self,
         *,
         collection_id: str,
+        build_id: str,
         semantic_records: ComparisonSemanticRecords,
-        row_records: tuple[ComparisonRowRecord, ...],
     ) -> None:
-        self.core_fact_repository.replace_collection_comparison_artifacts(
+        self.comparison_repository.replace(
             collection_id,
-            semantic_records.comparable_results,
-            semantic_records.collection_comparable_results,
-            row_records,
-            semantic_records.pairwise_comparison_relations,
+            build_id,
+            ComparisonFactSet(
+                comparison_artifacts_ready=True,
+                comparable_results=semantic_records.comparable_results,
+                collection_comparable_results=semantic_records.collection_comparable_results,
+                pairwise_comparison_relations=semantic_records.pairwise_comparison_relations,
+            ),
         )
 
     def _collect_corpus_comparable_result_items(
@@ -606,7 +640,9 @@ class ComparisonService:
     ) -> list[dict[str, Any]]:
         scoped_collection_id = self._safe_text(collection_id)
         if scoped_collection_id:
-            items = self._scan_corpus_comparable_result_items(collection_id=scoped_collection_id)
+            items = self._scan_corpus_comparable_result_items(
+                collection_id=scoped_collection_id
+            )
         else:
             items = self._scan_corpus_comparable_result_items()
         return self._filter_corpus_comparable_result_items(
@@ -627,7 +663,9 @@ class ComparisonService:
         collection_ids = self._list_corpus_collection_ids(collection_id)
         base_records_by_result_id: dict[str, ComparableResult] = {}
         observed_collection_ids_by_result_id: dict[str, set[str]] = {}
-        scoped_records_by_result_id: dict[str, dict[str, CollectionComparableResult]] = {}
+        scoped_records_by_result_id: dict[
+            str, dict[str, CollectionComparableResult]
+        ] = {}
 
         for current_collection_id in collection_ids:
             try:
@@ -647,7 +685,9 @@ class ComparisonService:
             for record in comparable_records:
                 if not record.comparable_result_id:
                     continue
-                base_records_by_result_id.setdefault(record.comparable_result_id, record)
+                base_records_by_result_id.setdefault(
+                    record.comparable_result_id, record
+                )
                 observed_collection_ids_by_result_id.setdefault(
                     record.comparable_result_id,
                     set(),
@@ -709,29 +749,43 @@ class ComparisonService:
         for item in items:
             normalized_context = item.get("normalized_context") or {}
             value = item.get("value") or {}
-            if expected_material_system and self._safe_text(
-                normalized_context.get("material_system_normalized")
-            ) != expected_material_system:
+            if (
+                expected_material_system
+                and self._safe_text(
+                    normalized_context.get("material_system_normalized")
+                )
+                != expected_material_system
+            ):
                 continue
-            if expected_property and self._safe_text(
-                value.get("property_normalized")
-            ) != expected_property:
+            if (
+                expected_property
+                and self._safe_text(value.get("property_normalized"))
+                != expected_property
+            ):
                 continue
-            if expected_test_condition and self._safe_text(
-                normalized_context.get("test_condition_normalized")
-            ) != expected_test_condition:
+            if (
+                expected_test_condition
+                and self._safe_text(normalized_context.get("test_condition_normalized"))
+                != expected_test_condition
+            ):
                 continue
-            if expected_baseline and self._safe_text(
-                normalized_context.get("baseline_normalized")
-            ) != expected_baseline:
+            if (
+                expected_baseline
+                and self._safe_text(normalized_context.get("baseline_normalized"))
+                != expected_baseline
+            ):
                 continue
-            if expected_source_document_id and self._safe_text(
-                item.get("source_document_id")
-            ) != expected_source_document_id:
+            if (
+                expected_source_document_id
+                and self._safe_text(item.get("source_document_id"))
+                != expected_source_document_id
+            ):
                 continue
-            if expected_comparable_result_id and self._safe_text(
-                item.get("comparable_result_id")
-            ) != expected_comparable_result_id:
+            if (
+                expected_comparable_result_id
+                and self._safe_text(item.get("comparable_result_id"))
+                != expected_comparable_result_id
+            ):
                 continue
             filtered_items.append(item)
         return filtered_items
@@ -758,16 +812,21 @@ class ComparisonService:
         expected_result_id = self._safe_text(result_id)
 
         if expected_material_system and (
-            self._safe_text(comparable_record.normalized_context.material_system_normalized)
+            self._safe_text(
+                comparable_record.normalized_context.material_system_normalized
+            )
             != expected_material_system
         ):
             return False
         if expected_property and (
-            self._safe_text(comparable_record.value.property_normalized) != expected_property
+            self._safe_text(comparable_record.value.property_normalized)
+            != expected_property
         ):
             return False
         if expected_test_condition and (
-            self._safe_text(comparable_record.normalized_context.test_condition_normalized)
+            self._safe_text(
+                comparable_record.normalized_context.test_condition_normalized
+            )
             != expected_test_condition
         ):
             return False
@@ -782,11 +841,13 @@ class ComparisonService:
         ):
             return False
         if expected_source_document_id and (
-            self._safe_text(comparable_record.source_document_id) != expected_source_document_id
+            self._safe_text(comparable_record.source_document_id)
+            != expected_source_document_id
         ):
             return False
         if expected_result_id and (
-            self._safe_text(comparable_record.comparable_result_id) != expected_result_id
+            self._safe_text(comparable_record.comparable_result_id)
+            != expected_result_id
         ):
             return False
         return True
@@ -806,9 +867,9 @@ class ComparisonService:
         self,
         collection_id: str,
     ) -> list[ComparisonRowRecord]:
-        facts = self._read_comparison_facts(collection_id)
+        projection = self.read_comparison_projection(collection_id)
         sort_order_by_result_id: dict[str, int] = {}
-        for scoped_record in facts.collection_comparable_results:
+        for scoped_record in projection.collection_comparable_results:
             if self._safe_text(scoped_record.collection_id) != collection_id:
                 continue
             if scoped_record.sort_order is None:
@@ -823,7 +884,7 @@ class ComparisonService:
                 else min(existing_sort_order, scoped_record.sort_order)
             )
         return sorted(
-            facts.comparison_rows,
+            projection.comparison_rows,
             key=lambda record: (
                 sort_order_by_result_id.get(
                     record.comparable_result_id,
@@ -837,9 +898,9 @@ class ComparisonService:
     def _read_comparison_facts(
         self,
         collection_id: str,
-    ) -> CoreFactSet:
+    ) -> ComparisonFactSet:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.comparison_repository.read(collection_id)
         if not facts.comparison_artifacts_ready:
             raise ComparisonRowsNotReadyError(collection_id)
         return facts
@@ -862,8 +923,7 @@ class ComparisonService:
         filtered: list[ComparisonRowRecord] = []
         for row in rows:
             if all(
-                not expected
-                or self._safe_text(getattr(row, field_name)) == expected
+                not expected or self._safe_text(getattr(row, field_name)) == expected
                 for field_name, expected in filters.items()
             ):
                 filtered.append(row)
@@ -919,8 +979,10 @@ class ComparisonService:
             "uncertainty": {
                 "missing_critical_context": missing_critical_context,
                 "unresolved_fields": missing_critical_context,
-                "unresolved_baseline_link": "baseline_reference" in missing_critical_context,
-                "unresolved_condition_link": "test_condition" in missing_critical_context,
+                "unresolved_baseline_link": "baseline_reference"
+                in missing_critical_context,
+                "unresolved_condition_link": "test_condition"
+                in missing_critical_context,
             },
         }
 
@@ -956,10 +1018,7 @@ class ComparisonService:
                 "baseline_id",
             ),
             "characterization_observations_by_id": self._index_records_by_text(
-                [
-                    record.to_record()
-                    for record in facts.characterization_observations
-                ],
+                [record.to_record() for record in facts.characterization_observations],
                 "observation_id",
             ),
             "structure_features_by_id": self._index_records_by_text(
@@ -1063,7 +1122,9 @@ class ComparisonService:
             axis_name = self._select_series_axis(chain_payloads)
             chain_payloads.sort(
                 key=lambda chain: (
-                    self._axis_sort_key((chain.get("test_condition") or {}).get(axis_name)),
+                    self._axis_sort_key(
+                        (chain.get("test_condition") or {}).get(axis_name)
+                    ),
                     chain["result_id"],
                 )
             )
@@ -1135,11 +1196,13 @@ class ComparisonService:
         host_material_system = self._safe_mapping(
             variant.get("host_material_system") if variant else None
         )
-        composition = self._safe_text((variant or {}).get("composition")) or self._safe_text(
-            host_material_system.get("composition")
-        )
+        composition = self._safe_text(
+            (variant or {}).get("composition")
+        ) or self._safe_text(host_material_system.get("composition"))
         material_label = (
-            self._safe_text(comparable_record.normalized_context.material_system_normalized)
+            self._safe_text(
+                comparable_record.normalized_context.material_system_normalized
+            )
             or self._safe_text(host_material_system.get("family"))
             or composition
             or "unspecified material system"
@@ -1216,7 +1279,9 @@ class ComparisonService:
                 temperature = self._optional_float(temperatures[0])
         return {
             "test_method": method
-            or self._safe_text(comparable_record.normalized_context.test_condition_normalized),
+            or self._safe_text(
+                comparable_record.normalized_context.test_condition_normalized
+            ),
             "test_temperature_c": temperature,
             "strain_rate_s-1": self._optional_float(
                 payload.get("strain_rate_s-1")
@@ -1255,7 +1320,9 @@ class ComparisonService:
             "resolved": bool(reference or baseline),
         }
         if include_scope:
-            payload["baseline_scope"] = self._safe_text((baseline or {}).get("baseline_scope"))
+            payload["baseline_scope"] = self._safe_text(
+                (baseline or {}).get("baseline_scope")
+            )
         return payload
 
     def _build_chain_assessment(
@@ -1291,10 +1358,14 @@ class ComparisonService:
             comparable_record,
             projection_context,
         )
-        value_payload = self._safe_mapping((measurement_result or {}).get("value_payload"))
+        value_payload = self._safe_mapping(
+            (measurement_result or {}).get("value_payload")
+        )
         value_origin = self._safe_text(value_payload.get("value_origin"))
         if value_origin is None:
-            value_origin = "derived" if value_payload.get("derivation_formula") else "reported"
+            value_origin = (
+                "derived" if value_payload.get("derivation_formula") else "reported"
+            )
         source_value_text = self._safe_text(value_payload.get("source_value_text"))
         if source_value_text is None:
             source_value_text = self._first_value_text(
@@ -1306,18 +1377,26 @@ class ComparisonService:
             "source_value_text": source_value_text,
             "source_unit_text": self._safe_text(value_payload.get("source_unit_text"))
             or comparable_record.value.unit,
-            "derivation_formula": self._safe_text(value_payload.get("derivation_formula")),
+            "derivation_formula": self._safe_text(
+                value_payload.get("derivation_formula")
+            ),
             "derivation_inputs": self._safe_mapping_or_none(
                 value_payload.get("derivation_inputs")
             ),
         }
 
-    def _build_chain_evidence(self, comparable_record: ComparableResult) -> dict[str, Any]:
+    def _build_chain_evidence(
+        self, comparable_record: ComparableResult
+    ) -> dict[str, Any]:
         return {
             "evidence_ids": list(comparable_record.evidence.evidence_ids),
             "direct_anchor_ids": list(comparable_record.evidence.direct_anchor_ids),
-            "contextual_anchor_ids": list(comparable_record.evidence.contextual_anchor_ids),
-            "structure_feature_ids": list(comparable_record.evidence.structure_feature_ids),
+            "contextual_anchor_ids": list(
+                comparable_record.evidence.contextual_anchor_ids
+            ),
+            "structure_feature_ids": list(
+                comparable_record.evidence.structure_feature_ids
+            ),
             "characterization_observation_ids": list(
                 comparable_record.evidence.characterization_observation_ids
             ),
@@ -1332,7 +1411,9 @@ class ComparisonService:
     ) -> list[dict[str, Any]]:
         supports: list[dict[str, Any]] = []
         structure_lookup = projection_context.get("structure_features_by_id", {})
-        observation_lookup = projection_context.get("characterization_observations_by_id", {})
+        observation_lookup = projection_context.get(
+            "characterization_observations_by_id", {}
+        )
         for feature_id in comparable_record.evidence.structure_feature_ids:
             feature = structure_lookup.get(feature_id, {})
             supports.append(
@@ -1348,7 +1429,9 @@ class ComparisonService:
                     },
                 }
             )
-        for observation_id in comparable_record.evidence.characterization_observation_ids:
+        for (
+            observation_id
+        ) in comparable_record.evidence.characterization_observation_ids:
             observation = observation_lookup.get(observation_id, {})
             supports.append(
                 {
@@ -1450,7 +1533,10 @@ class ComparisonService:
             if len(values) > 1:
                 return axis_name
         for axis_name in _TEST_SERIES_AXIS_CANDIDATES:
-            if any((chain.get("test_condition") or {}).get(axis_name) is not None for chain in chains):
+            if any(
+                (chain.get("test_condition") or {}).get(axis_name) is not None
+                for chain in chains
+            ):
                 return axis_name
         return "test_condition"
 
@@ -1464,7 +1550,9 @@ class ComparisonService:
     ) -> str:
         return (
             self._safe_text(test_condition.get("test_method"))
-            or self._safe_text(comparable_record.normalized_context.test_condition_normalized)
+            or self._safe_text(
+                comparable_record.normalized_context.test_condition_normalized
+            )
             or "unspecified test"
         )
 
@@ -1474,7 +1562,9 @@ class ComparisonService:
         projection_context: dict[str, Any],
     ) -> dict[str, Any] | None:
         variant_id = self._safe_text(comparable_record.binding.variant_id)
-        return (projection_context.get("sample_variants_by_id", {}) or {}).get(variant_id)
+        return (projection_context.get("sample_variants_by_id", {}) or {}).get(
+            variant_id
+        )
 
     def _lookup_measurement_result(
         self,
@@ -1639,9 +1729,9 @@ class ComparisonService:
         *,
         document_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        baseline = self._safe_text(comparable_record.baseline_reference) or self._safe_text(
-            comparable_record.normalized_context.baseline_normalized
-        )
+        baseline = self._safe_text(
+            comparable_record.baseline_reference
+        ) or self._safe_text(comparable_record.normalized_context.baseline_normalized)
         return {
             "result_id": comparable_record.comparable_result_id,
             "document_id": comparable_record.source_document_id,
@@ -1673,9 +1763,9 @@ class ComparisonService:
         ]
         | None = None,
     ) -> dict[str, Any]:
-        baseline = self._safe_text(comparable_record.baseline_reference) or self._safe_text(
-            comparable_record.normalized_context.baseline_normalized
-        )
+        baseline = self._safe_text(
+            comparable_record.baseline_reference
+        ) or self._safe_text(comparable_record.normalized_context.baseline_normalized)
         evidence_anchor_ids = [
             *comparable_record.evidence.direct_anchor_ids,
             *comparable_record.evidence.contextual_anchor_ids,
@@ -1686,7 +1776,9 @@ class ComparisonService:
             "document": {
                 "document_id": comparable_record.source_document_id,
                 "title": self._result_document_title(document_payload),
-                "source_filename": self._result_document_source_filename(document_payload),
+                "source_filename": self._result_document_source_filename(
+                    document_payload
+                ),
             },
             "material": {
                 "label": comparable_record.normalized_context.material_system_normalized,
@@ -1715,7 +1807,9 @@ class ComparisonService:
                 "comparability_status": scoped_record.assessment.comparability_status,
                 "warnings": list(scoped_record.assessment.comparability_warnings),
                 "basis": list(scoped_record.assessment.comparability_basis),
-                "missing_context": list(scoped_record.assessment.missing_critical_context),
+                "missing_context": list(
+                    scoped_record.assessment.missing_critical_context
+                ),
                 "requires_expert_review": scoped_record.assessment.requires_expert_review,
                 "assessment_epistemic_status": scoped_record.assessment.assessment_epistemic_status,
             },
@@ -1728,7 +1822,9 @@ class ComparisonService:
                 }
                 for evidence_id in comparable_record.evidence.evidence_ids
             ],
-            "actions": self._build_collection_result_actions(collection_id, comparable_record),
+            "actions": self._build_collection_result_actions(
+                collection_id, comparable_record
+            ),
         }
         detail.update(
             {
@@ -1762,7 +1858,9 @@ class ComparisonService:
         )
         return detail
 
-    def _load_document_profile_lookup(self, collection_id: str) -> dict[str, dict[str, Any]]:
+    def _load_document_profile_lookup(
+        self, collection_id: str
+    ) -> dict[str, dict[str, Any]]:
         try:
             profiles = self.document_profile_service.list_document_profiles(
                 collection_id,

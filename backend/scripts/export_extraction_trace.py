@@ -18,6 +18,7 @@ if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
 from application.derived.core_fact_projection import build_core_fact_projection_records
+from domain.core.comparison_projection import ComparisonRowProjector
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -27,8 +28,8 @@ from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
 from infra.persistence.postgres.paper_fact_repository import PostgresPaperFactRepository
-from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
+from infra.persistence.postgres.comparison_repository import (
+    PostgresComparisonRepository,
 )
 
 SOURCE_ARTIFACTS = (
@@ -184,7 +185,6 @@ def _load_artifacts(
     backend_root: Path,
     collection_id: str,
 ) -> dict[str, pd.DataFrame]:
-    db_path = backend_root / "data" / "lens.sqlite"
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
@@ -192,10 +192,17 @@ def _load_artifacts(
             session_factory
         ).read_collection_artifacts(collection_id)
         paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
+        comparison_facts = PostgresComparisonRepository(session_factory).read(
+            collection_id
+        )
     finally:
         engine.dispose()
-    core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
-    projection = build_core_fact_projection_records(paper_facts, core_facts)
+    comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=comparison_facts.comparable_results,
+        scoped_results=comparison_facts.collection_comparable_results,
+    )
+    projection = build_core_fact_projection_records(paper_facts, comparison_rows)
     frames: dict[str, pd.DataFrame] = {}
     source_records = {
         "documents": source_artifacts.documents,
@@ -220,8 +227,8 @@ def _load_artifacts(
         "measurement_results": paper_facts.measurement_results,
         "characterization_observations": paper_facts.characterization_observations,
         "structure_features": paper_facts.structure_features,
-        "comparable_results": core_facts.comparable_results,
-        "collection_comparable_results": core_facts.collection_comparable_results,
+        "comparable_results": comparison_facts.comparable_results,
+        "collection_comparable_results": comparison_facts.collection_comparable_results,
     }
     for name, records in core_records.items():
         frames[name] = _normalize_frame(

@@ -32,7 +32,11 @@ from infra.persistence.postgres.paper_fact_repository import (  # noqa: E402
 from infra.persistence.postgres.objective_repository import (  # noqa: E402
     PostgresObjectiveRepository,
 )
-from infra.persistence.sqlite import SqliteCoreFactRepository  # noqa: E402
+from infra.persistence.postgres.comparison_repository import (  # noqa: E402
+    PostgresComparisonRepository,
+)
+from domain.core.comparison_projection import ComparisonRowProjector  # noqa: E402
+
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
     / "tests"
@@ -183,10 +187,6 @@ def export_prediction_bundle(
     records_by_artifact, missing_artifacts = _load_artifacts(
         backend_root=root,
         collection_id=resolved_collection_id,
-        db_path=_resolve_repository_db_path(
-            backend_root=root,
-            source_output_dir=output_dir,
-        ),
     )
     bundle = build_prediction_bundle(
         collection_id=resolved_collection_id,
@@ -262,8 +262,7 @@ def build_prediction_bundle(
             "source_output_dir": str(source_output_dir),
             "fact_source": fact_source,
             "artifact_rows": {
-                name: len(records)
-                for name, records in records_by_artifact.items()
+                name: len(records) for name, records in records_by_artifact.items()
             },
             "missing_artifacts": missing_artifacts,
         },
@@ -289,7 +288,9 @@ def build_prediction_bundle(
             records_by_artifact["baseline_references"],
             "baseline_references",
         ),
-        "method_facts": _raw_records(records_by_artifact["method_facts"], "method_facts"),
+        "method_facts": _raw_records(
+            records_by_artifact["method_facts"], "method_facts"
+        ),
         "structure_features": _raw_records(
             records_by_artifact["structure_features"],
             "structure_features",
@@ -331,7 +332,6 @@ def _load_artifacts(
     *,
     backend_root: Path,
     collection_id: str,
-    db_path: Path,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     engine = build_database_engine(DatabaseSettings())
     try:
@@ -343,12 +343,21 @@ def _load_artifacts(
         objective_facts = PostgresObjectiveRepository(session_factory).read(
             collection_id
         )
+        comparison_facts = PostgresComparisonRepository(session_factory).read(
+            collection_id
+        )
     finally:
         engine.dispose()
-    core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
+    comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=comparison_facts.comparable_results,
+        scoped_results=comparison_facts.collection_comparable_results,
+    )
     records_by_artifact: dict[str, list[dict[str, Any]]] = {
         "documents": [record.to_record() for record in source_artifacts.documents],
-        "document_profiles": [record.to_record() for record in paper_facts.document_profiles],
+        "document_profiles": [
+            record.to_record() for record in paper_facts.document_profiles
+        ],
         "objective_evidence_units": [
             record.to_record() for record in objective_facts.objective_evidence_units
         ],
@@ -378,34 +387,22 @@ def _load_artifacts(
             record.to_record() for record in paper_facts.structure_features
         ],
         "comparable_results": [
-            record.to_record() for record in core_facts.comparable_results
+            record.to_record() for record in comparison_facts.comparable_results
         ],
         "collection_comparable_results": [
-            record.to_record() for record in core_facts.collection_comparable_results
+            record.to_record()
+            for record in comparison_facts.collection_comparable_results
         ],
         "pairwise_comparison_relations": [
-            record.to_record() for record in core_facts.pairwise_comparison_relations
+            record.to_record()
+            for record in comparison_facts.pairwise_comparison_relations
         ],
-        "comparison_rows": [
-            record.to_record() for record in core_facts.comparison_rows
-        ],
+        "comparison_rows": [record.to_record() for record in comparison_rows],
     }
     missing_artifacts = [
         name for name in ARTIFACT_NAMES if not records_by_artifact.get(name)
     ]
     return records_by_artifact, missing_artifacts
-
-
-def _resolve_repository_db_path(
-    *,
-    backend_root: Path,
-    source_output_dir: Path,
-) -> Path:
-    for candidate_dir in (source_output_dir, *source_output_dir.parents):
-        run_scoped_db = candidate_dir / "lens.sqlite"
-        if run_scoped_db.is_file() and run_scoped_db.stat().st_size > 0:
-            return run_scoped_db
-    return backend_root / "data" / "lens.sqlite"
 
 
 def _convert_papers(
@@ -455,7 +452,9 @@ def _convert_papers(
                 "process_type": _profile_process_type(profile),
                 "research_goal": _profile_payload_text(profile, "research_goal"),
                 "main_variables": _profile_payload_text(profile, "main_variables"),
-                "target_properties": _profile_payload_text(profile, "target_properties"),
+                "target_properties": _profile_payload_text(
+                    profile, "target_properties"
+                ),
                 "confidence": _first_value(profile, "confidence"),
                 "source": source,
             }
@@ -923,7 +922,9 @@ def _convert_objective_measurement_results(
             {
                 "paper_id": _text(row, "document_id"),
                 "result_id": _text(row, "evidence_unit_id"),
-                "sample_id": _objective_sample_id(_text(row, "document_id"), sample_context),
+                "sample_id": _objective_sample_id(
+                    _text(row, "document_id"), sample_context
+                ),
                 "sample_ids": [
                     _objective_sample_id(_text(row, "document_id"), sample_context)
                 ]
@@ -937,7 +938,9 @@ def _convert_objective_measurement_results(
                 "data_source": "objective_evidence_unit",
                 "baseline_id": _objective_baseline_reference(row),
                 "value_payload": value_payload,
-                "result_type": "scalar" if _objective_numeric_value(row) is not None else "",
+                "result_type": "scalar"
+                if _objective_numeric_value(row) is not None
+                else "",
                 "evidence_ids": _objective_evidence_ids(row),
                 "structure_feature_ids": [],
                 "characterization_observation_ids": [],
@@ -958,7 +961,9 @@ def _convert_objective_comparisons(rows: list[dict[str, Any]]) -> list[dict[str,
         baseline_context = _dict_value(row.get("baseline_context"))
         value_payload = _dict_value(row.get("value_payload"))
         unit = _objective_unit(row)
-        current_sample_id = _objective_sample_id(_text(row, "document_id"), sample_context)
+        current_sample_id = _objective_sample_id(
+            _text(row, "document_id"), sample_context
+        )
         baseline_sample_id = _objective_sample_id(
             _text(row, "document_id"),
             _objective_baseline_sample_context(baseline_context),
@@ -1141,7 +1146,9 @@ def _objective_sample_context_pair_candidates(
     candidates: list[dict[str, Any]] = []
     evidence_unit_id = _text(row, "evidence_unit_id") or f"row-{row_number}"
     for key, raw_value in sample_context.items():
-        metric = OBJECTIVE_SAMPLE_CONTEXT_METRICS.get(_objective_metric_alias_key(str(key)))
+        metric = OBJECTIVE_SAMPLE_CONTEXT_METRICS.get(
+            _objective_metric_alias_key(str(key))
+        )
         if not metric:
             continue
         value = _objective_numeric_scalar(raw_value)
@@ -1554,7 +1561,9 @@ def _convert_objective_observations(rows: list[dict[str, Any]]) -> list[dict[str
             {
                 "paper_id": _text(row, "document_id"),
                 "observation_id": _text(row, "evidence_unit_id"),
-                "sample_id": _objective_sample_id(_text(row, "document_id"), sample_context),
+                "sample_id": _objective_sample_id(
+                    _text(row, "document_id"), sample_context
+                ),
                 "sample_ids": [
                     _objective_sample_id(_text(row, "document_id"), sample_context)
                 ]
@@ -1702,8 +1711,7 @@ def _objective_logic_gap_record(
     return {
         "paper_id": paper_id,
         "issue_id": (
-            f"objective-logic-gap-{_issue_token(logic_chain_id)}-"
-            f"{_issue_token(gap)}"
+            f"objective-logic-gap-{_issue_token(logic_chain_id)}-{_issue_token(gap)}"
         ),
         "description": f"Objective logic chain {logic_chain_id} reports gap {gap}.",
         "impact": f"The assembled research chain is incomplete for objective {objective_id}.",
@@ -1833,10 +1841,9 @@ def _objective_source_ref_id(source_ref: dict[str, Any]) -> str:
 def _objective_test_condition_reference(row: dict[str, Any]) -> str:
     test_condition = _dict_value(row.get("test_condition"))
     resolved_condition = _dict_value(row.get("resolved_condition"))
-    return (
-        _payload_text(test_condition, "test_condition_id", "condition_id")
-        or _payload_text(resolved_condition, "test_condition_id", "condition_id")
-    )
+    return _payload_text(
+        test_condition, "test_condition_id", "condition_id"
+    ) or _payload_text(resolved_condition, "test_condition_id", "condition_id")
 
 
 def _objective_baseline_reference(row: dict[str, Any]) -> str:
@@ -1911,7 +1918,10 @@ def _objective_value_payload(row: dict[str, Any]) -> dict[str, Any]:
     if scalar is None:
         return value_payload
     for key in ("value", "numeric_value"):
-        if key in value_payload and _objective_numeric_scalar(value_payload[key]) != scalar:
+        if (
+            key in value_payload
+            and _objective_numeric_scalar(value_payload[key]) != scalar
+        ):
             return {**value_payload, key: scalar}
     if _objective_impedance_scientific_scalar(row) is not None:
         return {**value_payload, "value": scalar}
@@ -2107,7 +2117,9 @@ def _document_ids_from_records(groups: list[list[dict[str, Any]]]) -> list[str]:
     return values
 
 
-def _infer_collection_id(records_by_artifact: dict[str, list[dict[str, Any]]]) -> str | None:
+def _infer_collection_id(
+    records_by_artifact: dict[str, list[dict[str, Any]]],
+) -> str | None:
     for records in records_by_artifact.values():
         for row in records:
             collection_id = _text(row, "collection_id")
@@ -2175,7 +2187,9 @@ def _payload_text(payload: dict[str, Any], *keys: str) -> str:
     return _text(payload, *keys)
 
 
-def _remaining_payload(payload: dict[str, Any], *, excluded: set[str]) -> dict[str, Any]:
+def _remaining_payload(
+    payload: dict[str, Any], *, excluded: set[str]
+) -> dict[str, Any]:
     return {
         key: value
         for key, value in payload.items()
@@ -2203,9 +2217,8 @@ def _profile_process_type(profile: dict[str, Any]) -> str:
 
 def _material_system_text(row: dict[str, Any]) -> str:
     host = _dict_value(row.get("host_material_system"))
-    return (
-        _payload_text(host, "composition", "material_system", "family")
-        or _text(row, "composition")
+    return _payload_text(host, "composition", "material_system", "family") or _text(
+        row, "composition"
     )
 
 

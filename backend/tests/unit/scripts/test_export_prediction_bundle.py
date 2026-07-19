@@ -11,7 +11,7 @@ from domain.core import (
     CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
-    ComparisonRowRecord,
+    ComparisonFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
@@ -23,7 +23,8 @@ from domain.core import (
 )
 from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
-from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 
@@ -56,7 +57,9 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     exporter = _load_exporter_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
-    paper_fact_repository = _write_system_artifacts(backend_root, collection_id)
+    paper_fact_repository, comparison_repository = _write_system_artifacts(
+        backend_root, collection_id
+    )
     source_db_path = [backend_root / "data" / "lens.sqlite"]
     monkeypatch.setattr(
         exporter,
@@ -79,6 +82,12 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
         exporter,
         "PostgresObjectiveRepository",
         lambda _session_factory: MemoryObjectiveRepository(),
+    )
+    comparison_repositories = [comparison_repository]
+    monkeypatch.setattr(
+        exporter,
+        "PostgresComparisonRepository",
+        lambda _session_factory: comparison_repositories[0],
     )
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
 
@@ -118,7 +127,9 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     }
 
     output_dir_prediction_path = tmp_path / "generated" / "prediction_from_output.json"
-    collection_output_dir = backend_root / "data" / "collections" / collection_id / "output"
+    collection_output_dir = (
+        backend_root / "data" / "collections" / collection_id / "output"
+    )
     collection_output_dir.mkdir(parents=True)
     exporter.export_prediction_bundle(
         backend_root=backend_root,
@@ -135,11 +146,12 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     run_collection_id = "col-run"
     run_output_dir = run_root / "collections" / run_collection_id / "output"
     run_output_dir.mkdir(parents=True)
-    run_paper_fact_repository = _write_system_artifacts_to_db(
-        run_root / "lens.sqlite", run_collection_id
+    run_paper_fact_repository, run_comparison_repository = (
+        _write_system_artifacts_to_db(run_root / "lens.sqlite", run_collection_id)
     )
     source_db_path[0] = run_root / "lens.sqlite"
     paper_fact_repositories[0] = run_paper_fact_repository
+    comparison_repositories[0] = run_comparison_repository
     run_output_prediction_path = tmp_path / "generated" / "prediction_from_run.json"
 
     exporter.export_prediction_bundle(
@@ -298,10 +310,7 @@ def test_export_prediction_bundle_projects_objective_first_units(tmp_path):
         "obj-sample-paper-1-sample-0"
     ]
     assert bundle["observations"][0]["value_or_description"] == "fine grains"
-    assert {
-        evidence["evidence_id"]
-        for evidence in bundle["evidence"]
-    } == {
+    assert {evidence["evidence_id"] for evidence in bundle["evidence"]} == {
         "objective-source:table:table-1",
         "objective-source:text_window:block-1",
         "objective-source:text_window:block-2",
@@ -372,8 +381,7 @@ def test_export_prediction_bundle_projects_objective_uncertainties(tmp_path):
             "paper_id": "paper-1",
             "issue_id": "objective-logic-gap-olc-1-comparison_units_missing",
             "description": (
-                "Objective logic chain olc-1 reports gap "
-                "comparison_units_missing."
+                "Objective logic chain olc-1 reports gap comparison_units_missing."
             ),
             "impact": "The assembled research chain is incomplete for objective obj-1.",
             "source": {"artifact": "objective_logic_chains", "row": 1},
@@ -910,10 +918,12 @@ def test_export_prediction_bundle_ignores_uncertainty_only_pair_candidates(tmp_p
     )
 
     assert len(bundle["comparisons"]) == 12
-    assert {
-        comparison["current_value"]
-        for comparison in bundle["comparisons"]
-    } == {33.2, 37.3, 48.3, 54.0}
+    assert {comparison["current_value"] for comparison in bundle["comparisons"]} == {
+        33.2,
+        37.3,
+        48.3,
+        54.0,
+    }
 
 
 def test_export_prediction_bundle_projects_structural_context_pairs(tmp_path):
@@ -1151,12 +1161,8 @@ def test_export_prediction_bundle_projects_fatigue_limit_interpretation_pairs(
         for comparison in bundle["comparisons"]
     }
 
-    assert ("fatigue_limit", "l-ved", "wrought-316l", 80.0, 256.0) in (
-        comparison_index
-    )
-    assert ("fatigue_limit", "h-ved", "wrought-316l", 80.0, 256.0) in (
-        comparison_index
-    )
+    assert ("fatigue_limit", "l-ved", "wrought-316l", 80.0, 256.0) in (comparison_index)
+    assert ("fatigue_limit", "h-ved", "wrought-316l", 80.0, 256.0) in (comparison_index)
 
 
 def test_export_prediction_bundle_projects_objective_interpretations(tmp_path):
@@ -1330,14 +1336,12 @@ def test_export_prediction_bundle_infers_objective_sample_labels(tmp_path):
         fact_source="objective_first",
     )
 
-    assert [
-        sample["label_in_paper"]
-        for sample in bundle["samples"]
-    ] == ["L-VED", "M-VED", "H-VED"]
-    assert [
-        result["sample_id"]
-        for result in bundle["measurement_results"]
-    ] == [
+    assert [sample["label_in_paper"] for sample in bundle["samples"]] == [
+        "L-VED",
+        "M-VED",
+        "H-VED",
+    ]
+    assert [result["sample_id"] for result in bundle["measurement_results"]] == [
         "obj-sample-paper-1-l-ved",
         "obj-sample-paper-1-m-ved",
         "obj-sample-paper-1-h-ved",
@@ -1424,10 +1428,7 @@ def test_export_prediction_bundle_normalizes_objective_metric_aliases(tmp_path):
         fact_source="objective_first",
     )
 
-    assert [
-        result["metric_name"]
-        for result in bundle["measurement_results"]
-    ] == [
+    assert [result["metric_name"] for result in bundle["measurement_results"]] == [
         "yield strength",
         "ultimate tensile strength",
         "elongation",
@@ -1435,10 +1436,14 @@ def test_export_prediction_bundle_normalizes_objective_metric_aliases(tmp_path):
         "ultimate tensile strength",
         "elongation",
     ]
-    assert [
-        result["unit"]
-        for result in bundle["measurement_results"]
-    ] == ["MPa", "MPa", "%", "MPa", "MPa", "%"]
+    assert [result["unit"] for result in bundle["measurement_results"]] == [
+        "MPa",
+        "MPa",
+        "%",
+        "MPa",
+        "MPa",
+        "%",
+    ]
 
 
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch):
@@ -1468,6 +1473,11 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
         "PostgresObjectiveRepository",
         lambda _session_factory: MemoryObjectiveRepository(),
     )
+    monkeypatch.setattr(
+        exporter,
+        "PostgresComparisonRepository",
+        lambda _session_factory: MemoryComparisonRepository(),
+    )
 
     exporter.export_prediction_bundle(
         backend_root=backend_root,
@@ -1484,14 +1494,14 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
 
 def _write_system_artifacts(
     backend_root: Path, collection_id: str
-) -> MemoryPaperFactRepository:
+) -> tuple[MemoryPaperFactRepository, MemoryComparisonRepository]:
     db_path = backend_root / "data" / "lens.sqlite"
     return _write_system_artifacts_to_db(db_path, collection_id)
 
 
 def _write_system_artifacts_to_db(
     db_path: Path, collection_id: str
-) -> MemoryPaperFactRepository:
+) -> tuple[MemoryPaperFactRepository, MemoryComparisonRepository]:
     SqliteSourceArtifactRepository(db_path).replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -1698,116 +1708,91 @@ def _write_system_artifacts_to_db(
     )
     comparable_results = (
         ComparableResult.from_mapping(
-                    {
-                        "comparable_result_id": "cres-1",
-                        "source_result_id": "res-1",
-                        "source_document_id": "paper-1",
-                        "binding": {
-                            "variant_id": "var-1",
-                            "test_condition_id": "tc-1",
-                            "baseline_id": "base-1",
-                        },
-                        "normalized_context": {
-                            "material_system_normalized": "Ti-6Al-4V",
-                            "process_normalized": "LPBF",
-                            "property_normalized": "yield_strength",
-                            "baseline_normalized": "control",
-                            "test_condition_normalized": "tensile",
-                        },
-                        "axis": {"variable_axis": "post_treatment"},
-                        "value": {
-                            "property_normalized": "yield_strength",
-                            "result_type": "scalar",
-                            "result_summary": "YS 940 MPa",
-                            "value": 940,
-                            "unit": "MPa",
-                        },
-                        "evidence": {
-                            "supporting_evidence_ids": ["ev-res-1"],
-                            "supporting_anchor_ids": ["anchor-result"],
-                        },
-                        "variant_label": "S1",
-                        "baseline_reference": "control",
-                        "result_source_type": "table",
-                    }
+            {
+                "comparable_result_id": "cres-1",
+                "source_result_id": "res-1",
+                "source_document_id": "paper-1",
+                "binding": {
+                    "variant_id": "var-1",
+                    "test_condition_id": "tc-1",
+                    "baseline_id": "base-1",
+                },
+                "normalized_context": {
+                    "material_system_normalized": "Ti-6Al-4V",
+                    "process_normalized": "LPBF",
+                    "property_normalized": "yield_strength",
+                    "baseline_normalized": "control",
+                    "test_condition_normalized": "tensile",
+                },
+                "axis": {
+                    "axis_name": "post_treatment",
+                    "axis_value": "as-built",
+                },
+                "value": {
+                    "property_normalized": "yield_strength",
+                    "result_type": "scalar",
+                    "summary": "YS 940 MPa",
+                    "numeric_value": 940,
+                    "unit": "MPa",
+                },
+                "evidence": {
+                    "evidence_ids": ["ev-res-1"],
+                    "direct_anchor_ids": ["anchor-result"],
+                    "structure_feature_ids": ["sf-1"],
+                    "characterization_observation_ids": ["obs-1"],
+                    "traceability_status": "direct",
+                },
+                "variant_label": "S1",
+                "baseline_reference": "control",
+                "result_source_type": "table",
+            }
         ),
     )
     collection_comparable_results = (
         CollectionComparableResult.from_mapping(
-                    {
-                        "collection_id": collection_id,
-                        "comparable_result_id": "cres-1",
-                        "assessment": {"status": "comparable"},
-                        "included": True,
-                        "sort_order": 0,
-                    }
+            {
+                "collection_id": collection_id,
+                "comparable_result_id": "cres-1",
+                "assessment": {"status": "comparable"},
+                "included": True,
+                "sort_order": 0,
+            }
         ),
     )
     pairwise_comparison_relations = (
         PairwiseComparisonRelation.from_mapping(
-                    {
-                        "relation_id": "rel-1",
-                        "collection_id": collection_id,
-                        "document_id": "paper-1",
-                        "current_variant_id": "var-1",
-                        "reference_variant_id": "var-0",
-                        "comparison_axis": "laser_power_w",
-                        "property_normalized": "yield_strength",
-                        "current_result_id": "res-1",
-                        "reference_result_id": "res-0",
-                        "current_value": 940,
-                        "reference_value": 880,
-                        "unit": "MPa",
-                        "direction": "increase",
-                        "evidence_anchor_ids": ["anchor-result"],
-                        "relation_payload": {
-                            "current_variant_label": "S1",
-                            "reference_variant_label": "S0",
-                        },
-                        "confidence": 0.8,
-                    }
+            {
+                "relation_id": "rel-1",
+                "collection_id": collection_id,
+                "document_id": "paper-1",
+                "current_variant_id": "var-1",
+                "reference_variant_id": "var-0",
+                "comparison_axis": "laser_power_w",
+                "property_normalized": "yield_strength",
+                "current_result_id": "res-1",
+                "reference_result_id": "res-0",
+                "current_value": 940,
+                "reference_value": 880,
+                "unit": "MPa",
+                "direction": "increase",
+                "evidence_anchor_ids": ["anchor-result"],
+                "relation_payload": {
+                    "current_variant_label": "S1",
+                    "reference_variant_label": "S0",
+                },
+                "confidence": 0.8,
+            }
         ),
     )
-    comparison_rows = (
-        ComparisonRowRecord.from_mapping(
-                    {
-                        "row_id": "row-1",
-                        "collection_id": collection_id,
-                        "comparable_result_id": "cres-1",
-                        "source_document_id": "paper-1",
-                        "variant_id": "var-1",
-                        "variant_label": "S1",
-                        "variable_axis": "post_treatment",
-                        "variable_value": "as-built",
-                        "baseline_reference": "control",
-                        "result_source_type": "table",
-                        "result_type": "scalar",
-                        "result_summary": "YS 940 MPa",
-                        "supporting_evidence_ids": ["ev-res-1"],
-                        "supporting_anchor_ids": ["anchor-result"],
-                        "characterization_observation_ids": ["obs-1"],
-                        "structure_feature_ids": ["sf-1"],
-                        "material_system_normalized": "Ti-6Al-4V",
-                        "process_normalized": "LPBF",
-                        "property_normalized": "yield_strength",
-                        "baseline_normalized": "control",
-                        "test_condition_normalized": "tensile",
-                        "comparability_status": "comparable",
-                        "comparability_warnings": [],
-                        "comparability_basis": {},
-                        "requires_expert_review": False,
-                        "assessment_epistemic_status": "normalized_from_evidence",
-                        "missing_critical_context": [],
-                        "value": 940,
-                        "unit": "MPa",
-                    }
-        ),
-    )
-    SqliteCoreFactRepository(db_path).replace_collection_comparison_artifacts(
+    comparison_repository = MemoryComparisonRepository()
+    comparison_repository.replace(
         collection_id,
-        comparable_results,
-        collection_comparable_results,
-        comparison_rows,
-        pairwise_comparison_relations,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=comparable_results,
+            collection_comparable_results=collection_comparable_results,
+            pairwise_comparison_relations=pairwise_comparison_relations,
+        ),
     )
-    return paper_fact_repository
+    return paper_fact_repository, comparison_repository

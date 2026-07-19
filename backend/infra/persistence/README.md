@@ -37,23 +37,25 @@ The stable data ownership and identity contract lives in
   builds, stage state, artifact versions, active-build selection, and
   build-versioned Source structure, figures, references, document profiles,
   reusable paper facts, research objectives, contexts, paper frames, evidence
-  routes, evidence units, and logic chains through SQLAlchemy mappings and
-  direct aggregate repositories.
+  routes, evidence units, logic chains, comparable results, collection
+  comparison assessments, and pairwise relations through SQLAlchemy mappings
+  and direct aggregate repositories.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
   Handwritten repositories share `backend/data/lens.sqlite` for Goal sessions
-  and plans, comparisons, confirmed goals, understandings, and evaluation/review
-  state. These remaining repositories currently create schema at runtime.
-  SQLite Source, paper-fact, and objective tables are isolated
+  and plans, confirmed goals, understandings, and evaluation/review state.
+  These remaining repositories currently create schema at runtime. SQLite
+  Source, paper-fact, objective, and comparison tables are isolated
   test/legacy residue and are not composed into maintained runtime readers,
   writers, or supported scripts.
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
 `factory.py` constructs SQLite repositories only for the remaining Goal, Core,
-and evaluation families. Auth, collection, build, Source, paper-fact, and objective
-aggregates are composed directly in `main.py`; none has a repository factory or
+and evaluation families. Auth, collection, build, Source, paper-fact,
+objective, and comparison aggregates are composed directly in `main.py`; none
+has a repository factory or
 runtime fallback. Source pipeline JSON and Parquet
 outputs live under `infra/source/` runtime storage and are rebuildable
 intermediates, not a second persistence authority.
@@ -66,8 +68,8 @@ services remain caller-owned.
 `postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
 `postgres/models/collection.py`, `postgres/models/document.py`,
 `postgres/models/build.py`, `postgres/models/source.py`,
-`postgres/models/paper_fact.py`, and `postgres/models/objective.py` own their storage
-mappings; the matching direct
+`postgres/models/paper_fact.py`, `postgres/models/objective.py`, and
+`postgres/models/comparison.py` own their storage mappings; the matching direct
 aggregate repositories own explicit row/domain mapping and short transactions.
 `../../migrations/` owns the version history and is the only PostgreSQL schema
 change path; repositories never create tables.
@@ -111,8 +113,8 @@ baselines, measurements, characterization observations, and structure
 features. Writes name one pending build and validate each Source document and
 document version in the same transaction. Default reads resolve only the
 active successful build. Callers that also need objectives or comparisons
-receive the Objective and remaining Core repositories explicitly; no composite
-repository or SQLite paper-fact fallback exists.
+receive the direct Objective and Comparison repositories explicitly; no
+composite repository or SQLite paper-fact fallback exists.
 
 `PostgresObjectiveRepository` is the single structured owner for research
 objectives, contexts, paper frames, evidence routes, evidence units, logic
@@ -123,6 +125,14 @@ derives goal-specific stages in memory, and persists only the final
 understanding through its current owner. It does not mutate the active
 collection objective build. No SQLite objective read, write, fallback, or dual
 path remains.
+
+`PostgresComparisonRepository` is the single structured owner for comparable
+results, collection-scoped assessments, pairwise relations, and their ordered
+source/evidence links. Writes replace one explicitly named pending build;
+default reads resolve only the active successful build. `ComparisonService`
+regenerates `ComparisonRowRecord` values from those semantic records for every
+row-facing read. No comparison-row table, SQLite comparison read, fallback, or
+dual write exists.
 
 ## Target Boundary
 

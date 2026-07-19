@@ -8,6 +8,7 @@ from domain.core.comparison import (
     ComparableResult,
     ComparisonAssessment,
     ComparisonAxis,
+    ComparisonFactSet,
     ComparisonRowRecord,
     ContextBinding,
     EvidenceTrace,
@@ -48,7 +49,6 @@ from domain.core.evidence_backbone import (
     StructureFeature,
     TestCondition,
 )
-from domain.core.fact_store import CoreFactSet
 from domain.core.paper_fact import PaperFactSet
 from domain.core.objective_material_projection import (
     ObjectiveMaterialProjectionRow,
@@ -112,13 +112,13 @@ __all__ = [
     "ComparableResultAssembler",
     "ComparisonAssessment",
     "ComparisonAxis",
+    "ComparisonFactSet",
     "ComparisonInputRecords",
     "ComparisonProjectionRecords",
     "ComparisonRowRecord",
     "ComparisonRowProjector",
     "ComparisonSemanticRecords",
     "ContextBinding",
-    "CoreFactSet",
     "PaperFactSet",
     "CLAIM_STATUSES",
     "CLAIM_TYPES",

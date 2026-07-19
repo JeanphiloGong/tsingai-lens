@@ -11,8 +11,10 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
-from application.core.semantic_build.document_profile_service import DocumentProfileService
-from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.collection_service import build_test_collection_service
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
@@ -22,6 +24,7 @@ from domain.core import (
     CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
+    ComparisonFactSet,
     DocumentProfile,
     MeasurementResult,
     SampleVariant,
@@ -46,6 +49,7 @@ from tests.support.pbf_acceptance_fixture import (
     pbf_acceptance_structure_features,
     pbf_acceptance_test_conditions,
 )
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _build_semantic_result_record(
@@ -158,10 +162,7 @@ def _store_core_result_facts(
     comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
-        tuple(
-            DocumentProfile.from_mapping(row)
-            for row in (document_profiles or [])
-        ),
+        tuple(DocumentProfile.from_mapping(row) for row in (document_profiles or [])),
     )
     comparison_service.paper_fact_repository.replace_paper_facts(
         collection_id,
@@ -172,8 +173,7 @@ def _store_core_result_facts(
                 SampleVariant.from_mapping(row) for row in (sample_variants or [])
             ),
             test_conditions=tuple(
-                CoreTestCondition.from_mapping(row)
-                for row in (test_conditions or [])
+                CoreTestCondition.from_mapping(row) for row in (test_conditions or [])
             ),
             baseline_references=tuple(
                 BaselineReference.from_mapping(row)
@@ -188,19 +188,23 @@ def _store_core_result_facts(
                 for row in (characterization_observations or [])
             ),
             structure_features=tuple(
-                StructureFeature.from_mapping(row)
-                for row in (structure_features or [])
+                StructureFeature.from_mapping(row) for row in (structure_features or [])
             ),
         ),
     )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        tuple(ComparableResult.from_mapping(row) for row in (comparable_results or [])),
-        tuple(
-            CollectionComparableResult.from_mapping(row)
-            for row in (scoped_results or [])
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in (comparable_results or [])
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row)
+                for row in (scoped_results or [])
+            ),
         ),
-        (),
     )
 
 
@@ -213,7 +217,7 @@ def result_services(tmp_path):
         collection_service,
         paper_fact_repository=paper_fact_repository,
         objective_repository=MemoryObjectiveRepository(),
-        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
+        comparison_repository=MemoryComparisonRepository(),
         document_profile_service=DocumentProfileService(
             collection_service,
             source_artifact_repository=source_repository,
@@ -229,7 +233,9 @@ def result_services(tmp_path):
     return collection_service, comparison_service, request
 
 
-def test_results_route_returns_409_when_semantic_artifacts_are_not_ready(result_services):
+def test_results_route_returns_409_when_semantic_artifacts_are_not_ready(
+    result_services,
+):
     collection_service, _comparison_service, request = result_services
     record = collection_service.create_collection(name="Pending Results Collection")
 
@@ -246,7 +252,9 @@ def test_results_route_returns_409_when_semantic_artifacts_are_not_ready(result_
 
 def test_results_route_returns_product_projection_without_row_cache(result_services):
     collection_service, comparison_service, request = result_services
-    collection = collection_service.create_collection(name="Results Projection Collection")
+    collection = collection_service.create_collection(
+        name="Results Projection Collection"
+    )
     collection_id = collection["collection_id"]
 
     document_profile = {
@@ -433,8 +441,13 @@ def test_result_detail_route_returns_pbf_acceptance_chain_fields(result_services
     assert payload.variant_dossier.shared_process_state["hatch_spacing_um"] == 100
     assert payload.variant_dossier.shared_process_state["layer_thickness_um"] == 30
     assert payload.variant_dossier.shared_process_state["energy_density_j_mm3"] == 78
-    assert payload.variant_dossier.shared_process_state["energy_density_origin"] == "reported"
-    assert payload.variant_dossier.shared_process_state["build_orientation"] == "vertical"
+    assert (
+        payload.variant_dossier.shared_process_state["energy_density_origin"]
+        == "reported"
+    )
+    assert (
+        payload.variant_dossier.shared_process_state["build_orientation"] == "vertical"
+    )
     assert payload.test_condition_detail is not None
     assert payload.test_condition_detail.test_method == "tensile"
     assert payload.test_condition_detail.test_temperature_c == 25.0
@@ -445,9 +458,13 @@ def test_result_detail_route_returns_pbf_acceptance_chain_fields(result_services
     assert payload.baseline_detail.reference == PBF_BASELINE_LABEL
     assert payload.baseline_detail.baseline_type == "same_paper_control"
     assert payload.baseline_detail.baseline_scope == "current_paper"
-    support_by_id = {support.support_id: support for support in payload.structure_support}
+    support_by_id = {
+        support.support_id: support for support in payload.structure_support
+    }
     assert support_by_id["sf-porosity"].summary == "Porosity 0.1%"
-    assert support_by_id["sf-residual-stress"].summary == "Residual stress lower after HIP"
+    assert (
+        support_by_id["sf-residual-stress"].summary == "Residual stress lower after HIP"
+    )
     assert payload.value_provenance is not None
     assert payload.value_provenance.value_origin == "reported"
     assert payload.value_provenance.source_value_text == "940"

@@ -5,13 +5,9 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from domain.core.comparison import (
-    CollectionComparableResult,
-    ComparableResult,
-    ComparisonRowRecord,
-    PairwiseComparisonRelation,
+    ComparisonFactSet,
 )
 from domain.core.document_profile import DocumentProfile
-from domain.core.fact_store import CoreFactSet
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ConfirmedGoal,
@@ -334,19 +330,26 @@ class ObjectiveRepository(Protocol):
     ) -> ObjectiveFactSet: ...
 
 
-class CoreFactRepository(Protocol):
+class ComparisonRepository(Protocol):
     backend_name: str
 
-    def replace_collection_comparison_artifacts(
+    def replace(
         self,
         collection_id: str,
-        comparable_results: tuple[ComparableResult, ...],
-        collection_comparable_results: tuple[CollectionComparableResult, ...],
-        comparison_rows: tuple[ComparisonRowRecord, ...],
-        pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = (),
+        build_id: str,
+        facts: ComparisonFactSet,
     ) -> None: ...
 
-    def read_collection_facts(self, collection_id: str) -> CoreFactSet: ...
+    def read(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> ComparisonFactSet: ...
+
+
+class CoreFactRepository(Protocol):
+    backend_name: str
 
     def replace_collection_research_understandings(
         self,

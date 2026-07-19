@@ -38,6 +38,7 @@ from infra.source.runtime.source_evidence import (
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 class DummyWorkflowOutput:
@@ -205,6 +206,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
     source_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
+    comparison_repository = MemoryComparisonRepository()
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
@@ -227,7 +229,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        comparison_repository=comparison_repository,
     )
     runner = CollectionBuildPipelineService(
         collection_service,

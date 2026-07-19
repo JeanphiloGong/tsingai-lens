@@ -4,11 +4,15 @@ from pathlib import Path
 from typing import Any
 
 from application.source.collection_service import CollectionService
+from application.core.comparison_service import (
+    ComparisonRowsNotReadyError,
+    ComparisonService,
+)
 from application.derived.core_fact_projection import build_core_fact_projection_records
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
-from domain.ports import CoreFactRepository, ObjectiveRepository, PaperFactRepository
+from domain.ports import ObjectiveRepository, PaperFactRepository
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
@@ -78,12 +82,17 @@ def load_graph_payload(
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
     objective_repository: ObjectiveRepository,
-    core_fact_repository: CoreFactRepository,
+    comparison_service: ComparisonService,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     collection_service.get_collection(collection_id)
     paper_facts = paper_fact_repository.read(collection_id)
     objective_facts = objective_repository.read(collection_id)
-    core_facts = core_fact_repository.read_collection_facts(collection_id)
+    try:
+        comparison_projection = comparison_service.read_comparison_projection(
+            collection_id
+        )
+    except ComparisonRowsNotReadyError:
+        comparison_projection = None
     evidence_cards_ready = bool(
         paper_facts.evidence_cards_ready or objective_facts.objective_evidence_units
     )
@@ -93,9 +102,7 @@ def load_graph_payload(
         and (
             objective_facts.objective_evidence_units
             or objective_facts.objective_logic_chains
-            or core_facts.comparable_results
-            or core_facts.collection_comparable_results
-            or core_facts.comparison_rows
+            or bool(comparison_projection and comparison_projection.comparison_rows)
         )
     )
     if not graph_ready:
@@ -108,10 +115,13 @@ def load_graph_payload(
             missing_artifacts=_missing_core_graph_inputs(
                 paper_facts,
                 objective_facts,
-                core_facts,
+                comparison_projection,
             ),
         )
-    projection = build_core_fact_projection_records(paper_facts, core_facts)
+    projection = build_core_fact_projection_records(
+        paper_facts,
+        comparison_projection.comparison_rows if comparison_projection else (),
+    )
 
     return load_core_graph_payload(
         profiles=tuple(
@@ -136,22 +146,19 @@ def load_graph_payload(
 def _missing_core_graph_inputs(
     paper_facts: Any,
     objective_facts: Any,
-    core_facts: Any,
+    comparison_projection: Any,
 ) -> list[str]:
     missing: list[str] = []
     if not paper_facts.document_profiles:
         missing.append("core_fact_repository.document_profiles")
     if not (
-        paper_facts.evidence_cards_ready
-        or objective_facts.objective_evidence_units
+        paper_facts.evidence_cards_ready or objective_facts.objective_evidence_units
     ):
         missing.append("core_fact_repository.evidence_cards")
     if not (
         objective_facts.objective_evidence_units
         or objective_facts.objective_logic_chains
-        or core_facts.comparable_results
-        or core_facts.collection_comparable_results
-        or core_facts.comparison_rows
+        or bool(comparison_projection and comparison_projection.comparison_rows)
     ):
         missing.append("core_fact_repository.comparison_artifacts")
     return missing or ["core_fact_repository.comparison_artifacts"]
@@ -165,7 +172,7 @@ def get_collection_graph(
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
     objective_repository: ObjectiveRepository,
-    core_fact_repository: CoreFactRepository,
+    comparison_service: ComparisonService,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, truncated = load_graph_payload(
         collection_id=collection_id,
@@ -174,7 +181,7 @@ def get_collection_graph(
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        comparison_service=comparison_service,
     )
     return {
         "collection_id": collection_id,
@@ -192,7 +199,7 @@ def build_graphml(
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
     objective_repository: ObjectiveRepository,
-    core_fact_repository: CoreFactRepository,
+    comparison_service: ComparisonService,
 ) -> tuple[bytes, str]:
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
@@ -201,7 +208,7 @@ def build_graphml(
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        comparison_service=comparison_service,
     )
     return to_graphml(nodes_payload, edges_payload), f"{collection_id}.graphml"
 
@@ -213,7 +220,7 @@ def get_collection_graph_neighbors(
     collection_service: CollectionService,
     paper_fact_repository: PaperFactRepository,
     objective_repository: ObjectiveRepository,
-    core_fact_repository: CoreFactRepository,
+    comparison_service: ComparisonService,
 ) -> dict[str, Any]:
     nodes_payload, edges_payload, _ = load_graph_payload(
         collection_id=collection_id,
@@ -222,7 +229,7 @@ def get_collection_graph_neighbors(
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        core_fact_repository=core_fact_repository,
+        comparison_service=comparison_service,
     )
 
     node_ids = {str(node.get("id")) for node in nodes_payload}

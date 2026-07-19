@@ -60,6 +60,9 @@ from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
+from infra.persistence.postgres.comparison_repository import (
+    PostgresComparisonRepository,
+)
 from infra.persistence.postgres.paper_fact_repository import (
     PostgresPaperFactRepository,
 )
@@ -70,6 +73,7 @@ from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
 from domain.ports import (
+    ComparisonRepository,
     CoreFactRepository,
     ObjectiveRepository,
     PaperFactRepository,
@@ -111,6 +115,7 @@ def create_app(
     source_artifact_repository: SourceArtifactRepository | None = None,
     paper_fact_repository: PaperFactRepository | None = None,
     objective_repository: ObjectiveRepository | None = None,
+    comparison_repository: ComparisonRepository | None = None,
     core_fact_repository: CoreFactRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -125,6 +130,7 @@ def create_app(
                 or source_artifact_repository is None
                 or paper_fact_repository is None
                 or objective_repository is None
+                or comparison_repository is None
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -147,12 +153,13 @@ def create_app(
                 or PostgresSourceArtifactRepository(session_factory)
             )
             active_paper_fact_repository = (
-                paper_fact_repository
-                or PostgresPaperFactRepository(session_factory)
+                paper_fact_repository or PostgresPaperFactRepository(session_factory)
             )
             active_objective_repository = (
-                objective_repository
-                or PostgresObjectiveRepository(session_factory)
+                objective_repository or PostgresObjectiveRepository(session_factory)
+            )
+            active_comparison_repository = (
+                comparison_repository or PostgresComparisonRepository(session_factory)
             )
             active_core_fact_repository = (
                 core_fact_repository or build_core_fact_repository()
@@ -162,7 +169,7 @@ def create_app(
                 active_source_artifact_repository,
                 active_paper_fact_repository,
                 active_objective_repository,
-                active_core_fact_repository,
+                active_comparison_repository,
             )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
@@ -180,7 +187,7 @@ def create_app(
                 collection_service=active_collection_service,
                 paper_fact_repository=active_paper_fact_repository,
                 objective_repository=active_objective_repository,
-                core_fact_repository=active_core_fact_repository,
+                comparison_repository=active_comparison_repository,
                 document_profile_service=document_profile_service,
             )
             research_understanding_service = ResearchUnderstandingService(
@@ -201,7 +208,7 @@ def create_app(
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
                 objective_repository=active_objective_repository,
-                core_fact_repository=active_core_fact_repository,
+                comparison_repository=active_comparison_repository,
                 document_profile_service=document_profile_service,
             )
             research_view_service = ResearchViewAggregationService(
@@ -210,6 +217,7 @@ def create_app(
                 paper_fact_repository=active_paper_fact_repository,
                 objective_repository=active_objective_repository,
                 core_fact_repository=active_core_fact_repository,
+                comparison_service=comparison_service,
                 research_understanding_service=research_understanding_service,
             )
             confirmed_goal_service = ConfirmedGoalService(
@@ -221,6 +229,7 @@ def create_app(
             application.state.task_service = active_task_service
             application.state.paper_fact_repository = active_paper_fact_repository
             application.state.objective_repository = active_objective_repository
+            application.state.comparison_repository = active_comparison_repository
             application.state.core_fact_repository = active_core_fact_repository
             application.state.confirmed_goal_service = confirmed_goal_service
             application.state.artifact_registry_service = artifact_registry_service

@@ -8,21 +8,26 @@ from application.evaluation.prediction_snapshot_service import (
     CoreArtifactsNotReadyForEvaluationError,
     EvaluationPredictionSnapshotService,
 )
-from application.evaluation import research_understanding_feedback_service as ruf_service
+from application.evaluation import (
+    research_understanding_feedback_service as ruf_service,
+)
 from application.evaluation.research_understanding_feedback_service import (
     ResearchUnderstandingFeedbackService,
 )
 from domain.core import (
-    CoreFactSet,
     MeasurementResult,
     ObjectiveEvidenceUnit,
     ObjectiveFactSet,
     ResearchUnderstanding,
 )
 from domain.core.paper_fact import PaperFactSet
-from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
+from domain.evaluation import (
+    ResearchUnderstandingCuration,
+    ResearchUnderstandingFeedback,
+)
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 class FakeCollectionService:
@@ -162,24 +167,6 @@ class FakeEvaluationRepository:
         )
 
 
-class FakeCoreFactRepository:
-    backend_name = "fake"
-
-    def __init__(self, facts: CoreFactSet) -> None:
-        self.facts = facts
-
-    def read_collection_facts(self, collection_id: str) -> CoreFactSet:  # noqa: ARG002
-        return self.facts
-
-    def read_research_understanding(
-        self,
-        collection_id: str,
-        scope_type: str,
-        scope_id: str,
-    ):
-        return None
-
-
 class FakeResearchUnderstandingRepository:
     backend_name = "fake"
 
@@ -223,7 +210,9 @@ class FakeResearchUnderstandingProjectionService:
 
     def with_presentation(self, understanding):
         self.inputs.append(understanding)
-        return self.projected if self.projected is not None else understanding.to_record()
+        return (
+            self.projected if self.projected is not None else understanding.to_record()
+        )
 
 
 def _sample_understanding() -> ResearchUnderstanding:
@@ -458,7 +447,7 @@ def _sample_understanding() -> ResearchUnderstanding:
                             "source_kind": "objective_evidence_unit",
                         }
                     ],
-                    "raw_output": "{\"relations\": []}",
+                    "raw_output": '{"relations": []}',
                     "parsed_output": {"relations": []},
                 }
             ],
@@ -620,7 +609,9 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -687,7 +678,9 @@ def test_research_understanding_feedback_service_excludes_unversioned_gold_draft
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -764,7 +757,9 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -889,9 +884,12 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["presentation_bucket"] == "unbucketed"
     assert by_finding["finding-1"]["protocol_readiness"]["status"] == "protocol_ready"
     assert by_finding["finding-1"]["protocol_readiness"]["missing"] == []
-    assert by_finding["finding-1"]["protocol_readiness"]["checks"][
-        "traceable_training_evidence"
-    ] is True
+    assert (
+        by_finding["finding-1"]["protocol_readiness"]["checks"][
+            "traceable_training_evidence"
+        ]
+        is True
+    )
     assert by_finding["finding-1"]["acceptance_gate"] == {
         "status": "accepted",
         "accept_allowed": False,
@@ -919,8 +917,9 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-1"]["evidence_refs"][0]["source_text"] == (
         "Preheating increased ductility by 14% in LPBF 316L."
     )
-    assert by_finding["finding-1"]["evidence_refs"][0]["training_source_text"] == (
-        by_finding["finding-1"]["evidence_refs"][0]["quote"]
+    assert (
+        by_finding["finding-1"]["evidence_refs"][0]["training_source_text"]
+        == (by_finding["finding-1"]["evidence_refs"][0]["quote"])
     )
     assert by_finding["finding-1"]["evidence_refs"][0]["heading_path"] == (
         "Results / Mechanical properties"
@@ -929,8 +928,9 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         by_finding["finding-1"]["evidence_refs"][0]
     ]
     assert by_finding["finding-1"]["training_messages"][0]["role"] == "user"
-    assert "Preheating increased ductility by 14%" in (
-        by_finding["finding-1"]["training_messages"][0]["content"]
+    assert (
+        "Preheating increased ductility by 14%"
+        in (by_finding["finding-1"]["training_messages"][0]["content"])
     )
     assert by_finding["finding-1"]["training_messages"][1] == {
         "role": "assistant",
@@ -962,19 +962,19 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         }
     ]
     assert by_finding["finding-1"]["model_output"]["trace_id"] == "rut-1"
-    assert by_finding["finding-1"]["model_output"]["parsed_output"] == {
-        "relations": []
-    }
+    assert by_finding["finding-1"]["model_output"]["parsed_output"] == {"relations": []}
     assert by_finding["finding-2"]["label_status"] == "silver"
     assert by_finding["finding-2"]["dataset_use_status"] == "review_candidate"
     assert by_finding["finding-2"]["expert_target"]["source"] == "reviewer_feedback"
     assert by_finding["finding-2"]["expert_target"]["review_status"] == "partial"
     assert by_finding["finding-2"]["expert_target"]["feedback_id"] == "ruf-partial"
-    assert by_finding["finding-2"]["expert_target"]["statement"] == (
-        by_finding["finding-2"]["system_prediction"]["statement"]
+    assert (
+        by_finding["finding-2"]["expert_target"]["statement"]
+        == (by_finding["finding-2"]["system_prediction"]["statement"])
     )
-    assert by_finding["finding-2"]["evidence_refs"][0]["training_source_text"] == (
-        by_finding["finding-2"]["evidence_refs"][0]["quote"]
+    assert (
+        by_finding["finding-2"]["evidence_refs"][0]["training_source_text"]
+        == (by_finding["finding-2"]["evidence_refs"][0]["quote"])
     )
     assert by_finding["finding-2"]["training_evidence_refs"] == [
         by_finding["finding-2"]["evidence_refs"][0]
@@ -988,6 +988,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
     assert by_finding["finding-4"]["training_messages"] == []
     assert by_finding["finding-4"]["trace_status"] == "evidence_derived"
 
+
 def test_research_understanding_feedback_service_derives_dataset_input_blocks_from_traceable_evidence():
     record = _sample_understanding().to_record()
     record["model_traces"] = []
@@ -996,7 +997,9 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_fr
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
         core_fact_repository=FakeResearchUnderstandingRepository(understanding),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(record),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            record
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1092,7 +1095,9 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(understanding),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(record),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            record
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1102,9 +1107,10 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
     )
 
     sample = dataset["items"][0]
-    assert [
-        ref["evidence_ref_id"] for ref in sample["training_evidence_refs"]
-    ] == ["ev-1", "ev-condition"]
+    assert [ref["evidence_ref_id"] for ref in sample["training_evidence_refs"]] == [
+        "ev-1",
+        "ev-condition",
+    ]
     assert [block["role"] for block in sample["input_blocks"]] == [
         "direct_result",
         "condition_context",
@@ -1181,7 +1187,9 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_wh
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
         core_fact_repository=FakeResearchUnderstandingRepository(understanding),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(record),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            record
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1252,7 +1260,7 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
                     "traceability_status": "direct",
                     "evidence_role": "direct_support",
                     "quote": "Density increased from 91.9% to 99.6% from L-VED to H-VED.",
-                }
+                },
             ],
             "contexts": [
                 {
@@ -1317,7 +1325,7 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
                 "value_summary": "density 99.6%",
                 "traceability_status": "direct",
                 "evidence_role": "direct_support",
-            }
+            },
         ],
         "context_summaries": [
             {
@@ -1383,7 +1391,9 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            projected
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1447,7 +1457,9 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            projected
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1618,7 +1630,9 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            projected
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1637,12 +1651,13 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
     assert [ref["evidence_ref_id"] for ref in sample["training_evidence_refs"]] == [
         "ev-corrosion",
     ]
-    assert "Higher porosity made the passive film less stable." in (
-        sample["training_messages"][0]["content"]
+    assert (
+        "Higher porosity made the passive film less stable."
+        in (sample["training_messages"][0]["content"])
     )
-    assert "Table reports density values." not in sample["training_messages"][0][
-        "content"
-    ]
+    assert (
+        "Table reports density values." not in sample["training_messages"][0]["content"]
+    )
 
 
 def test_research_understanding_feedback_service_curation_match_evidence_order_keeps_current_direct_evidence_first():
@@ -1676,9 +1691,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
                     "label": "Corrosion result",
                     "locator": {"source_ref": "blk-corrosion"},
                     "traceability_status": "direct",
-                    "quote": (
-                        "Porosities were highly sensitive to pitting corrosion."
-                    ),
+                    "quote": ("Porosities were highly sensitive to pitting corrosion."),
                 },
                 {
                     "evidence_ref_id": "ev-table",
@@ -1700,9 +1713,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
                 "finding_id": "finding-corrosion",
                 "claim_id": "claim-corrosion",
                 "title": "porosity -> pitting corrosion behavior",
-                "statement": (
-                    "Porosities were highly sensitive to pitting corrosion."
-                ),
+                "statement": ("Porosities were highly sensitive to pitting corrosion."),
                 "variables": ["porosity"],
                 "mediators": [],
                 "outcomes": ["pitting corrosion"],
@@ -1750,9 +1761,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
                 "document_id": "doc-1",
                 "title": "Corrosion result",
                 "source_kind": "text",
-                "quote": (
-                    "Porosities were highly sensitive to pitting corrosion."
-                ),
+                "quote": ("Porosities were highly sensitive to pitting corrosion."),
                 "source_text": (
                     "Porosities were highly sensitive to pitting corrosion."
                 ),
@@ -1803,7 +1812,9 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            projected
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1831,7 +1842,9 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
 def test_research_understanding_feedback_service_current_label_alignment_ignores_stale_claim_level_correct_feedback():
     stored = _sample_understanding()
     projected = stored.to_record()
-    projected["presentation"]["findings"][1]["title"] = "energy density -> microstructure"
+    projected["presentation"]["findings"][1]["title"] = (
+        "energy density -> microstructure"
+    )
     projected["presentation"]["findings"][1]["statement"] = (
         "Energy density is associated with microstructure variation."
     )
@@ -1857,7 +1870,9 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            projected
+        ),
     )
 
     dataset = service.export_dataset(
@@ -1934,16 +1949,16 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
     assert current_sample["label_status"] == "candidate"
     assert current_sample["dataset_use_status"] == "review_candidate"
     assert current_sample["feedback_refs"] == []
-    assert current_sample["metadata"]["ignored_feedback_refs"] == [
-        feedback.to_record()
-    ]
+    assert current_sample["metadata"]["ignored_feedback_refs"] == [feedback.to_record()]
 
 
 def test_research_understanding_protocol_source_version_tracks_expert_target_changes():
     repository = FakeEvaluationRepository()
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -1991,15 +2006,16 @@ def test_research_understanding_protocol_source_version_tracks_expert_target_cha
         item for item in revised["items"] if item["finding_id"] == "finding-1"
     )
 
-    assert original_sample["finding_fingerprint"] == revised_sample[
-        "finding_fingerprint"
-    ]
+    assert (
+        original_sample["finding_fingerprint"] == revised_sample["finding_fingerprint"]
+    )
     assert original_sample["protocol_source_fingerprint"].startswith(
         "protocol-source.v1:"
     )
-    assert original_sample["protocol_source_fingerprint"] != revised_sample[
-        "protocol_source_fingerprint"
-    ]
+    assert (
+        original_sample["protocol_source_fingerprint"]
+        != revised_sample["protocol_source_fingerprint"]
+    )
 
 
 def test_research_understanding_feedback_service_invalidates_rejection_when_finding_content_changes():
@@ -2040,7 +2056,9 @@ def test_research_understanding_feedback_service_invalidates_rejection_when_find
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
         core_fact_repository=FakeResearchUnderstandingRepository(stored),
-        research_understanding_service=FakeResearchUnderstandingProjectionService(projected),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(
+            projected
+        ),
     )
 
     dataset = service.export_dataset(
@@ -2094,7 +2112,9 @@ def test_research_understanding_feedback_service_ignores_unversioned_claim_curat
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2164,7 +2184,9 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2222,7 +2244,9 @@ def test_research_understanding_feedback_service_curation_match_keeps_unmatched_
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2264,7 +2288,9 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2301,7 +2327,9 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
 def test_research_understanding_feedback_service_filters_dataset_by_task_type():
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=FakeEvaluationRepository(),
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2391,7 +2419,9 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2487,7 +2517,9 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2567,7 +2599,9 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2581,9 +2615,10 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
     assert dataset["item_count"] == 1
     assert dataset["items"][0]["training_messages"]
     assert dataset["items"][0]["protocol_readiness"]["status"] == "needs_correction"
-    assert "training_messages" in dataset["items"][0]["protocol_readiness"][
-        "blocking_missing"
-    ]
+    assert (
+        "training_messages"
+        in dataset["items"][0]["protocol_readiness"]["blocking_missing"]
+    )
     diagnostic = dataset["items"][0]["metadata"]["training_message_diagnostic"]
     assert "mismatched_assistant_statement" in diagnostic
     assert "mismatched_assistant_generalization_status" in diagnostic
@@ -2638,7 +2673,9 @@ def test_research_understanding_feedback_service_requires_training_message_scope
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2653,9 +2690,10 @@ def test_research_understanding_feedback_service_requires_training_message_scope
     assert dataset["quality_summary"]["training_ready_sample_count"] == 1
     assert dataset["quality_summary"]["training_message_sample_count"] == 0
     assert dataset["items"][0]["protocol_readiness"]["status"] == "needs_correction"
-    assert "training_messages" in dataset["items"][0]["protocol_readiness"][
-        "blocking_missing"
-    ]
+    assert (
+        "training_messages"
+        in dataset["items"][0]["protocol_readiness"]["blocking_missing"]
+    )
 
 
 def test_research_understanding_feedback_service_requires_actionable_protocol_inputs():
@@ -2681,7 +2719,9 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2816,7 +2856,9 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2863,7 +2905,9 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2905,7 +2949,9 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -2962,7 +3008,9 @@ def test_research_understanding_feedback_service_keeps_ai_curation_silver():
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -3016,7 +3064,9 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
     )
     service = ResearchUnderstandingFeedbackService(
         evaluation_repository=repository,
-        core_fact_repository=FakeResearchUnderstandingRepository(_sample_understanding()),
+        core_fact_repository=FakeResearchUnderstandingRepository(
+            _sample_understanding()
+        ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
@@ -3082,7 +3132,9 @@ def test_prediction_snapshot_service_exports_objective_first_measurements():
                             "property_normalized": "yield_strength",
                             "value_payload": {"value": 520},
                             "unit": "MPa",
-                            "source_refs": [{"source_kind": "table", "source_ref": "t1"}],
+                            "source_refs": [
+                                {"source_kind": "table", "source_ref": "t1"}
+                            ],
                             "confidence": 0.9,
                             "resolution_status": "resolved",
                         }
@@ -3090,7 +3142,7 @@ def test_prediction_snapshot_service_exports_objective_first_measurements():
                 )
             ),
         ),
-        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+        comparison_repository=MemoryComparisonRepository(),
         evaluation_repository=repository,
     )
 
@@ -3138,7 +3190,7 @@ def test_prediction_snapshot_service_exports_paper_fact_measurements():
         collection_service=FakeCollectionService(),
         paper_fact_repository=paper_fact_repository,
         objective_repository=MemoryObjectiveRepository(),
-        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+        comparison_repository=MemoryComparisonRepository(),
         evaluation_repository=repository,
     )
 
@@ -3158,7 +3210,7 @@ def test_prediction_snapshot_service_reports_not_ready_when_no_items():
         collection_service=FakeCollectionService(),
         paper_fact_repository=MemoryPaperFactRepository(),
         objective_repository=MemoryObjectiveRepository(),
-        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+        comparison_repository=MemoryComparisonRepository(),
         evaluation_repository=FakeEvaluationRepository(),
     )
 
@@ -3175,7 +3227,7 @@ def test_prediction_snapshot_service_allows_empty_ready_core_outputs():
             "col-gold",
             ObjectiveFactSet(research_objectives_ready=True),
         ),
-        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+        comparison_repository=MemoryComparisonRepository(),
         evaluation_repository=repository,
     )
 
@@ -3232,7 +3284,9 @@ def test_core_evaluation_service_scores_matching_measurements():
                             "property_normalized": "yield_strength",
                             "value_payload": {"value": 520.0000001},
                             "unit": "MPa",
-                            "source_refs": [{"source_kind": "table", "source_ref": "t1"}],
+                            "source_refs": [
+                                {"source_kind": "table", "source_ref": "t1"}
+                            ],
                             "confidence": 0.9,
                             "resolution_status": "resolved",
                         }
@@ -3240,7 +3294,7 @@ def test_core_evaluation_service_scores_matching_measurements():
                 )
             ),
         ),
-        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+        comparison_repository=MemoryComparisonRepository(),
         evaluation_repository=repository,
     )
     snapshot_service.create_core_snapshot(
@@ -3308,7 +3362,9 @@ def test_core_evaluation_service_reports_missing_extra_and_unit_failures():
                                 "property_normalized": "yield_strength",
                                 "value_payload": {"value": 520},
                                 "unit": "GPa",
-                                "source_refs": [{"source_kind": "table", "source_ref": "t1"}],
+                                "source_refs": [
+                                    {"source_kind": "table", "source_ref": "t1"}
+                                ],
                             }
                         ),
                         ObjectiveEvidenceUnit.from_mapping(
@@ -3326,7 +3382,7 @@ def test_core_evaluation_service_reports_missing_extra_and_unit_failures():
                     )
                 ),
             ),
-            core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+            comparison_repository=MemoryComparisonRepository(),
             evaluation_repository=FakeEvaluationRepository(),
         ).create_core_snapshot(
             collection_id="col-gold",
@@ -3380,7 +3436,7 @@ def test_core_evaluation_service_scores_empty_prediction_as_zero_recall():
                 "col-gold",
                 ObjectiveFactSet(research_objectives_ready=True),
             ),
-            core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+            comparison_repository=MemoryComparisonRepository(),
             evaluation_repository=FakeEvaluationRepository(),
         ).create_core_snapshot(
             collection_id="col-gold",
@@ -3447,14 +3503,16 @@ def test_core_evaluation_service_matches_objective_first_comparison_values():
                                 "direction": "higher",
                             },
                             "unit": "MPa",
-                            "source_refs": [{"source_kind": "table", "source_ref": "t1"}],
+                            "source_refs": [
+                                {"source_kind": "table", "source_ref": "t1"}
+                            ],
                             "confidence": 0.9,
                         }
                     ),
                 )
             ),
         ),
-        core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+        comparison_repository=MemoryComparisonRepository(),
         evaluation_repository=FakeEvaluationRepository(),
     ).create_core_snapshot(
         collection_id="col-gold",
@@ -3521,7 +3579,7 @@ def test_core_evaluation_service_reports_numeric_and_evidence_failures():
                     )
                 ),
             ),
-            core_fact_repository=FakeCoreFactRepository(CoreFactSet()),
+            comparison_repository=MemoryComparisonRepository(),
             evaluation_repository=FakeEvaluationRepository(),
         ).create_core_snapshot(
             collection_id="col-gold",

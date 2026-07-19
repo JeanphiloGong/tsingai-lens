@@ -35,12 +35,13 @@ must name the authoritative records from which they can be rebuilt.
 ## Current Runtime Model
 
 The current runtime is split between JSON files, uploaded and generated files,
-PostgreSQL auth records, and five handwritten SQLite repositories. This table
-records that split so the migration does not accidentally preserve it.
+PostgreSQL auth and collection records, and five handwritten SQLite
+repositories. This table records that split so later migrations do not
+accidentally preserve it.
 
 | Current family | Current runtime owner | Rebuildable now? | Target authority |
 | --- | --- | --- | --- |
-| Collection identity and metadata | `collections/<id>/meta.json` | No | PostgreSQL |
+| Collection identity and metadata | PostgreSQL `collections` | No | PostgreSQL |
 | Collection file membership | `collections/<id>/files.json` | No | PostgreSQL |
 | Import provenance | `collections/<id>/import_manifest.json` | No | PostgreSQL |
 | Uploaded PDF and text bytes | `collections/<id>/input/` | No | Object storage |

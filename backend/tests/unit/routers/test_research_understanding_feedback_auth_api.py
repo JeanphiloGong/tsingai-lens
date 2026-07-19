@@ -162,7 +162,6 @@ def feedback_client(
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.collection_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
@@ -177,8 +176,12 @@ def feedback_client(
         "feedback_service",
         feedback_service,
     )
-    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
-        client.app.state.collection_service = collection_service
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+        )
+    ) as client:
         yield client, feedback_service
 
 
@@ -194,7 +197,6 @@ def real_feedback_client(
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.collection_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
@@ -215,8 +217,12 @@ def real_feedback_client(
         "feedback_service",
         feedback_service,
     )
-    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
-        client.app.state.collection_service = collection_service
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+        )
+    ) as client:
         yield client
 
 

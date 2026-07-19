@@ -28,16 +28,18 @@ from domain.evaluation import (
 )
 from domain.goal import ExperimentPlanRecord
 from domain.source import (
+    CollectionRecord,
     SourceArtifactSet,
     SourceReferenceEntry,
     SourceReferenceSet,
 )
 from infra.persistence.file import (
     FileArtifactRepository,
-    FileCollectionRepository,
+    FileCollectionWorkspace,
     FileTaskRepository,
 )
 from infra.persistence.file.object_store import FileObjectStore
+from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteEvaluationRepository,
@@ -64,24 +66,35 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     collection_id = records["collections"][0]["collection_id"]
     db_path = tmp_path / "lens.sqlite"
 
-    collection_repository = FileCollectionRepository(tmp_path / "collections")
-    object_store = FileObjectStore(collection_repository.root_dir)
+    collection_workspace = FileCollectionWorkspace(tmp_path / "collections")
+    object_store = FileObjectStore(collection_workspace.root_dir)
     task_repository = FileTaskRepository(tmp_path / "tasks")
     artifact_repository = FileArtifactRepository(tmp_path / "collections")
     auth_repository = auth_session_service.repository
+    collection_repository = PostgresCollectionRepository(
+        auth_repository.session_factory
+    )
     source_repository = SqliteSourceArtifactRepository(db_path)
     core_repository = SqliteCoreFactRepository(db_path)
     goal_session_repository = SqliteGoalSessionRepository(db_path)
     experiment_plan_repository = SqliteExperimentPlanRepository(db_path)
     evaluation_repository = SqliteEvaluationRepository(db_path)
 
-    collection_repository.create_collection_dirs(collection_id)
-    collection_repository.write_collection(collection_id, records["collections"][0])
-    collection_repository.write_files(collection_id, records["collection_files"])
-    collection_repository.write_import_manifest(
+    auth_repository.add_user(records["auth_users"][0])
+    collection_repository.add_collection(
+        CollectionRecord.from_mapping(
+            records["collections"][0],
+            collection_id,
+            now_iso=records["collections"][0]["created_at"],
+        )
+    )
+    paths = collection_workspace.create_collection_dirs(collection_id)
+    collection_workspace.write_files(collection_id, records["collection_files"])
+    collection_workspace.write_import_manifest(
         collection_id,
         records["import_manifests"][0],
     )
+    assert not (paths.collection_dir / "meta.json").exists()
     object_payload = b"Synthetic fixture content; no paper or user data."
     object_store.write(
         f"{collection_id}/input/{records['collection_files'][0]['stored_filename']}",
@@ -91,7 +104,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     task_repository.write_task(records["tasks"][0]["task_id"], records["tasks"][0])
     artifact_repository.write(collection_id, records["artifacts"][0])
 
-    auth_repository.add_user(records["auth_users"][0])
     session_token_hash = sha256(b"synthetic-baseline-session-token").hexdigest()
     auth_repository.add_session(
         {
@@ -206,10 +218,16 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
 
     observed = deepcopy(scenario)
     observed_records = observed["records"]
-    observed_records["collections"] = [collection_repository.read_collection(collection_id)]
-    observed_records["collection_files"] = collection_repository.read_files(collection_id)
+    stored_collection = collection_repository.read_collection(collection_id).to_record()
+    observed_records["collections"] = [
+        {
+            key: stored_collection.get(key)
+            for key in records["collections"][0]
+        }
+    ]
+    observed_records["collection_files"] = collection_workspace.read_files(collection_id)
     observed_records["import_manifests"] = [
-        collection_repository.read_import_manifest(collection_id)
+        collection_workspace.read_import_manifest(collection_id)
     ]
     observed_records["tasks"] = [task_repository.read_task(records["tasks"][0]["task_id"])]
     observed_records["artifacts"] = [artifact_repository.read(collection_id)]

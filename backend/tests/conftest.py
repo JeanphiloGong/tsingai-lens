@@ -64,3 +64,19 @@ def auth_session_service(tmp_path):
         yield service
     finally:
         engine.dispose()
+
+
+@pytest.fixture
+def collection_service(tmp_path, auth_session_service):
+    from application.source.collection_service import CollectionService
+    from infra.persistence.file import FileCollectionWorkspace
+    from infra.persistence.postgres.collection_repository import (
+        PostgresCollectionRepository,
+    )
+
+    return CollectionService(
+        repository=PostgresCollectionRepository(
+            auth_session_service.repository.session_factory
+        ),
+        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+    )

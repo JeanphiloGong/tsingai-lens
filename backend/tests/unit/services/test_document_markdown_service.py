@@ -423,7 +423,7 @@ def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Stored Filename Collection")
     collection_id = collection["collection_id"]
-    collection_service.repository.write_files(
+    collection_service.workspace.write_files(
         collection_id,
         [
             {

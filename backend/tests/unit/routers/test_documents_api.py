@@ -531,7 +531,7 @@ def test_document_source_route_streams_manifest_source_file(document_services):
     storage_key = f"{collection_id}/input/paper-1.pdf"
     digest = sha256(payload).hexdigest()
     collection_service.object_store.write(storage_key, payload, digest)
-    collection_service.repository.write_import_manifest(
+    collection_service.workspace.write_import_manifest(
         collection_id,
         {
             "collection_id": collection_id,
@@ -592,7 +592,7 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
             }
         ],
     )
-    collection_service.repository.write_import_manifest(
+    collection_service.workspace.write_import_manifest(
         collection_id,
         {
             "collection_id": collection_id,
@@ -654,7 +654,7 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     )
     record = collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
-    collection_service.repository.write_import_manifest(
+    collection_service.workspace.write_import_manifest(
         collection_id,
         {
             "collection_id": collection_id,
@@ -701,7 +701,7 @@ def test_document_source_route_rejects_another_collections_storage_key(
     storage_key = f"{second['collection_id']}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
     collection_service.object_store.write(storage_key, payload, digest)
-    collection_service.repository.write_import_manifest(
+    collection_service.workspace.write_import_manifest(
         first["collection_id"],
         {
             "collection_id": first["collection_id"],

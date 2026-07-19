@@ -13,6 +13,7 @@ from domain.source.ports import ObjectStore
 from infra.persistence.factory import (
     build_artifact_repository,
 )
+from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 from infra.source.ingestion import (
     NormalizedImportBatch,
@@ -46,27 +47,29 @@ class DocumentSourceUnavailableError(RuntimeError):
 
 
 class CollectionService:
-    """File-backed collection registry for the application layer."""
+    """Application operations over collection metadata and its file workspace."""
 
     def __init__(
         self,
         repository: CollectionRepository,
+        workspace: FileCollectionWorkspace,
         artifact_repository: ArtifactRepository | None = None,
         object_store: ObjectStore | None = None,
     ) -> None:
         self.repository = repository
+        self.workspace = workspace
         self.artifact_repository = (
             artifact_repository
             or build_artifact_repository(
-                self.repository.root_dir,
-                backend=self.repository.backend_name,
+                self.workspace.root_dir,
+                backend=self.workspace.backend_name,
             )
         )
-        self.root_dir = self.repository.root_dir
+        self.root_dir = self.workspace.root_dir
         self.object_store = object_store or FileObjectStore(self.root_dir)
 
     def get_paths(self, collection_id: str) -> CollectionPaths:
-        return self.repository.get_paths(collection_id)
+        return self.workspace.get_paths(collection_id)
 
     # define a method for creating a document collection
     def create_collection(
@@ -83,10 +86,9 @@ class CollectionService:
             name=name,
             description=description,
             now_iso=now,
-        ).to_record()
-        paths = self.repository.create_collection_dirs(collection_id)
-        self.repository.write_collection(collection_id, record)
-        self.repository.write_files(collection_id, [])
+        )
+        paths = self.workspace.create_collection_dirs(collection_id)
+        self.workspace.write_files(collection_id, [])
         self.artifact_repository.write(
             collection_id,
             ArtifactStatusRecord.empty(
@@ -95,33 +97,24 @@ class CollectionService:
                 updated_at=now,
             ).to_record(),
         )
-        return record
+        try:
+            self.repository.add_collection(record)
+        except Exception:
+            self.workspace.delete_collection_dir(collection_id)
+            raise
+        return record.to_record()
 
     def list_collections(self, owner_user_id: str | None = None) -> list[dict]:
-        items: list[dict] = []
-        for collection_id, record in self.repository.list_collection_records():
-            record = CollectionRecord.from_mapping(
-                record,
-                collection_id,
-                now_iso=_now_iso(),
-            ).to_record()
-            if owner_user_id is not None and record["owner_user_id"] != owner_user_id:
-                continue
-            items.append(record)
-        return items
+        return [
+            record.to_record()
+            for record in self.repository.list_collections(owner_user_id)
+        ]
 
     def get_collection(self, collection_id: str) -> dict:
         record = self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        normalized = CollectionRecord.from_mapping(
-            record,
-            collection_id,
-            now_iso=_now_iso(),
-        ).to_record()
-        if normalized != record:
-            self.repository.write_collection(collection_id, normalized)
-        return normalized
+        return record.to_record()
 
     def get_collection_for_user(self, collection_id: str, owner_user_id: str) -> dict:
         record = self.get_collection(collection_id)
@@ -137,14 +130,15 @@ class CollectionService:
             record,
             collection_id,
             now_iso=record["updated_at"],
-        ).to_record()
-        self.repository.write_collection(collection_id, normalized)
-        return normalized
+        )
+        if not self.repository.update_collection(normalized):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        return normalized.to_record()
 
     def delete_collection(self, collection_id: str) -> dict:
         paths = self.get_paths(collection_id)
         target_dir = paths.collection_dir
-        if not self.repository.collection_exists(collection_id):
+        if self.repository.read_collection(collection_id) is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
 
         resolved_root = self.root_dir.resolve()
@@ -156,7 +150,7 @@ class CollectionService:
         if target_dir.is_symlink():
             raise ValueError("collection path cannot be a symlink")
 
-        for record in self.repository.read_files(collection_id) or []:
+        for record in self.workspace.read_files(collection_id) or []:
             storage_key = self._optional_text(record.get("storage_key"))
             stored_filename = self._optional_text(record.get("stored_filename"))
             if (
@@ -167,7 +161,9 @@ class CollectionService:
             ):
                 raise ValueError("invalid collection object key")
             self.object_store.delete(storage_key)
-        self.repository.delete_collection_dir(collection_id)
+        self.workspace.delete_collection_dir(collection_id)
+        if not self.repository.delete_collection(collection_id):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
         return {
             "collection_id": collection_id,
             "deleted_at": _now_iso(),
@@ -178,14 +174,15 @@ class CollectionService:
         return self.delete_collection(collection_id)
 
     def list_files(self, collection_id: str) -> list[dict]:
-        files = self.repository.read_files(collection_id)
+        self.get_collection(collection_id)
+        files = self.workspace.read_files(collection_id)
         if files is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return files
 
     def get_import_manifest(self, collection_id: str) -> dict[str, Any]:
         self.get_collection(collection_id)
-        manifest = self.repository.read_import_manifest(collection_id)
+        manifest = self.workspace.read_import_manifest(collection_id)
         if manifest is None:
             return empty_import_manifest(collection_id)
         return manifest
@@ -203,7 +200,7 @@ class CollectionService:
             raise DocumentSourceUnavailableError(collection_id, document_key)
 
         match_keys = self._source_match_keys(document_key, source_filename)
-        manifest = self.repository.read_import_manifest(collection_id) or {}
+        manifest = self.workspace.read_import_manifest(collection_id) or {}
         manifest_documents = self._iter_manifest_documents(manifest)
         for document in manifest_documents:
             if self._source_document_record_matches(document, match_keys):
@@ -215,7 +212,7 @@ class CollectionService:
 
         file_matches = [
             record
-            for record in self.repository.read_files(collection_id) or []
+            for record in self.workspace.read_files(collection_id) or []
             if self._source_file_record_matches(record, match_keys)
         ]
         if len(file_matches) == 1:
@@ -257,7 +254,7 @@ class CollectionService:
             },
         }
         manifest["handoffs"].append(handoff)
-        self.repository.write_import_manifest(collection_id, manifest)
+        self.workspace.write_import_manifest(collection_id, manifest)
         return handoff
 
     def import_from_adapter(
@@ -270,8 +267,7 @@ class CollectionService:
         max_documents: int | None = None,
         constraints: dict[str, Any] | None = None,
     ) -> list[dict]:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.get_collection(collection_id)
 
         request = SourceAdapterRequest(
             collection_id=collection_id,
@@ -289,12 +285,11 @@ class CollectionService:
         collection_id: str,
         batch: NormalizedImportBatch,
     ) -> list[dict]:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.get_collection(collection_id)
         if not batch.documents:
             raise ValueError("normalized import batch must include at least one document")
 
-        files = self.repository.read_files(collection_id) or []
+        files = self.workspace.read_files(collection_id) or []
         text_by_source_document = self._group_text_units(batch)
         created_records: list[dict] = []
 
@@ -324,7 +319,7 @@ class CollectionService:
             )
 
         files.extend(created_records)
-        self.repository.write_files(collection_id, files)
+        self.workspace.write_files(collection_id, files)
         manifest = self.get_import_manifest(collection_id)
         manifest["imports"].append(
             self._build_manifest_import_entry(
@@ -332,7 +327,7 @@ class CollectionService:
                 created_records=created_records,
             )
         )
-        self.repository.write_import_manifest(collection_id, manifest)
+        self.workspace.write_import_manifest(collection_id, manifest)
         self.update_collection(collection_id, paper_count=len(files), status="ready")
         return created_records
 
@@ -343,8 +338,7 @@ class CollectionService:
         content: bytes,
         media_type: str | None = None,
     ) -> dict:
-        if not self.repository.collection_exists(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
+        self.get_collection(collection_id)
         batch = normalize_upload(
             filename=filename,
             content=content,

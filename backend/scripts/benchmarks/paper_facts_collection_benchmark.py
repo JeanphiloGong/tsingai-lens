@@ -179,16 +179,19 @@ def parse_args() -> argparse.Namespace:
 
 def build_services(
     collections_root: Path,
+    session_factory: Any,
 ) -> tuple[Any, Any, Any, Any, Any]:
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
     from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
-    from infra.persistence.factory import build_collection_repository
+    from infra.persistence.file import FileCollectionWorkspace
+    from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 
     collection_service = CollectionService(
-        repository=build_collection_repository(root_dir=collections_root),
+        repository=PostgresCollectionRepository(session_factory),
+        workspace=FileCollectionWorkspace(collections_root),
     )
     artifact_registry_service = ArtifactRegistryService(root_dir=collections_root)
     document_profile_service = DocumentProfileService(
@@ -207,7 +210,7 @@ def build_services(
 def load_collection_inputs_for_benchmark(
     collection_id: str,
     *,
-    collections_root: Path,
+    collection_service: Any,
 ) -> tuple[Path, pd.DataFrame, pd.DataFrame | None, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     from application.source.artifact_input_service import (
         load_blocks_artifact,
@@ -218,12 +221,6 @@ def load_collection_inputs_for_benchmark(
     from application.core.semantic_build.document_profile_service import (
         DocumentProfileService,
         DocumentProfilesNotReadyError,
-    )
-    from application.source.collection_service import CollectionService
-    from infra.persistence.factory import build_collection_repository
-
-    collection_service = CollectionService(
-        repository=build_collection_repository(root_dir=collections_root),
     )
     output_dir = collection_service.get_paths(collection_id).output_dir
     documents, text_units = load_collection_inputs(collection_id)
@@ -445,13 +442,20 @@ def main() -> int:
         if args.collections_root is not None
         else (runtime.backend_root / "data" / "collections").resolve()
     )
+    from infra.persistence.database import (
+        DatabaseSettings,
+        build_database_engine,
+        build_session_factory,
+    )
+
+    engine = build_database_engine(DatabaseSettings())
     (
         collection_service,
         artifact_registry_service,
         document_profile_service,
         paper_facts_service_class,
         extractor_class,
-    ) = build_services(collections_root)
+    ) = build_services(collections_root, build_session_factory(engine))
     (
         output_dir,
         documents,
@@ -462,7 +466,7 @@ def main() -> int:
         profiles,
     ) = load_collection_inputs_for_benchmark(
         args.collection_id,
-        collections_root=collections_root,
+        collection_service=collection_service,
     )
 
     inner_extractor = extractor_class(
@@ -571,6 +575,7 @@ def main() -> int:
 
     write_json_output(args.summary_output, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    engine.dispose()
     return 0
 
 

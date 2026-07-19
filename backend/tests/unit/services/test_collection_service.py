@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import base64
 from hashlib import sha256
-import json
-
 import pytest
 
 from application.source.collection_service import CollectionService
+from infra.persistence.memory import MemoryCollectionRepository
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
@@ -21,39 +20,30 @@ def test_collection_service_requires_explicit_repository():
     with pytest.raises(TypeError, match="repository"):
         CollectionService()
 
+    with pytest.raises(TypeError, match="workspace"):
+        CollectionService(repository=MemoryCollectionRepository())
 
-def test_collection_service_normalizes_legacy_meta(tmp_path):
+
+def test_collection_service_never_creates_meta_json(tmp_path):
     service = build_test_collection_service(tmp_path / "collections")
-    paths = service.get_paths("default")
-    paths.collection_dir.mkdir(parents=True, exist_ok=True)
-    paths.meta_path.write_text(
-        json.dumps(
-            {
-                "id": "default",
-                "name": "default",
-                "created_at": "2026-01-15T12:03:14.032160+00:00",
-            },
-            ensure_ascii=True,
-            indent=2,
-        ),
-        encoding="utf-8",
+    record = service.create_collection("Database metadata")
+    paths = service.get_paths(record["collection_id"])
+
+    assert service.get_collection(record["collection_id"]) == record
+    assert service.list_collections() == [record]
+    assert paths.collection_dir.exists()
+    assert not (paths.collection_dir / "meta.json").exists()
+
+
+def test_list_files_requires_collection_metadata(tmp_path):
+    service = build_test_collection_service(tmp_path / "collections")
+    service.workspace.write_files(
+        "col_orphaned_workspace",
+        [{"stored_filename": "orphaned.txt"}],
     )
 
-    listed = service.list_collections()
-    assert listed[0]["collection_id"] == "default"
-    assert listed[0]["status"] == "idle"
-    assert "default_method" not in listed[0]
-    assert listed[0]["updated_at"] == "2026-01-15T12:03:14.032160+00:00"
-
-    record = service.get_collection("default")
-    assert record["collection_id"] == "default"
-    assert record["paper_count"] == 0
-    assert "default_method" not in record
-
-    saved = json.loads(paths.meta_path.read_text(encoding="utf-8"))
-    assert saved["collection_id"] == "default"
-    assert "id" not in saved
-    assert "default_method" not in saved
+    with pytest.raises(FileNotFoundError, match="collection not found"):
+        service.list_files("col_orphaned_workspace")
 
 
 def test_delete_collection_removes_collection_directory(tmp_path):
@@ -69,7 +59,7 @@ def test_delete_collection_removes_collection_directory(tmp_path):
     )
 
     assert paths.collection_dir.exists()
-    assert paths.meta_path.exists()
+    assert not (paths.collection_dir / "meta.json").exists()
     assert paths.files_path.exists()
     assert service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
 
@@ -101,7 +91,7 @@ def test_delete_collection_rejects_another_collections_storage_key(tmp_path):
         "paper.txt",
         b"Second collection bytes",
     )
-    service.repository.write_files(
+    service.workspace.write_files(
         first["collection_id"],
         [
             {

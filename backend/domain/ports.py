@@ -24,6 +24,7 @@ from domain.core.research_objective import (
 )
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
+    CollectionRecord,
     SourceArtifactSet,
     SourceBlock,
     SourceDocument,
@@ -51,37 +52,24 @@ class CollectionPaths:
     collection_dir: Path
     input_dir: Path
     output_dir: Path
-    meta_path: Path
     files_path: Path
     import_manifest_path: Path
     artifacts_path: Path
 
 
 class CollectionRepository(Protocol):
-    backend_name: str
-    root_dir: Path
+    def add_collection(self, record: CollectionRecord) -> None: ...
 
-    def get_paths(self, collection_id: str) -> CollectionPaths: ...
+    def list_collections(
+        self,
+        owner_user_id: str | None = None,
+    ) -> tuple[CollectionRecord, ...]: ...
 
-    def create_collection_dirs(self, collection_id: str) -> CollectionPaths: ...
+    def read_collection(self, collection_id: str) -> CollectionRecord | None: ...
 
-    def collection_exists(self, collection_id: str) -> bool: ...
+    def update_collection(self, record: CollectionRecord) -> bool: ...
 
-    def list_collection_records(self) -> list[tuple[str, dict]]: ...
-
-    def read_collection(self, collection_id: str) -> dict | None: ...
-
-    def write_collection(self, collection_id: str, payload: dict) -> None: ...
-
-    def delete_collection_dir(self, collection_id: str) -> None: ...
-
-    def read_files(self, collection_id: str) -> list[dict] | None: ...
-
-    def write_files(self, collection_id: str, payload: list[dict]) -> None: ...
-
-    def read_import_manifest(self, collection_id: str) -> dict | None: ...
-
-    def write_import_manifest(self, collection_id: str, payload: dict) -> None: ...
+    def delete_collection(self, collection_id: str) -> bool: ...
 
 class TaskRepository(Protocol):
     backend_name: str

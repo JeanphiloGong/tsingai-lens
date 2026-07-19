@@ -52,8 +52,9 @@ from infra.persistence.database import (
     build_database_engine,
     build_session_factory,
 )
-from infra.persistence.factory import build_collection_repository
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
+from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
     REQUEST_ID_HEADER,
@@ -83,46 +84,51 @@ def _parse_cors_allowed_origins() -> list[str]:
 def create_app(
     *,
     auth_session_service: AuthSessionService | None = None,
+    collection_service: CollectionService | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         engine = None
         try:
-            if auth_session_service is None:
+            session_factory = None
+            if auth_session_service is None or collection_service is None:
                 engine = build_database_engine(DatabaseSettings())
+                session_factory = build_session_factory(engine)
+            if auth_session_service is None:
                 active_auth_session_service = AuthSessionService(
-                    PostgresAuthRepository(build_session_factory(engine))
+                    PostgresAuthRepository(session_factory)
                 )
                 application.state.auth_session_service = active_auth_session_service
                 active_auth_session_service.ensure_bootstrap_user()
 
-            collection_service = CollectionService(
-                repository=build_collection_repository()
+            active_collection_service = collection_service or CollectionService(
+                repository=PostgresCollectionRepository(session_factory),
+                workspace=FileCollectionWorkspace(),
             )
             task_service = TaskService()
             artifact_registry_service = ArtifactRegistryService()
             document_profile_service = DocumentProfileService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
             )
             paper_facts_service = PaperFactsService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 document_profile_service=document_profile_service,
             )
             comparison_service = ComparisonService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 document_profile_service=document_profile_service,
             )
             research_objective_service = ResearchObjectiveService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 document_profile_service=document_profile_service,
             )
             workspace_service = WorkspaceService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 task_service=task_service,
                 document_profile_service=document_profile_service,
             )
             research_view_service = ResearchViewAggregationService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 task_service=task_service,
                 document_profile_service=document_profile_service,
                 paper_facts_service=paper_facts_service,
@@ -130,12 +136,12 @@ def create_app(
                 workspace_service=workspace_service,
             )
 
-            application.state.collection_service = collection_service
+            application.state.collection_service = active_collection_service
             application.state.task_service = task_service
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
             )
             application.state.paper_facts_service = paper_facts_service
             application.state.comparison_service = comparison_service
@@ -143,15 +149,15 @@ def create_app(
             application.state.workspace_service = workspace_service
             application.state.research_view_service = research_view_service
             application.state.build_pipeline_service = CollectionBuildPipelineService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 task_service=task_service,
                 artifact_registry_service=artifact_registry_service,
                 document_profile_service=document_profile_service,
                 research_objective_service=research_objective_service,
             )
-            application.state.goal_service = GoalService(collection_service)
+            application.state.goal_service = GoalService(active_collection_service)
             application.state.goal_session_service = GoalSessionService(
-                collection_service=collection_service,
+                collection_service=active_collection_service,
                 task_service=task_service,
                 research_view_service=research_view_service,
                 workspace_service=workspace_service,

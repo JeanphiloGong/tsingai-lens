@@ -1,43 +1,27 @@
 from __future__ import annotations
 
-from application.source.collection_service import CollectionService
 from infra.persistence.factory import (
+    build_artifact_repository,
     build_core_fact_repository,
     build_evaluation_repository,
     build_goal_session_repository,
-    build_persistence_bundle,
     build_source_artifact_repository,
+    build_task_repository,
 )
 
 
-def test_build_persistence_bundle_supports_memory_backend(tmp_path):
-    bundle = build_persistence_bundle(
-        collections_root=tmp_path / "collections",
-        tasks_root=tmp_path / "tasks",
+def test_task_and_artifact_factories_support_memory_backend(tmp_path):
+    task_repository = build_task_repository(
+        root_dir=tmp_path / "tasks",
+        backend="memory",
+    )
+    artifact_repository = build_artifact_repository(
+        root_dir=tmp_path / "collections",
         backend="memory",
     )
 
-    assert bundle.collection_repository.backend_name == "memory"
-    assert bundle.task_repository.backend_name == "memory"
-    assert bundle.artifact_repository.backend_name == "memory"
-
-
-def test_collection_service_uses_memory_backend_when_requested(tmp_path):
-    bundle = build_persistence_bundle(
-        collections_root=tmp_path / "collections",
-        tasks_root=tmp_path / "tasks",
-        backend="memory",
-    )
-    service = CollectionService(
-        repository=bundle.collection_repository,
-        artifact_repository=bundle.artifact_repository,
-    )
-
-    record = service.create_collection("In Memory")
-
-    assert service.repository.backend_name == "memory"
-    assert service.artifact_repository.backend_name == "memory"
-    assert service.get_collection(record["collection_id"])["name"] == "In Memory"
+    assert task_repository.backend_name == "memory"
+    assert artifact_repository.backend_name == "memory"
 
 
 def test_build_goal_session_repository_uses_sqlite_inside_infra(tmp_path):

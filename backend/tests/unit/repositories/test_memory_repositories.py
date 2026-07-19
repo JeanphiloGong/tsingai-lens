@@ -5,47 +5,27 @@ from infra.persistence.memory import (
     MemoryCollectionRepository,
     MemoryTaskRepository,
 )
+from domain.source import CollectionRecord
 
 
-def test_memory_collection_repository_round_trips_records_and_files(tmp_path):
-    repository = MemoryCollectionRepository(tmp_path / "collections")
-    collection_id = "col_demo"
-
-    repository.create_collection_dirs(collection_id)
-    repository.write_collection(
-        collection_id,
-        {
-            "collection_id": collection_id,
-            "name": "Demo",
-            "status": "idle",
-        },
-    )
-    repository.write_files(collection_id, [{"stored_filename": "paper.txt"}])
-
-    assert repository.collection_exists(collection_id) is True
-    assert repository.read_collection(collection_id)["name"] == "Demo"
-    assert repository.read_files(collection_id) == [{"stored_filename": "paper.txt"}]
-
-
-def test_memory_collection_repository_round_trips_import_manifest(tmp_path):
-    repository = MemoryCollectionRepository(tmp_path / "collections")
-    collection_id = "col_demo"
-
-    repository.create_collection_dirs(collection_id)
-    repository.write_import_manifest(
-        collection_id,
-        {
-            "schema_version": 1,
-            "collection_id": collection_id,
-            "imports": [{"import_id": "imp_demo"}],
-        },
+def test_memory_collection_repository_round_trips_records_by_owner():
+    repository = MemoryCollectionRepository()
+    record = CollectionRecord(
+        collection_id="col_demo",
+        owner_user_id="user_demo",
+        name="Demo",
+        description=None,
+        status="idle",
+        paper_count=0,
+        created_at="2026-07-19T00:00:00+00:00",
+        updated_at="2026-07-19T00:00:00+00:00",
     )
 
-    assert repository.read_import_manifest(collection_id) == {
-        "schema_version": 1,
-        "collection_id": collection_id,
-        "imports": [{"import_id": "imp_demo"}],
-    }
+    repository.add_collection(record)
+
+    assert repository.read_collection(record.collection_id) == record
+    assert repository.list_collections("user_demo") == (record,)
+    assert repository.list_collections("user_other") == ()
 
 
 def test_memory_task_repository_round_trips_task_records(tmp_path):

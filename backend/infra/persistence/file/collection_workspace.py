@@ -8,8 +8,8 @@ from domain.ports import CollectionPaths
 from infra.persistence.file._json import read_json, write_json
 
 
-class FileCollectionRepository:
-    """File-backed persistence for collection metadata and uploaded files."""
+class FileCollectionWorkspace:
+    """Filesystem workspace for collection-local files and outputs."""
 
     backend_name = "file"
 
@@ -23,7 +23,6 @@ class FileCollectionRepository:
             collection_dir=collection_dir,
             input_dir=collection_dir / "input",
             output_dir=collection_dir / "output",
-            meta_path=collection_dir / "meta.json",
             files_path=collection_dir / "files.json",
             import_manifest_path=collection_dir / "import_manifest.json",
             artifacts_path=collection_dir / "artifacts.json",
@@ -35,21 +34,6 @@ class FileCollectionRepository:
         paths.input_dir.mkdir(parents=True, exist_ok=True)
         paths.output_dir.mkdir(parents=True, exist_ok=True)
         return paths
-
-    def collection_exists(self, collection_id: str) -> bool:
-        return self.get_paths(collection_id).meta_path.exists()
-
-    def list_collection_records(self) -> list[tuple[str, dict]]:
-        items: list[tuple[str, dict]] = []
-        for meta_path in sorted(self.root_dir.glob("*/meta.json")):
-            items.append((meta_path.parent.name, read_json(meta_path, {})))
-        return items
-
-    def read_collection(self, collection_id: str) -> dict | None:
-        return read_json(self.get_paths(collection_id).meta_path, None)
-
-    def write_collection(self, collection_id: str, payload: dict) -> None:
-        write_json(self.get_paths(collection_id).meta_path, payload)
 
     def delete_collection_dir(self, collection_id: str) -> None:
         shutil.rmtree(self.get_paths(collection_id).collection_dir)

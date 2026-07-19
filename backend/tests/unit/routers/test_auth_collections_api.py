@@ -20,6 +20,7 @@ def _build_client(
     monkeypatch,
     tmp_path,
     auth_session_service,
+    collection_service,
 ) -> Iterator[TestClient]:
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -27,13 +28,17 @@ def _build_client(
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.collection_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from main import create_app
 
-    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+        )
+    ) as client:
         yield client
 
 
@@ -53,10 +58,10 @@ def test_main_app_import_defers_collection_and_database_initialization() -> None
             sys.executable,
             "-c",
             (
-                "import infra.persistence.factory as persistence_factory\n"
+                "import infra.persistence.database as database\n"
                 "def fail_if_called(*args, **kwargs):\n"
-                "    raise RuntimeError('collection persistence initialized during import')\n"
-                "persistence_factory.build_collection_repository = fail_if_called\n"
+                "    raise RuntimeError('database initialized during import')\n"
+                "database.build_database_engine = fail_if_called\n"
                 "import main\n"
             ),
         ],
@@ -93,18 +98,23 @@ def test_app_lifespan_composes_one_shared_collection_service(
     monkeypatch,
     tmp_path,
     auth_session_service,
+    collection_service,
 ) -> None:
     monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.collection_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from main import create_app
 
-    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+        )
+    ) as client:
         state = client.app.state
         collection_service = state.collection_service
         collection_consumers = (
@@ -127,16 +137,36 @@ def test_app_lifespan_composes_one_shared_collection_service(
         )
 
 
-def test_collections_api_requires_login(monkeypatch, tmp_path, auth_session_service):
-    with _build_client(monkeypatch, tmp_path, auth_session_service) as client:
+def test_collections_api_requires_login(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
         response = client.get("/api/v1/collections")
 
         assert response.status_code == 401
         assert response.json()["detail"]["code"] == "authentication_required"
 
 
-def test_login_me_and_logout_flow(monkeypatch, tmp_path, auth_session_service):
-    with _build_client(monkeypatch, tmp_path, auth_session_service) as client:
+def test_login_me_and_logout_flow(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
         login = _login(client)
         assert login.status_code == 200
         assert login.json()["user"]["email"] == "admin@example.com"
@@ -156,8 +186,14 @@ def test_collection_list_is_scoped_to_authenticated_owner(
     monkeypatch,
     tmp_path,
     auth_session_service,
+    collection_service,
 ):
-    with _build_client(monkeypatch, tmp_path, auth_session_service) as client:
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
         assert _login(client).status_code == 200
 
         created = client.post("/api/v1/collections", json={"name": "Admin papers"})
@@ -188,8 +224,14 @@ def test_public_static_data_mount_is_removed(
     monkeypatch,
     tmp_path,
     auth_session_service,
+    collection_service,
 ):
-    with _build_client(monkeypatch, tmp_path, auth_session_service) as client:
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
         leaked_path = tmp_path / "leak.txt"
         leaked_path.write_text("secret", encoding="utf-8")
 

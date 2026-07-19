@@ -562,11 +562,10 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 
 
 @pytest.fixture()
-def app_client(monkeypatch, tmp_path, auth_session_service):
+def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     import application.derived.graph_service as graph_service_module
     import application.pipeline.collection_build.service as task_runner_module
     from application.source.artifact_registry_service import ArtifactRegistryService
-    from tests.support.collection_service import build_test_collection_service
     from application.core.comparison_service import ComparisonService
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -585,7 +584,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service):
     monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.collection_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
@@ -593,7 +591,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service):
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
 
-    collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(tmp_path / "tasks")
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
@@ -665,7 +662,12 @@ def app_client(monkeypatch, tmp_path, auth_session_service):
         "core_fact_repository",
         comparison_service.core_fact_repository,
     )
-    with TestClient(create_app(auth_session_service=auth_session_service)) as client:
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+        )
+    ) as client:
         state = client.app.state
         state.collection_service = collection_service
         state.task_service = task_service

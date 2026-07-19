@@ -96,31 +96,44 @@ def check_collection_frontend_projection(
         ResearchObjectiveService,
     )
     from application.source.collection_service import CollectionService  # noqa: PLC0415
-    from infra.persistence.factory import build_collection_repository  # noqa: PLC0415
+    from infra.persistence.database import (  # noqa: PLC0415
+        DatabaseSettings,
+        build_database_engine,
+        build_session_factory,
+    )
+    from infra.persistence.file import FileCollectionWorkspace  # noqa: PLC0415
+    from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
+        PostgresCollectionRepository,
+    )
 
-    collection_service = CollectionService(
-        repository=build_collection_repository(),
-    )
-    objective_service = ResearchObjectiveService(
-        collection_service=collection_service,
-    )
-    objectives = objective_service.list_objective_workspaces(collection_id)
-    material_profile = (
-        ResearchViewAggregationService(
+    engine = build_database_engine(DatabaseSettings())
+    try:
+        collection_service = CollectionService(
+            repository=PostgresCollectionRepository(build_session_factory(engine)),
+            workspace=FileCollectionWorkspace(),
+        )
+        objective_service = ResearchObjectiveService(
             collection_service=collection_service,
-        ).get_collection_material_research_view(
-            collection_id,
-            material_id,
         )
-    )
-    objective_details = [
-        objective_service.get_objective_research_view(
-            collection_id,
-            str(row.get("objective_id") or ""),
+        objectives = objective_service.list_objective_workspaces(collection_id)
+        material_profile = (
+            ResearchViewAggregationService(
+                collection_service=collection_service,
+            ).get_collection_material_research_view(
+                collection_id,
+                material_id,
+            )
         )
-        for row in objectives.get("objectives", [])
-        if isinstance(row, dict) and row.get("objective_id")
-    ]
+        objective_details = [
+            objective_service.get_objective_research_view(
+                collection_id,
+                str(row.get("objective_id") or ""),
+            )
+            for row in objectives.get("objectives", [])
+            if isinstance(row, dict) and row.get("objective_id")
+        ]
+    finally:
+        engine.dispose()
     return evaluate_frontend_projection_payloads(
         collection_id=collection_id,
         material_id=material_id,

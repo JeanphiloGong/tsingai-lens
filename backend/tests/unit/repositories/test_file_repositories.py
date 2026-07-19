@@ -2,37 +2,28 @@ from __future__ import annotations
 
 from infra.persistence.file import (
     FileArtifactRepository,
-    FileCollectionRepository,
+    FileCollectionWorkspace,
     FileTaskRepository,
 )
 
 
-def test_file_collection_repository_round_trips_records_and_files(tmp_path):
-    repository = FileCollectionRepository(tmp_path / "collections")
+def test_file_collection_workspace_round_trips_files_without_meta_json(tmp_path):
+    workspace = FileCollectionWorkspace(tmp_path / "collections")
     collection_id = "col_demo"
 
-    repository.create_collection_dirs(collection_id)
-    repository.write_collection(
-        collection_id,
-        {
-            "collection_id": collection_id,
-            "name": "Demo",
-            "status": "idle",
-        },
-    )
-    repository.write_files(collection_id, [{"stored_filename": "paper.txt"}])
+    paths = workspace.create_collection_dirs(collection_id)
+    workspace.write_files(collection_id, [{"stored_filename": "paper.txt"}])
 
-    assert repository.collection_exists(collection_id) is True
-    assert repository.read_collection(collection_id)["name"] == "Demo"
-    assert repository.read_files(collection_id) == [{"stored_filename": "paper.txt"}]
+    assert workspace.read_files(collection_id) == [{"stored_filename": "paper.txt"}]
+    assert not (paths.collection_dir / "meta.json").exists()
 
 
-def test_file_collection_repository_round_trips_import_manifest(tmp_path):
-    repository = FileCollectionRepository(tmp_path / "collections")
+def test_file_collection_workspace_round_trips_import_manifest(tmp_path):
+    workspace = FileCollectionWorkspace(tmp_path / "collections")
     collection_id = "col_demo"
 
-    repository.create_collection_dirs(collection_id)
-    repository.write_import_manifest(
+    workspace.create_collection_dirs(collection_id)
+    workspace.write_import_manifest(
         collection_id,
         {
             "schema_version": 1,
@@ -41,7 +32,7 @@ def test_file_collection_repository_round_trips_import_manifest(tmp_path):
         },
     )
 
-    assert repository.read_import_manifest(collection_id) == {
+    assert workspace.read_import_manifest(collection_id) == {
         "schema_version": 1,
         "collection_id": collection_id,
         "imports": [{"import_id": "imp_demo"}],

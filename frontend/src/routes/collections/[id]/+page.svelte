@@ -159,7 +159,7 @@
 			await Promise.all([loadWorkspace(false), loadFiles(false), loadResearchView()]);
 			uploadResult = null;
 			actionStatus =
-				task.status === 'failed'
+				task.status === 'failed' || task.status === 'partial_success'
 					? task.errors[0] || $t('overview.actions.viewErrors')
 					: $t('documents.indexDone');
 		}
@@ -753,7 +753,9 @@
 							disabled={hasActiveTask}
 							on:click={startBuildRun}
 						>
-							{$t('overview.actions.startProcessing')}
+							{readinessState === 'failed'
+								? $t('overview.actions.retryProcessing')
+								: $t('overview.actions.startProcessing')}
 						</button>
 					{/if}
 				</div>

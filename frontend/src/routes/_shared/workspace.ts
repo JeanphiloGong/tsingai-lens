@@ -290,15 +290,20 @@ export function getCollectionWorkspaceState(
 		return 'processing';
 	}
 
+	if (
+		workspace.latest_task?.status === 'failed' ||
+		workspace.latest_task?.status === 'partial_success'
+	) {
+		return 'failed';
+	}
+
 	const actionablePrimaryViews = countActionablePrimaryViews(workspace);
 	const failedPrimaryViews = PRIMARY_WORKFLOW_KEYS.filter(
 		(key) => workspace.workflow[key] === 'failed'
 	).length;
 
 	if (actionablePrimaryViews === 0) {
-		return failedPrimaryViews > 0 || workspace.latest_task?.status === 'failed'
-			? 'failed'
-			: 'ready_to_process';
+		return failedPrimaryViews > 0 ? 'failed' : 'ready_to_process';
 	}
 
 	const hasLimits =

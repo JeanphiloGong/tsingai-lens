@@ -49,51 +49,17 @@ This node owns the collection workspace route family in the frontend.
   still-unreviewed finding counts before opening individual goal workspaces,
   with top review-priority diagnostics and pending review actions linking
   directly to the next candidate finding when the dataset summary provides one
-- render research understanding as an expert review workspace by default:
-  users scan Findings first, then inspect linked relations, evidence, context,
-  support grade, review status, paper count, and evidence count; finding
-  evidence displays the selected source quote first, keeps the full parsed
-  source block in an expandable audit section with paper/page/heading/block
-  provenance, and remains clickable back to the document reader; internal
-  finding/claim/evidence ids remain hidden binding data for feedback, curation,
-  source navigation, audit details, and review-queue deep links that open a
-  specific finding for accept/reject/correct review; expert review progress uses
-  dataset review-candidate counts as the canonical remaining-work number so
-  primary paper-level Findings that still need human confirmation are included,
-  and Finding detail renders the Finding-specific projected relation chain so
-  table-context corrections cannot be contradicted by an earlier raw relation;
-  while the separate evidence-repair filter only narrows to Findings whose
-  evidence, support, or projection needs closer inspection; Finding detail also
-  shows training-message diagnostics and protocol-readiness gaps from the
-  dataset sample so experts can tell whether a Finding is ready after review or
-  needs variable, direction, scope, support, message, or traceable-evidence
-  correction before training export or experiment drafting; Finding
-  detail also shows the selected candidate's position in the active review queue and
-  prioritizes the next review action for table-row checks, conflict resolution,
-  mechanism-evidence decisions, paper-level scope limits, and continuous
-  accept/reject/correct review; the review loop exposes the decision template,
-  decision board TSV, agent review prompts, and review packet download actions
-  whenever review candidates remain; the in-browser batch import accepts reviewed JSONL rows or
-  spreadsheet-filled TSV decision boards and checks them against the current
-  dataset before writing labels; the dataset panel surfaces optimization
-  hotspots by variable, outcome, direction, and evidence role so repeated
-  expert-review risks are visible before prompt or model tuning; when
-  the backend dataset sample provides an acceptance gate, the detail view also
-  shows whether direct accept is allowed, whether correction is required first,
-  and the expert checks that must be completed before the finding becomes
-  training-ready; hard `accept_blockers` disable direct accept even when a
-  stale or edited row says accept is allowed;
-  when the dataset sample provides a `review_decision_hint`, the detail view
-  surfaces the next review decision, blocked actions, and accept-blocking
-  reasons without showing raw JSON or internal identifiers;
-  the batch decision
-  import panel treats unconfirmed `agent_review` rows as review drafts and
-  sends human-confirmed agent review rows to the backend import service, which
-  applies the canonical accept/reject/correct conversion rules; dry-runs also
-  show affected-goal readiness counts and pending accept/reject/correct counts
-  plus the expert satisfaction gate status and blocking reasons, so experts
-  can judge whether a batch will create training-ready, exportable, or
-  protocol-ready samples before import
+- render confirmed Goal detail as the primary expert Finding workspace:
+  users scan a compact Finding table, open one full-width Finding detail, inspect
+  its variable-mechanism-outcome chain and applicability, and review one
+  paper-by-paper evidence table with original quotes, paper titles, pages,
+  headings, and source links; a single Review action opens accept, reject, and
+  correct decisions, preserves backend acceptance gates, and keeps internal
+  finding, claim, evidence, document, and context identifiers out of visible UI;
+  requested-variable and requested-outcome coverage live in a separate Coverage
+  view, while dataset exports, reanalysis, and experiment plans remain available
+  from secondary Goal actions instead of competing with Findings in the primary
+  page flow
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available
   for evidence location and page-level fallback when precise regions are missing,

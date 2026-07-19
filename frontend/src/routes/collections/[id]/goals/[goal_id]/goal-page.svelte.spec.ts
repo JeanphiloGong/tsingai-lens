@@ -4,10 +4,7 @@ import { render } from 'vitest-browser-svelte';
 import { authState } from '../../../../_shared/auth';
 
 type GoalPageState = {
-	params: {
-		id: string;
-		goal_id: string;
-	};
+	params: { id: string; goal_id: string };
 	url: URL;
 };
 
@@ -17,7 +14,6 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 		params: { id: 'col_123', goal_id: 'goal_1' },
 		url: new URL('http://localhost/collections/col_123/goals/goal_1')
 	};
-
 	return {
 		pageStore: {
 			subscribe(run: (value: GoalPageState) => void) {
@@ -34,24 +30,19 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 	};
 });
 
-vi.mock('$app/stores', () => ({
-	page: pageStore
-}));
-
+vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
 
-let defaultPlanSourceValidity = 'current';
-let defaultPlanSourceValidityReasons: string[] = [];
+let analysisResponse: Record<string, unknown>;
+let feedbackResponse: Record<string, unknown>[];
+let curationResponse: Record<string, unknown>[];
 
-function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
+function jsonResponse(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
 		status,
-		statusText,
-		headers: {
-			'Content-Type': 'application/json'
-		}
+		headers: { 'Content-Type': 'application/json' }
 	});
 }
 
@@ -65,24 +56,365 @@ function requestMethod(input: string | URL | Request, init?: RequestInit) {
 	return input instanceof Request ? input.method : (init?.method ?? 'GET');
 }
 
-function structuredProtocol(sourceLabel = 'Source 1') {
-	return [
-		`Hypothesis: 150 C preheating improves ductility [${sourceLabel}].`,
-		'Variable matrix: compare 25 C and 150 C builds.',
-		'Measurements: elongation and microstructure.',
-		'Controls: same LPBF parameters except preheating.',
-		'Risks or limits: single-alloy validation.'
-	].join('\n');
+function requestBody(init?: RequestInit) {
+	return JSON.parse((init?.body as string | undefined) ?? '{}') as Record<string, unknown>;
+}
+
+function researchUnderstanding() {
+	const firstFinding = {
+		finding_id: 'finding_internal_1',
+		claim_id: 'claim_internal_1',
+		title: 'preheating temperature -> ductility',
+		statement:
+			'Increasing build-platform preheating from 25 C to 150 C increases ductility by 14% in LPBF 316L.',
+		variables: ['build-platform preheating temperature'],
+		mediators: ['reduced thermal gradient'],
+		outcomes: ['ductility'],
+		direction: 'increases',
+		scope_summary: 'LPBF 316L, identical build parameters, tensile testing at room temperature',
+		support_grade: 'strong',
+		review_status: 'needs_review',
+		confidence: 0.91,
+		paper_count: 2,
+		evidence_count: 2,
+		evidence_ref_ids: ['ev_internal_1', 'ev_internal_2'],
+		context_ids: ['ctx_internal_1'],
+		relation_ids: ['rel_internal_1'],
+		relation_chain: [
+			{
+				relation_id: 'rel_internal_1',
+				variable: 'build-platform preheating temperature',
+				mediators: ['reduced thermal gradient'],
+				outcome: 'ductility',
+				direction: 'increases',
+				statement: 'Higher preheating increases ductility through a reduced thermal gradient.'
+			}
+		],
+		evidence_bundle: {
+			direct_result: ['ev_internal_1', 'ev_internal_2'],
+			mechanism: [],
+			condition_context: [],
+			background: [],
+			conflict: [],
+			noise: [],
+			uncategorized: []
+		},
+		comparison_summary: null,
+		expert_use_status: 'review_candidate',
+		dataset_use_status: 'review_candidate',
+		generalization_status: 'cross_paper_candidate',
+		generalization_note:
+			'Two papers report the same direction under comparable LPBF 316L conditions.',
+		evidence_gap_summary: 'Expert review is required.',
+		upgrade_actions: ['record_expert_review'],
+		related_review_finding_ids: [],
+		review_reasons: ['cross_paper_evidence', 'needs_expert_review'],
+		warnings: [],
+		synthesis_status: 'agreement',
+		common_conditions: ['LPBF 316L', 'room-temperature tensile testing'],
+		incomparable_conditions: [],
+		paper_contributions: [
+			{
+				document_id: 'doc_internal_1',
+				title: '56a67dccf6e344a0a7ed418921be62bc_P001-Preheating response.pdf',
+				source_filename: 'P001-Preheating response.pdf',
+				role: 'supporting',
+				statement: 'The 150 C build showed 14% higher elongation than the 25 C build.',
+				evidence_ref_ids: ['ev_internal_1']
+			},
+			{
+				document_id: 'doc_internal_2',
+				title: 'f66adc89b96248309706ed8a0ddc793f_P002-Thermal management.pdf',
+				source_filename: 'P002-Thermal management.pdf',
+				role: 'supporting',
+				statement: 'The independently produced 150 C cohort showed the same ductility trend.',
+				evidence_ref_ids: ['ev_internal_2']
+			}
+		]
+	};
+	const secondFinding = {
+		...firstFinding,
+		finding_id: 'finding_internal_2',
+		claim_id: 'claim_internal_2',
+		title: 'energy density -> porosity',
+		statement: 'Within the tested window, higher volumetric energy density reduces porosity.',
+		variables: ['volumetric energy density'],
+		mediators: [],
+		outcomes: ['porosity'],
+		direction: 'decreases',
+		scope_summary: 'LPBF 316L, 70-150 J/mm3',
+		support_grade: 'partial',
+		paper_count: 1,
+		evidence_count: 1,
+		evidence_ref_ids: ['ev_internal_3'],
+		context_ids: [],
+		relation_ids: [],
+		relation_chain: [],
+		evidence_bundle: {
+			direct_result: ['ev_internal_3'],
+			mechanism: [],
+			condition_context: [],
+			background: [],
+			conflict: [],
+			noise: [],
+			uncategorized: []
+		},
+		generalization_status: 'paper_level_only',
+		generalization_note: 'Only one paper provides a directly comparable result.',
+		review_reasons: ['single_paper_evidence'],
+		synthesis_status: 'paper_level_only',
+		common_conditions: [],
+		paper_contributions: [
+			{
+				document_id: 'doc_internal_1',
+				title: null,
+				source_filename: 'P001-Preheating response.pdf',
+				role: 'supporting',
+				statement: 'Density increased across the reported energy-density window.',
+				evidence_ref_ids: ['ev_internal_3']
+			}
+		]
+	};
+	return {
+		schema_version: 'research_understanding.v1',
+		state: 'ready',
+		scope: {
+			scope_type: 'goal',
+			collection_id: 'col_123',
+			goal_id: 'goal_1',
+			material_id: null,
+			objective_id: null,
+			document_id: null,
+			title: 'How does preheating affect LPBF 316L?'
+		},
+		claims: [],
+		relations: [],
+		evidence_refs: [],
+		contexts: [],
+		warnings: [],
+		summary: {
+			claim_count: 2,
+			relation_count: 1,
+			evidence_ref_count: 3,
+			context_count: 1
+		},
+		presentation: {
+			summary: {
+				title: 'How does preheating affect LPBF 316L?',
+				material_scope: ['316L stainless steel'],
+				variable_axes: ['build-platform preheating temperature', 'volumetric energy density'],
+				property_scope: ['ductility'],
+				claim_count: 2,
+				relation_count: 1,
+				evidence_count: 3,
+				context_count: 1,
+				review_queue_count: 2,
+				primary_finding_count: 1,
+				review_queue_finding_count: 1,
+				collection_document_count: 6,
+				axis_coverage: {
+					variables: [
+						{
+							axis: 'build-platform preheating temperature',
+							status: 'review_queue',
+							finding_id: 'finding_internal_1'
+						},
+						{
+							axis: 'scan strategy',
+							status: 'missing',
+							finding_id: ''
+						}
+					],
+					properties: [
+						{ axis: 'ductility', status: 'review_queue', finding_id: 'finding_internal_1' }
+					]
+				}
+			},
+			effects: [],
+			findings: [firstFinding, secondFinding],
+			primary_findings: [firstFinding],
+			review_queue_findings: [secondFinding],
+			evidence_items: [
+				{
+					evidence_ref_id: 'ev_internal_1',
+					document_id: 'doc_internal_1',
+					title: '56a67dccf6e344a0a7ed418921be62bc_P001-Preheating response / p. 5',
+					source_label: '56a67dccf6e344a0a7ed418921be62bc_P001-Preheating response',
+					source_kind: 'text_window',
+					source_ref: 'block_internal_1',
+					block_type: 'paragraph',
+					heading_path: '3.2 Tensile properties',
+					page: '5',
+					quote: 'Preheating the build platform to 150 C increased elongation by 14%.',
+					source_text: 'A much longer parsed source block that is not shown by default.',
+					value_summary: '',
+					table_audit: null,
+					traceability_status: 'resolved',
+					evidence_role: 'direct_support',
+					confidence: 0.96,
+					href: '/collections/col_123/documents/doc_internal_1?view=parsed-paper&page=5&quote=Preheating'
+				},
+				{
+					evidence_ref_id: 'ev_internal_2',
+					document_id: 'doc_internal_2',
+					title: 'f66adc89b96248309706ed8a0ddc793f_P002-Thermal management / p. 7',
+					source_label: 'f66adc89b96248309706ed8a0ddc793f_P002-Thermal management',
+					source_kind: 'table',
+					source_ref: 'table_internal_1',
+					block_type: null,
+					heading_path: null,
+					page: '7',
+					quote: 'The 150 C cohort reproduced the increase in elongation.',
+					source_text: null,
+					value_summary: '',
+					table_audit: null,
+					traceability_status: 'resolved',
+					evidence_role: 'direct_support',
+					confidence: 0.92,
+					href: '/collections/col_123/documents/doc_internal_2?view=parsed-paper&page=7'
+				},
+				{
+					evidence_ref_id: 'ev_internal_3',
+					document_id: 'doc_internal_1',
+					title: 'P001-Preheating response / p. 3',
+					source_label: 'P001-Preheating response',
+					source_kind: 'table',
+					source_ref: 'table_internal_2',
+					block_type: null,
+					heading_path: null,
+					page: '3',
+					quote: 'Relative density rose from 93.8% to 98.0% across the tested range.',
+					source_text: null,
+					value_summary: '',
+					table_audit: null,
+					traceability_status: 'resolved',
+					evidence_role: 'direct_support',
+					confidence: 0.9,
+					href: '/collections/col_123/documents/doc_internal_1?view=parsed-paper&page=3'
+				}
+			],
+			context_summaries: []
+		}
+	};
+}
+
+function goalAnalysis(overrides: Record<string, unknown> = {}) {
+	return {
+		collection_id: 'col_123',
+		goal: {
+			goal_id: 'goal_1',
+			collection_id: 'col_123',
+			question: 'How does preheating affect LPBF 316L?',
+			source_type: 'objective_candidate',
+			material_hints: ['316L stainless steel'],
+			process_hints: ['preheating'],
+			property_hints: ['ductility'],
+			source_objective_id: 'objective_internal_1',
+			status: 'ready',
+			analysis_error: null,
+			analysis_progress: null,
+			created_at: null,
+			updated_at: null
+		},
+		understanding: researchUnderstanding(),
+		pipeline_nodes: {},
+		errors: [],
+		warnings: [],
+		...overrides
+	};
+}
+
+function datasetResponse() {
+	return {
+		schema_version: 'research_understanding_dataset.v1',
+		dataset_id: 'dataset_internal_1',
+		collection_id: 'col_123',
+		scope_type: 'goal',
+		scope_id: 'goal_1',
+		task_type: 'research_understanding_finding',
+		metric_profile: 'research_understanding_v1',
+		label_status_filter: null,
+		dataset_use_status_filter: null,
+		item_count: 2,
+		label_counts: { candidate: 2, silver: 0, gold: 0, rejected: 0 },
+		quality_summary: {
+			training_ready_sample_count: 0,
+			training_message_sample_count: 0,
+			protocol_ready_sample_count: 0,
+			review_candidate_sample_count: 2,
+			next_review_finding_id: 'finding_internal_1',
+			by_dataset_use_status: { training_ready: 0, review_candidate: 2, rejected: 0 }
+		},
+		items: [
+			{
+				sample_id: 'sample_internal_1',
+				finding_id: 'finding_internal_1',
+				claim_id: 'claim_internal_1',
+				finding_fingerprint: 'fingerprint_internal_1',
+				label_status: 'candidate',
+				dataset_use_status: 'review_candidate',
+				review_action: { code: 'review_evidence', label: 'Review source evidence' },
+				protocol_readiness: null,
+				acceptance_gate: {
+					status: 'review_required',
+					accept_allowed: true,
+					requires_correction: false,
+					blocking_missing: [],
+					accept_blockers: [],
+					review_checks: [
+						'Confirm both papers used comparable LPBF 316L conditions.',
+						'Confirm the 14% value in the source passage.'
+					],
+					recommended_action_code: 'review_evidence',
+					guidance: 'Accept after checking both sources.'
+				},
+				review_decision_hint: null,
+				feedback_refs: [],
+				metadata: {
+					curation_id: null,
+					ignored_feedback_refs: [],
+					ignored_curation_refs: [],
+					training_message_diagnostic: []
+				}
+			}
+		],
+		warnings: []
+	};
+}
+
+function experimentPlansResponse() {
+	return {
+		collection_id: 'col_123',
+		goal_id: 'goal_1',
+		items: [
+			{
+				plan_id: 'plan_internal_1',
+				collection_id: 'col_123',
+				goal_id: 'goal_1',
+				title: 'Preheating validation matrix',
+				content:
+					'Hypothesis: preheating increases ductility.\nVariable matrix: 25 C and 150 C.\nMeasurements: elongation.\nControls: same LPBF parameters.\nRisks: single alloy.',
+				status: 'draft',
+				source_message_id: null,
+				source_links: [],
+				metadata: {},
+				created_by: 'Materials Expert',
+				created_at: '2026-07-19T00:00:00Z',
+				updated_at: '2026-07-19T00:00:00Z'
+			}
+		]
+	};
 }
 
 describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 	beforeEach(() => {
-		defaultPlanSourceValidity = 'current';
-		defaultPlanSourceValidityReasons = [];
+		analysisResponse = goalAnalysis();
+		feedbackResponse = [];
+		curationResponse = [];
 		authState.set({
 			status: 'authenticated',
 			user: {
-				user_id: 'user_materials_expert',
+				user_id: 'expert_internal_1',
 				email: 'materials-expert@example.com',
 				display_name: 'Materials Expert'
 			}
@@ -95,1350 +427,333 @@ describe('collections/[id]/goals/[goal_id]/+page.svelte', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
-			if (path.endsWith('/research-understanding/curations')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
+				return Promise.resolve(jsonResponse(analysisResponse));
+			}
+			if (path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans') {
+				return Promise.resolve(jsonResponse(experimentPlansResponse()));
+			}
+			if (path.endsWith('/research-understanding/dataset')) {
+				return Promise.resolve(jsonResponse(datasetResponse()));
 			}
 			if (path.endsWith('/research-understanding/feedback')) {
 				if (method === 'POST') {
-					const body = JSON.parse((init?.body as string | undefined) ?? '{}');
+					const body = requestBody(init);
 					return Promise.resolve(
 						jsonResponse({
-							feedback_id: `ruf_${body.finding_id ?? 'accept'}`,
+							...body,
+							feedback_id: 'feedback_internal_saved',
 							collection_id: 'col_123',
-							scope_type: body.scope_type ?? 'goal',
-							scope_id: body.scope_id ?? 'goal_1',
-							finding_id: body.finding_id ?? null,
-							claim_id: body.claim_id ?? null,
-							review_status: body.review_status ?? 'correct',
-							issue_type: body.issue_type ?? 'none',
-							note: body.note ?? null,
-							reviewer: 'materials-expert@example.com',
-							created_at: '2026-07-13T00:02:00+00:00'
+							finding_fingerprint: null,
+							created_at: '2026-07-19T00:00:00Z'
 						})
 					);
 				}
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: feedbackResponse }));
 			}
-			if (path.endsWith('/research-understanding/review-decisions/import') && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						status: 'ok',
-						dry_run: true,
-						total_rows: 2,
-						written_count: 0,
-						skipped_count: 1,
-						counts: {
-							accept: 1,
-							skip: 1
-						},
-						errors: [],
-						warnings: [],
-						review_progress: {
-							actionable_count: 1,
-							skipped_count: 1,
-							accept_count: 1,
-							reject_count: 0,
-							correct_count: 0
-						},
-						decision_progress_by_goal: [
-							{
-								goal_id: 'goal_1',
-								actionable_count: 1,
-								skipped_count: 1,
-								accept_count: 1,
-								reject_count: 0,
-								correct_count: 0,
-								next_review_finding_id: 'finding_claim_2'
-							}
-						],
-						affected_goals: [
-							{
-								goal_id: 'goal_1',
-								training_ready_count: 1,
-								training_message_count: 1,
-								protocol_ready_count: 1,
-								review_candidate_count: 1,
-								rejected_count: 0,
-								pending_actionable_count: 1,
-								pending_accept_count: 1,
-								pending_reject_count: 0,
-								pending_correct_count: 0,
-								projected_training_ready_count: 1,
-								projected_review_candidate_count: 1,
-								projected_rejected_count: 0
-							}
-						],
-						readiness_summary: {
-							goal_count: 1,
-							projected_training_ready_goal_count: 1,
-							projected_training_message_goal_count: 1,
-							projected_protocol_ready_goal_count: 1,
-							projected_review_candidate_count: 1,
-							projected_rejected_count: 0,
-							ready_for_training_export: true,
-							ready_for_protocol_drafting: true
-						},
-						review_scope_gate: {
-							status: 'blocked',
-							ready_for_expert_satisfaction_gate: false,
-							blocking_reasons: ['unchecked_rows_remain', 'review_candidates_remain'],
-							actionable_count: 1,
-							skipped_count: 1,
-							ready_for_training_export: true,
-							ready_for_protocol_drafting: true,
-							goals_still_needing_review_count: 1,
-							goals_missing_training_messages_count: 0,
-							goals_missing_protocol_ready_count: 0
-						}
-					})
-				);
-			}
-			if (path.endsWith('/research-understanding/dataset')) {
-				return Promise.resolve(
-					jsonResponse({
-						schema_version: 'research_understanding_dataset.v1',
-						dataset_id: 'dataset_col_123_goal_goal_1_research_understanding',
-						collection_id: 'col_123',
-						scope_type: 'goal',
-						scope_id: 'goal_1',
-						task_type: 'research_understanding_finding',
-						metric_profile: 'research_understanding_v1',
-						label_status_filter: null,
-						dataset_use_status_filter: null,
-						item_count: 1,
-						label_counts: {
-							candidate: 1,
-							silver: 0,
-							gold: 1,
-							rejected: 0
-						},
-						quality_summary: {
-							training_ready_sample_count: 1,
-							training_message_sample_count: 1,
-							protocol_ready_sample_count: 1,
-							review_candidate_sample_count: 1,
-							by_dataset_use_status: {
-								training_ready: 1,
-								review_candidate: 1,
-								rejected: 0
-							},
-							by_error_category: {
-								none: 1
-							},
-							by_review_reason: {},
-							by_system_warning: {},
-							by_review_candidate_reason: {},
-							by_review_candidate_warning: {},
-							top_error_categories: [{ name: 'none', count: 1 }],
-							top_issue_types: [{ name: 'none', count: 1 }],
-							top_review_reasons: [],
-							top_system_warnings: []
-						},
-						items: [],
-						warnings: []
-					})
-				);
-			}
-			if (
-				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal_id: 'goal_1',
-						items: [
-							{
-								plan_id: 'exp_1',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								title: 'Preheating validation matrix',
-								content: structuredProtocol(),
-								status: 'draft',
-								source_message_id: 'msg_1',
-								source_links: [
-									{
-										kind: 'evidence',
-										label: 'Source 1',
-										href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-									}
-								],
-								metadata: {
-									source: 'goal_copilot',
-									review_gate: 'protocol_ready_findings',
-									source_validity: defaultPlanSourceValidity,
-									source_validity_reasons: defaultPlanSourceValidityReasons
-								},
-								created_by: 'expert-a',
-								created_at: '2026-07-13T00:00:00+00:00',
-								updated_at: '2026-07-13T00:00:00+00:00'
-							}
-						]
-					})
-				);
-			}
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
+			if (path.endsWith('/research-understanding/curations')) {
+				if (method === 'POST') {
+					const body = requestBody(init);
+					return Promise.resolve(
+						jsonResponse({
+							...body,
+							curation_id: 'curation_internal_saved',
 							collection_id: 'col_123',
-							question: 'How does heat treatment affect strength?',
-							source_type: 'objective_candidate',
-							material_hints: ['316L stainless steel'],
-							process_hints: ['heat treatment'],
-							property_hints: ['yield strength'],
-							source_objective_id: 'obj_1',
-							status: 'ready',
-							analysis_error: null,
-							analysis_progress: null,
-							created_at: null,
-							updated_at: null
-						},
-						understanding: {
-							schema_version: 'research_understanding.v1',
-							state: 'ready',
-							scope: {
-								scope_type: 'goal',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								material_id: null,
-								objective_id: null,
-								document_id: null,
-								title: 'How does heat treatment affect strength?'
-							},
-							claims: [
-								{
-									claim_id: 'claim_1',
-									claim_type: 'finding',
-									statement: 'Heat treatment changes tensile strength.',
-									status: 'supported',
-									confidence: 0.84,
-									strength: 'moderate',
-									evidence_ref_ids: [],
-									context_ids: [],
-									source_object_ids: [],
-									warnings: []
-								},
-								{
-									claim_id: 'claim_2',
-									claim_type: 'finding',
-									statement: 'Aging treatment improves yield strength.',
-									status: 'supported',
-									confidence: 0.78,
-									strength: 'moderate',
-									evidence_ref_ids: [],
-									context_ids: [],
-									source_object_ids: [],
-									warnings: []
-								}
-							],
-							relations: [],
-							evidence_refs: [],
-							contexts: [],
-							warnings: [],
-							summary: {
-								claim_count: 2,
-								relation_count: 0,
-								evidence_ref_count: 0,
-								context_count: 0
-							},
-							presentation: {
-								summary: {
-									title: 'How does heat treatment affect strength?',
-									material_scope: ['316L stainless steel'],
-									variable_axes: ['heat treatment'],
-									property_scope: ['tensile strength'],
-									claim_count: 2,
-									relation_count: 0,
-									evidence_count: 0,
-									context_count: 0,
-									review_queue_count: 0
-								},
-								effects: [
-									{
-										effect_id: 'effect_claim_1',
-										claim_id: 'claim_1',
-										title: 'heat treatment -> tensile strength',
-										statement: 'Heat treatment changes tensile strength.',
-										claim_type: 'finding',
-										support_status: 'supported',
-										confidence: 0.84,
-										effect_direction: '',
-										variable_axis: 'heat treatment',
-										target_property: 'tensile strength',
-										paper_count: 0,
-										evidence_count: 0,
-										context_summary: '316L stainless steel, heat treatment',
-										evidence_ref_ids: [],
-										context_ids: [],
-										relation_ids: [],
-										needs_review: false,
-										warnings: []
-									},
-									{
-										effect_id: 'effect_claim_2',
-										claim_id: 'claim_2',
-										title: 'aging treatment -> yield strength',
-										statement: 'Aging treatment improves yield strength.',
-										claim_type: 'finding',
-										support_status: 'supported',
-										confidence: 0.78,
-										effect_direction: 'increases',
-										variable_axis: 'aging treatment',
-										target_property: 'yield strength',
-										paper_count: 0,
-										evidence_count: 0,
-										context_summary: '316L stainless steel, aging treatment',
-										evidence_ref_ids: [],
-										context_ids: [],
-										relation_ids: [],
-										needs_review: false,
-										warnings: []
-									}
-								],
-								findings: [
-									{
-										finding_id: 'finding_claim_1',
-										claim_id: 'claim_1',
-										title: 'heat treatment -> tensile strength',
-										statement: 'Heat treatment changes tensile strength.',
-										variables: ['heat treatment'],
-										mediators: [],
-										outcomes: ['tensile strength'],
-										direction: '',
-										scope_summary: '316L stainless steel, heat treatment',
-										support_grade: 'weak',
-										review_status: 'pending_review',
-										confidence: 0.84,
-										paper_count: 0,
-										evidence_count: 0,
-										evidence_ref_ids: [],
-										context_ids: [],
-										relation_ids: [],
-										evidence_bundle: {
-											direct_result: [],
-											mechanism: [],
-											condition_context: [],
-											background: [],
-											conflict: [],
-											noise: [],
-											uncategorized: []
-										},
-										warnings: []
-									},
-									{
-										finding_id: 'finding_claim_2',
-										claim_id: 'claim_2',
-										title: 'aging treatment -> yield strength',
-										statement: 'Aging treatment improves yield strength.',
-										variables: ['aging treatment'],
-										mediators: [],
-										outcomes: ['yield strength'],
-										direction: 'increases',
-										scope_summary: '316L stainless steel, aging treatment',
-										support_grade: 'weak',
-										review_status: 'pending_review',
-										confidence: 0.78,
-										paper_count: 0,
-										evidence_count: 0,
-										evidence_ref_ids: [],
-										context_ids: [],
-										relation_ids: [],
-										evidence_bundle: {
-											direct_result: [],
-											mechanism: [],
-											condition_context: [],
-											background: [],
-											conflict: [],
-											noise: [],
-											uncategorized: []
-										},
-										warnings: []
-									}
-								],
-								evidence_items: [],
-								context_summaries: []
-							}
-						},
-						pipeline_nodes: {},
-						errors: [],
-						warnings: []
-					})
-				);
+							finding_fingerprint: null,
+							updated_at: '2026-07-19T00:00:00Z'
+						})
+					);
+				}
+				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: curationResponse }));
 			}
 			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
 		});
 	});
 
-	it('loads confirmed goal analysis into the research understanding workspace', async () => {
+	it('renders a focused Finding list and keeps secondary tools out of the primary flow', async () => {
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Ask Copilot' }))
-			.toHaveAttribute('href', '/collections/col_123/assistant?goal_id=goal_1');
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'How does heat treatment affect strength?' }))
+			.element(browserPage.getByRole('heading', { name: 'How does preheating affect LPBF 316L?' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
+			.element(browserPage.getByRole('heading', { name: 'Research findings' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('2', { exact: true }).first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Download decision template' }))
+			.element(
+				browserPage.getByText(
+					'Increasing build-platform preheating from 25 C to 150 C increases ductility by 14% in LPBF 316L.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Audit binding')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Parsed source block')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Raw JSON')).not.toBeInTheDocument();
+		expect(document.body.textContent).not.toContain('finding_internal_1');
+		expect(document.body.textContent).not.toContain('claim_internal_1');
+		expect(document.body.textContent).not.toContain('rel_internal_1');
+		expect(document.body.textContent).not.toContain('ev_internal_1');
+		expect(document.body.textContent).not.toContain('doc_internal_1');
+		expect(document.body.textContent).not.toContain('56a67dccf6e344a0a7ed418921be62bc');
+	});
+
+	it('opens one Finding and shows paper-by-paper original evidence with source navigation', async () => {
+		render(Page);
+
+		await browserPage.getByRole('button', { name: /Increasing build-platform preheating/ }).click();
+		await expect
+			.element(browserPage.getByRole('heading', { name: /Increasing build-platform preheating/ }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Relationship' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('reduced thermal gradient')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence by paper' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('P001-Preheating response')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Preheating the build platform to 150 C increased elongation by 14%.')
+			)
+			.toBeInTheDocument();
+		const sourceLink = browserPage.getByRole('link', { name: /Open in paper/ }).first();
+		await expect
+			.element(sourceLink)
 			.toHaveAttribute(
 				'href',
-				'/api/v1/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1&dataset_use_status=review_candidate&format=decision_template'
+				expect.stringContaining('/collections/col_123/documents/doc_internal_1?')
 			);
+		await expect.element(sourceLink).toHaveAttribute('href', expect.stringContaining('page=5'));
+		await expect.element(sourceLink).toHaveAttribute('href', expect.stringContaining('return_to='));
+		await expect.element(browserPage.getByText('Cross-paper synthesis')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Finding evidence')).not.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
+		await expect
+			.element(browserPage.getByRole('table', { name: 'Research findings' }))
+			.toBeInTheDocument();
+	});
+
+	it('submits an accepted Finding as correct feedback', async () => {
+		render(Page);
+		await browserPage.getByRole('button', { name: /Increasing build-platform preheating/ }).click();
+		await browserPage.getByRole('button', { name: 'Review', exact: true }).click();
+		await expect.element(browserPage.getByRole('dialog')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Confirm the 14% value in the source passage.'))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Save decision' }).click();
+
+		await vi.waitFor(() => {
+			const call = fetchMock.mock.calls.find(
+				([input, init]) =>
+					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
+					requestMethod(input, init) === 'POST'
+			);
+			expect(requestBody(call?.[1])).toMatchObject({
+				scope_type: 'goal',
+				scope_id: 'goal_1',
+				finding_id: 'finding_internal_1',
+				claim_id: 'claim_internal_1',
+				review_status: 'correct',
+				issue_type: 'none',
+				reviewer: 'materials-expert@example.com'
+			});
+		});
+		await expect.element(browserPage.getByText('Accepted').first()).toBeInTheDocument();
+	});
+
+	it('submits rejection feedback with an expert issue and note', async () => {
+		render(Page);
+		await browserPage.getByRole('button', { name: /Increasing build-platform preheating/ }).click();
+		await browserPage.getByRole('button', { name: 'Review', exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Reject', exact: true }).click();
+		await browserPage.getByLabelText('Issue type').selectOptions('overclaim');
+		await browserPage
+			.getByLabelText('Reason for rejection')
+			.fill('The second paper does not report an independently controlled comparison.');
+		await browserPage.getByRole('button', { name: 'Save decision' }).click();
+
+		await vi.waitFor(() => {
+			const call = fetchMock.mock.calls.find(
+				([input, init]) =>
+					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
+					requestMethod(input, init) === 'POST'
+			);
+			expect(requestBody(call?.[1])).toMatchObject({
+				review_status: 'incorrect',
+				issue_type: 'overclaim',
+				note: 'The second paper does not report an independently controlled comparison.'
+			});
+		});
+		await expect.element(browserPage.getByText('Rejected').first()).toBeInTheDocument();
+	});
+
+	it('submits a corrected Finding with structured fields and retained evidence', async () => {
+		render(Page);
+		await browserPage.getByRole('button', { name: /Increasing build-platform preheating/ }).click();
+		await browserPage.getByRole('button', { name: 'Review', exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Correct', exact: true }).click();
+		await browserPage
+			.getByLabelText('Corrected finding')
+			.fill(
+				'At 150 C, build-platform preheating increased elongation by 14% in the reported LPBF 316L cohort.'
+			);
+		await browserPage.getByLabelText('Variables').fill('build-platform preheating temperature');
+		await browserPage.getByLabelText('Mechanism').fill('reduced thermal gradient');
+		await browserPage.getByLabelText('Outcomes').fill('elongation');
+		await browserPage.getByLabelText('Direction').fill('increases');
+		await browserPage.getByLabelText('Evidence grade').selectOptions('partial');
+		await browserPage
+			.getByRole('textbox', { name: 'Applicability' })
+			.fill('Reported LPBF 316L cohort under room-temperature tensile testing');
+		await browserPage.getByRole('button', { name: 'Save decision' }).click();
+
+		await vi.waitFor(() => {
+			const call = fetchMock.mock.calls.find(
+				([input, init]) =>
+					requestPath(input) === '/api/v1/collections/col_123/research-understanding/curations' &&
+					requestMethod(input, init) === 'POST'
+			);
+			expect(requestBody(call?.[1])).toMatchObject({
+				finding_id: 'finding_internal_1',
+				claim_id: 'claim_internal_1',
+				curated_statement:
+					'At 150 C, build-platform preheating increased elongation by 14% in the reported LPBF 316L cohort.',
+				curated_variables: ['build-platform preheating temperature'],
+				curated_mediators: ['reduced thermal gradient'],
+				curated_outcomes: ['elongation'],
+				curated_direction: 'increases',
+				curated_support_grade: 'partial',
+				curated_evidence_ref_ids: ['ev_internal_1', 'ev_internal_2']
+			});
+		});
+		await expect.element(browserPage.getByText('Corrected').first()).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: /At 150 C, build-platform preheating/ }))
+			.toBeInTheDocument();
+	});
+
+	it('shows requested variable and outcome coverage separately and opens linked Findings', async () => {
+		render(Page);
+		await browserPage.getByRole('button', { name: /Coverage/ }).click();
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Question coverage' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Variable coverage' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Outcome coverage' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('scan strategy')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('No finding').first()).toBeInTheDocument();
+		await browserPage
+			.getByRole('button', { name: /Increasing build-platform preheating/ })
+			.first()
+			.click();
+		await expect
+			.element(browserPage.getByRole('heading', { name: /Increasing build-platform preheating/ }))
+			.toBeInTheDocument();
+	});
+
+	it('keeps exports and experiment plans under More actions', async () => {
+		render(Page);
+		await browserPage.getByText('More', { exact: true }).click();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Download review packet' }))
 			.toHaveAttribute(
 				'href',
 				'/api/v1/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1&dataset_use_status=review_candidate&format=review_packet'
 			);
-		await expect
-			.element(browserPage.getByText('Heat treatment changes tensile strength.').first())
-			.toBeInTheDocument();
-		await browserPage
-			.getByRole('row', { name: /Heat treatment changes tensile strength\./ })
-			.getByRole('button', { name: 'Review evidence' })
-			.click();
-		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
-		const feedbackCall = fetchMock.mock.calls.find(
-			([input, init]) =>
-				requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
-				requestMethod(input, init) === 'POST'
-		);
-		expect(JSON.parse(feedbackCall?.[1]?.body as string)).toMatchObject({
-			scope_type: 'goal',
-			scope_id: 'goal_1',
-			finding_id: 'finding_claim_1',
-			claim_id: 'claim_1',
-			review_status: 'correct',
-			issue_type: 'none'
-		});
-		await expect.element(browserPage.getByText('Gold').first()).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Experiment plans' }).click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Preheating validation matrix').first())
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('obj_1')).not.toBeInTheDocument();
-	});
-
-	it('requires per-finding acceptance for expert dataset review', async () => {
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('button', { name: /Accept visible/ }))
-			.not.toBeInTheDocument();
-		await browserPage
-			.getByRole('row', { name: /Heat treatment changes tensile strength\./ })
-			.getByRole('button', { name: 'Review evidence' })
-			.click();
-		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
-		await vi.waitFor(() => {
-			const feedbackPosts = fetchMock.mock.calls.filter(
-				([input, init]) =>
-					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
-					requestMethod(input, init) === 'POST'
-			);
-			expect(feedbackPosts).toHaveLength(1);
-		});
-		await browserPage.getByRole('button', { name: 'Back to findings' }).click();
-		await browserPage
-			.getByRole('row', { name: /Aging treatment improves yield strength\./ })
-			.getByRole('button', { name: 'Review evidence' })
-			.click();
-		await browserPage.getByRole('button', { name: 'Accept paper-level', exact: true }).click();
-
-		await vi.waitFor(() => {
-			const feedbackPosts = fetchMock.mock.calls.filter(
-				([input, init]) =>
-					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
-					requestMethod(input, init) === 'POST'
-			);
-			expect(feedbackPosts).toHaveLength(2);
-		});
-		const feedbackBodies = fetchMock.mock.calls
-			.filter(
-				([input, init]) =>
-					requestPath(input) === '/api/v1/collections/col_123/research-understanding/feedback' &&
-					requestMethod(input, init) === 'POST'
-			)
-			.map(([, init]) => JSON.parse(init?.body as string));
-		expect(feedbackBodies).toEqual([
-			expect.objectContaining({
-				scope_type: 'goal',
-				scope_id: 'goal_1',
-				review_status: 'correct',
-				issue_type: 'none'
-			}),
-			expect.objectContaining({
-				scope_type: 'goal',
-				scope_id: 'goal_1',
-				review_status: 'correct',
-				issue_type: 'none'
-			})
-		]);
-		expect(feedbackBodies).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					finding_id: 'finding_claim_1',
-					claim_id: 'claim_1'
-				}),
-				expect.objectContaining({
-					finding_id: 'finding_claim_2',
-					claim_id: 'claim_2'
-				})
-			])
-		);
-		await expect.element(browserPage.getByText('Gold').first()).toBeInTheDocument();
-	});
-
-	it('shows the expert satisfaction gate after decision import dry-run', async () => {
-		render(Page);
-
-		await browserPage.getByText('Dataset', { exact: true }).click();
-		await browserPage
-			.getByLabelText('Reviewed decisions')
-			.fill(
-				[
-					'{"finding_id":"finding_claim_1","claim_id":"claim_1","action":"accept"}',
-					'{"finding_id":"finding_claim_2","claim_id":"claim_2","action":"skip"}'
-				].join('\n')
-			);
-		await browserPage.getByRole('button', { name: 'Dry run' }).click();
-
-		await expect.element(browserPage.getByText('Expert satisfaction gate')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Gate status: blocked.')).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Actionable rows 1, skipped rows 1. Training export ready; protocol drafting ready.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Some rows are still skipped or unchecked.'))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Some findings still need review.')).toBeInTheDocument();
-	});
-
-	it('opens the rejection form from a finding table row', async () => {
-		render(Page);
-
-		await browserPage.getByRole('button', { name: 'Reject' }).first().click();
-
-		await expect.element(browserPage.getByRole('heading', { name: 'Expert feedback' })).toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Review result')).toHaveValue('incorrect');
-		await expect.element(browserPage.getByLabelText('Issue type')).toHaveValue('evidence_not_grounded');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save feedback', exact: true }))
-			.toBeInTheDocument();
-	});
-
-	it('opens the correction form from a finding table row', async () => {
-		render(Page);
-
-		await browserPage.getByRole('button', { name: 'Correct' }).first().click();
-
-		await expect.element(browserPage.getByRole('heading', { name: 'Expert curation' })).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByLabelText('Curated statement'))
-			.toHaveValue('Heat treatment changes tensile strength.');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save curation', exact: true }))
-			.toBeInTheDocument();
-	});
-
-	it('edits saved experiment plan drafts on the goal page', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path.endsWith('/research-understanding/curations')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (path.endsWith('/research-understanding/feedback')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (
-				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal_id: 'goal_1',
-						items: [
-							{
-								plan_id: 'exp_1',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								title: 'Preheating validation matrix',
-								content: 'Compare 25 C and 150 C preheated builds.',
-								status: 'draft',
-								source_message_id: null,
-								source_links: [],
-								metadata: {},
-								created_by: 'expert-a',
-								created_at: '2026-07-13T00:00:00+00:00',
-								updated_at: '2026-07-13T00:00:00+00:00'
-							}
-						]
-					})
-				);
-			}
-			if (
-				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
-				method === 'PATCH'
-			) {
-				return Promise.resolve(
-					jsonResponse({
-						plan_id: 'exp_1',
-						collection_id: 'col_123',
-						goal_id: 'goal_1',
-						title: 'Edited validation matrix',
-						content: 'Add a no-preheat control.',
-						status: 'ready_for_review',
-						source_message_id: null,
-						source_links: [],
-						metadata: {},
-						created_by: 'expert-a',
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T01:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
-							collection_id: 'col_123',
-							question: 'How does heat treatment affect strength?',
-							source_type: 'objective_candidate',
-							material_hints: [],
-							process_hints: [],
-							property_hints: [],
-							source_objective_id: null,
-							status: 'ready',
-							analysis_error: null,
-							analysis_progress: null,
-							created_at: null,
-							updated_at: null
-						},
-						understanding: null,
-						pipeline_nodes: {},
-						errors: [],
-						warnings: []
-					})
-				);
-			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
-		});
-
-		render(Page);
-
-		const titleInput = browserPage.getByLabelText('Title');
-		await expect.element(titleInput).toHaveValue('Preheating validation matrix');
-		await expect.element(titleInput).toHaveAttribute('name', 'experiment_plan_title');
-		await expect
-			.element(browserPage.getByLabelText('Plan content'))
-			.toHaveAttribute('name', 'experiment_plan_content');
-		await expect
-			.element(browserPage.getByLabelText('Status'))
-			.toHaveAttribute('name', 'experiment_plan_status');
-		await titleInput.fill('Edited validation matrix');
-		await browserPage.getByLabelText('Plan content').fill('Add a no-preheat control.');
-		await browserPage.getByLabelText('Status').selectOptions('ready_for_review');
-		await browserPage.getByRole('button', { name: 'Save edits' }).click();
-
-		const patchCall = fetchMock.mock.calls.find(
-			([input, init]) =>
-				requestPath(input) ===
-					'/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
-				requestMethod(input, init) === 'PATCH'
-		);
-		expect(JSON.parse(patchCall?.[1]?.body as string)).toMatchObject({
-			title: 'Edited validation matrix',
-			content: 'Add a no-preheat control.',
-			status: 'ready_for_review'
-		});
-		await expect.element(browserPage.getByText('Edited validation matrix').first()).toBeInTheDocument();
-	});
-
-	it('shows an experiment plan error when the plan endpoint is missing', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path.endsWith('/research-understanding/curations')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (path.endsWith('/research-understanding/feedback')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (
-				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(jsonResponse({ detail: 'Not Found' }, 404, 'Not Found'));
-			}
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
-							collection_id: 'col_123',
-							question: 'How does heat treatment affect strength?',
-							source_type: 'objective_candidate',
-							material_hints: [],
-							process_hints: [],
-							property_hints: [],
-							source_objective_id: null,
-							status: 'ready',
-							analysis_error: null,
-							analysis_progress: null,
-							created_at: null,
-							updated_at: null
-						},
-						understanding: null,
-						pipeline_nodes: {},
-						errors: [],
-						warnings: []
-					})
-				);
-			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
-		});
-
-		render(Page);
-
+		await expect.element(browserPage.getByText('Preheating validation matrix')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Close plans' }).click();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Experiment plan storage is unavailable in the running backend. Restart or update the backend before saving protocol drafts.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('404 Not Found - Not Found')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('No experiment plans saved yet.')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Plan content')).not.toBeInTheDocument();
-	});
-
-	it('does not save copilot plan edits after removing source labels', async () => {
-		render(Page);
-
-		await browserPage
-			.getByLabelText('Plan content')
-			.fill(
-				[
-					'Hypothesis: 150 C preheating improves ductility.',
-					'Variable matrix: compare 25 C and 150 C builds.',
-					'Measurements: elongation and microstructure.',
-					'Controls: same LPBF parameters except preheating.',
-					'Risks or limits: single-alloy validation.'
-				].join('\n')
-			);
-
-		await expect
-			.element(
-				browserPage.getByText(
-					'Goal Copilot plans must keep at least one visible source label, such as [Source 1].'
-				)
-			)
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).toBeDisabled();
-		expect(
-			fetchMock.mock.calls.some(
-				([input, init]) =>
-					requestPath(input) ===
-						'/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
-					requestMethod(input, init) === 'PATCH'
-			)
-		).toBe(false);
-	});
-
-	it('does not save unstructured copilot plan edits', async () => {
-		render(Page);
-
-		await browserPage.getByLabelText('Plan content').fill('Run 25 C and 150 C LPBF builds [Source 1].');
-
-		await expect
-			.element(
-				browserPage.getByText(
-					'Goal Copilot plans must keep hypothesis, variable matrix, measurements, controls, and risks or limits.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).toBeDisabled();
-		expect(
-			fetchMock.mock.calls.some(
-				([input, init]) =>
-					requestPath(input) ===
-						'/api/v1/collections/col_123/goals/goal_1/experiment-plans/exp_1' &&
-					requestMethod(input, init) === 'PATCH'
-			)
-		).toBe(false);
-	});
-
-	it('shows stale copilot sources and prevents review promotion', async () => {
-		defaultPlanSourceValidity = 'stale';
-		defaultPlanSourceValidityReasons = ['source_finding_changed'];
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByText('Source Findings or evidence changed', { exact: true }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'This draft uses an older Finding or evidence version. Rebuild it in Copilot before marking it ready for review.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
-			.toBeDisabled();
-		await expect.element(browserPage.getByRole('button', { name: 'Save edits' })).not.toBeDisabled();
-	});
-
-	it('identifies scientifically inconsistent historical protocol drafts', async () => {
-		defaultPlanSourceValidity = 'stale';
-		defaultPlanSourceValidityReasons = ['protocol_design_inconsistent'];
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByText('Protocol design is scientifically inconsistent', { exact: true }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'This draft violates the experiment design contract. Review the variable matrix and causal boundary, or rebuild it in Copilot.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Source Findings or evidence changed', { exact: true }))
 			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
-			.toBeDisabled();
 	});
 
-	it('shows legacy copilot sources as unverified', async () => {
-		defaultPlanSourceValidity = 'unverified';
-		defaultPlanSourceValidityReasons = ['source_finding_snapshot_missing'];
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByText('Source version unverified', { exact: true }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'This legacy draft has no exact Finding and evidence version. Rebuild it in Copilot before marking it ready for review.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
-			.toBeDisabled();
-	});
-
-	it('opens the experiment plan requested by the copilot deep link', async () => {
+	it('opens a requested Copilot experiment plan as a secondary section', async () => {
 		setPage({
 			params: { id: 'col_123', goal_id: 'goal_1' },
-			url: new URL('http://localhost/collections/col_123/goals/goal_1?plan_id=exp_2#experiment-plans-title')
+			url: new URL(
+				'http://localhost/collections/col_123/goals/goal_1?plan_id=plan_internal_1#experiment-plans-title'
+			)
 		});
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path.endsWith('/research-understanding/curations')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (path.endsWith('/research-understanding/feedback')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (
-				path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal_id: 'goal_1',
-						items: [
-							{
-								plan_id: 'exp_1',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								title: 'Older validation matrix',
-								content: 'Earlier draft.',
-								status: 'draft',
-								source_message_id: null,
-								source_links: [],
-								metadata: {},
-								created_by: 'expert-a',
-								created_at: '2026-07-13T00:00:00+00:00',
-								updated_at: '2026-07-13T00:00:00+00:00'
-							},
-							{
-								plan_id: 'exp_2',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								title: 'Copied copilot validation plan',
-								content: structuredProtocol(),
-								status: 'draft',
-								source_message_id: 'msg_2',
-								source_links: [
-									{
-										kind: 'evidence',
-										label: 'Source 1',
-										href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-									}
-								],
-								metadata: {
-									source: 'goal_copilot',
-									source_session_id: 'session_2',
-									source_mode: 'collection_grounded',
-									used_evidence_ids: ['ev_1'],
-									review_gate: 'protocol_ready_findings',
-									source_validity: 'current',
-									source_validity_reasons: []
-								},
-								created_by: 'expert-a',
-								created_at: '2026-07-13T00:01:00+00:00',
-								updated_at: '2026-07-13T00:01:00+00:00'
-							}
-						]
-					})
-				);
-			}
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
-							collection_id: 'col_123',
-							question: 'How does VED affect fatigue?',
-							source_type: 'objective_candidate',
-							material_hints: [],
-							process_hints: [],
-							property_hints: [],
-							source_objective_id: null,
-							status: 'ready',
-							analysis_error: null,
-							analysis_progress: null,
-							created_at: null,
-							updated_at: null
-						},
-						understanding: null,
-						pipeline_nodes: {},
-						errors: [],
-						warnings: []
-					})
-				);
-			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
-		});
-
-		render(Page);
-
-		await expect.element(browserPage.getByLabelText('Title')).toHaveValue('Copied copilot validation plan');
-		await expect
-			.element(browserPage.getByLabelText('Plan content'))
-			.toHaveValue(structuredProtocol());
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Source 1' }))
-			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
-		await expect
-			.element(browserPage.getByText('Manual expert draft', { exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Goal Copilot draft', { exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Current Finding and evidence version', { exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Created under the protocol-ready review gate', { exact: true }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Collection evidence answer')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('protocol_ready_findings')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('1 evidence link(s)')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Evidence sources')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('session_2')).not.toBeInTheDocument();
-	});
-
-	it('shows analysis errors instead of an empty research understanding workspace', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request) => {
-			const path = requestPath(input);
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
-							collection_id: 'col_123',
-							question: 'How does heat treatment affect strength?',
-							source_type: 'objective_candidate',
-							material_hints: [],
-							process_hints: [],
-							property_hints: [],
-							source_objective_id: null,
-							status: 'failed',
-							analysis_error: 'finalize_goal: goal analysis produced no research findings',
-							analysis_progress: {
-								phase: 'failed',
-								unit: 'steps',
-								message: 'Goal analysis failed.'
-							},
-							created_at: null,
-							updated_at: null
-						},
-						understanding: {
-							schema_version: 'research_understanding.v1',
-							state: 'ready',
-							scope: {
-								scope_type: 'goal',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								material_id: null,
-								objective_id: null,
-								document_id: null,
-								title: 'How does heat treatment affect strength?'
-							},
-							claims: [],
-							relations: [],
-							evidence_refs: [],
-							contexts: [],
-							warnings: [],
-							summary: {
-								claim_count: 0,
-								relation_count: 0,
-								evidence_ref_count: 0,
-								context_count: 0
-							},
-							presentation: {
-								summary: {
-									title: 'How does heat treatment affect strength?',
-									material_scope: [],
-									variable_axes: [],
-									property_scope: [],
-									claim_count: 0,
-									relation_count: 0,
-									evidence_count: 0,
-									context_count: 0,
-									review_queue_count: 0,
-									primary_finding_count: 0,
-									review_queue_finding_count: 0,
-									collection_document_count: 0
-								},
-								effects: [],
-								findings: [],
-								primary_findings: [],
-								review_queue_findings: [],
-								evidence_items: [],
-								context_summaries: []
-							}
-						},
-						pipeline_nodes: {
-							finalize_goal: {
-								status: 'failed',
-								errors: ['goal analysis produced no research findings']
-							}
-						},
-						errors: ['finalize_goal: goal analysis produced no research findings'],
-						warnings: []
-					})
-				);
-			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
-		});
-
 		render(Page);
 
 		await expect
-			.element(browserPage.getByText('finalize_goal: goal analysis produced no research findings'))
+			.element(browserPage.getByRole('heading', { name: 'Experiment plans' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('heading', { name: 'Findings' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByLabelText('Title'))
+			.toHaveValue('Preheating validation matrix');
 	});
 
-	it('shows review-only understanding when goal analysis has no primary findings', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request) => {
-			const path = requestPath(input);
-			if (path.endsWith('/research-understanding/curations')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (path.endsWith('/research-understanding/feedback')) {
-				return Promise.resolve(jsonResponse({ collection_id: 'col_123', items: [] }));
-			}
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
-							collection_id: 'col_123',
-							question: 'How does scan strategy affect yield strength?',
-							source_type: 'objective_candidate',
-							material_hints: ['316L stainless steel'],
-							process_hints: ['scan strategy'],
-							property_hints: ['yield strength'],
-							source_objective_id: null,
-							status: 'ready',
-							analysis_error: null,
-							analysis_progress: null,
-							created_at: null,
-							updated_at: null
-						},
-						understanding: {
-							schema_version: 'research_understanding.v1',
-							state: 'ready',
-							scope: {
-								scope_type: 'goal',
-								collection_id: 'col_123',
-								goal_id: 'goal_1',
-								material_id: null,
-								objective_id: null,
-								document_id: null,
-								title: 'How does scan strategy affect yield strength?'
-							},
-							claims: [],
-							relations: [],
-							evidence_refs: [],
-							contexts: [],
-							warnings: [],
-							summary: {
-								claim_count: 0,
-								relation_count: 0,
-								evidence_ref_count: 0,
-								context_count: 0
-							},
-							presentation: {
-								summary: {
-									title: 'How does scan strategy affect yield strength?',
-									material_scope: ['316L stainless steel'],
-									variable_axes: ['scan strategy'],
-									property_scope: ['yield strength'],
-									claim_count: 0,
-									relation_count: 0,
-									evidence_count: 1,
-									context_count: 0,
-									review_queue_count: 1,
-									primary_finding_count: 0,
-									review_queue_finding_count: 1,
-									collection_document_count: 6
-								},
-								effects: [],
-								findings: [
-									{
-										finding_id: 'finding_review_only',
-										claim_id: 'claim_review_only',
-										title: 'scan strategy rotation angle and build orientation -> yield strength',
-										statement:
-											'Scan strategy rotation angles and build orientations can be used to predict crystallographic texture changes and Bishop-Hill yield strength in LPBF 316L.',
-										variables: ['scan strategy rotation angle', 'build orientation'],
-										mediators: ['crystallographic texture'],
-										outcomes: ['yield strength'],
-										direction: 'explains',
-										scope_summary: '316L stainless steel, LPBF',
-										support_grade: 'weak',
-										review_status: 'needs_review',
-										confidence: 0.72,
-										paper_count: 1,
-										evidence_count: 1,
-										evidence_ref_ids: ['ev_review'],
-										context_ids: [],
-										relation_ids: [],
-										evidence_bundle: {
-											direct_result: ['ev_review'],
-											mechanism: [],
-											condition_context: [],
-											background: [],
-											conflict: [],
-											noise: [],
-											uncategorized: []
-										},
-										expert_use_status: 'review_candidate',
-										dataset_use_status: 'review_candidate',
-										generalization_status: 'paper_level_only',
-										generalization_note:
-											'Evidence comes from one paper; use this as a traceable paper-level finding, not a cross-paper conclusion.',
-										evidence_gap_summary: 'Needs expert review.',
-										upgrade_actions: ['record_expert_review'],
-										review_reasons: ['model_validation_finding'],
-										warnings: ['model_validation_finding']
-									}
-								],
-								primary_findings: [],
-								review_queue_findings: [
-									{
-										finding_id: 'finding_review_only',
-										claim_id: 'claim_review_only',
-										title: 'scan strategy rotation angle and build orientation -> yield strength',
-										statement:
-											'Scan strategy rotation angles and build orientations can be used to predict crystallographic texture changes and Bishop-Hill yield strength in LPBF 316L.',
-										variables: ['scan strategy rotation angle', 'build orientation'],
-										mediators: ['crystallographic texture'],
-										outcomes: ['yield strength'],
-										direction: 'explains',
-										scope_summary: '316L stainless steel, LPBF',
-										support_grade: 'weak',
-										review_status: 'needs_review',
-										confidence: 0.72,
-										paper_count: 1,
-										evidence_count: 1,
-										evidence_ref_ids: ['ev_review'],
-										context_ids: [],
-										relation_ids: [],
-										evidence_bundle: {
-											direct_result: ['ev_review'],
-											mechanism: [],
-											condition_context: [],
-											background: [],
-											conflict: [],
-											noise: [],
-											uncategorized: []
-										},
-										expert_use_status: 'review_candidate',
-										dataset_use_status: 'review_candidate',
-										generalization_status: 'paper_level_only',
-										generalization_note:
-											'Evidence comes from one paper; use this as a traceable paper-level finding, not a cross-paper conclusion.',
-										evidence_gap_summary: 'Needs expert review.',
-										upgrade_actions: ['record_expert_review'],
-										review_reasons: ['model_validation_finding'],
-										warnings: ['model_validation_finding']
-									}
-								],
-								evidence_items: [],
-								context_summaries: []
-							}
-						},
-						pipeline_nodes: {
-							finalize_goal: {
-								status: 'succeeded',
-								warnings: [
-									'goal analysis produced review candidates but no primary research findings'
-								]
-							}
-						},
-						errors: [],
-						warnings: [
-							'goal analysis produced review candidates but no primary research findings'
-						]
-					})
-				);
-			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
+	it('shows running analysis progress with the active paper', async () => {
+		analysisResponse = goalAnalysis({
+			goal: {
+				goal_id: 'goal_1',
+				collection_id: 'col_123',
+				question: 'How does preheating affect LPBF 316L?',
+				source_type: 'objective_candidate',
+				material_hints: ['316L stainless steel'],
+				process_hints: ['preheating'],
+				property_hints: ['ductility'],
+				source_objective_id: null,
+				status: 'running',
+				analysis_error: null,
+				analysis_progress: {
+					phase: 'objective_evidence_routing_started',
+					current: 3,
+					total: 6,
+					unit: 'papers',
+					message: 'Routing source blocks and tables.',
+					active_document_id: 'doc_internal_1',
+					active_document_title: 'Preheating response',
+					active_source_filename: 'P001-Preheating response.pdf',
+					active_objective_id: null
+				},
+				created_at: null,
+				updated_at: null
+			},
+			understanding: null
 		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByText('Goal analysis needs review'))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'goal analysis produced review candidates but no primary research findings'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Goal analysis failed'))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Review before use').first()).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Repair candidates 1' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('No expert findings yet')).not.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage
-					.getByText(
-						'Scan strategy rotation angles and build orientations can be used to predict crystallographic texture changes and Bishop-Hill yield strength in LPBF 316L.'
-					)
-					.first()
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('Model prediction or validation evidence needs expert review.')
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Repair candidates 1' }))
-			.toHaveAttribute('aria-pressed', 'true');
-	});
-
-	it('shows running goal analysis progress with the active paper', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request) => {
-			const path = requestPath(input);
-			if (path === '/api/v1/collections/col_123/goals/goal_1/analysis') {
-				return Promise.resolve(
-					jsonResponse({
-						collection_id: 'col_123',
-						goal: {
-							goal_id: 'goal_1',
-							collection_id: 'col_123',
-							question: 'How does heat treatment affect strength?',
-							source_type: 'objective_candidate',
-							material_hints: ['316L stainless steel'],
-							process_hints: ['heat treatment'],
-							property_hints: ['yield strength'],
-							source_objective_id: 'obj_1',
-							status: 'running',
-							analysis_error: null,
-							analysis_progress: {
-								phase: 'objective_evidence_routing_started',
-								current: 3,
-								total: 6,
-								unit: 'frames',
-								message: 'Routing source blocks and tables.',
-								active_document_id: 'doc_1',
-								active_document_title: 'Heat treatment study',
-								active_source_filename: 'heat-treatment.pdf',
-								active_objective_id: 'obj_1'
-							},
-							created_at: null,
-							updated_at: null
-						},
-						understanding: null,
-						pipeline_nodes: {},
-						errors: [],
-						warnings: []
-					})
-				);
-			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500));
-		});
-
 		render(Page);
 
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Analyzing this research goal' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Heat treatment study')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('3/6 frames')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Preheating response')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('3/6 papers')).toBeInTheDocument();
+	});
+
+	it('keeps analysis failures explicit and does not render an empty Finding workspace', async () => {
+		analysisResponse = goalAnalysis({
+			goal: {
+				...(goalAnalysis().goal as Record<string, unknown>),
+				status: 'failed',
+				analysis_error: 'Goal analysis produced no research findings.'
+			},
+			understanding: null,
+			errors: ['Goal analysis produced no research findings.']
+		});
+		render(Page);
+
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Analyzing...' }))
-			.toBeDisabled();
+			.element(browserPage.getByText('Goal analysis produced no research findings.').first())
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Research findings' }))
+			.not.toBeInTheDocument();
 	});
 });

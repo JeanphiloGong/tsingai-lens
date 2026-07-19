@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
-	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
+	import GoalResearchWorkspace from './GoalResearchWorkspace.svelte';
 	import { errorMessage, isHttpStatusError } from '../../../../_shared/api';
 	import {
 		fetchExperimentPlans,
@@ -14,6 +14,7 @@
 	import { t } from '../../../../_shared/i18n';
 	import {
 		fetchGoalAnalysis,
+		researchUnderstandingDatasetUrl,
 		runGoalAnalysis,
 		type GoalAnalysis,
 		type GoalAnalysisProgress
@@ -34,7 +35,10 @@
 	let planSaving = false;
 	let error = '';
 	let planError = '';
+	let moreActionsOpen = false;
+	let plansOpen = false;
 	let loadedKey = '';
+	let openedRequestedPlanId = '';
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$: collectionId = $page.params.id ?? '';
@@ -51,6 +55,20 @@
 				: ''
 	) as WorkbenchInitialFocus;
 	$: workbenchInitialFindingId = $page.url.searchParams.get('finding_id') ?? '';
+	$: reviewPacketUrl = goalId
+		? researchUnderstandingDatasetUrl(
+				collectionId,
+				{ scope_type: 'goal', scope_id: goalId, dataset_use_status: 'review_candidate' },
+				'review_packet'
+			)
+		: '';
+	$: trainingDatasetUrl = goalId
+		? researchUnderstandingDatasetUrl(
+				collectionId,
+				{ scope_type: 'goal', scope_id: goalId, dataset_use_status: 'training_ready' },
+				'training_jsonl'
+			)
+		: '';
 	$: progress = goal?.analysis_progress ?? null;
 	$: isAnalysisRunning = goal?.status === 'running';
 	$: analysisErrors = analysis?.errors ?? [];
@@ -58,8 +76,8 @@
 	$: hasAnalysisErrors = analysisErrors.length > 0;
 	$: hasAnalysisWarnings = analysisWarnings.length > 0;
 	$: hasReviewableUnderstanding =
-		((understanding?.presentation?.primary_findings?.length ?? 0) > 0 ||
-			(understanding?.presentation?.review_queue_findings?.length ?? 0) > 0);
+		(understanding?.presentation?.primary_findings?.length ?? 0) > 0 ||
+		(understanding?.presentation?.review_queue_findings?.length ?? 0) > 0;
 	$: progressPercent = progressPercentLabel(progress);
 	$: currentDocumentLabel = progressDocumentLabel(progress);
 	$: selectedPlan = plans.find((plan) => plan.plan_id === selectedPlanId) ?? null;
@@ -68,15 +86,19 @@
 	$: selectedPlanCanEnterReview = canEnterReview(selectedPlan);
 	$: canSaveSelectedPlan = Boolean(
 		selectedPlan &&
-			planTitle.trim() &&
-			planContent.trim() &&
-			!selectedPlanEditWarning &&
-			(planStatus !== 'ready_for_review' || selectedPlanCanEnterReview)
+		planTitle.trim() &&
+		planContent.trim() &&
+		!selectedPlanEditWarning &&
+		(planStatus !== 'ready_for_review' || selectedPlanCanEnterReview)
 	);
 	$: if (browser && collectionId && goalId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
 		clearPoll();
 		void loadAnalysis();
+	}
+	$: if (browser && requestedPlanId && requestedPlanId !== openedRequestedPlanId) {
+		openedRequestedPlanId = requestedPlanId;
+		plansOpen = true;
 	}
 
 	onDestroy(() => {
@@ -84,6 +106,7 @@
 	});
 
 	async function loadAnalysis() {
+		moreActionsOpen = false;
 		loading = true;
 		error = '';
 		try {
@@ -156,6 +179,7 @@
 	}
 
 	async function rerunAnalysis() {
+		moreActionsOpen = false;
 		running = true;
 		error = '';
 		try {
@@ -167,6 +191,22 @@
 		} finally {
 			running = false;
 		}
+	}
+
+	function openExperimentPlans() {
+		moreActionsOpen = false;
+		plansOpen = true;
+		void loadPlans();
+		if (browser) {
+			setTimeout(() => {
+				document.getElementById('experiment-plans-title')?.scrollIntoView({ behavior: 'smooth' });
+			});
+		}
+	}
+
+	function goalStatusLabel(status: string | null | undefined) {
+		if (!status) return $t('research.emptyValue');
+		return $t(`research.objectives.goalReviewStatuses.${status}`);
 	}
 
 	function clearPoll() {
@@ -207,9 +247,7 @@
 
 	function metadataList(plan: ExperimentPlan | null, key: string) {
 		const value = plan?.metadata?.[key];
-		return Array.isArray(value)
-			? value.map((item) => String(item).trim()).filter(Boolean)
-			: [];
+		return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
 	}
 
 	function reviewGateLabel(value: string) {
@@ -282,8 +320,8 @@
 	function isCopilotPlan(plan: ExperimentPlan | null) {
 		return Boolean(
 			plan?.source_message_id ||
-				metadataText(plan, 'source') === 'goal_copilot' ||
-				metadataText(plan, 'review_gate') === 'protocol_ready_findings'
+			metadataText(plan, 'source') === 'goal_copilot' ||
+			metadataText(plan, 'review_gate') === 'protocol_ready_findings'
 		);
 	}
 
@@ -346,7 +384,10 @@
 			<h2>{goal?.question ?? goalId}</h2>
 			{#if goal}
 				<div class="goal-meta">
-					<span>{statusLabel(goal.status)}</span>
+					<span>{goalStatusLabel(goal.status)}</span>
+					{#if goal.material_hints.length}
+						<span>{goal.material_hints.join(', ')}</span>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -359,19 +400,30 @@
 			>
 				{$t('research.goalWorkspace.askCopilot')}
 			</a>
-			<button class="btn btn--ghost btn--small" type="button" on:click={loadAnalysis}>
-				{$t('research.objectives.refresh')}
-			</button>
-			<button
-				class="btn btn--primary btn--small"
-				type="button"
-				disabled={running || isAnalysisRunning}
-				on:click={rerunAnalysis}
-			>
-				{running || isAnalysisRunning
-					? $t('research.objectives.analyzing')
-					: $t('research.objectives.confirmAndAnalyze')}
-			</button>
+			<details class="more-menu" bind:open={moreActionsOpen}>
+				<summary class="btn btn--ghost btn--small">
+					{$t('research.goalWorkspace.moreActions')}
+				</summary>
+				<div class="more-menu__items">
+					<button type="button" on:click={loadAnalysis}>
+						{$t('research.objectives.refresh')}
+					</button>
+					<button type="button" disabled={running || isAnalysisRunning} on:click={rerunAnalysis}>
+						{running || isAnalysisRunning
+							? $t('research.objectives.analyzing')
+							: $t('research.goalWorkspace.reanalyze')}
+					</button>
+					<button type="button" on:click={openExperimentPlans}>
+						{$t('research.goalWorkspace.experimentPlansTitle')}
+					</button>
+					<a href={reviewPacketUrl} on:click={() => (moreActionsOpen = false)}>
+						{$t('research.goalWorkspace.downloadReviewPacket')}
+					</a>
+					<a href={trainingDatasetUrl} on:click={() => (moreActionsOpen = false)}>
+						{$t('research.goalWorkspace.downloadTrainingData')}
+					</a>
+				</div>
+			</details>
 		</div>
 	</header>
 
@@ -401,9 +453,7 @@
 		{#if !hasAnalysisErrors && hasAnalysisWarnings}
 			<section class="goal-state goal-state--warning" role="status">
 				<h3>{$t('research.objectives.analysisWarningTitle')}</h3>
-				{#each analysisWarnings as item}
-					<p>{item}</p>
-				{/each}
+				<p>{$t('research.goalWorkspace.analysisReviewBody')}</p>
 			</section>
 		{/if}
 		{#if isAnalysisRunning}
@@ -432,141 +482,160 @@
 			</section>
 		{/if}
 		{#if !hasAnalysisErrors || hasReviewableUnderstanding}
-			<ResearchUnderstandingWorkbench
+			<GoalResearchWorkspace
 				{understanding}
 				{collectionId}
+				{goalId}
 				returnTo={resolve('/collections/[id]/goals/[goal_id]', {
 					id: collectionId,
 					goal_id: goalId
 				})}
 				initialFocus={workbenchInitialFocus}
 				initialFindingId={workbenchInitialFindingId}
-				bodyKey="research.understanding.objectiveBody"
-				titleId="goal-understanding-title"
 			/>
 		{/if}
-		<section class="experiment-plans" aria-labelledby="experiment-plans-title">
-			<div class="experiment-plans__header">
-				<div>
-					<p class="eyebrow">{$t('research.goalWorkspace.experimentPlansEyebrow')}</p>
-					<h3 id="experiment-plans-title">{$t('research.goalWorkspace.experimentPlansTitle')}</h3>
-				</div>
-				<button class="btn btn--ghost btn--small" type="button" on:click={loadPlans}>
-					{$t('research.objectives.refresh')}
-				</button>
-			</div>
-			{#if plansLoading}
-				<p class="experiment-plans__state">{$t('research.goalWorkspace.experimentPlansLoading')}</p>
-			{:else if planError}
-				<p class="experiment-plans__state experiment-plans__state--error">{planError}</p>
-			{:else if !plans.length}
-				<p class="experiment-plans__state">{$t('research.goalWorkspace.experimentPlansEmpty')}</p>
-			{:else}
-				<div class="experiment-plans__grid">
-					<div class="experiment-plans__list" aria-label={$t('research.goalWorkspace.experimentPlansList')}>
-						{#each plans as plan}
-							<button
-								type="button"
-								class:active={plan.plan_id === selectedPlanId}
-								on:click={() => selectPlan(plan)}
-							>
-								<strong>{plan.title}</strong>
-								<span>{statusLabel(plan.status)}</span>
-								<small>
-									{planSourceLabel(plan)}{#if isCopilotPlan(plan)} · {sourceValidityLabel(plan)}{/if}
-								</small>
-							</button>
-						{/each}
+		{#if plansOpen}
+			<section class="experiment-plans" aria-labelledby="experiment-plans-title">
+				<div class="experiment-plans__header">
+					<div>
+						<p class="eyebrow">{$t('research.goalWorkspace.experimentPlansEyebrow')}</p>
+						<h3 id="experiment-plans-title">{$t('research.goalWorkspace.experimentPlansTitle')}</h3>
 					</div>
-					<form class="experiment-plans__editor" on:submit|preventDefault={savePlanEdits}>
-						{#if selectedPlanSourceWarning}
-							<p class="experiment-plans__source-warning" role="alert">
-								{selectedPlanSourceWarning}
-							</p>
-						{/if}
-						<label>
-							<span>{$t('research.goalWorkspace.experimentPlanTitle')}</span>
-							<input id="experiment-plan-title" name="experiment_plan_title" bind:value={planTitle} />
-						</label>
-						<label>
-							<span>{$t('research.goalWorkspace.experimentPlanStatus')}</span>
-							<select
-								id="experiment-plan-status"
-								name="experiment_plan_status"
-								bind:value={planStatus}
-							>
-								<option value="draft">{$t('research.goalWorkspace.experimentPlanDraft')}</option>
-								<option value="ready_for_review" disabled={!selectedPlanCanEnterReview}>
-									{$t('research.goalWorkspace.experimentPlanReady')}
-								</option>
-								<option value="archived">{$t('research.goalWorkspace.experimentPlanArchived')}</option>
-							</select>
-						</label>
-						<label class="experiment-plans__content">
-							<span>{$t('research.goalWorkspace.experimentPlanContent')}</span>
-							<textarea
-								id="experiment-plan-content"
-								name="experiment_plan_content"
-								rows="12"
-								bind:value={planContent}
-							></textarea>
-						</label>
-						{#if selectedPlanEditWarning}
-							<p class="experiment-plans__edit-warning" role="status">{selectedPlanEditWarning}</p>
-						{/if}
-						{#if selectedPlan}
-							<div
-								class="experiment-plans__provenance"
-								aria-label={$t('research.goalWorkspace.experimentPlanProvenance')}
-							>
-								<div>
-									<strong>
-										{planSourceLabel(selectedPlan)}
-									</strong>
-									{#if isCopilotPlan(selectedPlan)}
-										<span>{sourceValidityLabel(selectedPlan)}</span>
-									{/if}
-									<span>{selectedPlanReviewGateLabel(selectedPlan)}</span>
-								</div>
-								<div class="experiment-plans__provenance-meta">
-									{#if metadataText(selectedPlan, 'source_mode')}
-										<span>{sourceModeLabel(metadataText(selectedPlan, 'source_mode'))}</span>
-									{/if}
-									{#if metadataList(selectedPlan, 'used_evidence_ids').length}
-										<span>
-											{$t('research.goalWorkspace.experimentPlanEvidenceCount', {
-												count: metadataList(selectedPlan, 'used_evidence_ids').length
-											})}
-										</span>
-									{/if}
-								</div>
-								{#if selectedPlan.source_links.length}
-									<div class="experiment-plans__source-links">
-										<strong>{$t('research.goalWorkspace.experimentPlanSources')}</strong>
-										<div>
-											{#each selectedPlan.source_links as link}
-												<a href={link.href}>{link.label}</a>
-											{/each}
-										</div>
-									</div>
-								{/if}
-							</div>
-						{/if}
-						<div class="experiment-plans__footer">
-							<button
-								class="btn btn--primary btn--small"
-								type="submit"
-								disabled={planSaving || !canSaveSelectedPlan}
-							>
-								{planSaving
-									? $t('research.goalWorkspace.experimentPlanSaving')
-									: $t('research.goalWorkspace.experimentPlanSave')}
-							</button>
-						</div>
-					</form>
+					<button
+						class="btn btn--ghost btn--small"
+						type="button"
+						on:click={() => (plansOpen = false)}
+					>
+						{$t('research.goalWorkspace.closePlans')}
+					</button>
 				</div>
-			{/if}
-		</section>
+				{#if plansLoading}
+					<p class="experiment-plans__state">
+						{$t('research.goalWorkspace.experimentPlansLoading')}
+					</p>
+				{:else if planError}
+					<p class="experiment-plans__state experiment-plans__state--error">{planError}</p>
+				{:else if !plans.length}
+					<p class="experiment-plans__state">{$t('research.goalWorkspace.experimentPlansEmpty')}</p>
+				{:else}
+					<div class="experiment-plans__grid">
+						<div
+							class="experiment-plans__list"
+							aria-label={$t('research.goalWorkspace.experimentPlansList')}
+						>
+							{#each plans as plan}
+								<button
+									type="button"
+									class:active={plan.plan_id === selectedPlanId}
+									on:click={() => selectPlan(plan)}
+								>
+									<strong>{plan.title}</strong>
+									<span>{statusLabel(plan.status)}</span>
+									<small>
+										{planSourceLabel(plan)}{#if isCopilotPlan(plan)}
+											· {sourceValidityLabel(plan)}{/if}
+									</small>
+								</button>
+							{/each}
+						</div>
+						<form class="experiment-plans__editor" on:submit|preventDefault={savePlanEdits}>
+							{#if selectedPlanSourceWarning}
+								<p class="experiment-plans__source-warning" role="alert">
+									{selectedPlanSourceWarning}
+								</p>
+							{/if}
+							<label>
+								<span>{$t('research.goalWorkspace.experimentPlanTitle')}</span>
+								<input
+									id="experiment-plan-title"
+									name="experiment_plan_title"
+									bind:value={planTitle}
+								/>
+							</label>
+							<label>
+								<span>{$t('research.goalWorkspace.experimentPlanStatus')}</span>
+								<select
+									id="experiment-plan-status"
+									name="experiment_plan_status"
+									bind:value={planStatus}
+								>
+									<option value="draft">{$t('research.goalWorkspace.experimentPlanDraft')}</option>
+									<option value="ready_for_review" disabled={!selectedPlanCanEnterReview}>
+										{$t('research.goalWorkspace.experimentPlanReady')}
+									</option>
+									<option value="archived"
+										>{$t('research.goalWorkspace.experimentPlanArchived')}</option
+									>
+								</select>
+							</label>
+							<label class="experiment-plans__content">
+								<span>{$t('research.goalWorkspace.experimentPlanContent')}</span>
+								<textarea
+									id="experiment-plan-content"
+									name="experiment_plan_content"
+									rows="12"
+									bind:value={planContent}
+								></textarea>
+							</label>
+							{#if selectedPlanEditWarning}
+								<p class="experiment-plans__edit-warning" role="status">
+									{selectedPlanEditWarning}
+								</p>
+							{/if}
+							{#if selectedPlan}
+								<div
+									class="experiment-plans__provenance"
+									aria-label={$t('research.goalWorkspace.experimentPlanProvenance')}
+								>
+									<div>
+										<strong>
+											{planSourceLabel(selectedPlan)}
+										</strong>
+										{#if isCopilotPlan(selectedPlan)}
+											<span>{sourceValidityLabel(selectedPlan)}</span>
+										{/if}
+										<span>{selectedPlanReviewGateLabel(selectedPlan)}</span>
+									</div>
+									<div class="experiment-plans__provenance-meta">
+										{#if metadataText(selectedPlan, 'source_mode')}
+											<span>{sourceModeLabel(metadataText(selectedPlan, 'source_mode'))}</span>
+										{/if}
+										{#if metadataList(selectedPlan, 'used_evidence_ids').length}
+											<span>
+												{$t('research.goalWorkspace.experimentPlanEvidenceCount', {
+													count: metadataList(selectedPlan, 'used_evidence_ids').length
+												})}
+											</span>
+										{/if}
+									</div>
+									{#if selectedPlan.source_links.length}
+										<div class="experiment-plans__source-links">
+											<strong>{$t('research.goalWorkspace.experimentPlanSources')}</strong>
+											<div>
+												{#each selectedPlan.source_links as link}
+													<a href={link.href}>{link.label}</a>
+												{/each}
+											</div>
+										</div>
+									{/if}
+								</div>
+							{/if}
+							<div class="experiment-plans__footer">
+								<button
+									class="btn btn--primary btn--small"
+									type="submit"
+									disabled={planSaving || !canSaveSelectedPlan}
+								>
+									{planSaving
+										? $t('research.goalWorkspace.experimentPlanSaving')
+										: $t('research.goalWorkspace.experimentPlanSave')}
+								</button>
+							</div>
+						</form>
+					</div>
+				{/if}
+			</section>
+		{/if}
 	{/if}
 </section>
 
@@ -642,8 +711,14 @@
 	.goal-meta,
 	.goal-actions {
 		display: flex;
+		align-items: center;
 		flex-wrap: wrap;
 		gap: 10px;
+	}
+
+	.goal-header {
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: start;
 	}
 
 	.goal-meta {
@@ -652,6 +727,65 @@
 		font-size: 13px;
 		line-height: 20px;
 		text-transform: capitalize;
+	}
+
+	.goal-meta span + span::before {
+		content: '/';
+		margin-right: 10px;
+		color: var(--border-strong);
+	}
+
+	.more-menu {
+		position: relative;
+	}
+
+	.more-menu summary {
+		list-style: none;
+		cursor: pointer;
+	}
+
+	.more-menu summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.more-menu__items {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		z-index: 20;
+		display: grid;
+		width: 230px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		background: var(--surface-card);
+		padding: 6px;
+		box-shadow: 0 14px 32px rgba(15, 23, 42, 0.14);
+	}
+
+	.more-menu__items button,
+	.more-menu__items a {
+		width: 100%;
+		border: 0;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 13px;
+		line-height: 20px;
+		padding: 8px 10px;
+		text-align: left;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.more-menu__items button:hover,
+	.more-menu__items a:hover {
+		background: var(--bg-subtle);
+	}
+
+	.more-menu__items button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.goal-state {
@@ -741,12 +875,13 @@
 
 	.experiment-plans__grid {
 		display: grid;
-		grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1fr);
 		gap: 16px;
 	}
 
 	.experiment-plans__list {
 		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 		align-content: start;
 		gap: 8px;
 	}
@@ -927,6 +1062,29 @@
 	}
 
 	@media (max-width: 760px) {
+		.goal-header {
+			grid-template-columns: 1fr;
+		}
+
+		.goal-actions {
+			align-items: stretch;
+		}
+
+		.goal-actions > a,
+		.goal-actions > details {
+			flex: 1 1 auto;
+		}
+
+		.more-menu summary {
+			justify-content: center;
+		}
+
+		.more-menu__items {
+			right: auto;
+			left: 0;
+			width: min(280px, calc(100vw - 64px));
+		}
+
 		.goal-progress__grid {
 			grid-template-columns: 1fr;
 		}

@@ -512,20 +512,6 @@ def test_collection_service_imports_from_source_adapter(tmp_path):
     assert import_entry["goal_context"] == {"intent": "compare"}
     assert import_entry["documents"][0]["source_document_id"] == "srcdoc_search_1"
 
-    artifacts = service.artifact_repository.read(collection["collection_id"])
-    assert artifacts["document_profiles_generated"] is False
-    assert artifacts["evidence_cards_generated"] is False
-    assert artifacts["characterization_observations_generated"] is False
-    assert artifacts["structure_features_generated"] is False
-    assert artifacts["test_conditions_generated"] is False
-    assert artifacts["baseline_references_generated"] is False
-    assert artifacts["sample_variants_generated"] is False
-    assert artifacts["measurement_results_generated"] is False
-    assert artifacts["comparable_results_generated"] is False
-    assert artifacts["collection_comparable_results_generated"] is False
-    assert artifacts["comparison_rows_generated"] is False
-    assert artifacts["table_cells_generated"] is False
-
 
 def test_collection_service_rejects_source_adapter_batch_shape_mismatch(tmp_path):
     service = build_test_collection_service(tmp_path / "collections")

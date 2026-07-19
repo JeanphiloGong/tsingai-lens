@@ -8,12 +8,10 @@ from application.derived.core_fact_projection import build_core_fact_projection_
 from application.derived.graph_projection_service import (
     load_core_graph_payload,
 )
-from application.source.artifact_registry_service import ArtifactRegistryService
 from infra.persistence.factory import build_core_fact_repository
 from infra.derived.graph.graphml import to_graphml as render_graphml
 
 
-artifact_registry_service = ArtifactRegistryService()
 core_fact_repository = build_core_fact_repository()
 _NEIGHBORHOOD_MAX_NODES = 2_147_483_647
 
@@ -48,16 +46,6 @@ def resolve_collection_output_dir(
     collection_service: CollectionService,
 ) -> Path:
     collection_service.get_collection(collection_id)
-
-    try:
-        payload = artifact_registry_service.get(collection_id)
-        output_path = payload.get("output_path")
-        if output_path:
-            base_dir = Path(str(output_path)).expanduser().resolve()
-            if base_dir.exists():
-                return base_dir
-    except FileNotFoundError:
-        pass
 
     paths = collection_service.get_paths(collection_id)
     if not paths.output_dir.exists():
@@ -221,7 +209,6 @@ def to_graphml(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> byte
 
 
 __all__ = [
-    "artifact_registry_service",
     "build_graphml",
     "core_fact_repository",
     "get_collection_graph_neighbors",

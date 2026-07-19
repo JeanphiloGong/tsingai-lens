@@ -53,6 +53,7 @@ from infra.persistence.database import (
     build_session_factory,
 )
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
+from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.file import FileCollectionWorkspace
 
@@ -85,13 +86,18 @@ def create_app(
     *,
     auth_session_service: AuthSessionService | None = None,
     collection_service: CollectionService | None = None,
+    task_service: TaskService | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         engine = None
         try:
             session_factory = None
-            if auth_session_service is None or collection_service is None:
+            if (
+                auth_session_service is None
+                or collection_service is None
+                or task_service is None
+            ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
             if auth_session_service is None:
@@ -105,8 +111,12 @@ def create_app(
                 repository=PostgresCollectionRepository(session_factory),
                 workspace=FileCollectionWorkspace(),
             )
-            task_service = TaskService()
-            artifact_registry_service = ArtifactRegistryService()
+            active_task_service = task_service or TaskService(
+                PostgresBuildRepository(session_factory)
+            )
+            artifact_registry_service = ArtifactRegistryService(
+                active_task_service.repository
+            )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
             )
@@ -124,20 +134,19 @@ def create_app(
             )
             workspace_service = WorkspaceService(
                 collection_service=active_collection_service,
-                task_service=task_service,
+                task_service=active_task_service,
                 document_profile_service=document_profile_service,
             )
             research_view_service = ResearchViewAggregationService(
                 collection_service=active_collection_service,
-                task_service=task_service,
+                workspace_service=workspace_service,
                 document_profile_service=document_profile_service,
                 paper_facts_service=paper_facts_service,
                 comparison_service=comparison_service,
-                workspace_service=workspace_service,
             )
 
             application.state.collection_service = active_collection_service
-            application.state.task_service = task_service
+            application.state.task_service = active_task_service
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(
@@ -150,7 +159,7 @@ def create_app(
             application.state.research_view_service = research_view_service
             application.state.build_pipeline_service = CollectionBuildPipelineService(
                 collection_service=active_collection_service,
-                task_service=task_service,
+                task_service=active_task_service,
                 artifact_registry_service=artifact_registry_service,
                 document_profile_service=document_profile_service,
                 research_objective_service=research_objective_service,
@@ -158,7 +167,6 @@ def create_app(
             application.state.goal_service = GoalService(active_collection_service)
             application.state.goal_session_service = GoalSessionService(
                 collection_service=active_collection_service,
-                task_service=task_service,
                 research_view_service=research_view_service,
                 workspace_service=workspace_service,
                 comparison_service=comparison_service,

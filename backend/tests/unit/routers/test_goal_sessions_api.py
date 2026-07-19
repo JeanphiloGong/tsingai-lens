@@ -11,6 +11,11 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.goal.session_service import GoalSessionService
+from application.core.research_view_aggregation_service import (
+    ResearchViewAggregationService,
+)
+from application.core.workspace_overview_service import WorkspaceService
+from application.source.task_service import TaskService
 from tests.support.collection_service import build_test_collection_service
 from controllers.goal import sessions as sessions_controller
 from controllers.schemas.goal.session import (
@@ -18,6 +23,7 @@ from controllers.schemas.goal.session import (
     GoalSessionMessageRequest,
 )
 from infra.persistence.factory import build_goal_session_repository
+from infra.persistence.memory import MemoryBuildRepository
 
 
 def _request(goal_session_service, user_id: str = "local-user"):
@@ -65,8 +71,15 @@ class _FakeLLMClient:
 @pytest.fixture()
 def goal_session_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
+    task_service = TaskService(MemoryBuildRepository())
+    workspace_service = WorkspaceService(collection_service, task_service)
     service = GoalSessionService(
         collection_service=collection_service,
+        research_view_service=ResearchViewAggregationService(
+            collection_service,
+            workspace_service,
+        ),
+        workspace_service=workspace_service,
         goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
         llm_client=_FakeLLMClient("General background."),
         model="fake-model",

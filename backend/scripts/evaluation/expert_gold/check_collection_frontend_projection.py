@@ -92,10 +92,12 @@ def check_collection_frontend_projection(
     from application.core.research_view_aggregation_service import (  # noqa: PLC0415
         ResearchViewAggregationService,
     )
+    from application.core.workspace_overview_service import WorkspaceService  # noqa: PLC0415
     from application.core.semantic_build.research_objective_service import (  # noqa: PLC0415
         ResearchObjectiveService,
     )
     from application.source.collection_service import CollectionService  # noqa: PLC0415
+    from application.source.task_service import TaskService  # noqa: PLC0415
     from infra.persistence.database import (  # noqa: PLC0415
         DatabaseSettings,
         build_database_engine,
@@ -105,12 +107,20 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
         PostgresCollectionRepository,
     )
+    from infra.persistence.postgres.build_repository import (  # noqa: PLC0415
+        PostgresBuildRepository,
+    )
 
     engine = build_database_engine(DatabaseSettings())
     try:
+        session_factory = build_session_factory(engine)
         collection_service = CollectionService(
-            repository=PostgresCollectionRepository(build_session_factory(engine)),
+            repository=PostgresCollectionRepository(session_factory),
             workspace=FileCollectionWorkspace(),
+        )
+        workspace_service = WorkspaceService(
+            collection_service=collection_service,
+            task_service=TaskService(PostgresBuildRepository(session_factory)),
         )
         objective_service = ResearchObjectiveService(
             collection_service=collection_service,
@@ -119,6 +129,7 @@ def check_collection_frontend_projection(
         material_profile = (
             ResearchViewAggregationService(
                 collection_service=collection_service,
+                workspace_service=workspace_service,
             ).get_collection_material_research_view(
                 collection_id,
                 material_id,

@@ -24,6 +24,9 @@ from domain.core.research_objective import (
 )
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
+    ArtifactVersionRecord,
+    BuildStageRecord,
+    CollectionBuildRecord,
     CollectionFileRecord,
     CollectionHandoffRecord,
     CollectionImportRecord,
@@ -38,6 +41,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    TaskRecord,
 )
 from domain.evaluation import (
     EvaluationGoldItem,
@@ -55,7 +59,6 @@ class CollectionPaths:
     collection_dir: Path
     input_dir: Path
     output_dir: Path
-    artifacts_path: Path
 
 
 class CollectionRepository(Protocol):
@@ -97,24 +100,59 @@ class CollectionRepository(Protocol):
     def delete_collection(self, collection_id: str) -> bool: ...
 
 
-class TaskRepository(Protocol):
-    backend_name: str
-    root_dir: Path
+class BuildRepository(Protocol):
+    def add_task(
+        self,
+        record: TaskRecord,
+        *,
+        build_id: str,
+    ) -> CollectionBuildRecord: ...
 
-    def read_task(self, task_id: str) -> dict | None: ...
+    def read_task(self, task_id: str) -> TaskRecord | None: ...
 
-    def write_task(self, task_id: str, payload: dict) -> None: ...
+    def list_tasks(
+        self,
+        *,
+        collection_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[TaskRecord, ...]: ...
 
-    def list_tasks(self) -> list[dict]: ...
+    def update_task(
+        self,
+        record: TaskRecord,
+        *,
+        stages: tuple[BuildStageRecord, ...] | None = None,
+    ) -> bool: ...
 
+    def read_build(self, task_id: str) -> CollectionBuildRecord | None: ...
 
-class ArtifactRepository(Protocol):
-    backend_name: str
-    root_dir: Path
+    def list_stages(self, task_id: str) -> tuple[BuildStageRecord, ...]: ...
 
-    def read(self, collection_id: str) -> dict | None: ...
+    def add_artifact_versions(
+        self,
+        task_id: str,
+        records: tuple[ArtifactVersionRecord, ...],
+    ) -> None: ...
 
-    def write(self, collection_id: str, payload: dict) -> None: ...
+    def list_artifact_versions(
+        self,
+        task_id: str,
+    ) -> tuple[ArtifactVersionRecord, ...]: ...
+
+    def finish_build(
+        self,
+        record: TaskRecord,
+        *,
+        build_status: str,
+        activate: bool,
+    ) -> CollectionBuildRecord: ...
+
+    def read_active_build(
+        self,
+        collection_id: str,
+    ) -> CollectionBuildRecord | None: ...
 
 
 class GoalSessionRepository(Protocol):

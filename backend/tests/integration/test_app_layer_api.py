@@ -27,6 +27,7 @@ from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.source_evidence import build_blocks, build_table_cells, build_table_rows
 
 try:
@@ -581,21 +582,19 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     from application.core.workspace_overview_service import WorkspaceService
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
-    monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
 
-    task_service = TaskService(tmp_path / "tasks")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
-        tmp_path / "collections",
+        build_repository,
         source_artifact_repository=source_artifact_repository,
         core_fact_repository=core_fact_repository,
     )
@@ -638,11 +637,10 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     )
     research_view_service = ResearchViewAggregationService(
         collection_service=collection_service,
-        task_service=task_service,
+        workspace_service=workspace_service,
         document_profile_service=document_profile_service,
         paper_facts_service=paper_facts_service,
         comparison_service=comparison_service,
-        workspace_service=workspace_service,
         core_fact_repository=core_fact_repository,
     )
     goal_service = GoalService(collection_service)
@@ -656,7 +654,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         return [DummyWorkflowOutput()]
 
     monkeypatch.setattr(task_runner_module, "build_source_artifacts", fake_build_source_artifacts)
-    monkeypatch.setattr(graph_service_module, "artifact_registry_service", artifact_registry)
     monkeypatch.setattr(
         graph_service_module,
         "core_fact_repository",
@@ -666,6 +663,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
+            task_service=task_service,
         )
     ) as client:
         state = client.app.state
@@ -1244,10 +1242,6 @@ def test_graph_endpoints_serve_core_projection_without_legacy_graph_outputs(
     output_dir = _collection_output_dir(app_client, collection_id)
 
     _write_core_graph_outputs(output_dir, collection_id)
-    app_client.app.state.artifact_registry_service.upsert(
-        collection_id,
-        output_dir,
-    )
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
     workspace_body = workspace.json()

@@ -24,43 +24,43 @@ The stable data ownership and identity contract lives in
 ## Current Runtime
 
 - `file/`
-  Owns collection directory and artifact paths, immutable uploaded input bytes
-  through `FileObjectStore`, task JSON, and `artifacts.json`. It does not own
-  collection identity, file membership, or import provenance.
+  Owns collection workspace directories, scratch/output paths, and immutable
+  uploaded input bytes through `FileObjectStore`. It owns no structured task,
+  build, artifact, collection, membership, or import state.
 - `memory/`
-  Test and isolated-run implementations for the collection aggregate, task,
-  and artifact state. The collection implementation has no runtime
-  memory-backend switch.
+  Direct isolated-test implementations for the collection and build
+  aggregates. Neither implementation is selectable at runtime.
 - `postgres/`
   Owns users, browser sessions, collection metadata, stored-object metadata,
-  collection file membership, import provenance, and Goal-intake handoffs
-  through SQLAlchemy mappings and direct aggregate repositories. The
-  application creates one engine and session factory, both repositories, and
-  their services in the FastAPI lifespan.
+  collection file membership, import provenance, Goal-intake handoffs, tasks,
+  collection builds, stage state, artifact versions, and active-build
+  selection through SQLAlchemy mappings and direct aggregate repositories.
+  The application creates one engine and session factory and composes these
+  repositories and services in the FastAPI lifespan.
 - `sqlite/`
   Five handwritten repositories share `backend/data/lens.sqlite` for Goal
   sessions and plans, Source records, Core and Goal workflow records, and
   evaluation/review state. These remaining repositories currently create
   schema at runtime.
 - `mysql/`
-  Unimplemented placeholder selected only by the task/artifact backend switch.
+  Unimplemented placeholder with no active runtime selection path.
 
-`factory.py` selects file, memory, or the unimplemented MySQL path only for task
-and artifact repositories. It constructs SQLite directly for the remaining
-Goal, Source, Core, and evaluation families. Auth and the complete current
-collection aggregate are composed directly in `main.py`; neither has a
-repository factory or runtime fallback. Source pipeline JSON and Parquet
-outputs live under `infra/source/` runtime storage and are rebuildable
-intermediates, not a second persistence authority.
+`factory.py` constructs SQLite repositories only for the remaining Goal,
+Source, Core, and evaluation families. Auth, collection, and build aggregates
+are composed directly in `main.py`; none has a repository factory or runtime
+fallback. Source pipeline JSON and Parquet outputs live under `infra/source/`
+runtime storage and are rebuildable intermediates, not a second persistence
+authority.
 
 `database.py` owns the validated synchronous SQLAlchemy engine and session
-factory. The FastAPI lifespan shares this contract between auth and collection
-repositories and disposes its owned engine at shutdown; injected test services
-remain caller-owned.
+factory. The FastAPI lifespan shares this contract between auth, collection,
+and build repositories and disposes its owned engine at shutdown; injected test
+services remain caller-owned.
 
-`postgres/base.py` owns declarative metadata. `postgres/models/auth.py` and
-`postgres/models/collection.py` own their storage mappings; the matching direct
-repositories own explicit row/domain mapping and short transactions.
+`postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
+`postgres/models/collection.py`, and `postgres/models/build.py` own their
+storage mappings; the matching direct repositories own explicit row/domain
+mapping and short transactions.
 `../../migrations/` owns the version history and is the only PostgreSQL schema
 change path; repositories never create tables.
 
@@ -70,6 +70,13 @@ registration and collection count/status changes commit in one transaction.
 Collection deletion commits relational removal before the workspace directory
 is deleted. Maintained callers do not read or write collection file or import
 manifest JSON and do not scan input directories as a fallback authority.
+
+`PostgresBuildRepository` is the single structured owner for tasks, collection
+builds, ordered stages, immutable artifact versions, and active-build
+selection. It allocates collection-local build numbers and activates only newer
+successful builds in short transactions. `MemoryBuildRepository` mirrors this
+aggregate only for isolated tests. No maintained caller reads or writes task
+JSON or `artifacts.json`.
 
 ## Target Boundary
 

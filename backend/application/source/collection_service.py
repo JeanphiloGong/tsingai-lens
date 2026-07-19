@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from domain.ports import ArtifactRepository, CollectionPaths, CollectionRepository
+from domain.ports import CollectionPaths, CollectionRepository
 from domain.source import (
-    ArtifactStatusRecord,
     CollectionFileRecord,
     CollectionHandoffRecord,
     CollectionImportDocumentRecord,
@@ -18,9 +17,6 @@ from domain.source import (
     empty_import_manifest,
 )
 from domain.source.ports import ObjectStore
-from infra.persistence.factory import (
-    build_artifact_repository,
-)
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 from infra.source.ingestion import (
@@ -61,15 +57,10 @@ class CollectionService:
         self,
         repository: CollectionRepository,
         workspace: FileCollectionWorkspace,
-        artifact_repository: ArtifactRepository | None = None,
         object_store: ObjectStore | None = None,
     ) -> None:
         self.repository = repository
         self.workspace = workspace
-        self.artifact_repository = artifact_repository or build_artifact_repository(
-            self.workspace.root_dir,
-            backend=self.workspace.backend_name,
-        )
         self.root_dir = self.workspace.root_dir
         self.object_store = object_store or FileObjectStore(self.root_dir)
 
@@ -92,15 +83,7 @@ class CollectionService:
             description=description,
             now_iso=now,
         )
-        paths = self.workspace.create_collection_dirs(collection_id)
-        self.artifact_repository.write(
-            collection_id,
-            ArtifactStatusRecord.empty(
-                collection_id=collection_id,
-                output_path=str(paths.output_dir),
-                updated_at=now,
-            ).to_record(),
-        )
+        self.workspace.create_collection_dirs(collection_id)
         try:
             self.repository.add_collection(record)
         except Exception:

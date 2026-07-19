@@ -28,6 +28,8 @@ from domain.evaluation import (
 )
 from domain.goal import ExperimentPlanRecord
 from domain.source import (
+    ArtifactVersionRecord,
+    BuildStageRecord,
     CollectionFileRecord,
     CollectionImportDocumentRecord,
     CollectionImportRecord,
@@ -35,16 +37,15 @@ from domain.source import (
     SourceArtifactSet,
     SourceReferenceEntry,
     SourceReferenceSet,
+    TaskRecord,
 )
-from infra.persistence.file import (
-    FileArtifactRepository,
-    FileCollectionWorkspace,
-    FileTaskRepository,
-)
+from application.source.artifact_registry_service import ArtifactRegistryService
+from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
+from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteEvaluationRepository,
@@ -73,12 +74,12 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
 
     collection_workspace = FileCollectionWorkspace(tmp_path / "collections")
     object_store = FileObjectStore(collection_workspace.root_dir)
-    task_repository = FileTaskRepository(tmp_path / "tasks")
-    artifact_repository = FileArtifactRepository(tmp_path / "collections")
     auth_repository = auth_session_service.repository
     collection_repository = PostgresCollectionRepository(
         auth_repository.session_factory
     )
+    build_repository = PostgresBuildRepository(auth_repository.session_factory)
+    artifact_registry_service = ArtifactRegistryService(build_repository)
     source_repository = SqliteSourceArtifactRepository(db_path)
     core_repository = SqliteCoreFactRepository(db_path)
     goal_session_repository = SqliteGoalSessionRepository(db_path)
@@ -144,8 +145,48 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ),
         updated_at=records["collections"][0]["updated_at"],
     )
-    task_repository.write_task(records["tasks"][0]["task_id"], records["tasks"][0])
-    artifact_repository.write(collection_id, records["artifacts"][0])
+    task_record = TaskRecord.from_mapping(records["tasks"][0])
+    build_repository.add_task(task_record, build_id="build_baseline")
+    artifact_stage = BuildStageRecord(
+        stage_id="stage_artifact_registry_baseline",
+        build_id="build_baseline",
+        stage_kind="artifact_registry",
+        stage_version=1,
+        stage_order=0,
+        status="succeeded",
+        started_at=task_record.created_at,
+        finished_at=task_record.updated_at,
+        errors=(),
+        warnings=(),
+        skip_reason=None,
+    )
+    build_repository.update_task(task_record, stages=(artifact_stage,))
+    build_repository.add_artifact_versions(
+        task_record.task_id,
+        tuple(
+            ArtifactVersionRecord(
+                artifact_version_id=f"artifact_baseline_{artifact_kind}",
+                build_stage_id=artifact_stage.stage_id,
+                artifact_kind=artifact_kind,
+                schema_version=1,
+                content_version=1,
+                status="ready",
+                object_id=None,
+                details={},
+                created_at=task_record.updated_at,
+            )
+            for artifact_kind in (
+                "documents",
+                "document_profiles",
+                "evidence_cards",
+            )
+        ),
+    )
+    build_repository.finish_build(
+        task_record,
+        build_status="succeeded",
+        activate=True,
+    )
 
     session_token_hash = sha256(b"synthetic-baseline-session-token").hexdigest()
     auth_repository.add_session(
@@ -291,9 +332,15 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         }
     ]
     observed_records["tasks"] = [
-        task_repository.read_task(records["tasks"][0]["task_id"])
+        {
+            key: build_repository.read_task(task_record.task_id).to_record().get(key)
+            for key in records["tasks"][0]
+        }
     ]
-    observed_records["artifacts"] = [artifact_repository.read(collection_id)]
+    projected_artifacts = artifact_registry_service.get_for_task(task_record.task_id)
+    observed_records["artifacts"] = [
+        {key: projected_artifacts.get(key) for key in records["artifacts"][0]}
+    ]
     observed_records["auth_users"] = [
         auth_repository.read_user(records["auth_users"][0]["user_id"])
     ]

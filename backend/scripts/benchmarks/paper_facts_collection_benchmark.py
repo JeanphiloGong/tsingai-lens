@@ -180,11 +180,10 @@ def parse_args() -> argparse.Namespace:
 def build_services(
     collections_root: Path,
     session_factory: Any,
-) -> tuple[Any, Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any]:
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
     from application.core.semantic_build.paper_facts_service import PaperFactsService
-    from application.source.artifact_registry_service import ArtifactRegistryService
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
     from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
@@ -193,14 +192,11 @@ def build_services(
         repository=PostgresCollectionRepository(session_factory),
         workspace=FileCollectionWorkspace(collections_root),
     )
-    artifact_registry_service = ArtifactRegistryService(root_dir=collections_root)
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry_service,
     )
     return (
         collection_service,
-        artifact_registry_service,
         document_profile_service,
         PaperFactsService,
         CoreLLMStructuredExtractor,
@@ -451,7 +447,6 @@ def main() -> int:
     engine = build_database_engine(DatabaseSettings())
     (
         collection_service,
-        artifact_registry_service,
         document_profile_service,
         paper_facts_service_class,
         extractor_class,
@@ -476,7 +471,6 @@ def main() -> int:
     )
     planning_service = paper_facts_service_class(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry_service,
         document_profile_service=document_profile_service,
         structured_extractor=inner_extractor,
     )
@@ -497,7 +491,6 @@ def main() -> int:
     )
     benchmark_service = paper_facts_service_class(
         collection_service=collection_service,
-        artifact_registry_service=artifact_registry_service,
         document_profile_service=document_profile_service,
         structured_extractor=timing_extractor,
     )

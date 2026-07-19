@@ -5,8 +5,8 @@
 This document is the backend authority for persistence ownership, durable
 identities, relationships, build lineage, and deletion boundaries.
 
-The target model is not the current runtime model. Until each data family is
-cut over, the current repositories described below still own runtime behavior.
+The target model is being adopted one data family at a time. Until each family
+is cut over, the current repositories described below still own its runtime behavior.
 The [revision plan](../plans/backend-wide/persistence-model-revision/implementation-plan.md)
 owns sequencing; this document owns the stable destination.
 
@@ -34,8 +34,8 @@ must name the authoritative records from which they can be rebuilt.
 
 ## Current Runtime Model
 
-The current runtime is split between PostgreSQL auth and collection records,
-file-backed task and artifact state, uploaded and generated files, and five
+The current runtime is split between PostgreSQL auth, collection, file
+provenance, and build-lineage records; uploaded and generated files; and five
 handwritten SQLite repositories. This table records that split so later
 migrations do not accidentally preserve it.
 
@@ -45,8 +45,9 @@ migrations do not accidentally preserve it.
 | Stored-object metadata and collection file membership | PostgreSQL `stored_objects` and `collection_files` | No | PostgreSQL |
 | Import provenance and Goal-intake handoffs | PostgreSQL `collection_imports`, `collection_import_documents`, and `collection_handoffs` | No | PostgreSQL |
 | Uploaded PDF and text bytes | `collections/<id>/input/` | No | Object storage |
-| Task status, progress, and errors | `tasks/<id>.json` | No | PostgreSQL |
-| Artifact readiness and paths | `collections/<id>/artifacts.json` | No | PostgreSQL metadata; binary exports in object storage |
+| Task status, progress, and errors | PostgreSQL `tasks` | No | PostgreSQL |
+| Collection builds and stage state | PostgreSQL `collection_builds` and `build_stages` | No | PostgreSQL |
+| Artifact readiness and active-build selection | PostgreSQL `artifact_versions` and `collection_active_builds` | No | PostgreSQL metadata; binary exports in object storage |
 | Users and auth sessions | PostgreSQL `auth_users` and `auth_sessions` | No | PostgreSQL |
 | Goal sessions and experiment plans | `lens.sqlite` Goal tables | No | PostgreSQL |
 | Source document structure and references | `lens.sqlite` Source tables | No | PostgreSQL |
@@ -63,10 +64,17 @@ The collection aggregate is now one direct relational boundary. One import
 transaction inserts stored-object metadata, collection file membership, the
 import record, and ordered imported-document links, then updates collection
 count and status. `FileCollectionWorkspace` owns collection directories and
-artifact paths only. `FileObjectStore` owns immutable input bytes by validated
+scratch/output paths only. `FileObjectStore` owns immutable input bytes by validated
 storage key and SHA-256. No maintained runtime or export path reads
 `files.json`, `import_manifest.json`, or an input-directory scan as collection
 authority.
+
+The build aggregate is also direct and relational. `Task`, `CollectionBuild`,
+`BuildStage`, and `ArtifactVersion` share one `BuildRepository` boundary.
+Successful completion may advance `collection_active_builds`; failed builds and
+older concurrent completions remain history and cannot replace a newer active
+build. Task-specific artifact readiness is derived from immutable version rows,
+not stored as a mutable boolean document.
 
 ### Legacy SQLite Inventory
 

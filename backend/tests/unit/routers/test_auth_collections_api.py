@@ -22,14 +22,14 @@ def _build_client(
     auth_session_service,
     collection_service,
 ) -> Iterator[TestClient]:
+    from application.source.task_service import TaskService
+    from infra.persistence.memory import MemoryBuildRepository
+
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
-    monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from main import create_app
 
@@ -37,6 +37,7 @@ def _build_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
+            task_service=TaskService(MemoryBuildRepository()),
         )
     ) as client:
         yield client
@@ -100,12 +101,12 @@ def test_app_lifespan_composes_one_shared_collection_service(
     auth_session_service,
     collection_service,
 ) -> None:
-    monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
+    from application.source.task_service import TaskService
+    from infra.persistence.memory import MemoryBuildRepository
+
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from main import create_app
 
@@ -113,6 +114,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
+            task_service=TaskService(MemoryBuildRepository()),
         )
     ) as client:
         state = client.app.state

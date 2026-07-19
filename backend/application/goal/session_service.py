@@ -40,7 +40,6 @@ from application.goal.protocol_contract import (
 )
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.collection_service import CollectionService
-from application.source.task_service import TaskService
 from domain.goal import (
     GoalAnswerMode,
     GoalMessageRecord,
@@ -114,9 +113,8 @@ class GoalSessionService:
         self,
         *,
         collection_service: CollectionService,
-        task_service: TaskService | None = None,
-        research_view_service: ResearchViewAggregationService | None = None,
-        workspace_service: WorkspaceService | None = None,
+        research_view_service: ResearchViewAggregationService,
+        workspace_service: WorkspaceService,
         comparison_service: ComparisonService | None = None,
         paper_facts_service: PaperFactsService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
@@ -128,20 +126,8 @@ class GoalSessionService:
         model: str | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.task_service = task_service or TaskService(
-            self.collection_service.root_dir.parent / "tasks"
-        )
-        self.research_view_service = (
-            research_view_service
-            or ResearchViewAggregationService(
-                collection_service=self.collection_service,
-                task_service=self.task_service,
-            )
-        )
-        self.workspace_service = workspace_service or WorkspaceService(
-            collection_service=self.collection_service,
-            task_service=self.task_service,
-        )
+        self.research_view_service = research_view_service
+        self.workspace_service = workspace_service
         self.comparison_service = comparison_service or ComparisonService(
             collection_service=self.collection_service,
         )
@@ -1501,13 +1487,8 @@ class GoalSessionService:
         )
 
     def _collection_data_version(self, collection: dict[str, Any]) -> str:
-        collection_id = collection["collection_id"]
-        artifacts = (
-            self.collection_service.artifact_repository.read(collection_id) or {}
-        )
         return str(
-            artifacts.get("updated_at")
-            or collection.get("updated_at")
+            collection.get("updated_at")
             or collection.get("created_at")
             or ""
         )

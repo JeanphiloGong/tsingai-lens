@@ -156,14 +156,14 @@ def feedback_client(
     tmp_path,
     auth_session_service,
 ) -> Iterator[tuple[TestClient, RecordingResearchUnderstandingFeedbackService]]:
+    from application.source.task_service import TaskService
+    from infra.persistence.memory import MemoryBuildRepository
+
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
-    monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from tests.support.collection_service import build_test_collection_service
     from controllers.core import research_understanding_feedback
@@ -180,6 +180,7 @@ def feedback_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
+            task_service=TaskService(MemoryBuildRepository()),
         )
     ) as client:
         yield client, feedback_service
@@ -191,14 +192,14 @@ def real_feedback_client(
     tmp_path,
     auth_session_service,
 ) -> Iterator[TestClient]:
+    from application.source.task_service import TaskService
+    from infra.persistence.memory import MemoryBuildRepository
+
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
-    monkeypatch.setenv("LENS_PERSISTENCE_BACKEND", "file")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.artifact_repository.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.file.task_repository.DATA_DIR", tmp_path)
 
     from tests.support.collection_service import build_test_collection_service
     from controllers.core import research_understanding_feedback
@@ -221,6 +222,7 @@ def real_feedback_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
+            task_service=TaskService(MemoryBuildRepository()),
         )
     ) as client:
         yield client

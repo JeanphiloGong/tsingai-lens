@@ -22,7 +22,6 @@ class FileCollectionWorkspace:
             collection_dir=collection_dir,
             input_dir=collection_dir / "input",
             output_dir=collection_dir / "output",
-            artifacts_path=collection_dir / "artifacts.json",
         )
 
     def create_collection_dirs(self, collection_id: str) -> CollectionPaths:

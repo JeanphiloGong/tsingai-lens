@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from infra.persistence.memory import (
-    MemoryArtifactRepository,
-    MemoryCollectionRepository,
-    MemoryTaskRepository,
-)
+from infra.persistence.memory import MemoryBuildRepository, MemoryCollectionRepository
 from domain.source import (
     CollectionFileRecord,
     CollectionHandoffRecord,
@@ -110,19 +106,8 @@ def test_memory_collection_repository_keeps_file_provenance_in_one_aggregate():
     assert repository.list_collection_handoffs("col_demo") == ()
 
 
-def test_memory_task_repository_round_trips_task_records(tmp_path):
-    repository = MemoryTaskRepository(tmp_path / "tasks")
-    repository.write_task("task_demo", {"task_id": "task_demo", "status": "queued"})
+def test_memory_build_repository_is_directly_injected_for_isolated_tests() -> None:
+    repository = MemoryBuildRepository()
 
-    assert repository.read_task("task_demo")["status"] == "queued"
-    assert repository.list_tasks() == [{"task_id": "task_demo", "status": "queued"}]
-
-
-def test_memory_artifact_repository_round_trips_artifacts(tmp_path):
-    repository = MemoryArtifactRepository(tmp_path / "collections")
-    repository.write("col_demo", {"collection_id": "col_demo", "graph_ready": True})
-
-    assert repository.read("col_demo") == {
-        "collection_id": "col_demo",
-        "graph_ready": True,
-    }
+    assert repository.list_tasks() == ()
+    assert repository.read_active_build("col_demo") is None

@@ -67,16 +67,14 @@ class CollectionBuildPipelineService:
     def __init__(
         self,
         collection_service: CollectionService,
-        task_service: TaskService | None = None,
-        artifact_registry_service: ArtifactRegistryService | None = None,
+        task_service: TaskService,
+        artifact_registry_service: ArtifactRegistryService,
         document_profile_service: DocumentProfileService | None = None,
         research_objective_service: ResearchObjectiveService | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.task_service = task_service or TaskService()
-        self.artifact_registry_service = (
-            artifact_registry_service or ArtifactRegistryService()
-        )
+        self.task_service = task_service
+        self.artifact_registry_service = artifact_registry_service
         self.document_profile_service = document_profile_service or DocumentProfileService(
             collection_service=self.collection_service,
         )
@@ -182,7 +180,7 @@ class CollectionBuildPipelineService:
                 if isinstance(artifacts, dict)
                 else str(output_dir)
             )
-            self.task_service.update_task(
+            self.task_service.finish_task(
                 task_id,
                 status=final_status,
                 current_stage="artifacts_ready" if final_status != "failed" else "failed",
@@ -199,7 +197,6 @@ class CollectionBuildPipelineService:
                 output_path=output_path,
                 errors=result["errors"],
                 warnings=result["warnings"],
-                finished_at=self.task_service.get_task(task_id)["updated_at"],
             )
             self.collection_service.update_collection(collection_id, status=final_status)
             return self.task_service.get_task(task_id)
@@ -213,7 +210,7 @@ class CollectionBuildPipelineService:
             errors = list(record.get("errors", []))
             if str(exc) not in errors:
                 errors.append(str(exc))
-            self.task_service.update_task(
+            self.task_service.finish_task(
                 task_id,
                 status="failed",
                 current_stage="failed",
@@ -224,7 +221,6 @@ class CollectionBuildPipelineService:
                     "message": "Build failed before artifacts were ready.",
                 },
                 errors=errors,
-                finished_at=record["updated_at"],
             )
             self.collection_service.update_collection(collection_id, status="failed")
             raise

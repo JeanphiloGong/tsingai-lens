@@ -1,11 +1,5 @@
-"""File-backed persistence adapters."""
+"""File-backed workspace and object storage."""
 
-from infra.persistence.file.artifact_repository import FileArtifactRepository
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-from infra.persistence.file.task_repository import FileTaskRepository
 
-__all__ = [
-    "FileArtifactRepository",
-    "FileCollectionWorkspace",
-    "FileTaskRepository",
-]
+__all__ = ["FileCollectionWorkspace"]

@@ -4,7 +4,8 @@ from application.pipeline.collection_build.context import CollectionBuildContext
 
 
 def run(context: CollectionBuildContext) -> dict:
-    artifacts = context.artifact_registry_service.upsert(
+    artifacts = context.artifact_registry_service.register(
+        context.task_id,
         context.collection_id,
         context.output_dir,
     )

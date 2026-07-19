@@ -11,6 +11,7 @@ from controllers.schemas.source.task import (
     TaskListResponse,
     TaskResponse,
 )
+
 router = APIRouter(tags=["tasks"])
 logger = logging.getLogger(__name__)
 _build_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="source-build")
@@ -111,10 +112,8 @@ async def get_task(task_id: str, request: Request) -> TaskResponse:
 )
 async def get_task_artifacts(task_id: str, request: Request) -> ArtifactStatusResponse:
     try:
-        task = request.app.state.task_service.get_task(task_id)
-        artifacts = request.app.state.artifact_registry_service.get(
-            task["collection_id"]
-        )
+        request.app.state.task_service.get_task(task_id)
+        artifacts = request.app.state.artifact_registry_service.get_for_task(task_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

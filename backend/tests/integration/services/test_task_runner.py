@@ -15,6 +15,7 @@ from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
 from domain.source import SourceArtifactSet
+from infra.persistence.memory import MemoryBuildRepository
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
@@ -115,8 +116,9 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    artifact_registry = ArtifactRegistryService(build_repository)
     runner = CollectionBuildPipelineService(
         collection_service,
         task_service,
@@ -141,10 +143,13 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
     source_artifact_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     artifact_registry = ArtifactRegistryService(
-        tmp_path / "collections",
+        build_repository,
+        source_artifact_repository=source_artifact_repository,
+        core_fact_repository=SqliteCoreFactRepository(tmp_path / "lens.sqlite"),
     )
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
@@ -172,7 +177,7 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert result["progress_detail"]["phase"] == "artifacts_ready"
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
-    artifacts = artifact_registry.get(collection["collection_id"])
+    artifacts = artifact_registry.get_for_task(task["task_id"])
     assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
     assert artifacts["document_profiles_generated"] is True
@@ -218,8 +223,9 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    artifact_registry = ArtifactRegistryService(build_repository)
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Empty Collection")
@@ -243,8 +249,9 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(monkeypatch,
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    artifact_registry = ArtifactRegistryService(build_repository)
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Source Error Collection")
@@ -269,8 +276,9 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    task_service = TaskService(tmp_path / "tasks")
-    artifact_registry = ArtifactRegistryService(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    artifact_registry = ArtifactRegistryService(build_repository)
     runner = CollectionBuildPipelineService(collection_service, task_service, artifact_registry)
 
     collection = collection_service.create_collection("Logging Progress Collection")

@@ -3,6 +3,7 @@ import { API_PREFIX } from './base';
 import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {
+	invalid_credentials: 'auth.invalidCredentials',
 	collection_not_found: 'error.collectionNotFound',
 	graph_not_ready: 'error.graphNotReady',
 	community_not_found: 'error.communityNotFound'

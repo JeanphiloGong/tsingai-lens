@@ -45,6 +45,7 @@ const translations: Record<Language, Translations> = {
 			signIn: 'Sign in',
 			signingIn: 'Signing in...',
 			logout: 'Log out',
+			invalidCredentials: 'Invalid email or password.',
 			missingCredentials: 'Enter your email and password.'
 		},
 		footer: {
@@ -3485,6 +3486,7 @@ const translations: Record<Language, Translations> = {
 			signIn: '登录',
 			signingIn: '登录中...',
 			logout: '退出',
+			invalidCredentials: '邮箱或密码错误。',
 			missingCredentials: '请输入邮箱和密码。'
 		},
 		footer: {

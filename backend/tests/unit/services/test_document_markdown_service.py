@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from tests.support.collection_service import build_test_collection_service
@@ -9,6 +11,11 @@ from application.source.document_markdown_service import (
     SourceDocumentNotFoundError,
 )
 from domain.source import SourceArtifactSet
+from infra.source.ingestion.normalized_import import (
+    NormalizedImportBatch,
+    NormalizedImportDocument,
+    NormalizedImportSourceMetadata,
+)
 
 
 def _build_markdown_service(tmp_path):
@@ -158,9 +165,9 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     assert payload["markdown"].index("## Results") < payload["markdown"].index(
         "Results section text appears before the table."
     )
-    assert payload["markdown"].index("Results section text appears before the table.") < (
-        payload["markdown"].index("**Table.** Table 1. Conductivity summary.")
-    )
+    assert payload["markdown"].index(
+        "Results section text appears before the table."
+    ) < (payload["markdown"].index("**Table.** Table 1. Conductivity summary."))
     assert payload["markdown"].index("**Table.** Table 1. Conductivity summary.") < (
         payload["markdown"].index("## References")
     )
@@ -177,7 +184,11 @@ def test_document_markdown_service_projects_figure_images(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Figure Markdown Collection")
     collection_id = collection["collection_id"]
-    figure_asset = collection_service.get_paths(collection_id).output_dir / "image_assets" / "fig-1.png"
+    figure_asset = (
+        collection_service.get_paths(collection_id).output_dir
+        / "image_assets"
+        / "fig-1.png"
+    )
     figure_asset.parent.mkdir(parents=True, exist_ok=True)
     figure_asset.write_bytes(b"fake-png")
     markdown_service.source_artifact_repository.replace_collection_artifacts(
@@ -220,7 +231,9 @@ def test_document_markdown_service_projects_figure_images(tmp_path):
     assert source_map["fig-1"]["figure_id"] == "fig-1"
 
 
-def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missing(tmp_path):
+def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missing(
+    tmp_path,
+):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Missing Figure Asset Collection")
     collection_id = collection["collection_id"]
@@ -366,7 +379,9 @@ def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
     assert "blk-garbled-header" not in source_map
 
 
-def test_document_markdown_service_keeps_readable_block_with_replacement_glyph(tmp_path):
+def test_document_markdown_service_keeps_readable_block_with_replacement_glyph(
+    tmp_path,
+):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Readable Glyph Collection")
     collection_id = collection["collection_id"]
@@ -423,14 +438,26 @@ def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Stored Filename Collection")
     collection_id = collection["collection_id"]
-    collection_service.workspace.write_files(
+    collection_service.import_normalized_batch(
         collection_id,
-        [
-            {
-                "original_filename": "P001-Readable Paper.pdf",
-                "stored_filename": "abc123_P001-Readable Paper.pdf",
-            }
-        ],
+        NormalizedImportBatch(
+            documents=(
+                NormalizedImportDocument(
+                    source_document_id="srcdoc_p001",
+                    origin_channel="upload",
+                    original_filename="P001-Readable Paper.pdf",
+                    stored_filename="abc123_P001-Readable Paper.pdf",
+                    media_type="application/pdf",
+                    storage_payload_base64=base64.b64encode(b"fixture").decode("ascii"),
+                ),
+            ),
+            text_units=(),
+            source_metadata=NormalizedImportSourceMetadata(
+                channel="upload",
+                adapter_name="upload",
+                ingested_at="2026-07-19T00:00:00+00:00",
+            ),
+        ),
     )
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,

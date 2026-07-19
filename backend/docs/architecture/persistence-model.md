@@ -34,16 +34,16 @@ must name the authoritative records from which they can be rebuilt.
 
 ## Current Runtime Model
 
-The current runtime is split between JSON files, uploaded and generated files,
-PostgreSQL auth and collection records, and five handwritten SQLite
-repositories. This table records that split so later migrations do not
-accidentally preserve it.
+The current runtime is split between PostgreSQL auth and collection records,
+file-backed task and artifact state, uploaded and generated files, and five
+handwritten SQLite repositories. This table records that split so later
+migrations do not accidentally preserve it.
 
 | Current family | Current runtime owner | Rebuildable now? | Target authority |
 | --- | --- | --- | --- |
 | Collection identity and metadata | PostgreSQL `collections` | No | PostgreSQL |
-| Collection file membership | `collections/<id>/files.json` | No | PostgreSQL |
-| Import provenance | `collections/<id>/import_manifest.json` | No | PostgreSQL |
+| Stored-object metadata and collection file membership | PostgreSQL `stored_objects` and `collection_files` | No | PostgreSQL |
+| Import provenance and Goal-intake handoffs | PostgreSQL `collection_imports`, `collection_import_documents`, and `collection_handoffs` | No | PostgreSQL |
 | Uploaded PDF and text bytes | `collections/<id>/input/` | No | Object storage |
 | Task status, progress, and errors | `tasks/<id>.json` | No | PostgreSQL |
 | Artifact readiness and paths | `collections/<id>/artifacts.json` | No | PostgreSQL metadata; binary exports in object storage |
@@ -58,6 +58,15 @@ accidentally preserve it.
 | Embedding, parser, and model caches | `cache/` and runtime cache paths | Yes | Local scratch; optional accepted embeddings use `pgvector` |
 | Trace payloads and logs | `traces/` and log paths | Yes for product behavior; retained only for diagnostics | Local scratch or object storage when an explicit retention rule requires it |
 | Legacy document indexes, graph store, and file Goal sessions | `documents/`, `graph_store.json`, and `collections/_goal_sessions/` | Legacy residue, not a supported authority | Offline migration input or removal after approved cleanup |
+
+The collection aggregate is now one direct relational boundary. One import
+transaction inserts stored-object metadata, collection file membership, the
+import record, and ordered imported-document links, then updates collection
+count and status. `FileCollectionWorkspace` owns collection directories and
+artifact paths only. `FileObjectStore` owns immutable input bytes by validated
+storage key and SHA-256. No maintained runtime or export path reads
+`files.json`, `import_manifest.json`, or an input-directory scan as collection
+authority.
 
 ### Legacy SQLite Inventory
 
@@ -150,7 +159,7 @@ Concrete migration names may differ, but these identity rules may not.
 | Collection | `collection_id` | References one owning user and at most one active successful collection build. |
 | Collection membership | `collection_document_id` | References collection and document; pair is unique. |
 | Document and version | `document_id`, `document_version_id` | Version references document and stored object; content identity is immutable. |
-| Stored object and import | `object_id`, `import_id` | Storage key and SHA-256 are constrained; import references collection and object. |
+| Stored object, collection file, and import | `object_id`, `file_id`, `import_id` | Storage key and SHA-256 are constrained; file references collection and object; imported document references one import and file in the same collection. |
 | Task and build | `task_id`, `collection_build_id`, `build_stage_id` | Build references collection and task; stage references build; stage kind and version are unique within a build. |
 | Artifact version | `artifact_version_id` | References its build stage and optional stored object; schema and content versions are typed. |
 | Source records | Existing domain IDs per record family | Every record references a Source build stage and document version; join tables use declared foreign keys. |
@@ -249,6 +258,13 @@ Migration is offline and one-way per accepted data family. There are no runtime
 dual writes, fallback reads, or SQLite compatibility paths. If a cutover fails,
 restore the accepted snapshot and application version; do not merge two live
 authorities.
+
+For the current collection aggregate, deletion validates all storage keys,
+deletes collection-owned relational records and stored-object metadata in one
+transaction, then removes the collection directory. A relational failure
+therefore leaves bytes intact. A later filesystem cleanup failure may leave
+purgeable orphan bytes, but cannot leave live metadata pointing to missing
+evidence.
 
 ## Contract Summary
 

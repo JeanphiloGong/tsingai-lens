@@ -24,6 +24,9 @@ from domain.core.research_objective import (
 )
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportRecord,
     CollectionRecord,
     SourceArtifactSet,
     SourceBlock,
@@ -52,8 +55,6 @@ class CollectionPaths:
     collection_dir: Path
     input_dir: Path
     output_dir: Path
-    files_path: Path
-    import_manifest_path: Path
     artifacts_path: Path
 
 
@@ -69,7 +70,32 @@ class CollectionRepository(Protocol):
 
     def update_collection(self, record: CollectionRecord) -> bool: ...
 
+    def add_collection_import(
+        self,
+        record: CollectionImportRecord,
+        *,
+        updated_at: str,
+    ) -> None: ...
+
+    def list_collection_files(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionFileRecord, ...]: ...
+
+    def list_collection_imports(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionImportRecord, ...]: ...
+
+    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None: ...
+
+    def list_collection_handoffs(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionHandoffRecord, ...]: ...
+
     def delete_collection(self, collection_id: str) -> bool: ...
+
 
 class TaskRepository(Protocol):
     backend_name: str

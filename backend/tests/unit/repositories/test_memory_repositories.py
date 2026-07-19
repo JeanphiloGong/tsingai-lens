@@ -5,7 +5,13 @@ from infra.persistence.memory import (
     MemoryCollectionRepository,
     MemoryTaskRepository,
 )
-from domain.source import CollectionRecord
+from domain.source import (
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+)
 
 
 def test_memory_collection_repository_round_trips_records_by_owner():
@@ -26,6 +32,82 @@ def test_memory_collection_repository_round_trips_records_by_owner():
     assert repository.read_collection(record.collection_id) == record
     assert repository.list_collections("user_demo") == (record,)
     assert repository.list_collections("user_other") == ()
+
+
+def test_memory_collection_repository_keeps_file_provenance_in_one_aggregate():
+    repository = MemoryCollectionRepository()
+    collection = CollectionRecord(
+        collection_id="col_demo",
+        owner_user_id="user_demo",
+        name="Demo",
+        description=None,
+        status="idle",
+        paper_count=0,
+        created_at="2026-07-19T00:00:00+00:00",
+        updated_at="2026-07-19T00:00:00+00:00",
+    )
+    file_record = CollectionFileRecord(
+        file_id="file_demo",
+        collection_id="col_demo",
+        object_id="obj_demo",
+        object_kind="source_input",
+        original_filename="paper.pdf",
+        stored_filename="stored-paper.pdf",
+        storage_key="col_demo/input/stored-paper.pdf",
+        sha256="a" * 64,
+        media_type="application/pdf",
+        status="stored",
+        size_bytes=10,
+        created_at="2026-07-19T00:01:00+00:00",
+    )
+    import_record = CollectionImportRecord(
+        import_id="imp_demo",
+        collection_id="col_demo",
+        channel="upload",
+        adapter_name="upload",
+        adapter_version=None,
+        raw_locator="paper.pdf",
+        goal_context=None,
+        warnings=(),
+        ingested_at="2026-07-19T00:01:00+00:00",
+        documents=(
+            CollectionImportDocumentRecord(
+                source_document_id="srcdoc_demo",
+                origin_channel="upload",
+                file=file_record,
+                language=None,
+                ingest_status="normalized",
+                text_units=(),
+            ),
+        ),
+    )
+    handoff = CollectionHandoffRecord(
+        handoff_id="handoff_demo",
+        collection_id="col_demo",
+        kind="goal_brief",
+        status="awaiting_source_material",
+        created_at="2026-07-19T00:02:00+00:00",
+        source_channels=("upload",),
+        goal_context={"research_brief": {"intent": "compare"}},
+    )
+
+    repository.add_collection(collection)
+    repository.add_collection_import(
+        import_record,
+        updated_at="2026-07-19T00:01:00+00:00",
+    )
+    repository.add_collection_handoff(handoff)
+
+    assert repository.list_collection_files("col_demo") == (file_record,)
+    assert repository.list_collection_imports("col_demo") == (import_record,)
+    assert repository.list_collection_handoffs("col_demo") == (handoff,)
+    assert repository.read_collection("col_demo").paper_count == 1
+    assert repository.read_collection("col_demo").status == "ready"
+
+    assert repository.delete_collection("col_demo") is True
+    assert repository.list_collection_files("col_demo") == ()
+    assert repository.list_collection_imports("col_demo") == ()
+    assert repository.list_collection_handoffs("col_demo") == ()
 
 
 def test_memory_task_repository_round_trips_task_records(tmp_path):

@@ -16,7 +16,7 @@ from infra.persistence.postgres.base import Base
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260719_0003"
+HEAD_REVISION = "20260719_0004"
 
 
 def test_empty_database_upgrades_checks_downgrades_and_upgrades_again(
@@ -48,7 +48,12 @@ def test_empty_database_upgrades_checks_downgrades_and_upgrades_again(
                 "alembic_version",
                 "auth_sessions",
                 "auth_users",
+                "collection_files",
+                "collection_handoffs",
+                "collection_import_documents",
+                "collection_imports",
                 "collections",
+                "stored_objects",
             ]
             command.check(config)
 
@@ -96,7 +101,12 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 "alembic_version",
                 "auth_sessions",
                 "auth_users",
+                "collection_files",
+                "collection_handoffs",
+                "collection_import_documents",
+                "collection_imports",
                 "collections",
+                "stored_objects",
             }
             command.check(config)
 

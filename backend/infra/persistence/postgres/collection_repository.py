@@ -1,15 +1,28 @@
-"""PostgreSQL persistence for collection metadata."""
+"""PostgreSQL persistence for the collection aggregate."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from domain.source import CollectionRecord
-from infra.persistence.postgres.models.collection import Collection
+from domain.source import (
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+)
+from infra.persistence.postgres.models.collection import (
+    Collection,
+    CollectionFile,
+    CollectionHandoff,
+    CollectionImport,
+    CollectionImportDocument,
+    StoredObject,
+)
 
 
 class PostgresCollectionRepository:
@@ -60,11 +73,258 @@ class PostgresCollectionRepository:
             row.updated_at = _datetime(record.updated_at)
             return True
 
+    def add_collection_import(
+        self,
+        record: CollectionImportRecord,
+        *,
+        updated_at: str,
+    ) -> None:
+        if not record.documents:
+            raise ValueError("collection import must include at least one document")
+        if any(
+            document.file.collection_id != record.collection_id
+            for document in record.documents
+        ):
+            raise ValueError("collection import file belongs to another collection")
+
+        with self.session_factory.begin() as session:
+            collection = session.get(
+                Collection,
+                record.collection_id,
+                with_for_update=True,
+            )
+            if collection is None:
+                raise FileNotFoundError(f"collection not found: {record.collection_id}")
+            next_file_order = (
+                int(
+                    session.scalar(
+                        select(
+                            func.coalesce(func.max(CollectionFile.file_order), -1)
+                        ).where(CollectionFile.collection_id == record.collection_id)
+                    )
+                )
+                + 1
+            )
+            next_import_order = (
+                int(
+                    session.scalar(
+                        select(
+                            func.coalesce(func.max(CollectionImport.import_order), -1)
+                        ).where(CollectionImport.collection_id == record.collection_id)
+                    )
+                )
+                + 1
+            )
+
+            session.add(
+                CollectionImport(
+                    import_id=record.import_id,
+                    collection_id=record.collection_id,
+                    channel=record.channel,
+                    adapter_name=record.adapter_name,
+                    adapter_version=record.adapter_version,
+                    raw_locator=record.raw_locator,
+                    goal_context=(
+                        dict(record.goal_context)
+                        if record.goal_context is not None
+                        else None
+                    ),
+                    warnings=list(record.warnings),
+                    ingested_at=_datetime(record.ingested_at),
+                    import_order=next_import_order,
+                )
+            )
+            object_rows: list[StoredObject] = []
+            file_rows: list[CollectionFile] = []
+            document_rows: list[CollectionImportDocument] = []
+            for document_order, document in enumerate(record.documents):
+                file_record = document.file
+                object_rows.append(
+                    StoredObject(
+                        object_id=file_record.object_id,
+                        object_kind=file_record.object_kind,
+                        storage_key=file_record.storage_key,
+                        sha256=file_record.sha256,
+                        size_bytes=file_record.size_bytes,
+                        media_type=file_record.media_type,
+                        created_at=_datetime(file_record.created_at),
+                    )
+                )
+                file_rows.append(
+                    CollectionFile(
+                        file_id=file_record.file_id,
+                        collection_id=file_record.collection_id,
+                        object_id=file_record.object_id,
+                        original_filename=file_record.original_filename,
+                        stored_filename=file_record.stored_filename,
+                        status=file_record.status,
+                        document_id=file_record.document_id,
+                        file_order=next_file_order + document_order,
+                        created_at=_datetime(file_record.created_at),
+                    )
+                )
+                document_rows.append(
+                    CollectionImportDocument(
+                        file_id=file_record.file_id,
+                        collection_id=record.collection_id,
+                        import_id=record.import_id,
+                        source_document_id=document.source_document_id,
+                        origin_channel=document.origin_channel,
+                        language=document.language,
+                        ingest_status=document.ingest_status,
+                        text_units=[dict(item) for item in document.text_units],
+                        document_order=document_order,
+                    )
+                )
+
+            session.add_all(object_rows)
+            session.flush()
+            session.add_all(file_rows)
+            session.flush()
+            session.add_all(document_rows)
+
+            collection.paper_count = next_file_order + len(record.documents)
+            collection.status = "ready"
+            collection.updated_at = _datetime(updated_at)
+
+    def list_collection_files(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionFileRecord, ...]:
+        statement = (
+            select(CollectionFile, StoredObject)
+            .join(StoredObject, CollectionFile.object_id == StoredObject.object_id)
+            .where(CollectionFile.collection_id == collection_id)
+            .order_by(CollectionFile.file_order)
+        )
+        with self.session_factory() as session:
+            return tuple(
+                _to_file_record(file_row, object_row)
+                for file_row, object_row in session.execute(statement)
+            )
+
+    def list_collection_imports(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionImportRecord, ...]:
+        import_statement = (
+            select(CollectionImport)
+            .where(CollectionImport.collection_id == collection_id)
+            .order_by(CollectionImport.import_order)
+        )
+        document_statement = (
+            select(CollectionImportDocument, CollectionFile, StoredObject)
+            .join(
+                CollectionFile,
+                CollectionImportDocument.file_id == CollectionFile.file_id,
+            )
+            .join(StoredObject, CollectionFile.object_id == StoredObject.object_id)
+            .where(CollectionImportDocument.collection_id == collection_id)
+            .order_by(
+                CollectionImportDocument.import_id,
+                CollectionImportDocument.document_order,
+            )
+        )
+        with self.session_factory() as session:
+            import_rows = tuple(session.scalars(import_statement))
+            documents_by_import: dict[
+                str,
+                list[CollectionImportDocumentRecord],
+            ] = {}
+            for document_row, file_row, object_row in session.execute(
+                document_statement
+            ):
+                documents_by_import.setdefault(document_row.import_id, []).append(
+                    _to_import_document(document_row, file_row, object_row)
+                )
+            return tuple(
+                _to_import_record(
+                    import_row,
+                    tuple(documents_by_import.get(import_row.import_id, ())),
+                )
+                for import_row in import_rows
+            )
+
+    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None:
+        with self.session_factory.begin() as session:
+            collection = session.get(
+                Collection,
+                record.collection_id,
+                with_for_update=True,
+            )
+            if collection is None:
+                raise FileNotFoundError(f"collection not found: {record.collection_id}")
+            next_handoff_order = (
+                int(
+                    session.scalar(
+                        select(
+                            func.coalesce(func.max(CollectionHandoff.handoff_order), -1)
+                        ).where(CollectionHandoff.collection_id == record.collection_id)
+                    )
+                )
+                + 1
+            )
+            session.add(
+                CollectionHandoff(
+                    handoff_id=record.handoff_id,
+                    collection_id=record.collection_id,
+                    kind=record.kind,
+                    status=record.status,
+                    created_at=_datetime(record.created_at),
+                    source_channels=list(record.source_channels),
+                    goal_context=dict(record.goal_context),
+                    handoff_order=next_handoff_order,
+                )
+            )
+
+    def list_collection_handoffs(
+        self,
+        collection_id: str,
+    ) -> tuple[CollectionHandoffRecord, ...]:
+        statement = (
+            select(CollectionHandoff)
+            .where(CollectionHandoff.collection_id == collection_id)
+            .order_by(CollectionHandoff.handoff_order)
+        )
+        with self.session_factory() as session:
+            return tuple(_to_handoff_record(row) for row in session.scalars(statement))
+
     def delete_collection(self, collection_id: str) -> bool:
         with self.session_factory.begin() as session:
             row = session.get(Collection, collection_id)
             if row is None:
                 return False
+            object_ids = tuple(
+                session.scalars(
+                    select(CollectionFile.object_id).where(
+                        CollectionFile.collection_id == collection_id
+                    )
+                )
+            )
+            session.execute(
+                delete(CollectionImportDocument).where(
+                    CollectionImportDocument.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(CollectionHandoff).where(
+                    CollectionHandoff.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(CollectionImport).where(
+                    CollectionImport.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(CollectionFile).where(
+                    CollectionFile.collection_id == collection_id
+                )
+            )
+            if object_ids:
+                session.execute(
+                    delete(StoredObject).where(StoredObject.object_id.in_(object_ids))
+                )
             session.delete(row)
             return True
 
@@ -79,6 +339,72 @@ def _to_record(row: Collection) -> CollectionRecord:
         paper_count=row.paper_count,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+    )
+
+
+def _to_file_record(
+    file_row: CollectionFile,
+    object_row: StoredObject,
+) -> CollectionFileRecord:
+    return CollectionFileRecord(
+        file_id=file_row.file_id,
+        collection_id=file_row.collection_id,
+        object_id=object_row.object_id,
+        object_kind=object_row.object_kind,
+        original_filename=file_row.original_filename,
+        stored_filename=file_row.stored_filename,
+        storage_key=object_row.storage_key,
+        sha256=object_row.sha256,
+        media_type=object_row.media_type,
+        status=file_row.status,
+        size_bytes=object_row.size_bytes,
+        created_at=_iso(file_row.created_at),
+        document_id=file_row.document_id,
+    )
+
+
+def _to_import_document(
+    document_row: CollectionImportDocument,
+    file_row: CollectionFile,
+    object_row: StoredObject,
+) -> CollectionImportDocumentRecord:
+    return CollectionImportDocumentRecord(
+        source_document_id=document_row.source_document_id,
+        origin_channel=document_row.origin_channel,
+        file=_to_file_record(file_row, object_row),
+        language=document_row.language,
+        ingest_status=document_row.ingest_status,
+        text_units=tuple(dict(item) for item in document_row.text_units),
+    )
+
+
+def _to_import_record(
+    row: CollectionImport,
+    documents: tuple[CollectionImportDocumentRecord, ...],
+) -> CollectionImportRecord:
+    return CollectionImportRecord(
+        import_id=row.import_id,
+        collection_id=row.collection_id,
+        channel=row.channel,
+        adapter_name=row.adapter_name,
+        adapter_version=row.adapter_version,
+        raw_locator=row.raw_locator,
+        goal_context=dict(row.goal_context) if row.goal_context is not None else None,
+        warnings=tuple(str(item) for item in row.warnings),
+        ingested_at=_iso(row.ingested_at),
+        documents=documents,
+    )
+
+
+def _to_handoff_record(row: CollectionHandoff) -> CollectionHandoffRecord:
+    return CollectionHandoffRecord(
+        handoff_id=row.handoff_id,
+        collection_id=row.collection_id,
+        kind=row.kind,
+        status=row.status,
+        created_at=_iso(row.created_at),
+        source_channels=tuple(str(item) for item in row.source_channels),
+        goal_context=dict(row.goal_context),
     )
 
 

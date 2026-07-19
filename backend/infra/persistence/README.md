@@ -24,17 +24,19 @@ The stable data ownership and identity contract lives in
 ## Current Runtime
 
 - `file/`
-  Owns collection filesystem workspaces, `files.json`, `import_manifest.json`,
-  uploaded input bytes, task JSON, and `artifacts.json`. It does not own
-  collection identity or metadata.
+  Owns collection directory and artifact paths, immutable uploaded input bytes
+  through `FileObjectStore`, task JSON, and `artifacts.json`. It does not own
+  collection identity, file membership, or import provenance.
 - `memory/`
-  Test and isolated-run implementations for collection metadata, task, and
-  artifact state. Collection metadata has no runtime memory-backend switch.
+  Test and isolated-run implementations for the collection aggregate, task,
+  and artifact state. The collection implementation has no runtime
+  memory-backend switch.
 - `postgres/`
-  Owns users, browser sessions, and collection metadata through SQLAlchemy
-  mappings and direct aggregate repositories. The application creates one
-  engine and session factory, both repositories, and their services in the
-  FastAPI lifespan.
+  Owns users, browser sessions, collection metadata, stored-object metadata,
+  collection file membership, import provenance, and Goal-intake handoffs
+  through SQLAlchemy mappings and direct aggregate repositories. The
+  application creates one engine and session factory, both repositories, and
+  their services in the FastAPI lifespan.
 - `sqlite/`
   Five handwritten repositories share `backend/data/lens.sqlite` for Goal
   sessions and plans, Source records, Core and Goal workflow records, and
@@ -45,11 +47,11 @@ The stable data ownership and identity contract lives in
 
 `factory.py` selects file, memory, or the unimplemented MySQL path only for task
 and artifact repositories. It constructs SQLite directly for the remaining
-Goal, Source, Core, and evaluation families. Auth and collection metadata are
-composed directly in `main.py`; neither has a repository factory or runtime
-fallback. Source pipeline JSON and Parquet outputs live under `infra/source/`
-runtime storage and are rebuildable intermediates, not a second persistence
-authority.
+Goal, Source, Core, and evaluation families. Auth and the complete current
+collection aggregate are composed directly in `main.py`; neither has a
+repository factory or runtime fallback. Source pipeline JSON and Parquet
+outputs live under `infra/source/` runtime storage and are rebuildable
+intermediates, not a second persistence authority.
 
 `database.py` owns the validated synchronous SQLAlchemy engine and session
 factory. The FastAPI lifespan shares this contract between auth and collection
@@ -61,6 +63,13 @@ remain caller-owned.
 repositories own explicit row/domain mapping and short transactions.
 `../../migrations/` owns the version history and is the only PostgreSQL schema
 change path; repositories never create tables.
+
+`PostgresCollectionRepository` is the single structured owner for collection
+metadata, files, imports, imported-document links, and handoffs. Import
+registration and collection count/status changes commit in one transaction.
+Collection deletion commits relational removal before the workspace directory
+is deleted. Maintained callers do not read or write collection file or import
+manifest JSON and do not scan input directories as a fallback authority.
 
 ## Target Boundary
 

@@ -28,6 +28,9 @@ from domain.evaluation import (
 )
 from domain.goal import ExperimentPlanRecord
 from domain.source import (
+    CollectionFileRecord,
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
     CollectionRecord,
     SourceArtifactSet,
     SourceReferenceEntry,
@@ -39,7 +42,9 @@ from infra.persistence.file import (
     FileTaskRepository,
 )
 from infra.persistence.file.object_store import FileObjectStore
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from infra.persistence.sqlite import (
     SqliteCoreFactRepository,
     SqliteEvaluationRepository,
@@ -89,17 +94,55 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         )
     )
     paths = collection_workspace.create_collection_dirs(collection_id)
-    collection_workspace.write_files(collection_id, records["collection_files"])
-    collection_workspace.write_import_manifest(
-        collection_id,
-        records["import_manifests"][0],
-    )
     assert not (paths.collection_dir / "meta.json").exists()
     object_payload = b"Synthetic fixture content; no paper or user data."
+    object_digest = sha256(object_payload).hexdigest()
+    fixture_file = records["collection_files"][0]
+    storage_key = f"{collection_id}/input/{fixture_file['stored_filename']}"
     object_store.write(
-        f"{collection_id}/input/{records['collection_files'][0]['stored_filename']}",
+        storage_key,
         object_payload,
-        sha256(object_payload).hexdigest(),
+        object_digest,
+    )
+    file_record = CollectionFileRecord(
+        file_id=fixture_file["file_id"],
+        collection_id=collection_id,
+        object_id="obj_strength",
+        object_kind="source_input",
+        original_filename=fixture_file["original_filename"],
+        stored_filename=fixture_file["stored_filename"],
+        storage_key=storage_key,
+        sha256=object_digest,
+        media_type=fixture_file["media_type"],
+        status="stored",
+        size_bytes=len(object_payload),
+        created_at=records["collections"][0]["created_at"],
+        document_id=fixture_file["document_id"],
+    )
+    fixture_import = records["import_manifests"][0]["imports"][0]
+    collection_repository.add_collection_import(
+        CollectionImportRecord(
+            import_id=fixture_import["import_id"],
+            collection_id=collection_id,
+            channel=fixture_import["source_type"],
+            adapter_name=fixture_import["source_type"],
+            adapter_version=None,
+            raw_locator=fixture_file["original_filename"],
+            goal_context=None,
+            warnings=(),
+            ingested_at=records["collections"][0]["updated_at"],
+            documents=(
+                CollectionImportDocumentRecord(
+                    source_document_id=fixture_file["document_id"],
+                    origin_channel=fixture_import["source_type"],
+                    file=file_record,
+                    language=None,
+                    ingest_status="normalized",
+                    text_units=(),
+                ),
+            ),
+        ),
+        updated_at=records["collections"][0]["updated_at"],
     )
     task_repository.write_task(records["tasks"][0]["task_id"], records["tasks"][0])
     artifact_repository.write(collection_id, records["artifacts"][0])
@@ -137,7 +180,10 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     core_repository.replace_collection_research_objectives(
         collection_id,
         (),
-        tuple(ResearchObjective.from_mapping(item) for item in records["research_objectives"]),
+        tuple(
+            ResearchObjective.from_mapping(item)
+            for item in records["research_objectives"]
+        ),
         (),
         (),
         (),
@@ -220,16 +266,33 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     observed_records = observed["records"]
     stored_collection = collection_repository.read_collection(collection_id).to_record()
     observed_records["collections"] = [
+        {key: stored_collection.get(key) for key in records["collections"][0]}
+    ]
+    stored_files = collection_repository.list_collection_files(collection_id)
+    observed_records["collection_files"] = [
         {
-            key: stored_collection.get(key)
-            for key in records["collections"][0]
+            key: (
+                stored_file.size_bytes
+                if key == "byte_size"
+                else stored_file.to_record().get(key)
+            )
+            for key in records["collection_files"][index]
+        }
+        for index, stored_file in enumerate(stored_files)
+    ]
+    observed_records["import_manifests"] = [
+        {
+            "schema_version": 1,
+            "collection_id": collection_id,
+            "imports": [
+                item.to_record()
+                for item in collection_repository.list_collection_imports(collection_id)
+            ],
         }
     ]
-    observed_records["collection_files"] = collection_workspace.read_files(collection_id)
-    observed_records["import_manifests"] = [
-        collection_workspace.read_import_manifest(collection_id)
+    observed_records["tasks"] = [
+        task_repository.read_task(records["tasks"][0]["task_id"])
     ]
-    observed_records["tasks"] = [task_repository.read_task(records["tasks"][0]["task_id"])]
     observed_records["artifacts"] = [artifact_repository.read(collection_id)]
     observed_records["auth_users"] = [
         auth_repository.read_user(records["auth_users"][0]["user_id"])
@@ -259,16 +322,23 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
 
     facts = core_repository.read_collection_facts(collection_id)
     core_families = {
-        "core_document_profiles": [item.to_record() for item in facts.document_profiles],
+        "core_document_profiles": [
+            item.to_record() for item in facts.document_profiles
+        ],
         "core_evidence_anchors": [item.to_record() for item in facts.evidence_anchors],
         "core_method_facts": [item.to_record() for item in facts.method_facts],
         "core_sample_variants": [item.to_record() for item in facts.sample_variants],
         "core_test_conditions": [item.to_record() for item in facts.test_conditions],
-        "core_baseline_references": [item.to_record() for item in facts.baseline_references],
-        "core_measurement_results": [item.to_record() for item in facts.measurement_results],
+        "core_baseline_references": [
+            item.to_record() for item in facts.baseline_references
+        ],
+        "core_measurement_results": [
+            item.to_record() for item in facts.measurement_results
+        ],
         "research_objectives": [item.to_record() for item in facts.research_objectives],
         "confirmed_goals": [
-            item.to_record() for item in core_repository.list_confirmed_goals(collection_id)
+            item.to_record()
+            for item in core_repository.list_confirmed_goals(collection_id)
         ],
         "research_understandings": [
             item.to_record()
@@ -283,11 +353,17 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ]
 
     session_id = records["goal_sessions"][0]["session_id"]
-    observed_records["goal_sessions"] = [goal_session_repository.read_session(session_id)]
-    observed_records["goal_messages"] = goal_session_repository.read_messages(session_id)
+    observed_records["goal_sessions"] = [
+        goal_session_repository.read_session(session_id)
+    ]
+    observed_records["goal_messages"] = goal_session_repository.read_messages(
+        session_id
+    )
     observed_records["experiment_plans"] = [
         item.to_record()
-        for item in experiment_plan_repository.list_plans(collection_id, "goal_strength")
+        for item in experiment_plan_repository.list_plans(
+            collection_id, "goal_strength"
+        )
     ]
     observed_records["feedback"] = [
         item.to_record()
@@ -305,7 +381,8 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         evaluation_repository.read_gold_set("gold_strength").to_record()
     ]
     observed_records["evaluation_gold_items"] = [
-        item.to_record() for item in evaluation_repository.list_gold_items("gold_strength")
+        item.to_record()
+        for item in evaluation_repository.list_gold_items("gold_strength")
     ]
     observed_records["prediction_snapshots"] = [
         evaluation_repository.read_prediction_snapshot("snapshot_strength").to_record()

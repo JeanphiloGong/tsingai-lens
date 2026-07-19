@@ -39,10 +39,21 @@ from domain.source.artifacts import (
     safe_int,
     update_heading_stack,
 )
-from domain.source.collection import CollectionRecord, empty_import_manifest
+from domain.source.collection import (
+    CollectionFileRecord,
+    CollectionHandoffRecord,
+    CollectionImportDocumentRecord,
+    CollectionImportRecord,
+    CollectionRecord,
+    empty_import_manifest,
+)
 
 __all__ = [
     "ArtifactStatusRecord",
+    "CollectionFileRecord",
+    "CollectionHandoffRecord",
+    "CollectionImportDocumentRecord",
+    "CollectionImportRecord",
     "CollectionRecord",
     "SourceBlock",
     "SourceBlockType",

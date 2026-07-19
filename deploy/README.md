@@ -22,7 +22,7 @@ Install the deploy bundle with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/deploy/install.sh \
-  | sh -s -- --version v0.9.0 --ref v0.9.0
+  | sh -s -- --version v0.10.0 --ref v0.10.0
 ```
 
 Use `--ref <git-ref>` when you want the deploy files themselves to come from a
@@ -155,7 +155,7 @@ Edit `.env` to set that generated value, the published image tag, and the host
 port:
 
 ```bash
-LENS_VERSION=v0.9.0
+LENS_VERSION=v0.10.0
 LENS_HTTP_PORT=8080
 POSTGRES_PASSWORD=<generated-64-character-hex-value>
 ```
@@ -164,7 +164,7 @@ The password initializes the `lens` database user only when the PostgreSQL
 volume is empty. Changing `.env` later does not rotate an existing database
 password. Keep `.env` private and do not commit it.
 
-Edit `backend.env` before the first v0.9.0 start to create the initial login
+Edit `backend.env` before the first v0.10.0 start to create the initial login
 user:
 
 ```bash
@@ -233,7 +233,7 @@ http://localhost:8080
 ./scripts/lens logs
 ./scripts/lens ps
 ./scripts/lens pull
-./scripts/lens upgrade v0.9.0
+./scripts/lens upgrade v0.10.0
 ```
 
 Command mapping:

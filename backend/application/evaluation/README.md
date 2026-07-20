@@ -65,5 +65,7 @@ artifacts.
 
 All review records, datasets, imports, and exports use `objective_id` as their
 only research scope. The FastAPI lifespan composes the feedback service with
-the direct PostgreSQL Understanding and review repositories. SQLite remains
-only for unrelated gold-set, prediction-snapshot, and evaluation-run records.
+the direct PostgreSQL Understanding and review repositories. Gold-set,
+prediction-snapshot, and evaluation-run services require an explicit
+`EvaluationRepository`; the maintained implementation is the direct
+`PostgresEvaluationRepository`, with no SQLite default or persistence factory.

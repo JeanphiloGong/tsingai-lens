@@ -7,7 +7,6 @@ The stable data ownership and identity contract lives in
 ## Scope
 
 - `database.py`
-- `factory.py`
 - `file/`
 - `memory/`
 - `postgres/`
@@ -40,24 +39,24 @@ The stable data ownership and identity contract lives in
   routes, evidence units, logic chains, comparable results, collection
   comparison assessments, pairwise relations, Research Objective lifecycle
   state, Objective Understandings and expert review, Objective-focused
-  sessions/messages, and Objective experiment plans through SQLAlchemy mappings
+  sessions/messages, Objective experiment plans, evaluation gold sets,
+  prediction snapshots, runs, scores, and failures through SQLAlchemy mappings
   and direct aggregate repositories.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
-  Retains the unrelated evaluation gold-set, prediction-snapshot, and run
-  repository. SQLite Source and other structured repositories are isolated
-  test/legacy residue and are not composed into maintained runtime readers or
-  writers.
+  Retains only a legacy Source repository for isolated migration and baseline
+  tests. It is not composed into maintained runtime readers or writers.
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
-`factory.py` constructs the remaining SQLite evaluation repository only. Auth,
-collection, build, Source, paper-fact, objective, comparison, Understanding,
-review, session/message, and experiment-plan aggregates are composed directly
-in `main.py`; none has a repository factory or runtime fallback. Source pipeline JSON and Parquet
-outputs live under `infra/source/` runtime storage and are rebuildable
-intermediates, not a second persistence authority.
+Auth, collection, build, Source, paper-fact, objective, comparison,
+Understanding, review, session/message, and experiment-plan aggregates are
+composed directly in `main.py`. Evaluation callers receive the direct
+PostgreSQL repository explicitly. No aggregate has a repository factory or
+runtime fallback. Source pipeline JSON and Parquet outputs live under
+`infra/source/` runtime storage and are rebuildable intermediates, not a second
+persistence authority.
 
 `database.py` owns the validated synchronous SQLAlchemy engine and session
 factory. The FastAPI lifespan shares this contract between auth, collection,
@@ -145,6 +144,13 @@ intent, while `focused_objective_id` is the only persisted research identity.
 Copilot plans may reference only assistant messages from a session focused on
 the same collection and Objective.
 
+`PostgresEvaluationRepository` owns evaluation gold sets and items, prediction
+snapshots and items, and evaluation runs with their scores and failures. Each
+upsert preserves the parent collection identity and replaces child records in
+one transaction. Runs may reference only existing gold and prediction parents
+from the same collection. Application services require this repository as an
+explicit dependency; no SQLite evaluation path remains.
+
 `PostgresComparisonRepository` is the single structured owner for comparable
 results, collection-scoped assessments, pairwise relations, and their ordered
 source/evidence links. Writes replace one explicitly named pending build;
@@ -153,10 +159,10 @@ regenerates `ComparisonRowRecord` values from those semantic records for every
 row-facing read. No comparison-row table, SQLite comparison read, fallback, or
 dual write exists.
 
-The former broad Core persistence path, ConfirmedGoal runtime path, and SQLite
-Goal-session, experiment-plan, Understanding, and review repositories have been
-deleted. There is no aggregate facade, fallback alias, compatibility path, or
-runtime storage selector.
+The former broad Core persistence path, ConfirmedGoal runtime path, persistence
+factory, and SQLite Goal-session, experiment-plan, Understanding, review, and
+evaluation repositories have been deleted. There is no aggregate facade,
+fallback alias, compatibility path, or runtime storage selector.
 
 ## Target Boundary
 

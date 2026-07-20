@@ -46,10 +46,10 @@ from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
-from infra.persistence.sqlite import (
-    SqliteEvaluationRepository,
-    SqliteSourceArtifactRepository,
+from infra.persistence.postgres.evaluation_repository import (
+    PostgresEvaluationRepository,
 )
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
@@ -100,7 +100,9 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     )
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     experiment_plan_repository = goal_session_repository
-    evaluation_repository = SqliteEvaluationRepository(db_path)
+    evaluation_repository = PostgresEvaluationRepository(
+        auth_repository.session_factory
+    )
     review_repository = InMemoryObjectiveReviewRepository()
 
     auth_repository.add_user(records["auth_users"][0])
@@ -442,16 +444,10 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         )
     ]
     observed_records["feedback"] = [
-        item.to_record()
-        for item in review_repository.list_feedback(
-            collection_id
-        )
+        item.to_record() for item in review_repository.list_feedback(collection_id)
     ]
     observed_records["curations"] = [
-        item.to_record()
-        for item in review_repository.list_curations(
-            collection_id
-        )
+        item.to_record() for item in review_repository.list_curations(collection_id)
     ]
     observed_records["evaluation_gold_sets"] = [
         evaluation_repository.read_gold_set("gold_strength").to_record()

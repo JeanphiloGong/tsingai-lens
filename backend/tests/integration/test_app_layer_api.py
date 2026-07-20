@@ -706,8 +706,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)

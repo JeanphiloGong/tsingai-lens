@@ -29,8 +29,6 @@ def _build_client(
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-
     from main import create_app
 
     with TestClient(
@@ -43,7 +41,11 @@ def _build_client(
         yield client
 
 
-def _login(client: TestClient, email: str = "admin@example.com", password: str = "admin-password"):
+def _login(
+    client: TestClient,
+    email: str = "admin@example.com",
+    password: str = "admin-password",
+):
     return client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": password},
@@ -106,8 +108,6 @@ def test_app_lifespan_composes_one_shared_collection_service(
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-
     from main import create_app
 
     with TestClient(

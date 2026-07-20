@@ -57,8 +57,6 @@ def feedback_client(
         lambda **_kwargs: PassthroughResearchUnderstandingService(),
     )
     monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
-    monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-
     from tests.support.collection_service import build_test_collection_service
     from tests.support.comparison_repository import MemoryComparisonRepository
     from tests.support.objective_repository import MemoryObjectiveRepository
@@ -248,7 +246,9 @@ def test_feedback_route_uses_authenticated_user_not_spoofed_reviewer(
 
     assert response.status_code == 200
     assert response.json()["reviewer"] == "admin@example.com"
-    assert tuple(review_repository.feedback.values())[-1].reviewer == "admin@example.com"
+    assert (
+        tuple(review_repository.feedback.values())[-1].reviewer == "admin@example.com"
+    )
 
 
 def test_curation_route_uses_authenticated_user_not_spoofed_reviewer(
@@ -279,7 +279,9 @@ def test_curation_route_uses_authenticated_user_not_spoofed_reviewer(
 
     assert response.status_code == 200
     assert response.json()["reviewer"] == "admin@example.com"
-    assert tuple(review_repository.curations.values())[-1].reviewer == "admin@example.com"
+    assert (
+        tuple(review_repository.curations.values())[-1].reviewer == "admin@example.com"
+    )
 
 
 def test_feedback_route_preserves_agent_reviewer(
@@ -397,9 +399,7 @@ def test_human_curation_route_makes_dataset_sample_training_ready(
     assert collection_payload["objective_id"] is None
     assert collection_payload["quality_summary"]["training_ready_sample_count"] == 1
     assert (
-        collection_payload["quality_summary"]["by_dataset_use_status"][
-            "training_ready"
-        ]
+        collection_payload["quality_summary"]["by_dataset_use_status"]["training_ready"]
         == 1
     )
     assert collection_payload["items"][0]["dataset_use_status"] == "training_ready"

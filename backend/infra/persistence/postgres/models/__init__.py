@@ -28,6 +28,13 @@ from infra.persistence.postgres.models.document import (
     DocumentVersion,
 )
 from infra.persistence.postgres.models.evaluation import (
+    EvaluationFailureRecord,
+    EvaluationGoldItemRecord,
+    EvaluationGoldSetRecord,
+    EvaluationPredictionItemRecord,
+    EvaluationPredictionSnapshotRecord,
+    EvaluationRunRecord,
+    EvaluationScoreRecord,
     ResearchUnderstandingCurationRecord,
     ResearchUnderstandingFeedbackRecord,
 )
@@ -101,6 +108,13 @@ __all__ = [
     "CollectionImportDocument",
     "Document",
     "DocumentVersion",
+    "EvaluationFailureRecord",
+    "EvaluationGoldItemRecord",
+    "EvaluationGoldSetRecord",
+    "EvaluationPredictionItemRecord",
+    "EvaluationPredictionSnapshotRecord",
+    "EvaluationRunRecord",
+    "EvaluationScoreRecord",
     "ObjectiveBuild",
     "ObjectiveExperimentPlan",
     "ObjectiveIdentityMigration",

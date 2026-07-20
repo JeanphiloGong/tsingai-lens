@@ -17,9 +17,6 @@ from domain.ports import (
     ObjectiveRepository,
     PaperFactRepository,
 )
-from infra.persistence.factory import (
-    build_evaluation_repository,
-)
 
 
 class CoreArtifactsNotReadyForEvaluationError(RuntimeError):
@@ -42,15 +39,13 @@ class EvaluationPredictionSnapshotService:
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
         comparison_repository: ComparisonRepository,
-        evaluation_repository: EvaluationRepository | None = None,
+        evaluation_repository: EvaluationRepository,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
         self.comparison_repository = comparison_repository
-        self.evaluation_repository = (
-            evaluation_repository or build_evaluation_repository()
-        )
+        self.evaluation_repository = evaluation_repository
 
     def create_core_snapshot(
         self,

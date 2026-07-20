@@ -27,6 +27,11 @@ from infra.persistence.postgres.models.document import (
     Document,
     DocumentVersion,
 )
+from infra.persistence.postgres.models.evaluation import (
+    ResearchUnderstandingCurationRecord,
+    ResearchUnderstandingFeedbackRecord,
+)
+from infra.persistence.postgres.models.migration import ObjectiveIdentityMigration
 from infra.persistence.postgres.models.paper_fact import (
     PaperFactBaselineReference,
     PaperFactBuild,
@@ -49,6 +54,11 @@ from infra.persistence.postgres.models.objective import (
     ObjectivePaperSkim,
     ObjectiveResearchRecord,
 )
+from infra.persistence.postgres.models.objective_workspace import (
+    ObjectiveExperimentPlan,
+    ObjectiveMessage,
+    ObjectiveSession,
+)
 from infra.persistence.postgres.models.source import (
     SourceBlock,
     SourceBlockTextUnit,
@@ -63,6 +73,14 @@ from infra.persistence.postgres.models.source import (
     SourceTableRow,
     SourceTextUnit,
     SourceTextUnitDocument,
+)
+from infra.persistence.postgres.models.understanding import (
+    ResearchClaimRecord,
+    ResearchContextRecord,
+    ResearchEvidenceRefRecord,
+    ResearchFindingRecord,
+    ResearchRelationRecord,
+    ResearchUnderstandingRecord,
 )
 
 __all__ = [
@@ -84,6 +102,9 @@ __all__ = [
     "Document",
     "DocumentVersion",
     "ObjectiveBuild",
+    "ObjectiveExperimentPlan",
+    "ObjectiveIdentityMigration",
+    "ObjectiveMessage",
     "ObjectiveContextRecord",
     "ObjectiveEvidenceRouteRecord",
     "ObjectiveEvidenceUnitRecord",
@@ -91,6 +112,7 @@ __all__ = [
     "ObjectivePaperFrameRecord",
     "ObjectivePaperSkim",
     "ObjectiveResearchRecord",
+    "ObjectiveSession",
     "PairwiseComparisonRelationRecord",
     "PaperFactBaselineReference",
     "PaperFactBuild",
@@ -102,6 +124,14 @@ __all__ = [
     "PaperFactSampleVariant",
     "PaperFactStructureFeature",
     "PaperFactTestCondition",
+    "ResearchClaimRecord",
+    "ResearchContextRecord",
+    "ResearchEvidenceRefRecord",
+    "ResearchFindingRecord",
+    "ResearchRelationRecord",
+    "ResearchUnderstandingCurationRecord",
+    "ResearchUnderstandingFeedbackRecord",
+    "ResearchUnderstandingRecord",
     "StoredObject",
     "SourceBlock",
     "SourceBlockTextUnit",

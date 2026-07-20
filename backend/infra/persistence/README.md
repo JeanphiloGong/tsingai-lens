@@ -129,6 +129,14 @@ objective-scoped Understanding through its current owner. It does not mutate
 the collection Objective build. No second Goal identity, lifecycle repository,
 SQLite objective path, fallback, or dual path remains.
 
+Alembic revision `20260720_0013` also defines the final Objective-scoped
+Understanding, expert-review, session/message, experiment-plan, and sanitized
+migration-audit tables used by the offline Goal identity importer. In this
+slice those tables are an offline migration target only. Maintained runtime
+services continue to use their existing downstream repositories until the
+direct Objective-scope cutover replaces those callers in the next slice; no
+runtime fallback or dual read is introduced.
+
 `PostgresComparisonRepository` is the single structured owner for comparable
 results, collection-scoped assessments, pairwise relations, and their ordered
 source/evidence links. Writes replace one explicitly named pending build;

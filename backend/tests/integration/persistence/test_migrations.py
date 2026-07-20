@@ -16,7 +16,7 @@ from infra.persistence.postgres.base import Base
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260720_0012"
+HEAD_REVISION = "20260720_0013"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -45,11 +45,15 @@ EXPECTED_TABLES = {
     "objective_document_links",
     "objective_evidence_routes",
     "objective_evidence_units",
+    "objective_experiment_plans",
     "objective_frame_table_links",
     "objective_logic_chain_unit_links",
     "objective_logic_chains",
+    "objective_identity_migrations",
+    "objective_messages",
     "objective_paper_frames",
     "objective_paper_skims",
+    "objective_sessions",
     "objective_unit_anchor_links",
     "objective_unit_source_refs",
     "paper_fact_baseline_evidence_anchors",
@@ -75,7 +79,20 @@ EXPECTED_TABLES = {
     "pairwise_comparison_anchor_links",
     "pairwise_comparison_relations",
     "research_objectives",
+    "research_claim_context_links",
+    "research_claim_evidence_links",
+    "research_claims",
+    "research_contexts",
+    "research_evidence_refs",
+    "research_finding_evidence_links",
+    "research_findings",
+    "research_relation_context_links",
+    "research_relation_evidence_links",
+    "research_relations",
     "research_objective_lifecycles",
+    "research_understanding_curation_records",
+    "research_understanding_feedback_records",
+    "research_understandings",
     "source_block_text_units",
     "source_blocks",
     "source_documents",

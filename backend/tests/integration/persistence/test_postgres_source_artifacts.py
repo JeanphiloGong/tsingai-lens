@@ -9,7 +9,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 import pytest
-from sqlalchemy import URL, create_engine, event, select
+from sqlalchemy import URL, create_engine, event, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
@@ -49,6 +49,18 @@ from infra.persistence.postgres.source_artifact_repository import (
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 NOW = "2026-07-19T10:00:00+00:00"
+REAL_SOURCE_DOCUMENT_ID = "d" * 128
+REAL_SOURCE_TEXT_UNIT_ID = "t" * 128
+REAL_SOURCE_BLOCK_ID = f"blk_{REAL_SOURCE_DOCUMENT_ID}_1000"
+REAL_SOURCE_TABLE_ID = f"tbl_{REAL_SOURCE_DOCUMENT_ID}_1_table_1"
+REAL_SOURCE_ROW_ID = (
+    f"row_{REAL_SOURCE_DOCUMENT_ID}_{REAL_SOURCE_TABLE_ID}_1"
+)
+REAL_SOURCE_REFERENCE_ID = f"ref-{REAL_SOURCE_DOCUMENT_ID}-0001"
+REAL_SOURCE_CANDIDATE_ID = f"cand-{REAL_SOURCE_REFERENCE_ID}"
+REAL_SOURCE_MENTION_ID = (
+    f"mention-{REAL_SOURCE_DOCUMENT_ID}-{REAL_SOURCE_BLOCK_ID}-0001"
+)
 
 
 @pytest.fixture
@@ -245,6 +257,59 @@ def _artifacts(title: str = "Paper") -> SourceArtifactSet:
     )
 
 
+def _real_shape_artifacts() -> SourceArtifactSet:
+    artifacts = _artifacts()
+    return replace(
+        artifacts,
+        documents=(
+            replace(
+                artifacts.documents[0],
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                text_unit_ids=(REAL_SOURCE_TEXT_UNIT_ID,),
+            ),
+        ),
+        text_units=(
+            replace(
+                artifacts.text_units[0],
+                text_unit_id=REAL_SOURCE_TEXT_UNIT_ID,
+                document_ids=(REAL_SOURCE_DOCUMENT_ID,),
+            ),
+        ),
+        blocks=(
+            replace(
+                artifacts.blocks[0],
+                block_id=REAL_SOURCE_BLOCK_ID,
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                text_unit_ids=(REAL_SOURCE_TEXT_UNIT_ID,),
+            ),
+        ),
+        tables=(
+            replace(
+                artifacts.tables[0],
+                table_id=REAL_SOURCE_TABLE_ID,
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                caption_block_id=REAL_SOURCE_BLOCK_ID,
+            ),
+        ),
+        table_rows=(
+            replace(
+                artifacts.table_rows[0],
+                row_id=REAL_SOURCE_ROW_ID,
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                table_id=REAL_SOURCE_TABLE_ID,
+            ),
+        ),
+        table_cells=(
+            replace(
+                artifacts.table_cells[0],
+                cell_id="c" * 128,
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                table_id=REAL_SOURCE_TABLE_ID,
+            ),
+        ),
+    )
+
+
 def _figure(build_id: str) -> SourceFigure:
     return SourceFigure(
         figure_id="figure-1",
@@ -325,6 +390,44 @@ def _references() -> SourceReferenceSet:
                 resolved_doi="10.1000/result",
                 resolved_url="https://doi.org/10.1000/result",
                 metadata={"rank": 1},
+            ),
+        ),
+    )
+
+
+def _real_shape_references() -> SourceReferenceSet:
+    references = _references()
+    return replace(
+        references,
+        entries=(
+            replace(
+                references.entries[0],
+                reference_id=REAL_SOURCE_REFERENCE_ID,
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                source_block_id=REAL_SOURCE_BLOCK_ID,
+            ),
+        ),
+        mentions=(
+            replace(
+                references.mentions[0],
+                mention_id=REAL_SOURCE_MENTION_ID,
+                document_id=REAL_SOURCE_DOCUMENT_ID,
+                reference_id=REAL_SOURCE_REFERENCE_ID,
+                source_block_id=REAL_SOURCE_BLOCK_ID,
+            ),
+        ),
+        resolutions=(
+            replace(
+                references.resolutions[0],
+                reference_id=REAL_SOURCE_REFERENCE_ID,
+            ),
+        ),
+        candidates=(
+            replace(
+                references.candidates[0],
+                candidate_id=REAL_SOURCE_CANDIDATE_ID,
+                reference_id=REAL_SOURCE_REFERENCE_ID,
+                cited_by_document_id=REAL_SOURCE_DOCUMENT_ID,
             ),
         ),
     )
@@ -665,15 +768,16 @@ def test_postgresql_enforces_source_structure_contract() -> None:
         task = _task("task_source")
         builds.add_task(task, build_id="build_source")
 
+        real_shape_artifacts = _real_shape_artifacts()
         repository.replace_collection_artifacts(
-            "col_source", "build_source", _artifacts()
+            "col_source", "build_source", real_shape_artifacts
         )
         assert (
             repository.read_collection_artifacts("col_source", build_id="build_source")
-            == _artifacts()
+            == real_shape_artifacts
         )
 
-        unordered_references = _references()
+        unordered_references = _real_shape_references()
         unordered_references = replace(
             unordered_references,
             entries=(
@@ -707,11 +811,11 @@ def test_postgresql_enforces_source_structure_contract() -> None:
         )
         assert [entry.reference_id for entry in ordered_references.entries] == [
             "reference-null-index",
-            "reference-1",
+            REAL_SOURCE_REFERENCE_ID,
         ]
         assert [mention.mention_id for mention in ordered_references.mentions] == [
             "mention-null-position",
-            "mention-1",
+            REAL_SOURCE_MENTION_ID,
         ]
 
         orphan_block = replace(_artifacts().blocks[0], document_id="missing-document")
@@ -723,7 +827,7 @@ def test_postgresql_enforces_source_structure_contract() -> None:
             )
         assert (
             repository.read_collection_artifacts("col_source", build_id="build_source")
-            == _artifacts()
+            == real_shape_artifacts
         )
 
         _finish(builds, task, success=True)
@@ -734,6 +838,7 @@ def test_postgresql_enforces_source_structure_contract() -> None:
         assert repository.list_documents("col_source")[0].title == "Paper"
     finally:
         with engine.begin() as connection:
+            connection.execute(text("DELETE FROM collections"))
             config.attributes["connection"] = connection
             command.downgrade(config, "base")
         engine.dispose()

@@ -9,7 +9,7 @@ from threading import Barrier
 from alembic import command
 from alembic.config import Config
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
@@ -48,9 +48,13 @@ from tests.integration.persistence.test_postgres_paper_facts import _paper_facts
 from tests.integration.persistence.test_postgres_source_artifacts import (
     BACKEND_ROOT,
     NOW,
+    REAL_SOURCE_BLOCK_ID,
+    REAL_SOURCE_DOCUMENT_ID,
+    REAL_SOURCE_TABLE_ID,
     _artifacts,
     _collection_import,
     _finish,
+    _real_shape_artifacts,
     _task,
 )
 
@@ -589,12 +593,129 @@ def test_postgresql_enforces_objective_contract() -> None:
         builds = PostgresBuildRepository(sessions)
         repository = PostgresObjectiveRepository(sessions)
         facts = _objective_facts()
-        task = _write_build(
-            source_repository,
-            builds,
-            "build_objectives_postgresql",
+        facts = replace(
             facts,
+            research_objectives=tuple(
+                replace(item, seed_document_ids=(REAL_SOURCE_DOCUMENT_ID,))
+                for item in facts.research_objectives
+            ),
+            objective_contexts=tuple(
+                replace(
+                    item,
+                    routing_hints=(
+                        {"table_id": REAL_SOURCE_TABLE_ID, "role": "result_table"},
+                    ),
+                )
+                for item in facts.objective_contexts
+            ),
+            paper_skims=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.paper_skims
+            ),
+            objective_paper_frames=tuple(
+                replace(
+                    item,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    relevant_tables=(REAL_SOURCE_TABLE_ID,),
+                )
+                for item in facts.objective_paper_frames
+            ),
+            objective_evidence_routes=tuple(
+                replace(
+                    item,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    source_ref=REAL_SOURCE_TABLE_ID,
+                )
+                for item in facts.objective_evidence_routes
+            ),
+            objective_evidence_units=tuple(
+                replace(
+                    item,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    source_refs=(
+                        {
+                            "source_kind": "table",
+                            "source_ref": REAL_SOURCE_TABLE_ID,
+                            "page": 1,
+                        },
+                        {
+                            "source_kind": "text_window",
+                            "source_ref": REAL_SOURCE_BLOCK_ID,
+                            "role": "test_condition",
+                        },
+                    ),
+                )
+                for item in facts.objective_evidence_units
+            ),
+            objective_logic_chains=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.objective_logic_chains
+            ),
         )
+        task = _task("task_build_objectives_postgresql")
+        builds.add_task(task, build_id="build_objectives_postgresql")
+        source_repository.replace_collection_artifacts(
+            "col_source",
+            "build_objectives_postgresql",
+            _real_shape_artifacts(),
+        )
+        paper_facts = _paper_facts()
+        paper_facts = replace(
+            paper_facts,
+            document_profiles=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.document_profiles
+            ),
+            evidence_anchors=tuple(
+                replace(
+                    item,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    block_id=REAL_SOURCE_BLOCK_ID,
+                    figure_or_table=REAL_SOURCE_TABLE_ID,
+                )
+                for item in paper_facts.evidence_anchors
+            ),
+            method_facts=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.method_facts
+            ),
+            sample_variants=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.sample_variants
+            ),
+            test_conditions=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.test_conditions
+            ),
+            baseline_references=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.baseline_references
+            ),
+            measurement_results=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.measurement_results
+            ),
+            characterization_observations=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.characterization_observations
+            ),
+            structure_features=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in paper_facts.structure_features
+            ),
+        )
+        paper_repository = PostgresPaperFactRepository(sessions)
+        paper_repository.replace_document_profiles(
+            "col_source",
+            "build_objectives_postgresql",
+            paper_facts.document_profiles,
+        )
+        paper_repository.replace_paper_facts(
+            "col_source",
+            "build_objectives_postgresql",
+            paper_facts,
+        )
+        repository.replace("col_source", "build_objectives_postgresql", facts)
 
         assert repository.read("col_source") == ObjectiveFactSet()
         assert (
@@ -668,6 +789,7 @@ def test_postgresql_enforces_objective_contract() -> None:
         )
     finally:
         with engine.begin() as connection:
+            connection.execute(text("TRUNCATE TABLE collections CASCADE"))
             config.attributes["connection"] = connection
             command.downgrade(config, "base")
         engine.dispose()

@@ -294,7 +294,7 @@ objective_frame_table_links = Table(
     Column("build_id", String(64), primary_key=True),
     Column("frame_id", String(128), primary_key=True),
     Column("link_kind", String(16), primary_key=True),
-    Column("table_id", String(128), primary_key=True),
+    Column("table_id", String(), primary_key=True),
     Column("collection_id", String(64), nullable=False),
     Column("source_document_id", String(128), nullable=False),
     Column("position", Integer, nullable=False),
@@ -401,9 +401,9 @@ class ObjectiveEvidenceRouteRecord(Base):
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
     route_order: Mapped[int] = mapped_column(Integer, nullable=False)
     source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    source_ref: Mapped[str] = mapped_column(String(128), nullable=False)
-    source_block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    source_table_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_ref: Mapped[str] = mapped_column(String(), nullable=False)
+    source_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
+    source_table_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     source_figure_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(64), nullable=False)
     extractable: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -492,9 +492,9 @@ objective_unit_source_refs = Table(
     Column("collection_id", String(64), nullable=False),
     Column("source_document_id", String(128), nullable=False),
     Column("source_kind", String(32), nullable=False),
-    Column("source_ref", String(128), nullable=False),
-    Column("source_block_id", String(128), nullable=True),
-    Column("source_table_id", String(128), nullable=True),
+    Column("source_ref", String(), nullable=False),
+    Column("source_block_id", String(), nullable=True),
+    Column("source_table_id", String(), nullable=True),
     Column("source_figure_id", String(128), nullable=True),
     Column("metadata_json", _JSON_DOCUMENT, nullable=False),
     CheckConstraint(

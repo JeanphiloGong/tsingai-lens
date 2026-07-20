@@ -118,9 +118,9 @@ class PaperFactEvidenceAnchor(Base):
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quote: Mapped[str | None] = mapped_column(Text, nullable=True)
     deep_link: Mapped[str | None] = mapped_column(Text, nullable=True)
-    block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     snippet_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    figure_or_table: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    figure_or_table: Mapped[str | None] = mapped_column(String(), nullable=True)
     quote_span: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

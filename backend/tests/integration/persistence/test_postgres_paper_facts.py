@@ -7,7 +7,7 @@ import os
 from alembic import command
 from alembic.config import Config
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
@@ -38,9 +38,13 @@ from infra.persistence.postgres.source_artifact_repository import (
 from tests.integration.persistence.test_postgres_source_artifacts import (
     BACKEND_ROOT,
     NOW,
+    REAL_SOURCE_BLOCK_ID,
+    REAL_SOURCE_DOCUMENT_ID,
+    REAL_SOURCE_TABLE_ID,
     _artifacts,
     _collection_import,
     _finish,
+    _real_shape_artifacts,
     _task,
 )
 
@@ -489,9 +493,53 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
         task = _task("task_facts_postgresql")
         builds.add_task(task, build_id="build_facts_postgresql")
         source_repository.replace_collection_artifacts(
-            "col_source", "build_facts_postgresql", _artifacts()
+            "col_source", "build_facts_postgresql", _real_shape_artifacts()
         )
         facts = _paper_facts()
+        facts = replace(
+            facts,
+            document_profiles=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.document_profiles
+            ),
+            evidence_anchors=tuple(
+                replace(
+                    item,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    block_id=REAL_SOURCE_BLOCK_ID,
+                    figure_or_table=REAL_SOURCE_TABLE_ID,
+                )
+                for item in facts.evidence_anchors
+            ),
+            method_facts=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.method_facts
+            ),
+            sample_variants=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.sample_variants
+            ),
+            test_conditions=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.test_conditions
+            ),
+            baseline_references=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.baseline_references
+            ),
+            measurement_results=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.measurement_results
+            ),
+            characterization_observations=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.characterization_observations
+            ),
+            structure_features=tuple(
+                replace(item, document_id=REAL_SOURCE_DOCUMENT_ID)
+                for item in facts.structure_features
+            ),
+        )
 
         repository.replace_document_profiles(
             "col_source", "build_facts_postgresql", facts.document_profiles
@@ -522,6 +570,7 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
         assert repository.read("col_source") == facts
     finally:
         with engine.begin() as connection:
+            connection.execute(text("TRUNCATE TABLE collections CASCADE"))
             config.attributes["connection"] = connection
             command.downgrade(config, "base")
         engine.dispose()

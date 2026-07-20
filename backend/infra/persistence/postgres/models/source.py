@@ -159,7 +159,7 @@ class SourceBlock(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    block_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    block_id: Mapped[str] = mapped_column(String(), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
     block_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -202,7 +202,7 @@ class SourceBlockTextUnit(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    block_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    block_id: Mapped[str] = mapped_column(String(), primary_key=True)
     text_unit_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
@@ -232,12 +232,12 @@ class SourceTable(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    table_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    table_id: Mapped[str] = mapped_column(String(), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
     table_order: Mapped[int] = mapped_column(Integer, nullable=False)
     caption_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    caption_block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    caption_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
         _JSON_DOCUMENT, nullable=True
@@ -274,10 +274,10 @@ class SourceTableRow(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    row_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    row_id: Mapped[str] = mapped_column(String(), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    table_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    table_id: Mapped[str] = mapped_column(String(), nullable=False)
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     row_text: Mapped[str] = mapped_column(Text, nullable=False)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -316,7 +316,7 @@ class SourceTableCell(Base):
     cell_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    table_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    table_id: Mapped[str] = mapped_column(String(), nullable=False)
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     col_index: Mapped[int] = mapped_column(Integer, nullable=False)
     cell_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -380,7 +380,7 @@ class SourceFigure(Base):
     figure_order: Mapped[int] = mapped_column(Integer, nullable=False)
     figure_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     caption_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    caption_block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    caption_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
         _JSON_DOCUMENT, nullable=True
@@ -440,7 +440,7 @@ class SourceReferenceEntry(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    reference_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    reference_id: Mapped[str] = mapped_column(String(), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
     raw_reference: Mapped[str] = mapped_column(Text, nullable=False)
@@ -449,7 +449,7 @@ class SourceReferenceEntry(Base):
     authors_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     doi: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
@@ -513,13 +513,13 @@ class SourceReferenceMention(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    mention_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    mention_id: Mapped[str] = mapped_column(String(), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    reference_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reference_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     citation_marker: Mapped[str] = mapped_column(Text, nullable=False)
     context_text: Mapped[str] = mapped_column(Text, nullable=False)
-    source_block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     char_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     char_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -558,7 +558,7 @@ class SourceReferenceResolution(Base):
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     resolution_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    reference_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(), nullable=False)
     provider: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     resolved_title: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -612,9 +612,9 @@ class SourceReferenceCandidate(Base):
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    candidate_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(String(), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    reference_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(), nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     relevance_score: Mapped[float] = mapped_column(Float, nullable=False)
     relevance_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

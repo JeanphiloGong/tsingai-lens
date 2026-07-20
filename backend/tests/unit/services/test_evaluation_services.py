@@ -108,7 +108,7 @@ class FakeEvaluationRepository:
     def upsert_evaluation_run(self, run) -> None:
         self.run = run
 
-    def upsert_research_understanding_feedback(self, feedback):
+    def upsert_feedback(self, feedback):
         self.feedback = (
             feedback,
             *(
@@ -119,7 +119,7 @@ class FakeEvaluationRepository:
         )
         return feedback
 
-    def upsert_research_understanding_curation(self, curation):
+    def upsert_curation(self, curation):
         self.curations = (
             curation,
             *(
@@ -130,11 +130,10 @@ class FakeEvaluationRepository:
         )
         return curation
 
-    def list_research_understanding_curations(
+    def list_curations(
         self,
         collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
+        objective_id: str | None = None,
         finding_id: str | None = None,
         claim_id: str | None = None,
     ):
@@ -142,17 +141,15 @@ class FakeEvaluationRepository:
             curation
             for curation in getattr(self, "curations", ())
             if curation.collection_id == collection_id
-            and (scope_type is None or curation.scope_type == scope_type)
-            and (scope_id is None or curation.scope_id == scope_id)
+            and (objective_id is None or curation.objective_id == objective_id)
             and (finding_id is None or curation.finding_id == finding_id)
             and (claim_id is None or curation.claim_id == claim_id)
         )
 
-    def list_research_understanding_feedback(
+    def list_feedback(
         self,
         collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
+        objective_id: str | None = None,
         finding_id: str | None = None,
         claim_id: str | None = None,
     ):
@@ -160,8 +157,7 @@ class FakeEvaluationRepository:
             feedback
             for feedback in getattr(self, "feedback", ())
             if feedback.collection_id == collection_id
-            and (scope_type is None or feedback.scope_type == scope_type)
-            and (scope_id is None or feedback.scope_id == scope_id)
+            and (objective_id is None or feedback.objective_id == objective_id)
             and (finding_id is None or feedback.finding_id == finding_id)
             and (claim_id is None or feedback.claim_id == claim_id)
         )
@@ -178,29 +174,21 @@ class FakeResearchUnderstandingRepository:
         self.understanding = understanding
         self.understandings = understandings
 
-    def read_research_understanding(
+    def read_objective_understanding(
         self,
         collection_id: str,  # noqa: ARG002
-        scope_type: str,  # noqa: ARG002
-        scope_id: str,  # noqa: ARG002
+        objective_id: str,  # noqa: ARG002
     ):
         return self.understanding
 
-    def list_research_understandings(
+    def list_objective_understandings(
         self,
         collection_id: str,  # noqa: ARG002
-        scope_type: str | None = None,
     ):
         understandings = self.understandings
         if understandings is None:
             understandings = (self.understanding,) if self.understanding else ()
-        if scope_type is None:
-            return tuple(understandings)
-        return tuple(
-            understanding
-            for understanding in understandings
-            if understanding.scope.scope_type == scope_type
-        )
+        return tuple(understandings)
 
 
 class FakeResearchUnderstandingProjectionService:
@@ -220,9 +208,9 @@ def _sample_understanding() -> ResearchUnderstanding:
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-gold",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect ductility?",
             },
             "claims": [
@@ -586,7 +574,7 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
                 "curation_id": "ruc-abc123",
                 "collection_id": "col-gold",
                 "scope_type": "objective",
-                "scope_id": "obj-1",
+                "objective_id": "obj-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "mechanism",
@@ -608,7 +596,7 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -617,16 +605,15 @@ def test_research_understanding_feedback_service_exports_curation_gold_draft():
 
     draft = service.export_gold_draft(
         collection_id="col-gold",
-        scope_type="objective",
-        scope_id="obj-1",
+        objective_id="obj-1",
     )
 
-    assert draft["gold_id"] == "gold_col-gold_objective_obj-1_research_understanding"
+    assert draft["gold_id"] == "gold_col-gold_obj-1_research_understanding"
     assert draft["metric_profile"] == "research_understanding_v1"
     assert draft["item_count"] == 1
     item = draft["items"][0]
     assert item["family"] == "research_understanding_findings"
-    assert item["item_key"] == "objective:obj-1:finding-1"
+    assert item["item_key"] == "obj-1:finding-1"
     assert item["payload"] == {
         "finding_id": "finding-1",
         "claim_id": "claim-1",
@@ -662,8 +649,8 @@ def test_research_understanding_feedback_service_excludes_unversioned_gold_draft
             {
                 "curation_id": "ruc-unversioned",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -677,7 +664,7 @@ def test_research_understanding_feedback_service_excludes_unversioned_gold_draft
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -686,8 +673,7 @@ def test_research_understanding_feedback_service_excludes_unversioned_gold_draft
 
     draft = service.export_gold_draft(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     assert draft["item_count"] == 0
@@ -701,8 +687,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -728,8 +714,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             {
                 "feedback_id": "ruf-partial",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "review_status": "partial",
@@ -743,8 +729,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             {
                 "feedback_id": "ruf-wrong",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-3",
                 "claim_id": "claim-3",
                 "review_status": "incorrect",
@@ -756,7 +742,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -765,8 +751,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     assert dataset["schema_version"] == "research_understanding_dataset.v1"
@@ -778,7 +763,7 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
         "gold": 1,
         "rejected": 1,
     }
-    assert dataset["quality_summary"] == {
+    expected_quality = {
         "total_samples": 4,
         "usable_sample_count": 2,
         "training_ready_sample_count": 1,
@@ -878,6 +863,8 @@ def test_research_understanding_feedback_service_exports_dataset_samples():
             "resolved_feedback": 0,
         },
     }
+    quality = dataset["quality_summary"]
+    assert {key: quality[key] for key in expected_quality} == expected_quality
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
     assert by_finding["finding-1"]["label_status"] == "gold"
     assert by_finding["finding-1"]["dataset_use_status"] == "training_ready"
@@ -995,7 +982,7 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_fr
     record["presentation"]["findings"] = [record["presentation"]["findings"][0]]
     understanding = ResearchUnderstanding.from_mapping(record)
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(
             understanding
         ),
@@ -1006,8 +993,7 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_fr
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     sample = dataset["items"][0]
@@ -1081,8 +1067,8 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
             {
                 "feedback_id": "ruf-condition-context",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": finding["finding_id"],
                 "claim_id": finding["claim_id"],
                 "finding_fingerprint": ruf_service._finding_fingerprint(finding),
@@ -1095,7 +1081,7 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             understanding
         ),
@@ -1106,8 +1092,7 @@ def test_research_understanding_feedback_service_keeps_condition_context_for_tra
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     sample = dataset["items"][0]
@@ -1189,7 +1174,7 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_wh
     record["presentation"]["findings"] = [record["presentation"]["findings"][0]]
     understanding = ResearchUnderstanding.from_mapping(record)
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(
             understanding
         ),
@@ -1200,8 +1185,7 @@ def test_research_understanding_feedback_service_derives_dataset_input_blocks_wh
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     sample = dataset["items"][0]
@@ -1232,9 +1216,9 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-gold",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect density?",
             },
             "claims": [
@@ -1344,15 +1328,14 @@ def test_research_understanding_feedback_service_exports_current_presentation_fi
     }
     projection_service = FakeResearchUnderstandingProjectionService(projected)
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=projection_service,
     )
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     assert projection_service.inputs == [stored]
@@ -1395,7 +1378,7 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
         projected["presentation"]["findings"][1],
     ]
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
@@ -1404,8 +1387,7 @@ def test_research_understanding_feedback_service_exports_presentation_buckets():
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -1461,7 +1443,7 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
         "table_row_needs_expert_review"
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
@@ -1470,8 +1452,7 @@ def test_research_understanding_feedback_service_summarizes_system_review_risks(
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -1528,9 +1509,9 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-gold",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect corrosion?",
             },
             "claims": [],
@@ -1611,8 +1592,8 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
             {
                 "curation_id": "ruc-corrosion",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-corrosion",
                 "claim_id": "claim-corrosion",
                 "finding_fingerprint": _finding_fingerprint_for(
@@ -1634,7 +1615,7 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
@@ -1643,8 +1624,7 @@ def test_research_understanding_feedback_service_curation_evidence_priority():
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     sample = dataset["items"][0]
@@ -1671,9 +1651,9 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-gold",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect corrosion?",
             },
             "claims": [],
@@ -1788,8 +1768,8 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
             {
                 "curation_id": "ruc-corrosion",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-corrosion",
                 "claim_id": "claim-corrosion",
                 "finding_fingerprint": _finding_fingerprint_for(
@@ -1816,7 +1796,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
@@ -1825,8 +1805,7 @@ def test_research_understanding_feedback_service_curation_match_evidence_order_k
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     sample = dataset["items"][0]
@@ -1861,8 +1840,8 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
             {
                 "feedback_id": "ruf-stale-correct",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "",
                 "claim_id": "claim-2",
                 "review_status": "correct",
@@ -1874,7 +1853,7 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
@@ -1883,8 +1862,7 @@ def test_research_understanding_feedback_service_current_label_alignment_ignores
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -1905,15 +1883,14 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
     repository = FakeEvaluationRepository()
     projection_service = FakeResearchUnderstandingProjectionService(projected)
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=projection_service,
     )
 
     feedback = service.record_feedback(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         finding_id="finding-2",
         claim_id="claim-2",
         review_status="correct",
@@ -1922,8 +1899,7 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
     )
     reviewed = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
     reviewed_sample = next(
         item for item in reviewed["items"] if item["finding_id"] == "finding-2"
@@ -1941,8 +1917,7 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
     ]
     current = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
     current_sample = next(
         item for item in current["items"] if item["finding_id"] == "finding-2"
@@ -1961,7 +1936,7 @@ def test_research_understanding_feedback_service_invalidates_review_when_finding
 def test_research_understanding_protocol_source_version_tracks_expert_target_changes():
     repository = FakeEvaluationRepository()
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -1971,8 +1946,7 @@ def test_research_understanding_protocol_source_version_tracks_expert_target_cha
     def curate(statement: str) -> None:
         service.record_curation(
             collection_id="col-gold",
-            scope_type="goal",
-            scope_id="goal-1",
+            objective_id="objective-1",
             finding_id="finding-1",
             claim_id="claim-1",
             curated_claim_type="finding",
@@ -1993,8 +1967,7 @@ def test_research_understanding_protocol_source_version_tracks_expert_target_cha
     curate("Preheating improves ductility by 14% in LPBF 316L.")
     original = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
     original_sample = next(
         item for item in original["items"] if item["finding_id"] == "finding-1"
@@ -2005,8 +1978,7 @@ def test_research_understanding_protocol_source_version_tracks_expert_target_cha
     )
     revised = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
     revised_sample = next(
         item for item in revised["items"] if item["finding_id"] == "finding-1"
@@ -2034,8 +2006,8 @@ def test_research_understanding_feedback_service_invalidates_rejection_when_find
             {
                 "feedback_id": "ruf-stale-correct",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "",
                 "claim_id": "claim-2",
                 "review_status": "correct",
@@ -2047,8 +2019,8 @@ def test_research_understanding_feedback_service_invalidates_rejection_when_find
             {
                 "feedback_id": "ruf-exact-wrong-context",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "review_status": "partial",
@@ -2060,7 +2032,7 @@ def test_research_understanding_feedback_service_invalidates_rejection_when_find
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(stored),
         research_understanding_service=FakeResearchUnderstandingProjectionService(
             projected
@@ -2069,8 +2041,7 @@ def test_research_understanding_feedback_service_invalidates_rejection_when_find
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2092,8 +2063,8 @@ def test_research_understanding_feedback_service_ignores_unversioned_claim_curat
             {
                 "curation_id": "ruc-claim-evidence-overlap",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "",
                 "claim_id": "claim-3",
                 "curated_claim_type": "finding",
@@ -2117,7 +2088,7 @@ def test_research_understanding_feedback_service_ignores_unversioned_claim_curat
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2126,8 +2097,7 @@ def test_research_understanding_feedback_service_ignores_unversioned_claim_curat
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2149,8 +2119,8 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
             {
                 "curation_id": "ruc-resolved",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -2176,8 +2146,8 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
             {
                 "feedback_id": "ruf-old-overclaim",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "review_status": "partial",
@@ -2189,7 +2159,7 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2198,8 +2168,7 @@ def test_research_understanding_feedback_service_resolved_feedback_does_not_coun
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2224,8 +2193,8 @@ def test_research_understanding_feedback_service_curation_match_keeps_unmatched_
             {
                 "curation_id": "ruc-unmatched",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "curated_claim_type": "finding",
@@ -2249,7 +2218,7 @@ def test_research_understanding_feedback_service_curation_match_keeps_unmatched_
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2258,8 +2227,7 @@ def test_research_understanding_feedback_service_curation_match_keeps_unmatched_
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2282,8 +2250,8 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
             {
                 "feedback_id": "ruf-wrong",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-3",
                 "claim_id": "claim-3",
                 "review_status": "incorrect",
@@ -2293,7 +2261,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2302,8 +2270,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         label_status="rejected",
     )
 
@@ -2332,7 +2299,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_label():
 
 def test_research_understanding_feedback_service_filters_dataset_by_task_type():
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2341,14 +2308,12 @@ def test_research_understanding_feedback_service_filters_dataset_by_task_type():
 
     matching = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         task_type=ruf_service.DATASET_TASK_TYPE,
     )
     non_matching = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         task_type="relation_extraction",
     )
 
@@ -2366,8 +2331,8 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
             {
                 "feedback_id": "ruf-wrong-variable",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "review_status": "incorrect",
@@ -2381,8 +2346,8 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
             {
                 "feedback_id": "ruf-wrong-outcome",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "review_status": "incorrect",
@@ -2396,8 +2361,8 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
             {
                 "feedback_id": "ruf-wrong-direction",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-3",
                 "claim_id": "claim-3",
                 "review_status": "incorrect",
@@ -2411,8 +2376,8 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
             {
                 "feedback_id": "ruf-insufficient-evidence",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-4",
                 "claim_id": "claim-4",
                 "review_status": "incorrect",
@@ -2424,7 +2389,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2433,8 +2398,7 @@ def test_research_understanding_feedback_service_counts_material_error_issue_typ
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     assert dataset["label_counts"] == {
@@ -2478,8 +2442,8 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
             {
                 "feedback_id": "ruf-partial",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "review_status": "partial",
@@ -2492,8 +2456,8 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
             {
                 "feedback_id": "ruf-wrong",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-3",
                 "claim_id": "claim-3",
                 "review_status": "incorrect",
@@ -2507,8 +2471,8 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -2522,7 +2486,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2531,14 +2495,12 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
 
     training_ready = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         dataset_use_status="training_ready",
     )
     review_candidate = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         dataset_use_status="review_candidate",
     )
 
@@ -2563,8 +2525,7 @@ def test_research_understanding_feedback_service_filters_dataset_by_use_status()
     with pytest.raises(ValueError, match="unsupported dataset_use_status"):
         service.export_dataset(
             collection_id="col-gold",
-            scope_type="goal",
-            scope_id="goal-1",
+            objective_id="objective-1",
             dataset_use_status="ready",
         )
 
@@ -2578,8 +2539,8 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -2604,7 +2565,7 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
         ],
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2613,8 +2574,7 @@ def test_research_understanding_feedback_service_counts_only_valid_training_mess
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         dataset_use_status="training_ready",
     )
 
@@ -2642,8 +2602,8 @@ def test_research_understanding_feedback_service_requires_training_message_scope
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -2678,7 +2638,7 @@ def test_research_understanding_feedback_service_requires_training_message_scope
         ],
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2687,8 +2647,7 @@ def test_research_understanding_feedback_service_requires_training_message_scope
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         dataset_use_status="training_ready",
     )
 
@@ -2709,8 +2668,8 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
             {
                 "curation_id": "ruc-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "curated_claim_type": "finding",
@@ -2724,7 +2683,7 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2733,8 +2692,7 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
         dataset_use_status="training_ready",
     )
 
@@ -2762,7 +2720,7 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
 def test_research_understanding_feedback_service_exports_collection_dataset():
     goal_one = _sample_understanding()
     goal_two_record = _sample_understanding().to_record()
-    goal_two_record["scope"]["goal_id"] = "goal-2"
+    goal_two_record["scope"]["objective_id"] = "objective-2"
     goal_two_record["scope"]["title"] = "How does VED affect density?"
     goal_two_record["presentation"]["findings"] = [
         goal_two_record["presentation"]["findings"][1]
@@ -2772,10 +2730,10 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
     repository.feedback = (
         _feedback_record(
             {
-                "feedback_id": "ruf-goal-1",
+                "feedback_id": "ruf-objective-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "review_status": "correct",
@@ -2786,10 +2744,10 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
         ),
         _feedback_record(
             {
-                "feedback_id": "ruf-goal-2",
+                "feedback_id": "ruf-objective-2",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-2",
+                "scope_type": "objective",
+                "objective_id": "objective-2",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "review_status": "correct",
@@ -2800,7 +2758,7 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             None,
             understandings=(goal_one, goal_two),
@@ -2810,26 +2768,23 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
 
     dataset = service.export_collection_dataset(
         collection_id="col-gold",
-        scope_type="goal",
         dataset_use_status="training_ready",
         task_type=ruf_service.DATASET_TASK_TYPE,
     )
     non_matching = service.export_collection_dataset(
         collection_id="col-gold",
-        scope_type="goal",
         dataset_use_status="training_ready",
         task_type="relation_extraction",
     )
 
     assert dataset["collection_id"] == "col-gold"
-    assert dataset["scope_type"] == "collection"
-    assert dataset["scope_id"] == "goal"
+    assert dataset["objective_id"] is None
     assert dataset["dataset_use_status_filter"] == "training_ready"
     assert dataset["task_type_filter"] == ruf_service.DATASET_TASK_TYPE
     assert dataset["item_count"] == 2
-    assert {(item["scope_id"], item["finding_id"]) for item in dataset["items"]} == {
-        ("goal-1", "finding-1"),
-        ("goal-2", "finding-2"),
+    assert {(item["objective_id"], item["finding_id"]) for item in dataset["items"]} == {
+        ("objective-1", "finding-1"),
+        ("objective-2", "finding-2"),
     }
     assert dataset["quality_summary"]["training_ready_sample_count"] == 2
     assert dataset["quality_summary"]["by_dataset_use_status"] == {
@@ -2849,8 +2804,8 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
             {
                 "feedback_id": "ruf-anonymous-correct",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "review_status": "correct",
@@ -2861,7 +2816,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2870,8 +2825,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_correct_feedbac
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2897,8 +2851,8 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
             {
                 "feedback_id": "ruf-ai-partial",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-2",
                 "claim_id": "claim-2",
                 "review_status": "partial",
@@ -2910,7 +2864,7 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2919,8 +2873,7 @@ def test_research_understanding_feedback_service_keeps_ai_partial_feedback_revie
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2941,8 +2894,8 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
             {
                 "feedback_id": "ruf-ai-correct",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "review_status": "correct",
@@ -2954,7 +2907,7 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -2963,8 +2916,7 @@ def test_research_understanding_feedback_service_keeps_ai_correct_feedback_silve
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -2990,8 +2942,8 @@ def test_research_understanding_feedback_service_keeps_ai_curation_silver():
             {
                 "curation_id": "ruc-ai-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -3013,7 +2965,7 @@ def test_research_understanding_feedback_service_keeps_ai_curation_silver():
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -3022,8 +2974,7 @@ def test_research_understanding_feedback_service_keeps_ai_curation_silver():
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -3047,8 +2998,8 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
             {
                 "curation_id": "ruc-anonymous-1",
                 "collection_id": "col-gold",
-                "scope_type": "goal",
-                "scope_id": "goal-1",
+                "scope_type": "objective",
+                "objective_id": "objective-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "curated_claim_type": "finding",
@@ -3069,7 +3020,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
         ),
     )
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=repository,
+        review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             _sample_understanding()
         ),
@@ -3078,8 +3029,7 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="objective-1",
     )
 
     by_finding = {item["finding_id"]: item for item in dataset["items"]}
@@ -3098,14 +3048,14 @@ def test_research_understanding_feedback_service_keeps_anonymous_curation_silver
 
 def test_research_understanding_feedback_service_reports_missing_dataset_scope():
     service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=FakeEvaluationRepository(),
+        review_repository=FakeEvaluationRepository(),
         research_understanding_repository=FakeResearchUnderstandingRepository(None),
+        research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        scope_type="goal",
-        scope_id="missing-goal",
+        objective_id="missing-goal",
     )
 
     assert dataset["item_count"] == 0

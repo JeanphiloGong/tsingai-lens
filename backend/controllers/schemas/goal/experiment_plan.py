@@ -16,9 +16,9 @@ class ExperimentPlanSourceLink(BaseModel):
 
 
 class ExperimentPlanCreateRequest(BaseModel):
-    """Save one goal-scoped experiment plan draft."""
+    """Save one Objective-scoped experiment plan draft."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     title: str = Field(..., min_length=1, max_length=400)
     content: str = Field(..., min_length=1, max_length=20000)
@@ -33,7 +33,7 @@ class ExperimentPlanCreateRequest(BaseModel):
 class ExperimentPlanUpdateRequest(BaseModel):
     """Edit a saved experiment plan draft."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     title: str = Field(..., min_length=1, max_length=400)
     content: str = Field(..., min_length=1, max_length=20000)
@@ -43,7 +43,7 @@ class ExperimentPlanUpdateRequest(BaseModel):
 class ExperimentPlanResponse(BaseModel):
     plan_id: str
     collection_id: str
-    goal_id: str
+    objective_id: str
     title: str
     content: str
     status: ExperimentPlanStatus
@@ -57,5 +57,5 @@ class ExperimentPlanResponse(BaseModel):
 
 class ExperimentPlanListResponse(BaseModel):
     collection_id: str
-    goal_id: str
+    objective_id: str
     items: list[ExperimentPlanResponse] = Field(default_factory=list)

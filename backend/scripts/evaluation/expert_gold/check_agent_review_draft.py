@@ -165,7 +165,7 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         for goal in goals:
             lines.append(
                 "- "
-                f"{goal.get('goal_id') or 'n/a'}: "
+                f"{goal.get('objective_id') or 'n/a'}: "
                 f"reviewed={goal.get('agent_reviewed_count', 0)} "
                 f"accept={goal.get('accept_count', 0)} "
                 f"reject={goal.get('reject_count', 0)} "
@@ -194,7 +194,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
         warnings.append(_issue(line_number, finding_id, "missing agent_review"))
         return {
             "collection_id": _text(row.get("collection_id")),
-            "goal_id": _text(row.get("goal_id")),
+            "objective_id": _text(row.get("objective_id")),
             "finding_id": finding_id,
             "recommendation": "missing",
             "errors": errors,
@@ -268,7 +268,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
         warnings.append(_issue(line_number, finding_id, "row has no evidence summary"))
     return {
         "collection_id": _text(row.get("collection_id")),
-        "goal_id": _text(row.get("goal_id")),
+        "objective_id": _text(row.get("objective_id")),
         "finding_id": finding_id,
         "recommendation": recommendation or "missing",
         "errors": errors,
@@ -279,12 +279,12 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
 def _goal_handoff(row_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     goals: dict[tuple[str, str], dict[str, Any]] = {}
     for result in row_results:
-        key = (_text(result.get("collection_id")), _text(result.get("goal_id")))
+        key = (_text(result.get("collection_id")), _text(result.get("objective_id")))
         goal = goals.setdefault(
             key,
             {
                 "collection_id": key[0],
-                "goal_id": key[1],
+                "objective_id": key[1],
                 "total_rows": 0,
                 "agent_reviewed_count": 0,
                 "accept_count": 0,

@@ -1013,95 +1013,6 @@ class ResearchObjectiveService:
             "extractor": self._get_structured_extractor(),
         }
 
-    def persist_objective_understandings(
-        self,
-        collection_id: str,
-    ) -> tuple[ResearchUnderstanding, ...]:
-        facts = self.objective_repository.read(collection_id)
-        understandings: list[ResearchUnderstanding] = []
-        for objective in facts.research_objectives:
-            objective_id = objective.objective_id
-            context = next(
-                (
-                    candidate
-                    for candidate in facts.objective_contexts
-                    if candidate.objective_id == objective_id
-                ),
-                None,
-            )
-            frames = [
-                frame
-                for frame in facts.objective_paper_frames
-                if frame.objective_id == objective_id
-            ]
-            routes = [
-                route.to_record()
-                for route in facts.objective_evidence_routes
-                if route.objective_id == objective_id
-            ]
-            raw_evidence_units = [
-                unit
-                for unit in facts.objective_evidence_units
-                if unit.objective_id == objective_id
-            ]
-            evidence_units = self._objective_detail_evidence_units(
-                tuple(raw_evidence_units),
-                objective_context=context,
-            )
-            evidence_unit_records = self._evidence_units_with_route_evidence_roles(
-                evidence_units,
-                routes=tuple(
-                    route
-                    for route in facts.objective_evidence_routes
-                    if route.objective_id == objective_id
-                ),
-            )
-            logic_chains = [
-                chain
-                for chain in facts.objective_logic_chains
-                if chain.objective_id == objective_id
-            ]
-            logic_chain = self._objective_detail_logic_chain(
-                objective=objective,
-                objective_context=context,
-                source_logic_chain=self._select_objective_logic_chain(logic_chains),
-                evidence_units=evidence_units,
-            )
-            frame_views = self._objective_paper_frame_views(
-                frames,
-                collection_id=collection_id,
-                facts=facts,
-            )
-            payload = {
-                "collection_id": collection_id,
-                "objective": objective.to_record(),
-                "objective_context": context.to_record() if context is not None else None,
-                "paper_frames": frame_views,
-                "evidence_routes": routes,
-                "evidence_units": evidence_unit_records,
-                "logic_chain": logic_chain.to_record() if logic_chain is not None else None,
-            }
-            understandings.append(
-                ResearchUnderstanding.from_mapping(
-                    self.research_understanding_service.build_objective_understanding(
-                        payload
-                    )
-                )
-            )
-        existing_non_objective = tuple(
-            item
-            for item in self.research_understanding_repository.list_research_understandings(
-                collection_id
-            )
-            if item.scope.scope_type != "objective"
-        )
-        persisted = (*existing_non_objective, *understandings)
-        self.research_understanding_repository.replace_collection_research_understandings(
-            collection_id,
-            persisted,
-        )
-        return tuple(understandings)
-
     def _notify_progress(
         self,
         progress_callback: ProgressCallback | None,
@@ -1553,9 +1464,8 @@ class ResearchObjectiveService:
         collection_id: str,
         objective_id: str,
     ) -> dict[str, Any] | None:
-        understanding = self.research_understanding_repository.read_research_understanding(
+        understanding = self.research_understanding_repository.read_objective_understanding(
             collection_id,
-            "objective",
             objective_id,
         )
         return self.research_understanding_service.with_presentation(understanding)

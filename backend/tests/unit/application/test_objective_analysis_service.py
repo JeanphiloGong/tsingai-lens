@@ -77,10 +77,15 @@ class FakeUnderstandingRepository:
     def __init__(self) -> None:
         self.understanding = None
 
-    def upsert_research_understanding(self, collection_id, understanding):
+    def upsert_objective_understanding(
+        self,
+        collection_id,
+        objective_id,
+        understanding,
+    ):
         self.understanding = understanding
 
-    def read_research_understanding(self, collection_id, scope_type, scope_id):
+    def read_objective_understanding(self, collection_id, objective_id):
         return self.understanding
 
 

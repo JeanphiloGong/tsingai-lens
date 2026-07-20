@@ -19,7 +19,6 @@ from domain.core.objective_material_projection import (
     project_objective_material_rows,
 )
 from domain.ports import (
-    ResearchUnderstandingRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
@@ -154,14 +153,12 @@ class ResearchViewAggregationService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        research_understanding_repository: ResearchUnderstandingRepository,
         comparison_service: ComparisonService,
         research_understanding_service: ResearchUnderstandingService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.research_understanding_repository = research_understanding_repository
         self.comparison_service = comparison_service
         self.research_understanding_service = research_understanding_service
 
@@ -349,11 +346,9 @@ class ResearchViewAggregationService:
             )
             if profile is None:
                 raise ResearchViewMaterialNotFoundError(collection_id, material_id)
-            understanding = (
-                self.research_understanding_repository.read_research_understanding(
-                    collection_id,
-                    "material",
-                    profile["material_id"],
+            understanding = ResearchUnderstanding.from_mapping(
+                self.research_understanding_service.build_material_understanding(
+                    profile
                 )
             )
             profile["understanding"] = (
@@ -362,65 +357,6 @@ class ResearchViewAggregationService:
             return self._clean_value(profile)
 
         raise ResearchViewNotReadyError(collection_id)
-
-    def persist_material_understandings(
-        self,
-        collection_id: str,
-    ) -> tuple[ResearchUnderstanding, ...]:
-        self.collection_service.get_collection(collection_id)
-        paper_facts, objective_facts = self._load_collection_facts(collection_id)
-        objective_material_rows = self._objective_material_rows(objective_facts)
-        if not objective_material_rows:
-            existing_non_material = tuple(
-                item
-                for item in self.research_understanding_repository.list_research_understandings(
-                    collection_id
-                )
-                if item.scope.scope_type != "material"
-            )
-            self.research_understanding_repository.replace_collection_research_understandings(
-                collection_id,
-                existing_non_material,
-            )
-            return ()
-
-        material_summaries = self._build_objective_material_summaries(
-            collection_id,
-            objective_material_rows,
-        )
-        understandings: list[ResearchUnderstanding] = []
-        for summary in material_summaries:
-            material_id = str(summary.get("material_id") or "").strip()
-            if not material_id:
-                continue
-            profile = self._build_objective_material_profile(
-                collection_id,
-                material_id,
-                objective_material_rows,
-                self._records_list(paper_facts.document_profiles),
-            )
-            if profile is None:
-                continue
-            understandings.append(
-                ResearchUnderstanding.from_mapping(
-                    self.research_understanding_service.build_material_understanding(
-                        profile
-                    )
-                )
-            )
-        existing_non_material = tuple(
-            item
-            for item in self.research_understanding_repository.list_research_understandings(
-                collection_id
-            )
-            if item.scope.scope_type != "material"
-        )
-        persisted = (*existing_non_material, *understandings)
-        self.research_understanding_repository.replace_collection_research_understandings(
-            collection_id,
-            persisted,
-        )
-        return tuple(understandings)
 
     def get_document_research_view(
         self,

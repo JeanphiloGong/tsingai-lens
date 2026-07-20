@@ -51,14 +51,8 @@ REJECT_ISSUES = frozenset(
 class ResearchUnderstandingReviewImportService:
     def __init__(
         self,
-        feedback_service: Any | None = None,
+        feedback_service: Any,
     ) -> None:
-        if feedback_service is None:
-            from application.evaluation.research_understanding_feedback_service import (  # noqa: PLC0415
-                ResearchUnderstandingFeedbackService,
-            )
-
-            feedback_service = ResearchUnderstandingFeedbackService()
         self.feedback_service = feedback_service
 
     def import_rows(
@@ -82,7 +76,7 @@ class ResearchUnderstandingReviewImportService:
             decision for decision in decisions if decision["status"] == "ready"
         ]
         review_progress = _review_progress(valid_decisions)
-        decision_progress_by_goal = _decision_progress_by_goal(valid_decisions)
+        decision_progress_by_objective = _decision_progress_by_objective(valid_decisions)
         if not errors:
             errors.extend(
                 _dataset_validation_errors(self.feedback_service, valid_decisions)
@@ -100,18 +94,18 @@ class ResearchUnderstandingReviewImportService:
                 errors=errors,
                 warnings=[],
                 review_progress=review_progress,
-                decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=[],
+                decision_progress_by_objective=decision_progress_by_objective,
+                affected_objectives=[],
                 readiness_summary={},
             )
         warnings = _review_warnings(valid_decisions)
         warnings.extend(_actionable_decision_warnings(valid_decisions))
         if fail_on_warnings and warnings:
-            affected_goals = _affected_goal_summaries(
+            affected_objectives = _affected_objective_summaries(
                 self.feedback_service,
                 valid_decisions,
             )
-            readiness_summary = _readiness_summary(affected_goals)
+            readiness_summary = _readiness_summary(affected_objectives)
             return _summary(
                 status="fail",
                 dry_run=dry_run,
@@ -131,8 +125,8 @@ class ResearchUnderstandingReviewImportService:
                 ],
                 warnings=warnings,
                 review_progress=review_progress,
-                decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=affected_goals,
+                decision_progress_by_objective=decision_progress_by_objective,
+                affected_objectives=affected_objectives,
                 readiness_summary=readiness_summary,
                 review_scope_gate=_review_scope_gate(
                     review_progress,
@@ -140,11 +134,11 @@ class ResearchUnderstandingReviewImportService:
                 ),
             )
         if dry_run:
-            affected_goals = _affected_goal_summaries(
+            affected_objectives = _affected_objective_summaries(
                 self.feedback_service,
                 valid_decisions,
             )
-            readiness_summary = _readiness_summary(affected_goals)
+            readiness_summary = _readiness_summary(affected_objectives)
             return _summary(
                 status="pass",
                 dry_run=True,
@@ -157,8 +151,8 @@ class ResearchUnderstandingReviewImportService:
                 errors=[],
                 warnings=warnings,
                 review_progress=review_progress,
-                decision_progress_by_goal=decision_progress_by_goal,
-                affected_goals=affected_goals,
+                decision_progress_by_objective=decision_progress_by_objective,
+                affected_objectives=affected_objectives,
                 readiness_summary=readiness_summary,
                 review_scope_gate=_review_scope_gate(
                     review_progress,
@@ -177,12 +171,12 @@ class ResearchUnderstandingReviewImportService:
             else:
                 self.feedback_service.record_feedback(reviewer=reviewer, **payload)
             written += 1
-        affected_goals = _affected_goal_summaries(
+        affected_objectives = _affected_objective_summaries(
             self.feedback_service,
             valid_decisions,
             include_pending=False,
         )
-        readiness_summary = _readiness_summary(affected_goals)
+        readiness_summary = _readiness_summary(affected_objectives)
         return _summary(
             status="pass",
             dry_run=False,
@@ -193,8 +187,8 @@ class ResearchUnderstandingReviewImportService:
             errors=[],
             warnings=warnings,
             review_progress=review_progress,
-            decision_progress_by_goal=decision_progress_by_goal,
-            affected_goals=affected_goals,
+            decision_progress_by_objective=decision_progress_by_objective,
+            affected_objectives=affected_objectives,
             readiness_summary=readiness_summary,
             review_scope_gate=_review_scope_gate(
                 review_progress,
@@ -259,7 +253,7 @@ def read_decision_board_tsv(content: str) -> list[dict[str, str]]:
     fieldnames = reader.fieldnames or []
     missing = [
         field
-        for field in ("collection_id", "goal_id", "finding_id", "expert_action")
+        for field in ("collection_id", "objective_id", "finding_id", "expert_action")
         if field not in fieldnames
     ]
     if missing:
@@ -288,13 +282,13 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             "review_work_order": _review_work_order(row),
             "payload": {
                 "collection_id": _text(row.get("collection_id")),
-                "scope_id": _text(row.get("goal_id")),
+                "objective_id": _text(row.get("objective_id")),
                 "finding_id": _text(row.get("finding_id")),
                 "claim_id": _optional_text(row.get("claim_id")),
             },
         }
 
-    required = ["collection_id", "goal_id", "finding_id"]
+    required = ["collection_id", "objective_id", "finding_id"]
     missing = [field for field in required if not _text(row.get(field))]
     if missing:
         return _error(line_number, action, f"missing required field(s): {', '.join(missing)}")
@@ -314,8 +308,7 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             "review_warning": _review_warning(row),
             "payload": {
                 "collection_id": _text(row.get("collection_id")),
-                "scope_type": "goal",
-                "scope_id": _text(row.get("goal_id")),
+                "objective_id": _text(row.get("objective_id")),
                 "finding_id": _text(row.get("finding_id")),
                 "claim_id": _optional_text(row.get("claim_id")),
                 "review_status": "correct",
@@ -334,8 +327,7 @@ def _decision_from_row(row: dict[str, Any], *, line_number: int) -> dict[str, An
             "review_warning": "",
             "payload": {
                 "collection_id": _text(row.get("collection_id")),
-                "scope_type": "goal",
-                "scope_id": _text(row.get("goal_id")),
+                "objective_id": _text(row.get("objective_id")),
                 "finding_id": _text(row.get("finding_id")),
                 "claim_id": _optional_text(row.get("claim_id")),
                 "review_status": "incorrect",
@@ -361,7 +353,7 @@ def _decision_board_rows_to_review_rows(
         template = templates.get(_decision_board_key(board_row))
         if not template:
             raise ValueError(
-                f"line {line_number}: finding is not present in current goal dataset"
+                f"line {line_number}: finding is not present in current objective dataset"
             )
         row = dict(template)
         if action in {"", "skip"}:
@@ -385,11 +377,10 @@ def _decision_board_templates(
     board_rows: list[dict[str, str]],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     templates: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for collection_id, goal_id in sorted(_decision_board_goal_keys(board_rows)):
+    for collection_id, objective_id in sorted(_decision_board_objective_keys(board_rows)):
         dataset = service.export_dataset(
             collection_id=collection_id,
-            scope_type="goal",
-            scope_id=goal_id,
+            objective_id=objective_id,
             label_status=None,
             dataset_use_status=None,
         )
@@ -399,35 +390,35 @@ def _decision_board_templates(
             finding_id = _text(item.get("finding_id"))
             if not finding_id:
                 continue
-            templates[(collection_id, goal_id, finding_id)] = (
+            templates[(collection_id, objective_id, finding_id)] = (
                 _review_row_from_dataset_item(
                     collection_id,
-                    goal_id,
+                    objective_id,
                     item,
                 )
             )
     return templates
 
 
-def _decision_board_goal_keys(
+def _decision_board_objective_keys(
     board_rows: list[dict[str, str]],
 ) -> set[tuple[str, str]]:
     keys: set[tuple[str, str]] = set()
     for line_number, row in enumerate(board_rows, start=2):
         collection_id = _text(row.get("collection_id"))
-        goal_id = _text(row.get("goal_id"))
+        objective_id = _text(row.get("objective_id"))
         finding_id = _text(row.get("finding_id"))
-        if not collection_id or not goal_id or not finding_id:
+        if not collection_id or not objective_id or not finding_id:
             raise ValueError(
-                f"line {line_number}: collection_id, goal_id, and finding_id are required"
+                f"line {line_number}: collection_id, objective_id, and finding_id are required"
             )
-        keys.add((collection_id, goal_id))
+        keys.add((collection_id, objective_id))
     return keys
 
 
 def _review_row_from_dataset_item(
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
     item: dict[str, Any],
 ) -> dict[str, Any]:
     prediction = _mapping(item.get("system_prediction"))
@@ -441,13 +432,10 @@ def _review_row_from_dataset_item(
         or _mapping_list(item.get("evidence_refs"))
         or _mapping_list(item.get("input_blocks"))
     )
-    item_scope_type = _text(item.get("scope_type")) or "goal"
-    item_scope_id = _text(item.get("scope_id")) or goal_id
+    item_objective_id = _text(item.get("objective_id")) or objective_id
     return {
         "collection_id": collection_id,
-        "goal_id": item_scope_id if item_scope_type == "goal" else goal_id,
-        "scope_type": item_scope_type,
-        "scope_id": item_scope_id,
+        "objective_id": item_objective_id,
         "sample_id": _text(item.get("sample_id")),
         "finding_id": _text(item.get("finding_id")),
         "claim_id": _text(item.get("claim_id")),
@@ -545,7 +533,7 @@ def _split_decision_board_list(value: Any) -> list[str]:
 def _decision_board_key(row: dict[str, str]) -> tuple[str, str, str]:
     return (
         _text(row.get("collection_id")),
-        _text(row.get("goal_id")),
+        _text(row.get("objective_id")),
         _text(row.get("finding_id")),
     )
 
@@ -671,8 +659,7 @@ def _correct_decision(
         "review_warning": _review_warning(row),
         "payload": {
             "collection_id": _text(row.get("collection_id")),
-            "scope_type": "goal",
-            "scope_id": _text(row.get("goal_id")),
+            "objective_id": _text(row.get("objective_id")),
             "finding_id": _text(row.get("finding_id")),
             "claim_id": _optional_text(row.get("claim_id")),
             "curated_claim_type": _text(target.get("claim_type") or row.get("claim_type"))
@@ -848,34 +835,34 @@ def _review_progress(decisions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _decision_progress_by_goal(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _decision_progress_by_objective(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             key: value
-            for key, value in goal.items()
+            for key, value in objective.items()
             if key != "decisions"
         }
-        for goal in _decision_progress_by_goal_internal(decisions)
+        for objective in _decision_progress_by_objective_internal(decisions)
     ]
 
 
-def _decision_progress_by_goal_internal(
+def _decision_progress_by_objective_internal(
     decisions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    goals: dict[tuple[str, str], dict[str, Any]] = {}
+    objectives: dict[tuple[str, str], dict[str, Any]] = {}
     for decision in decisions:
         payload = _mapping(decision.get("payload"))
         collection_id = _text(payload.get("collection_id"))
-        goal_id = _text(payload.get("scope_id"))
+        objective_id = _text(payload.get("objective_id"))
         if not collection_id:
             collection_id = _text(decision.get("collection_id"))
-        if not goal_id:
-            goal_id = _text(decision.get("goal_id"))
-        key = (collection_id, goal_id)
-        if key not in goals:
-            goals[key] = {
+        if not objective_id:
+            objective_id = _text(decision.get("objective_id"))
+        key = (collection_id, objective_id)
+        if key not in objectives:
+            objectives[key] = {
                 "collection_id": collection_id,
-                "goal_id": goal_id,
+                "objective_id": objective_id,
                 "total_rows": 0,
                 "actionable_count": 0,
                 "skipped_count": 0,
@@ -886,26 +873,26 @@ def _decision_progress_by_goal_internal(
                 "next_review_work_order": {},
                 "decisions": [],
             }
-        goal = goals[key]
+        objective = objectives[key]
         action = _text(decision.get("action"))
-        goal["total_rows"] += 1
-        goal["decisions"].append(decision)
+        objective["total_rows"] += 1
+        objective["decisions"].append(decision)
         if action == "skip":
-            goal["skipped_count"] += 1
-            if not goal["next_review_finding_id"]:
-                goal["next_review_finding_id"] = _text(payload.get("finding_id"))
-                goal["next_review_work_order"] = _mapping(
+            objective["skipped_count"] += 1
+            if not objective["next_review_finding_id"]:
+                objective["next_review_finding_id"] = _text(payload.get("finding_id"))
+                objective["next_review_work_order"] = _mapping(
                     decision.get("review_work_order")
                 )
             continue
         if action in {"accept", "reject", "correct"}:
-            goal["actionable_count"] += 1
-            goal[f"{action}_count"] += 1
+            objective["actionable_count"] += 1
+            objective[f"{action}_count"] += 1
     return [
-        goal
-        for goal in sorted(
-            goals.values(),
-            key=lambda item: (_text(item.get("collection_id")), _text(item.get("goal_id"))),
+        objective
+        for objective in sorted(
+            objectives.values(),
+            key=lambda item: (_text(item.get("collection_id")), _text(item.get("objective_id"))),
         )
     ]
 
@@ -922,16 +909,16 @@ def _dataset_validation_errors(
             continue
         payload = decision.get("payload", {})
         collection_id = _text(payload.get("collection_id"))
-        goal_id = _text(payload.get("scope_id"))
+        objective_id = _text(payload.get("objective_id"))
         finding_id = _text(payload.get("finding_id"))
-        dataset = datasets.get((collection_id, goal_id), {})
+        dataset = datasets.get((collection_id, objective_id), {})
         item = _dataset_item(dataset, finding_id)
         if not item:
             errors.append(
                 _error(
                     int(decision.get("line") or 0),
                     _text(action),
-                    "finding_id does not exist in current goal dataset",
+                    "finding_id does not exist in current objective dataset",
                 )
             )
             continue
@@ -941,7 +928,7 @@ def _dataset_validation_errors(
                 _error(
                     int(decision.get("line") or 0),
                     _text(action),
-                    "claim_id does not match current goal dataset finding",
+                    "claim_id does not match current objective dataset finding",
                 )
             )
             continue
@@ -973,19 +960,18 @@ def _datasets_for_decisions(
         {
             (
                 _text(decision.get("payload", {}).get("collection_id")),
-                _text(decision.get("payload", {}).get("scope_id")),
+                _text(decision.get("payload", {}).get("objective_id")),
             )
             for decision in decisions
             if decision.get("action") != "skip"
         }
     )
-    for collection_id, goal_id in keys:
-        if not collection_id or not goal_id:
+    for collection_id, objective_id in keys:
+        if not collection_id or not objective_id:
             continue
-        datasets[(collection_id, goal_id)] = service.export_dataset(
+        datasets[(collection_id, objective_id)] = service.export_dataset(
             collection_id=collection_id,
-            scope_type="goal",
-            scope_id=goal_id,
+            objective_id=objective_id,
         )
     return datasets
 
@@ -1010,21 +996,21 @@ def _dataset_evidence_ref_ids(item: dict[str, Any]) -> set[str]:
     }
 
 
-def _affected_goal_summaries(
+def _affected_objective_summaries(
     service: Any,
     decisions: list[dict[str, Any]],
     *,
     include_pending: bool = True,
 ) -> list[dict[str, Any]]:
     datasets = _datasets_for_decisions(service, decisions)
-    pending_by_goal = {
-        (_text(progress.get("collection_id")), _text(progress.get("goal_id"))): progress
-        for progress in _decision_progress_by_goal_internal(decisions)
+    pending_by_objective = {
+        (_text(progress.get("collection_id")), _text(progress.get("objective_id"))): progress
+        for progress in _decision_progress_by_objective_internal(decisions)
     }
     summaries = []
     for key, dataset in datasets.items():
-        summary = _goal_readiness_summary(dataset)
-        pending = pending_by_goal.get(key, {}) if include_pending else {}
+        summary = _objective_readiness_summary(dataset)
+        pending = pending_by_objective.get(key, {}) if include_pending else {}
         pending_accept = int(pending.get("accept_count") or 0)
         pending_reject = int(pending.get("reject_count") or 0)
         pending_correct = int(pending.get("correct_count") or 0)
@@ -1127,7 +1113,7 @@ def _projection_deltas(
     }
 
 
-def _goal_readiness_summary(dataset: dict[str, Any]) -> dict[str, Any]:
+def _objective_readiness_summary(dataset: dict[str, Any]) -> dict[str, Any]:
     quality = dataset.get("quality_summary")
     quality = quality if isinstance(quality, dict) else {}
     items = _mapping_list(dataset.get("items"))
@@ -1136,7 +1122,7 @@ def _goal_readiness_summary(dataset: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "collection_id": _text(dataset.get("collection_id")),
-        "goal_id": _text(dataset.get("scope_id")),
+        "objective_id": _text(dataset.get("objective_id")),
         "item_count": int(dataset.get("item_count") or len(items)),
         "training_ready_count": int(
             quality.get("training_ready_sample_count") or len(training_ready)
@@ -1314,46 +1300,46 @@ def _has_protocol_design_inputs(item: dict[str, Any]) -> bool:
     return bool(statement and variables and outcomes and (direction or scope) and evidence)
 
 
-def _readiness_summary(affected_goals: list[dict[str, Any]]) -> dict[str, Any]:
-    goal_count = len(affected_goals)
+def _readiness_summary(affected_objectives: list[dict[str, Any]]) -> dict[str, Any]:
+    objective_count = len(affected_objectives)
     projected_review_candidate_count = sum(
-        int(goal.get("projected_review_candidate_count") or 0)
-        for goal in affected_goals
+        int(objective.get("projected_review_candidate_count") or 0)
+        for objective in affected_objectives
     )
     projected_rejected_count = sum(
-        int(goal.get("projected_rejected_count") or 0) for goal in affected_goals
+        int(objective.get("projected_rejected_count") or 0) for objective in affected_objectives
     )
-    training_ready_goals = sum(
+    training_ready_objectives = sum(
         1
-        for goal in affected_goals
-        if int(goal.get("projected_training_ready_count") or 0) > 0
+        for objective in affected_objectives
+        if int(objective.get("projected_training_ready_count") or 0) > 0
     )
-    training_message_goals = sum(
+    training_message_objectives = sum(
         1
-        for goal in affected_goals
-        if int(goal.get("projected_training_message_count") or 0) > 0
+        for objective in affected_objectives
+        if int(objective.get("projected_training_message_count") or 0) > 0
     )
-    protocol_ready_goals = sum(
+    protocol_ready_objectives = sum(
         1
-        for goal in affected_goals
-        if int(goal.get("projected_protocol_ready_count") or 0) > 0
+        for objective in affected_objectives
+        if int(objective.get("projected_protocol_ready_count") or 0) > 0
     )
     return {
-        "goal_count": goal_count,
-        "projected_training_ready_goal_count": training_ready_goals,
-        "projected_training_message_goal_count": training_message_goals,
-        "projected_protocol_ready_goal_count": protocol_ready_goals,
+        "objective_count": objective_count,
+        "projected_training_ready_objective_count": training_ready_objectives,
+        "projected_training_message_objective_count": training_message_objectives,
+        "projected_protocol_ready_objective_count": protocol_ready_objectives,
         "projected_review_candidate_count": projected_review_candidate_count,
         "projected_rejected_count": projected_rejected_count,
-        "ready_for_training_export": goal_count > 0 and training_message_goals == goal_count,
-        "ready_for_protocol_drafting": goal_count > 0 and protocol_ready_goals == goal_count,
-        "goals_still_needing_review_count": sum(
+        "ready_for_training_export": objective_count > 0 and training_message_objectives == objective_count,
+        "ready_for_protocol_drafting": objective_count > 0 and protocol_ready_objectives == objective_count,
+        "objectives_still_needing_review_count": sum(
             1
-            for goal in affected_goals
-            if int(goal.get("projected_review_candidate_count") or 0) > 0
+            for objective in affected_objectives
+            if int(objective.get("projected_review_candidate_count") or 0) > 0
         ),
-        "goals_missing_training_messages_count": goal_count - training_message_goals,
-        "goals_missing_protocol_ready_count": goal_count - protocol_ready_goals,
+        "objectives_missing_training_messages_count": objective_count - training_message_objectives,
+        "objectives_missing_protocol_ready_count": objective_count - protocol_ready_objectives,
     }
 
 
@@ -1366,13 +1352,13 @@ def _review_scope_gate(
     ready_for_training = bool(readiness_summary.get("ready_for_training_export"))
     ready_for_protocol = bool(readiness_summary.get("ready_for_protocol_drafting"))
     still_needing_review = int(
-        readiness_summary.get("goals_still_needing_review_count") or 0
+        readiness_summary.get("objectives_still_needing_review_count") or 0
     )
     training_gaps = int(
-        readiness_summary.get("goals_missing_training_messages_count") or 0
+        readiness_summary.get("objectives_missing_training_messages_count") or 0
     )
     protocol_gaps = int(
-        readiness_summary.get("goals_missing_protocol_ready_count") or 0
+        readiness_summary.get("objectives_missing_protocol_ready_count") or 0
     )
     blocking_reasons = []
     if actionable == 0:
@@ -1387,7 +1373,7 @@ def _review_scope_gate(
         blocking_reasons.append("protocol_drafting_not_ready")
     return {
         "status": "ready" if not blocking_reasons else "blocked",
-        "scope": "reviewed_goals",
+        "scope": "reviewed_objectives",
         "ready_for_reviewed_scope": not blocking_reasons,
         "ready_for_expert_satisfaction_gate": not blocking_reasons,
         "blocking_reasons": blocking_reasons,
@@ -1395,9 +1381,9 @@ def _review_scope_gate(
         "skipped_count": skipped,
         "ready_for_training_export": ready_for_training,
         "ready_for_protocol_drafting": ready_for_protocol,
-        "goals_still_needing_review_count": still_needing_review,
-        "goals_missing_training_messages_count": training_gaps,
-        "goals_missing_protocol_ready_count": protocol_gaps,
+        "objectives_still_needing_review_count": still_needing_review,
+        "objectives_missing_training_messages_count": training_gaps,
+        "objectives_missing_protocol_ready_count": protocol_gaps,
     }
 
 
@@ -1412,8 +1398,8 @@ def _summary(
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
     review_progress: dict[str, Any],
-    decision_progress_by_goal: list[dict[str, Any]],
-    affected_goals: list[dict[str, Any]],
+    decision_progress_by_objective: list[dict[str, Any]],
+    affected_objectives: list[dict[str, Any]],
     readiness_summary: dict[str, Any],
     review_scope_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1427,8 +1413,8 @@ def _summary(
         "errors": errors,
         "warnings": warnings,
         "review_progress": review_progress,
-        "decision_progress_by_goal": decision_progress_by_goal,
-        "affected_goals": affected_goals,
+        "decision_progress_by_objective": decision_progress_by_objective,
+        "affected_objectives": affected_objectives,
         "readiness_summary": readiness_summary,
         "review_scope_gate": review_scope_gate or {},
     }

@@ -92,10 +92,9 @@
       "finding_id",
       "issue_type",
       "note",
+      "objective_id",
       "review_status",
-      "reviewer",
-      "scope_id",
-      "scope_type"
+      "reviewer"
     ],
     "measurement_result": [
       "baseline_id",

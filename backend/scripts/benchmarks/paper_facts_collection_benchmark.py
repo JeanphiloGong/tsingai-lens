@@ -195,19 +195,20 @@ def build_services(
     from infra.persistence.postgres.paper_fact_repository import (
         PostgresPaperFactRepository,
     )
+    from infra.persistence.postgres.research_understanding_repository import (
+        PostgresResearchUnderstandingRepository,
+    )
     from infra.persistence.postgres.source_artifact_repository import (
         PostgresSourceArtifactRepository,
     )
-    from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
-
     collection_service = CollectionService(
         repository=PostgresCollectionRepository(session_factory),
         workspace=FileCollectionWorkspace(collections_root),
     )
     source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
     paper_fact_repository = PostgresPaperFactRepository(session_factory)
-    research_understanding_repository = SqliteResearchUnderstandingRepository(
-        collections_root.parent / "lens.sqlite"
+    research_understanding_repository = PostgresResearchUnderstandingRepository(
+        session_factory
     )
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,

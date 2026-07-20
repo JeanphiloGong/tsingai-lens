@@ -35,7 +35,7 @@ def _summary():
         "goal_count": 1,
         "goals": [
             {
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
                 "protocol_ready_count": 0,
@@ -59,14 +59,14 @@ def _summary():
                     }
                 },
                 "review_packet": {
-                    "goal_id": "goal-1",
+                    "objective_id": "objective-1",
                     "candidates": [
                         {
                             "finding_id": "finding-1",
                             "statement": "Preheating increased ductility.",
                             "recommended_action_code": "accept_as_paper_level",
                             "recommended_action": "accept as paper-level",
-                            "open_url": "/collections/col-1/goals/goal-1?finding_id=finding-1",
+                            "open_url": "/collections/col-1/objectives/objective-1?finding_id=finding-1",
                             "acceptance_gate": {"accept_allowed": False},
                             "review_decision_hint": {
                                 "why_accept_blocked": ["table row alignment"]
@@ -93,7 +93,7 @@ def _summary():
                             ],
                         }
                     ],
-                    "review_url": "/collections/col-1/goals/goal-1?review=queue",
+                    "review_url": "/collections/col-1/objectives/objective-1?review=queue",
                     "risk_summary": {
                         "reason:single_paper_evidence": 1,
                         "warning:table_row_alignment_uncertain": 1,
@@ -161,7 +161,6 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
 
     result = module.prepare_goal_review_workspace(
         collection_id="col-1",
-        goal_ids=("goal-1",),
         objective_ids=("objective-1",),
         output_dir=tmp_path / "workspace",
     )
@@ -202,7 +201,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "review packet\n\n"
     )
     dashboard = (workspace / "review-dashboard.md").read_text(encoding="utf-8")
-    assert "### How does preheating affect ductility? (goal-1)" in dashboard
+    assert "### How does preheating affect ductility? (objective-1)" in dashboard
     assert "Direct accept blocked: 1" in dashboard
     assert "| Finding | Gate | Action | Note required | Evidence | Open |" in dashboard
     assert "accept blocked: table row alignment" in dashboard
@@ -210,7 +209,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     priority = (workspace / "review-priority.md").read_text(encoding="utf-8")
     assert "# Lens Review Priority Queue" in priority
     assert "P1 correct/reject: accept blocked" in priority
-    assert "How does preheating affect ductility? (goal-1)" in priority
+    assert "How does preheating affect ductility? (objective-1)" in priority
     assert "Preheating increased ductility." in priority
     assert "accept as paper-level" in priority
     decision_board = (workspace / "expert-decision-board.tsv").read_text(
@@ -239,7 +238,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "corrected_evidence_ref_ids",
         "collection_id",
         "priority",
-        "goal_id",
+        "objective_id",
         "goal",
         "finding_id",
         "finding",
@@ -284,8 +283,8 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "",
         "col-1",
         "P1 correct/reject: accept blocked",
-        "goal-1",
-        "How does preheating affect ductility? (goal-1)",
+        "objective-1",
+        "How does preheating affect ductility? (objective-1)",
         "finding-1",
         "Preheating increased ductility.",
         "accept as paper-level",
@@ -297,19 +296,19 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
         "blocked: table row alignment",
         "Paper A / p. 4",
         "Preheating increased ductility by 14%.",
-        "/collections/col-1/goals/goal-1?finding_id=finding-1",
+        "/collections/col-1/objectives/objective-1?finding_id=finding-1",
         "/collections/col-1/documents/doc-1",
     ]
     checklist = (workspace / "review-checklist.md").read_text(encoding="utf-8")
     assert "# Lens Expert Review Checklist" in checklist
-    assert "### How does preheating affect ductility? (goal-1)" in checklist
+    assert "### How does preheating affect ductility? (objective-1)" in checklist
     assert (
         "- `accept`: finding, variables, outcome, direction, scope, and cited "
         "evidence all match."
     ) in checklist
     assert "Training unlock: one accepted or corrected finding" in checklist
     assert "Finding id: `finding-1`" in checklist
-    assert "[open finding](/collections/col-1/goals/goal-1?finding_id=finding-1)" in checklist
+    assert "[open finding](/collections/col-1/objectives/objective-1?finding_id=finding-1)" in checklist
     assert "- [ ] Source link opens the cited paper/table/block." in checklist
     assert "- [ ] Direction matches the cited result." in checklist
     unlock_plan = (workspace / "review-unlock-plan.md").read_text(encoding="utf-8")
@@ -322,7 +321,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     readiness = (workspace / "dataset-readiness.md").read_text(encoding="utf-8")
     assert "pending review candidates: 1" in readiness
     assert (
-        "| How does preheating affect ductility? (goal-1) | 0 | 0 | 0 | 1 | "
+        "| How does preheating affect ductility? (objective-1) | 0 | 0 | 0 | 1 | "
         "accept as paper-level |"
     ) in readiness
     satisfaction = (workspace / "expert-satisfaction.md").read_text(encoding="utf-8")
@@ -375,7 +374,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     )
     assert (
         '"$SCRIPTS/check_goal_expert_loop.py" --collection-id '
-        "'col-1' --goal-id 'goal-1' --format text"
+        "'col-1' --objective-id 'objective-1' --format text"
     ) in commands
     assert "if [ -n \"$API_BASE_URL\" ]; then" in commands
     assert "--api-base-url \"$API_BASE_URL\" --format text" in commands
@@ -383,7 +382,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     assert "--runtime-write-check --format text" in commands
     assert (
         '"$SCRIPTS/check_goal_dataset_quality.py" --collection-id '
-        "'col-1' --goal-id 'goal-1' --format training-jsonl "
+        "'col-1' --objective-id 'objective-1' --format training-jsonl "
         "--require-training-ready"
     ) in commands
     assert json.loads(
@@ -408,7 +407,6 @@ def test_prepare_goal_review_workspace_refuses_non_empty_output_dir(tmp_path):
     try:
         module.prepare_goal_review_workspace(
             collection_id="col-1",
-            goal_ids=("goal-1",),
             objective_ids=("objective-1",),
             output_dir=output_dir,
         )
@@ -474,7 +472,7 @@ def test_render_review_dashboard_summarizes_goal_risks():
 
     assert "# Lens Goal Review Dashboard" in dashboard
     assert "Review candidates: 1" in dashboard
-    assert "### How does preheating affect ductility? (goal-1)" in dashboard
+    assert "### How does preheating affect ductility? (objective-1)" in dashboard
     assert "Direct accept blocked: 1" in dashboard
     assert (
         "Top risks: reason:single_paper_evidence=1, "
@@ -483,7 +481,7 @@ def test_render_review_dashboard_summarizes_goal_risks():
     assert (
         "| Preheating increased ductility. | accept blocked: table row alignment | "
         "accept as paper-level | Required: explain accepted paper-level scope. | "
-        "Paper A / p. 4 | [open](/collections/col-1/goals/goal-1?finding_id=finding-1) |"
+        "Paper A / p. 4 | [open](/collections/col-1/objectives/objective-1?finding_id=finding-1) |"
     ) in dashboard
 
 
@@ -497,7 +495,7 @@ def test_render_review_priority_report_orders_accept_blockers_first():
             "statement": "Preheating needs paper-level confirmation.",
             "recommended_action_code": "accept_as_paper_level",
             "recommended_action": "accept as paper-level",
-            "open_url": "/collections/col-1/goals/goal-1?finding_id=finding-2",
+            "open_url": "/collections/col-1/objectives/objective-1?finding_id=finding-2",
             "acceptance_gate": {"accept_allowed": True},
             "review_reasons": ["single_paper_evidence"],
             "evidence": [{"label": "Paper B / p. 2"}],
@@ -510,12 +508,12 @@ def test_render_review_priority_report_orders_accept_blockers_first():
     assert "1. Resolve findings where direct accept is blocked." in report
     assert (
         "| P1 correct/reject: accept blocked | How does preheating affect ductility? "
-        "(goal-1) | Preheating increased ductility. | accept as paper-level | "
+        "(objective-1) | Preheating increased ductility. | accept as paper-level | "
         "Paper A / p. 4 |"
     ) in report
     assert (
         "| P4 confirm paper-level scope | How does preheating affect ductility? "
-        "(goal-1) | Preheating needs paper-level confirmation. | "
+        "(objective-1) | Preheating needs paper-level confirmation. | "
         "accept as paper-level | Paper B / p. 2 |"
     ) in report
     assert report.index("P1 correct/reject") < report.index("P4 confirm")
@@ -562,7 +560,7 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
     assert header[19:24] == [
         "collection_id",
         "priority",
-        "goal_id",
+        "objective_id",
         "goal",
         "finding_id",
     ]
@@ -583,7 +581,7 @@ def test_render_expert_decision_board_exports_spreadsheet_rows():
     assert "wrong_variable" in row["reject_issue_options"]
     assert row["collection_id"] == "col-1"
     assert row["priority"] == "P1 correct/reject: accept blocked"
-    assert row["goal_id"] == "goal-1"
+    assert row["objective_id"] == "objective-1"
     assert row["finding_id"] == "finding-1"
     assert row["accept_allowed"] == "no"
     assert row["allowed_actions"] == "reject; correct; skip"
@@ -607,7 +605,7 @@ def test_render_review_checklist_gives_expert_decision_steps():
     assert "# Lens Expert Review Checklist" in checklist
     assert "Review candidates: 1" in checklist
     assert "- `reject`: evidence does not support the finding; set a concrete `issue_type`." in checklist
-    assert "### How does preheating affect ductility? (goal-1)" in checklist
+    assert "### How does preheating affect ductility? (objective-1)" in checklist
     assert "Training unlock: one accepted or corrected finding" in checklist
     assert "#### 1. Preheating increased ductility." in checklist
     assert "Finding id: `finding-1`" in checklist
@@ -651,7 +649,7 @@ def test_render_review_unlock_plan_explains_decision_effects():
     report = module.render_review_unlock_plan(summary)
 
     assert "# Lens Review Unlock Plan" in report
-    assert "| How does preheating affect ductility? (goal-1) |" in report
+    assert "| How does preheating affect ductility? (objective-1) |" in report
     assert "correct/reject first" in report
     assert "blocked: direction or scope" in report
     assert "Correct the direction or scope before import." in report
@@ -669,7 +667,7 @@ def test_render_dataset_readiness_report_explains_partial_exports():
     assert "training_ready findings: 0" in report
     assert "pending review candidates: 1" in report
     assert (
-        "| How does preheating affect ductility? (goal-1) | 0 | 0 | 0 | 1 | "
+        "| How does preheating affect ductility? (objective-1) | 0 | 0 | 0 | 1 | "
         "accept as paper-level |"
     ) in report
     assert (
@@ -759,7 +757,6 @@ def test_enrich_goal_questions_adds_question_to_matching_goals(monkeypatch):
     module._enrich_goal_questions(
         summary,
         collection_id="col-1",
-        goal_ids=("goal-1",),
         objective_ids=("objective-1",),
         api_base_url=None,
     )

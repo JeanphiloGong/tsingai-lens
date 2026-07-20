@@ -28,7 +28,6 @@ FINDING_SYNTHESIS_STATUSES: Final[frozenset[str]] = frozenset(
 class ResearchUnderstandingScope:
     scope_type: str
     collection_id: str
-    goal_id: str | None = None
     material_id: str | None = None
     objective_id: str | None = None
     document_id: str | None = None
@@ -39,7 +38,6 @@ class ResearchUnderstandingScope:
         return cls(
             scope_type=_text(payload.get("scope_type")) or "collection",
             collection_id=_text(payload.get("collection_id")) or "",
-            goal_id=_text(payload.get("goal_id")),
             material_id=_text(payload.get("material_id")),
             objective_id=_text(payload.get("objective_id")),
             document_id=_text(payload.get("document_id")),
@@ -50,7 +48,6 @@ class ResearchUnderstandingScope:
         return {
             "scope_type": self.scope_type,
             "collection_id": self.collection_id,
-            "goal_id": self.goal_id,
             "material_id": self.material_id,
             "objective_id": self.objective_id,
             "document_id": self.document_id,
@@ -364,7 +361,6 @@ class ResearchUnderstanding:
         *,
         scope_type: str,
         collection_id: str,
-        goal_id: str | None = None,
         material_id: str | None = None,
         objective_id: str | None = None,
         title: str | None = None,
@@ -376,7 +372,6 @@ class ResearchUnderstanding:
                 "scope": {
                     "scope_type": scope_type,
                     "collection_id": collection_id,
-                    "goal_id": goal_id,
                     "material_id": material_id,
                     "objective_id": objective_id,
                     "title": title,
@@ -408,8 +403,6 @@ class ResearchUnderstanding:
 
     @property
     def scope_id(self) -> str:
-        if self.scope.scope_type == "goal" and self.scope.goal_id:
-            return self.scope.goal_id
         if self.scope.scope_type == "objective" and self.scope.objective_id:
             return self.scope.objective_id
         if self.scope.scope_type == "material" and self.scope.material_id:

@@ -121,13 +121,12 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
         PostgresObjectiveRepository,
     )
+    from infra.persistence.postgres.research_understanding_repository import (  # noqa: PLC0415
+        PostgresResearchUnderstandingRepository,
+    )
     from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
         PostgresSourceArtifactRepository,
     )
-    from infra.persistence.sqlite import (  # noqa: PLC0415
-        SqliteResearchUnderstandingRepository,
-    )
-
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
@@ -139,8 +138,8 @@ def check_collection_frontend_projection(
         paper_fact_repository = PostgresPaperFactRepository(session_factory)
         objective_repository = PostgresObjectiveRepository(session_factory)
         comparison_repository = PostgresComparisonRepository(session_factory)
-        research_understanding_repository = SqliteResearchUnderstandingRepository(
-            backend_root / "data" / "lens.sqlite"
+        research_understanding_repository = PostgresResearchUnderstandingRepository(
+            session_factory
         )
         document_profile_service = DocumentProfileService(
             collection_service=collection_service,

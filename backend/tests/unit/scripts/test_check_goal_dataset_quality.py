@@ -189,7 +189,7 @@ def _dataset_payload(**overrides):
     }
     quality_summary.update(overrides.pop("quality_overrides", {}))
     return {
-        "scope_id": "goal-1",
+        "objective_id": "objective-1",
         "item_count": 1,
         "quality_summary": quality_summary,
         "items": [item],
@@ -409,10 +409,10 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         "reason:single_paper_evidence": 1,
         "reason:table_row_needs_expert_review": 1,
     }
-    assert packet["goal_id"] == "goal-1"
+    assert packet["objective_id"] == "objective-1"
     assert (
         candidate["open_url"]
-        == "/collections/col-1/goals/goal-1?review=queue&finding_id=finding-1"
+        == "/collections/col-1/objectives/objective-1?review=queue&finding_id=finding-1"
     )
     assert candidate["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
     assert candidate["evidence"][0]["evidence_ref_id"] == "ev-1"
@@ -425,9 +425,9 @@ def test_build_goal_review_packet_lists_candidate_evidence():
         candidate["evidence"][0]["href"]
         == "/collections/col-1/documents/doc-1?source_ref=blk-1&quote=long-text"
     )
-    assert "Goal goal-1: 1 review candidate(s)" in text
+    assert "Goal objective-1: 1 review candidate(s)" in text
     assert (
-        "open finding: /collections/col-1/goals/goal-1?review=queue&finding_id=finding-1"
+        "open finding: /collections/col-1/objectives/objective-1?review=queue&finding_id=finding-1"
         in text
     )
     assert "fields: variables=preheating; outcomes=ductility; direction=increase" in text
@@ -506,7 +506,7 @@ def test_render_review_jsonl_exports_candidate_rows():
 
     assert len(rows) == 1
     assert rows[0]["collection_id"] == "col-1"
-    assert rows[0]["goal_id"] == "goal-1"
+    assert rows[0]["objective_id"] == "objective-1"
     assert rows[0]["finding_id"] == "finding-1"
     assert rows[0]["claim_id"] == "claim-1"
     assert rows[0]["statement"] == "Preheating increased ductility by 14%."
@@ -617,8 +617,8 @@ def test_render_review_packet_keeps_full_finding_statements():
     )
 
     packet = {
-        "goal_id": "goal-1",
-        "review_url": "/collections/col-1/goals/goal-1?review=queue",
+        "objective_id": "objective-1",
+        "review_url": "/collections/col-1/objectives/objective-1?review=queue",
         "candidates": [
             {
                 "statement": long_statement,
@@ -629,7 +629,7 @@ def test_render_review_packet_keeps_full_finding_statements():
                 "support_grade": "partial",
                 "review_status": "needs_review",
                 "trace_status": "evidence_derived",
-                "open_url": "/collections/col-1/goals/goal-1?review=queue&finding_id=finding-1",
+                "open_url": "/collections/col-1/objectives/objective-1?review=queue&finding_id=finding-1",
                 "recommended_action": "check whether mechanism evidence is required",
                 "acceptance_gate": {
                     "status": "review_required",
@@ -732,7 +732,7 @@ def test_render_decision_template_exports_editable_import_rows():
     del rows[0]["review_work_order"]
     assert rows[0] == {
         "collection_id": "col-1",
-        "goal_id": "goal-1",
+        "objective_id": "objective-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
         "action": "skip",
@@ -943,7 +943,7 @@ def test_render_agent_review_prompt_jsonl_exports_independent_review_tasks():
     row = rows[0]
     assert row["task"] == "review_lens_research_finding"
     assert row["collection_id"] == "col-1"
-    assert row["goal_id"] == "goal-1"
+    assert row["objective_id"] == "objective-1"
     assert row["finding_id"] == "finding-1"
     assert row["reviewer_role"] == "independent_materials_science_reviewer"
     assert "action" not in row
@@ -1002,7 +1002,7 @@ def test_render_messages_jsonl_exports_training_ready_messages():
 def test_render_training_jsonl_exports_messages_with_traceable_metadata():
     check = _load_goal_dataset_check_module()
 
-    dataset = _dataset_payload(collection_id="col-1", scope_type="goal")
+    dataset = _dataset_payload(collection_id="col-1")
     export = check.build_goal_training_message_export(
         dataset,
         include_metadata=True,
@@ -1016,8 +1016,7 @@ def test_render_training_jsonl_exports_messages_with_traceable_metadata():
     assert rows[0]["messages"][0]["role"] == "user"
     assert rows[0]["metadata"] == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "goal_id": "goal-1",
+        "objective_id": "objective-1",
         "sample_id": "sample-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
@@ -1045,16 +1044,15 @@ def test_check_goal_dataset_quality_includes_training_metadata_when_requested(
     monkeypatch.setattr(
         check,
         "_local_goal_dataset",
-        lambda collection_id, goal_id: _dataset_payload(
+        lambda collection_id, objective_id: _dataset_payload(
             collection_id=collection_id,
-            scope_id=goal_id,
-            scope_type="goal",
+            objective_id=objective_id,
         ),
     )
 
     summary = check.check_goal_dataset_quality(
         collection_id="col-1",
-        goal_ids=("goal-1",),
+        objective_ids=("objective-1",),
         include_training_export=True,
         include_training_metadata=True,
     )
@@ -1063,7 +1061,7 @@ def test_check_goal_dataset_quality_includes_training_metadata_when_requested(
 
     assert summary["goals"][0]["training_export"]["row_count"] == 1
     assert rows[0]["metadata"]["collection_id"] == "col-1"
-    assert rows[0]["metadata"]["goal_id"] == "goal-1"
+    assert rows[0]["metadata"]["objective_id"] == "objective-1"
     assert rows[0]["metadata"]["claim_id"] == "claim-1"
 
 

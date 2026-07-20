@@ -48,15 +48,19 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.sqlite import (
     SqliteEvaluationRepository,
-    SqliteExperimentPlanRepository,
-    SqliteGoalSessionRepository,
-    SqliteResearchUnderstandingRepository,
     SqliteSourceArtifactRepository,
 )
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
+from tests.support.objective_understanding_repository import (
+    InMemoryObjectiveUnderstandingRepository,
+)
+from tests.support.objective_workspace_repository import (
+    InMemoryObjectiveWorkspaceRepository,
+)
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -86,7 +90,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    research_understanding_repository = SqliteResearchUnderstandingRepository(db_path)
+    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
@@ -94,9 +98,10 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         objective_repository=objective_repository,
         comparison_repository=comparison_repository,
     )
-    goal_session_repository = SqliteGoalSessionRepository(db_path)
-    experiment_plan_repository = SqliteExperimentPlanRepository(db_path)
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
+    experiment_plan_repository = goal_session_repository
     evaluation_repository = SqliteEvaluationRepository(db_path)
+    review_repository = InMemoryObjectiveReviewRepository()
 
     auth_repository.add_user(records["auth_users"][0])
     collection_repository.add_collection(
@@ -279,8 +284,9 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ),
     )
     for item in records["research_understandings"]:
-        research_understanding_repository.upsert_research_understanding(
+        research_understanding_repository.upsert_objective_understanding(
             collection_id,
+            item["scope"]["objective_id"],
             ResearchUnderstanding.from_mapping(item),
         )
 
@@ -308,11 +314,11 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         EvaluationRun.from_mapping(records["evaluation_runs"][0])
     )
     for item in records["feedback"]:
-        evaluation_repository.upsert_research_understanding_feedback(
+        review_repository.upsert_feedback(
             ResearchUnderstandingFeedback.from_mapping(item)
         )
     for item in records["curations"]:
-        evaluation_repository.upsert_research_understanding_curation(
+        review_repository.upsert_curation(
             ResearchUnderstandingCuration.from_mapping(item)
         )
 
@@ -410,7 +416,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ],
         "research_understandings": [
             item.to_record()
-            for item in research_understanding_repository.list_research_understandings(
+            for item in research_understanding_repository.list_objective_understandings(
                 collection_id
             )
         ],
@@ -432,18 +438,18 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     observed_records["experiment_plans"] = [
         item.to_record()
         for item in experiment_plan_repository.list_plans(
-            collection_id, "goal_strength"
+            collection_id, "objective_strength"
         )
     ]
     observed_records["feedback"] = [
         item.to_record()
-        for item in evaluation_repository.list_research_understanding_feedback(
+        for item in review_repository.list_feedback(
             collection_id
         )
     ]
     observed_records["curations"] = [
         item.to_record()
-        for item in evaluation_repository.list_research_understanding_curations(
+        for item in review_repository.list_curations(
             collection_id
         )
     ]

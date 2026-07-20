@@ -521,29 +521,28 @@ def _local_objective_analysis_payload(
             build_database_engine,
             build_session_factory,
         )
-        from infra.persistence.factory import (  # noqa: PLC0415
-            build_research_understanding_repository,
-        )
         from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
             PostgresObjectiveRepository,
+        )
+        from infra.persistence.postgres.research_understanding_repository import (  # noqa: PLC0415
+            PostgresResearchUnderstandingRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
         try:
-            objective = PostgresObjectiveRepository(
-                build_session_factory(engine)
-            ).read_objective_workspace(collection_id, objective_id)
+            session_factory = build_session_factory(engine)
+            objective = PostgresObjectiveRepository(session_factory).read_objective_workspace(
+                collection_id, objective_id
+            )
+            understanding = PostgresResearchUnderstandingRepository(
+                session_factory
+            ).read_objective_understanding(collection_id, objective_id)
         finally:
             engine.dispose()
         if objective is None:
             raise FileNotFoundError(
                 f"research objective not found: {collection_id}/{objective_id}"
             )
-        understanding = build_research_understanding_repository().read_research_understanding(
-            collection_id,
-            "objective",
-            objective_id,
-        )
         return {
             "collection_id": collection_id,
             "objective": objective.to_workspace_record(),

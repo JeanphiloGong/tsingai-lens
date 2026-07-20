@@ -27,9 +27,6 @@ from domain.source import (
     build_source_document_tree,
 )
 from infra.persistence.memory import MemoryBuildRepository
-from infra.persistence.sqlite import (
-    SqliteResearchUnderstandingRepository,
-)
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import (
     build_blocks,
@@ -39,6 +36,9 @@ from infra.source.runtime.source_evidence import (
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.objective_understanding_repository import (
+    InMemoryObjectiveUnderstandingRepository,
+)
 
 
 class DummyWorkflowOutput:
@@ -207,9 +207,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    research_understanding_repository = SqliteResearchUnderstandingRepository(
-        tmp_path / "lens.sqlite"
-    )
+    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,

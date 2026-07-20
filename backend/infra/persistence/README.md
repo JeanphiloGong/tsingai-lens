@@ -38,26 +38,24 @@ The stable data ownership and identity contract lives in
   build-versioned Source structure, figures, references, document profiles,
   reusable paper facts, research objectives, contexts, paper frames, evidence
   routes, evidence units, logic chains, comparable results, collection
-  comparison assessments, pairwise relations, and Research Objective lifecycle
-  state through SQLAlchemy mappings and direct aggregate repositories.
+  comparison assessments, pairwise relations, Research Objective lifecycle
+  state, Objective Understandings and expert review, Objective-focused
+  sessions/messages, and Objective experiment plans through SQLAlchemy mappings
+  and direct aggregate repositories.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
-  Handwritten repositories share `backend/data/lens.sqlite` for Goal sessions
-  and plans, understandings, and evaluation/review state.
-  These remaining repositories currently create schema at runtime. SQLite
-  Source, paper-fact, objective, and comparison tables are isolated
-  test/legacy residue and are not composed into maintained runtime readers,
-  writers, or supported scripts.
+  Retains the unrelated evaluation gold-set, prediction-snapshot, and run
+  repository. SQLite Source and other structured repositories are isolated
+  test/legacy residue and are not composed into maintained runtime readers or
+  writers.
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
-`factory.py` constructs SQLite repositories only for the remaining Goal session
-and plan, Understanding, and evaluation families. Auth, collection, build, Source,
-paper-fact, objective, and comparison aggregates are composed directly in
-`main.py`; none
-has a repository factory or
-runtime fallback. Source pipeline JSON and Parquet
+`factory.py` constructs the remaining SQLite evaluation repository only. Auth,
+collection, build, Source, paper-fact, objective, comparison, Understanding,
+review, session/message, and experiment-plan aggregates are composed directly
+in `main.py`; none has a repository factory or runtime fallback. Source pipeline JSON and Parquet
 outputs live under `infra/source/` runtime storage and are rebuildable
 intermediates, not a second persistence authority.
 
@@ -69,8 +67,10 @@ services remain caller-owned.
 `postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
 `postgres/models/collection.py`, `postgres/models/document.py`,
 `postgres/models/build.py`, `postgres/models/source.py`,
-`postgres/models/paper_fact.py`, `postgres/models/objective.py`, and
-`postgres/models/comparison.py` own their storage mappings; the matching direct
+`postgres/models/paper_fact.py`, `postgres/models/objective.py`,
+`postgres/models/comparison.py`, `postgres/models/understanding.py`,
+`postgres/models/evaluation.py`, and `postgres/models/objective_workspace.py`
+own their storage mappings; the matching direct
 aggregate repositories own explicit row/domain mapping and short transactions.
 `../../migrations/` owns the version history and is the only PostgreSQL schema
 change path; repositories never create tables.
@@ -125,17 +125,25 @@ only the active successful build. The same repository owns
 `research_objective_lifecycles`, keyed by `(collection_id, objective_id)`, and
 pins each confirmed Objective to its exact immutable source build. Objective
 analysis derives its stages in memory and persists only the final
-objective-scoped Understanding through its current owner. It does not mutate
+objective-scoped Understanding through
+`PostgresResearchUnderstandingRepository`. It does not mutate
 the collection Objective build. No second Goal identity, lifecycle repository,
 SQLite objective path, fallback, or dual path remains.
 
-Alembic revision `20260720_0013` also defines the final Objective-scoped
-Understanding, expert-review, session/message, experiment-plan, and sanitized
-migration-audit tables used by the offline Goal identity importer. In this
-slice those tables are an offline migration target only. Maintained runtime
-services continue to use their existing downstream repositories until the
-direct Objective-scope cutover replaces those callers in the next slice; no
-runtime fallback or dual read is introduced.
+`PostgresResearchUnderstandingRepository` owns final Objective Understandings
+keyed by `(collection_id, objective_id)`. It validates the parent Objective
+lifecycle and replaces each normalized Understanding graph transactionally.
+
+`PostgresResearchUnderstandingReviewRepository` owns feedback and curation for
+Objective Findings. Writes validate the parent Understanding, Finding, and
+optional claim before commit, so cross-Objective review references fail at the
+persistence boundary.
+
+`PostgresObjectiveWorkspaceRepository` owns Objective-focused Goal sessions,
+ordered messages, and experiment plans. Goal session naming describes user
+intent, while `focused_objective_id` is the only persisted research identity.
+Copilot plans may reference only assistant messages from a session focused on
+the same collection and Objective.
 
 `PostgresComparisonRepository` is the single structured owner for comparable
 results, collection-scoped assessments, pairwise relations, and their ordered
@@ -145,11 +153,10 @@ regenerates `ComparisonRowRecord` values from those semantic records for every
 row-facing read. No comparison-row table, SQLite comparison read, fallback, or
 dual write exists.
 
-The former broad Core persistence path and ConfirmedGoal runtime path have been
-deleted. `SqliteResearchUnderstandingRepository` is the direct temporary owner
-for its legacy table, and services receive that narrow repository contract
-explicitly. Its later PostgreSQL cutover replaces the concrete implementation
-directly; there is no aggregate facade, fallback alias, or compatibility path.
+The former broad Core persistence path, ConfirmedGoal runtime path, and SQLite
+Goal-session, experiment-plan, Understanding, and review repositories have been
+deleted. There is no aggregate facade, fallback alias, compatibility path, or
+runtime storage selector.
 
 ## Target Boundary
 

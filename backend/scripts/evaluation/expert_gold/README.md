@@ -442,7 +442,7 @@ blocked accepts still fail and must be corrected, rejected, or left skipped.
 The import writes only explicit human expert decisions. It rejects AI/agent
 reviewer ids and does not promote unreviewed AI suggestions to gold labels.
 Dry-run validation also checks that each reviewed `finding_id` still exists in
-the current goal dataset, that an exported `claim_id` still matches that
+the current Objective dataset, that an exported `claim_id` still matches that
 finding, and that corrected `evidence_ref_id` values belong to that finding, so
 stale or hand-edited rows fail before any label is written.
 Dry-run and import summaries may include `warnings` for accepted or corrected
@@ -470,10 +470,10 @@ When skipped template rows include `review_work_order`, the text output also
 shows the next skipped finding's recommended decision path, whether direct
 accept is allowed, and the checks that should be completed before changing the
 row away from `skip`.
-Successful non-dry-run imports include `affected_goals` with the resulting
+Successful non-dry-run imports include `affected_objectives` with the resulting
 `training_ready`, training-message, protocol-ready, review-candidate, and
-rejected counts so reviewers can immediately see whether the goal is ready for
-training export or protocol drafting. Each affected goal also lists up to 10
+rejected counts so reviewers can immediately see whether the Objective is ready for
+training export or protocol drafting. Each affected Objective also lists up to 10
 `readiness_issues` for training-ready samples that still lack fine-tuning
 messages or protocol inputs.
 Dataset quality summaries also include top diagnostic lists for error
@@ -496,7 +496,7 @@ fine-tuning-compatible message rows with:
 ```
 
 For evaluation, audit, or dataset registry import, use `training-jsonl` to keep
-the same `messages` payload plus `collection_id`, `goal_id`, `finding_id`,
+the same `messages` payload plus `collection_id`, `objective_id`, `finding_id`,
 `claim_id`, reviewer/status fields, variables, outcomes, direction,
 scope summary, and `evidence_ref_ids` metadata:
 

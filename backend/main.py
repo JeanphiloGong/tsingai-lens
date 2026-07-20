@@ -20,7 +20,12 @@ from application.core.semantic_build.research_objective_service import (
 )
 from application.core.workspace_overview_service import WorkspaceService
 from application.goal.brief_service import GoalService
+from application.goal.experiment_plan_service import ExperimentPlanService
 from application.goal.session_service import GoalSessionService
+from application.evaluation import (
+    ResearchUnderstandingFeedbackService,
+    ResearchUnderstandingReviewImportService,
+)
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
@@ -69,14 +74,25 @@ from infra.persistence.postgres.objective_repository import (
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
+from infra.persistence.postgres.objective_workspace_repository import (
+    PostgresObjectiveWorkspaceRepository,
+)
+from infra.persistence.postgres.research_understanding_repository import (
+    PostgresResearchUnderstandingRepository,
+)
+from infra.persistence.postgres.research_understanding_review_repository import (
+    PostgresResearchUnderstandingReviewRepository,
+)
 from domain.ports import (
     ComparisonRepository,
+    ExperimentPlanRepository,
+    GoalSessionRepository,
     ObjectiveRepository,
     PaperFactRepository,
     ResearchUnderstandingRepository,
+    ResearchUnderstandingReviewRepository,
     SourceArtifactRepository,
 )
-from infra.persistence.factory import build_research_understanding_repository
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -114,6 +130,11 @@ def create_app(
     objective_repository: ObjectiveRepository | None = None,
     comparison_repository: ComparisonRepository | None = None,
     research_understanding_repository: ResearchUnderstandingRepository | None = None,
+    research_understanding_review_repository: (
+        ResearchUnderstandingReviewRepository | None
+    ) = None,
+    goal_session_repository: GoalSessionRepository | None = None,
+    experiment_plan_repository: ExperimentPlanRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -128,6 +149,10 @@ def create_app(
                 or paper_fact_repository is None
                 or objective_repository is None
                 or comparison_repository is None
+                or research_understanding_repository is None
+                or research_understanding_review_repository is None
+                or goal_session_repository is None
+                or experiment_plan_repository is None
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -160,7 +185,22 @@ def create_app(
             )
             active_research_understanding_repository = (
                 research_understanding_repository
-                or build_research_understanding_repository()
+                or PostgresResearchUnderstandingRepository(session_factory)
+            )
+            active_review_repository = (
+                research_understanding_review_repository
+                or PostgresResearchUnderstandingReviewRepository(session_factory)
+            )
+            default_workspace_repository = None
+            if goal_session_repository is None or experiment_plan_repository is None:
+                default_workspace_repository = PostgresObjectiveWorkspaceRepository(
+                    session_factory
+                )
+            active_goal_session_repository = (
+                goal_session_repository or default_workspace_repository
+            )
+            active_experiment_plan_repository = (
+                experiment_plan_repository or default_workspace_repository
             )
             artifact_registry_service = ArtifactRegistryService(
                 active_task_service.repository,
@@ -191,6 +231,15 @@ def create_app(
             research_understanding_service = ResearchUnderstandingService(
                 source_artifact_repository=active_source_artifact_repository,
             )
+            research_understanding_feedback_service = (
+                ResearchUnderstandingFeedbackService(
+                    review_repository=active_review_repository,
+                    research_understanding_repository=(
+                        active_research_understanding_repository
+                    ),
+                    research_understanding_service=research_understanding_service,
+                )
+            )
             research_objective_service = ResearchObjectiveService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
@@ -216,9 +265,6 @@ def create_app(
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
                 objective_repository=active_objective_repository,
-                research_understanding_repository=(
-                    active_research_understanding_repository
-                ),
                 comparison_service=comparison_service,
                 research_understanding_service=research_understanding_service,
             )
@@ -229,6 +275,17 @@ def create_app(
             application.state.comparison_repository = active_comparison_repository
             application.state.research_understanding_repository = (
                 active_research_understanding_repository
+            )
+            application.state.research_understanding_review_repository = (
+                active_review_repository
+            )
+            application.state.research_understanding_feedback_service = (
+                research_understanding_feedback_service
+            )
+            application.state.research_understanding_review_import_service = (
+                ResearchUnderstandingReviewImportService(
+                    research_understanding_feedback_service
+                )
             )
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
@@ -262,6 +319,17 @@ def create_app(
                 comparison_service=comparison_service,
                 paper_facts_service=paper_facts_service,
                 research_objective_service=research_objective_service,
+                research_understanding_feedback_service=(
+                    research_understanding_feedback_service
+                ),
+                goal_session_repository=active_goal_session_repository,
+            )
+            application.state.experiment_plan_service = ExperimentPlanService(
+                repository=active_experiment_plan_repository,
+                goal_session_repository=active_goal_session_repository,
+                research_understanding_feedback_service=(
+                    research_understanding_feedback_service
+                ),
             )
             application.state.objective_analysis_service = ObjectiveAnalysisService(
                 objective_repository=active_objective_repository,

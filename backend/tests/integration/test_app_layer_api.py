@@ -27,7 +27,6 @@ from domain.source import (
     SourceReferenceSet,
     build_source_document_tree,
 )
-from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import (
@@ -38,6 +37,13 @@ from infra.source.runtime.source_evidence import (
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.objective_understanding_repository import (
+    InMemoryObjectiveUnderstandingRepository,
+)
+from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
+from tests.support.objective_workspace_repository import (
+    InMemoryObjectiveWorkspaceRepository,
+)
 
 try:
     from fastapi.testclient import TestClient
@@ -705,6 +711,11 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
+    monkeypatch.setattr(
+        "main.ResearchUnderstandingService",
+        lambda **_kwargs: SimpleNamespace(with_presentation=lambda value: value),
+    )
+    monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
 
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
@@ -712,9 +723,9 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    research_understanding_repository = SqliteResearchUnderstandingRepository(
-        tmp_path / "lens.sqlite"
-    )
+    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
+    research_understanding_review_repository = InMemoryObjectiveReviewRepository()
+    objective_workspace_repository = InMemoryObjectiveWorkspaceRepository()
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
@@ -733,6 +744,11 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             objective_repository=objective_repository,
             comparison_repository=comparison_repository,
             research_understanding_repository=research_understanding_repository,
+            research_understanding_review_repository=(
+                research_understanding_review_repository
+            ),
+            goal_session_repository=objective_workspace_repository,
+            experiment_plan_repository=objective_workspace_repository,
         )
     ) as client:
         login_response = client.post(
@@ -743,12 +759,12 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         yield client
 
 
-def test_goal_experiment_plan_routes_are_registered(app_client):
+def test_objective_experiment_plan_routes_are_registered(app_client):
     openapi = app_client.get("/api/openapi.json")
     assert openapi.status_code == 200
     paths = openapi.json()["paths"]
     plan_list_path = (
-        f"{API_V1_PREFIX}/collections/{{collection_id}}/goals/{{goal_id}}/"
+        f"{API_V1_PREFIX}/collections/{{collection_id}}/objectives/{{objective_id}}/"
         "experiment-plans"
     )
     plan_detail_path = f"{plan_list_path}/{{plan_id}}"

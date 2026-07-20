@@ -1,124 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from typing import Any
 
 from fastapi.testclient import TestClient
 import pytest
 
-from application.evaluation import ResearchUnderstandingFeedbackService
 from domain.core import ResearchUnderstanding
-from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
-
-
-@dataclass
-class RecordingResearchUnderstandingFeedbackService:
-    feedback_calls: list[dict[str, Any]] = field(default_factory=list)
-    curation_calls: list[dict[str, Any]] = field(default_factory=list)
-
-    def record_feedback(self, **kwargs):  # noqa: ANN003
-        self.feedback_calls.append(kwargs)
-        return ResearchUnderstandingFeedback.from_mapping(
-            {
-                "feedback_id": f"ruf-{len(self.feedback_calls)}",
-                "collection_id": kwargs["collection_id"],
-                "scope_type": kwargs["scope_type"],
-                "scope_id": kwargs["scope_id"],
-                "finding_id": kwargs["finding_id"],
-                "claim_id": kwargs["claim_id"],
-                "review_status": kwargs["review_status"],
-                "issue_type": kwargs["issue_type"],
-                "note": kwargs["note"],
-                "reviewer": kwargs["reviewer"],
-                "created_at": "2026-07-11T00:00:00+00:00",
-            }
-        )
-
-    def record_curation(self, **kwargs):  # noqa: ANN003
-        self.curation_calls.append(kwargs)
-        return ResearchUnderstandingCuration.from_mapping(
-            {
-                "curation_id": f"ruc-{len(self.curation_calls)}",
-                "collection_id": kwargs["collection_id"],
-                "scope_type": kwargs["scope_type"],
-                "scope_id": kwargs["scope_id"],
-                "finding_id": kwargs["finding_id"],
-                "claim_id": kwargs["claim_id"],
-                "curated_claim_type": kwargs["curated_claim_type"],
-                "curated_status": kwargs["curated_status"],
-                "curated_statement": kwargs["curated_statement"],
-                "curated_support_grade": kwargs["curated_support_grade"],
-                "curated_review_status": kwargs["curated_review_status"],
-                "curated_variables": kwargs["curated_variables"],
-                "curated_mediators": kwargs["curated_mediators"],
-                "curated_outcomes": kwargs["curated_outcomes"],
-                "curated_direction": kwargs["curated_direction"],
-                "curated_scope_summary": kwargs["curated_scope_summary"],
-                "curated_evidence_ref_ids": kwargs["curated_evidence_ref_ids"],
-                "curated_context_ids": kwargs["curated_context_ids"],
-                "note": kwargs["note"],
-                "reviewer": kwargs["reviewer"],
-                "updated_at": "2026-07-11T00:00:00+00:00",
-            }
-        )
-
-
-class PersistingEvaluationRepository:
-    backend_name = "fake"
-
-    def __init__(self) -> None:
-        self.feedback: list[ResearchUnderstandingFeedback] = []
-        self.curations: list[ResearchUnderstandingCuration] = []
-
-    def upsert_research_understanding_feedback(self, feedback):
-        self.feedback.append(feedback)
-        return feedback
-
-    def upsert_research_understanding_curation(self, curation):
-        self.curations = [
-            existing
-            for existing in self.curations
-            if existing.curation_id != curation.curation_id
-        ]
-        self.curations.append(curation)
-        return curation
-
-    def list_research_understanding_feedback(
-        self,
-        collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
-        finding_id: str | None = None,
-        claim_id: str | None = None,
-    ):
-        return tuple(
-            item
-            for item in self.feedback
-            if item.collection_id == collection_id
-            and (scope_type is None or item.scope_type == scope_type)
-            and (scope_id is None or item.scope_id == scope_id)
-            and (finding_id is None or item.finding_id == finding_id)
-            and (claim_id is None or item.claim_id == claim_id)
-        )
-
-    def list_research_understanding_curations(
-        self,
-        collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
-        finding_id: str | None = None,
-        claim_id: str | None = None,
-    ):
-        return tuple(
-            item
-            for item in self.curations
-            if item.collection_id == collection_id
-            and (scope_type is None or item.scope_type == scope_type)
-            and (scope_id is None or item.scope_id == scope_id)
-            and (finding_id is None or item.finding_id == finding_id)
-            and (claim_id is None or item.claim_id == claim_id)
-        )
 
 
 class StaticResearchUnderstandingRepository:
@@ -127,21 +14,17 @@ class StaticResearchUnderstandingRepository:
     def __init__(self, understanding: ResearchUnderstanding) -> None:
         self.understanding = understanding
 
-    def read_research_understanding(
+    def read_objective_understanding(
         self,
         collection_id: str,  # noqa: ARG002
-        scope_type: str,  # noqa: ARG002
-        scope_id: str,  # noqa: ARG002
+        objective_id: str,  # noqa: ARG002
     ):
         return self.understanding
 
-    def list_research_understandings(
+    def list_objective_understandings(
         self,
         collection_id: str,  # noqa: ARG002
-        scope_type: str | None = None,
     ):
-        if scope_type and self.understanding.scope.scope_type != scope_type:
-            return ()
         return (self.understanding,)
 
 
@@ -155,7 +38,7 @@ def feedback_client(
     monkeypatch,
     tmp_path,
     auth_session_service,
-) -> Iterator[tuple[TestClient, RecordingResearchUnderstandingFeedbackService]]:
+) -> Iterator[tuple[TestClient, object]]:
     from application.source.task_service import TaskService
     from infra.persistence.memory import MemoryBuildRepository
 
@@ -163,22 +46,29 @@ def feedback_client(
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
+    monkeypatch.setattr(
+        "main.ResearchUnderstandingService",
+        lambda **_kwargs: PassthroughResearchUnderstandingService(),
+    )
+    monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
     monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
 
     from tests.support.collection_service import build_test_collection_service
+    from tests.support.comparison_repository import MemoryComparisonRepository
     from tests.support.objective_repository import MemoryObjectiveRepository
+    from tests.support.objective_review_repository import (
+        InMemoryObjectiveReviewRepository,
+    )
+    from tests.support.objective_workspace_repository import (
+        InMemoryObjectiveWorkspaceRepository,
+    )
     from tests.support.paper_fact_repository import MemoryPaperFactRepository
     from tests.support.source_artifact_repository import MemorySourceArtifactRepository
-    from controllers.core import research_understanding_feedback
     from main import create_app
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    feedback_service = RecordingResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        research_understanding_feedback,
-        "feedback_service",
-        feedback_service,
-    )
+    review_repository = InMemoryObjectiveReviewRepository()
+    workspace_repository = InMemoryObjectiveWorkspaceRepository()
     with TestClient(
         create_app(
             auth_session_service=auth_session_service,
@@ -187,57 +77,24 @@ def feedback_client(
             source_artifact_repository=MemorySourceArtifactRepository(),
             paper_fact_repository=MemoryPaperFactRepository(),
             objective_repository=MemoryObjectiveRepository(),
+            comparison_repository=MemoryComparisonRepository(),
+            research_understanding_repository=StaticResearchUnderstandingRepository(
+                _sample_understanding()
+            ),
+            research_understanding_review_repository=review_repository,
+            goal_session_repository=workspace_repository,
+            experiment_plan_repository=workspace_repository,
         )
     ) as client:
-        yield client, feedback_service
+        yield client, review_repository
 
 
 @pytest.fixture()
 def real_feedback_client(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
+    feedback_client,
 ) -> Iterator[TestClient]:
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryBuildRepository
-
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
-    monkeypatch.setattr("config.DATA_DIR", tmp_path)
-    monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.factory.DATA_DIR", tmp_path)
-
-    from tests.support.collection_service import build_test_collection_service
-    from tests.support.objective_repository import MemoryObjectiveRepository
-    from tests.support.paper_fact_repository import MemoryPaperFactRepository
-    from tests.support.source_artifact_repository import MemorySourceArtifactRepository
-    from controllers.core import research_understanding_feedback
-    from main import create_app
-
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    feedback_service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=PersistingEvaluationRepository(),
-        research_understanding_repository=StaticResearchUnderstandingRepository(
-            _sample_understanding()
-        ),
-        research_understanding_service=PassthroughResearchUnderstandingService(),
-    )
-    monkeypatch.setattr(
-        research_understanding_feedback,
-        "feedback_service",
-        feedback_service,
-    )
-    with TestClient(
-        create_app(
-            auth_session_service=auth_session_service,
-            collection_service=collection_service,
-            task_service=TaskService(MemoryBuildRepository()),
-            source_artifact_repository=MemorySourceArtifactRepository(),
-            paper_fact_repository=MemoryPaperFactRepository(),
-            objective_repository=MemoryObjectiveRepository(),
-        )
-    ) as client:
-        yield client
+    client, _review_repository = feedback_client
+    yield client
 
 
 def _login(client: TestClient) -> None:
@@ -259,9 +116,9 @@ def _sample_understanding() -> ResearchUnderstanding:
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-test",
-                "goal_id": "goal-1",
+                "objective_id": "obj-1",
                 "title": "How does preheating affect ductility?",
             },
             "claims": [
@@ -366,15 +223,14 @@ def _sample_understanding() -> ResearchUnderstanding:
 def test_feedback_route_uses_authenticated_user_not_spoofed_reviewer(
     feedback_client,
 ):
-    client, feedback_service = feedback_client
+    client, review_repository = feedback_client
     _login(client)
     collection_id = _create_collection(client)
 
     response = client.post(
         f"/api/v1/collections/{collection_id}/research-understanding/feedback",
         json={
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "obj-1",
             "finding_id": "finding-1",
             "claim_id": "claim-1",
             "review_status": "correct",
@@ -386,21 +242,20 @@ def test_feedback_route_uses_authenticated_user_not_spoofed_reviewer(
 
     assert response.status_code == 200
     assert response.json()["reviewer"] == "admin@example.com"
-    assert feedback_service.feedback_calls[-1]["reviewer"] == "admin@example.com"
+    assert tuple(review_repository.feedback.values())[-1].reviewer == "admin@example.com"
 
 
 def test_curation_route_uses_authenticated_user_not_spoofed_reviewer(
     feedback_client,
 ):
-    client, feedback_service = feedback_client
+    client, review_repository = feedback_client
     _login(client)
     collection_id = _create_collection(client)
 
     response = client.post(
         f"/api/v1/collections/{collection_id}/research-understanding/curations",
         json={
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "obj-1",
             "finding_id": "finding-1",
             "claim_id": "claim-1",
             "curated_claim_type": "finding",
@@ -418,21 +273,20 @@ def test_curation_route_uses_authenticated_user_not_spoofed_reviewer(
 
     assert response.status_code == 200
     assert response.json()["reviewer"] == "admin@example.com"
-    assert feedback_service.curation_calls[-1]["reviewer"] == "admin@example.com"
+    assert tuple(review_repository.curations.values())[-1].reviewer == "admin@example.com"
 
 
 def test_feedback_route_preserves_agent_reviewer(
     feedback_client,
 ):
-    client, feedback_service = feedback_client
+    client, review_repository = feedback_client
     _login(client)
     collection_id = _create_collection(client)
 
     response = client.post(
         f"/api/v1/collections/{collection_id}/research-understanding/feedback",
         json={
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "obj-1",
             "finding_id": "finding-1",
             "claim_id": "claim-1",
             "review_status": "partial",
@@ -445,7 +299,7 @@ def test_feedback_route_preserves_agent_reviewer(
     assert response.status_code == 200
     assert response.json()["reviewer"] == "ai-reviewer-codex-evidence-audit"
     assert (
-        feedback_service.feedback_calls[-1]["reviewer"]
+        tuple(review_repository.feedback.values())[-1].reviewer
         == "ai-reviewer-codex-evidence-audit"
     )
 
@@ -453,13 +307,12 @@ def test_feedback_route_preserves_agent_reviewer(
 def test_feedback_route_requires_login_before_writing(
     feedback_client,
 ):
-    client, feedback_service = feedback_client
+    client, review_repository = feedback_client
 
     response = client.post(
         "/api/v1/collections/col-missing/research-understanding/feedback",
         json={
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "obj-1",
             "finding_id": "finding-1",
             "review_status": "correct",
             "issue_type": "none",
@@ -469,7 +322,7 @@ def test_feedback_route_requires_login_before_writing(
 
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "authentication_required"
-    assert feedback_service.feedback_calls == []
+    assert review_repository.feedback == {}
 
 
 def test_human_curation_route_makes_dataset_sample_training_ready(
@@ -482,8 +335,7 @@ def test_human_curation_route_makes_dataset_sample_training_ready(
     curation = client.post(
         f"/api/v1/collections/{collection_id}/research-understanding/curations",
         json={
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "obj-1",
             "finding_id": "finding-1",
             "claim_id": "claim-1",
             "curated_claim_type": "finding",
@@ -508,7 +360,7 @@ def test_human_curation_route_makes_dataset_sample_training_ready(
     dataset = client.get(
         (
             f"/api/v1/collections/{collection_id}/research-understanding/dataset"
-            "?scope_type=goal&scope_id=goal-1"
+            "?objective_id=obj-1"
         )
     )
 
@@ -530,14 +382,13 @@ def test_human_curation_route_makes_dataset_sample_training_ready(
     collection_dataset = client.get(
         (
             f"/api/v1/collections/{collection_id}"
-            "/research-understanding/dataset/collection?scope_type=goal"
+            "/research-understanding/dataset/collection"
         )
     )
 
     assert collection_dataset.status_code == 200
     collection_payload = collection_dataset.json()
-    assert collection_payload["scope_type"] == "collection"
-    assert collection_payload["scope_id"] == "goal"
+    assert collection_payload["objective_id"] is None
     assert collection_payload["quality_summary"]["training_ready_sample_count"] == 1
     assert (
         collection_payload["quality_summary"]["by_dataset_use_status"][

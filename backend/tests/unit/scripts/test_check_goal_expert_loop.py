@@ -50,7 +50,7 @@ def _dataset_payload(status: str = "pass"):
         "status": status,
         "goals": [
             {
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "item_count": 1,
                 "training_ready_count": 1,
                 "training_message_ready_count": 1,
@@ -63,7 +63,7 @@ def _dataset_payload(status: str = "pass"):
                 "by_review_candidate_warning": {},
             },
             {
-                "goal_id": "goal-2",
+                "objective_id": "objective-2",
                 "item_count": 2,
                 "training_ready_count": 0,
                 "training_message_ready_count": 0,
@@ -134,7 +134,6 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
     )
 
@@ -143,7 +142,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     assert summary["layers"]["expert_review"]["status"] == "pass"
     assert summary["layers"]["dataset_accumulation"]["training_ready_goal_count"] == 1
     assert summary["layers"]["dataset_accumulation"]["protocol_ready_goal_count"] == 1
-    assert summary["layers"]["experiment_design"]["eligible_goal_ids"] == ["goal-1"]
+    assert summary["layers"]["experiment_design"]["eligible_objective_ids"] == ["objective-1"]
     assert summary["layers"]["experiment_design"]["runtime_contract"]["status"] == (
         "not_checked"
     )
@@ -196,23 +195,23 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     }
     assert summary["remaining_work"] == {
         "review_candidate_count": 2,
-        "goals_without_training_ready": ["goal-2"],
-        "goals_without_training_messages": ["goal-2"],
-        "goals_without_protocol_ready": ["goal-2"],
+        "goals_without_training_ready": ["objective-2"],
+        "goals_without_training_messages": ["objective-2"],
+        "goals_without_protocol_ready": ["objective-2"],
         "protocol_ready_goals": [
             {
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "question": "How does preheating affect ductility?",
                 "training_ready_count": 1,
                 "training_message_ready_count": 1,
                 "protocol_ready_count": 1,
-                "assistant_url": "/collections/col-1/assistant?goal_id=goal-1",
-                "training_ready_url": "/collections/col-1/goals/goal-1?review=training_ready",
+                "assistant_url": "/collections/col-1/assistant?objective_id=objective-1",
+                "training_ready_url": "/collections/col-1/objectives/objective-1?review=training_ready",
             }
         ],
         "pending_goals": [
             {
-                "goal_id": "goal-2",
+                "objective_id": "objective-2",
                 "question": "How does porosity affect corrosion?",
                 "review_candidate_count": 2,
                 "training_ready_count": 0,
@@ -223,7 +222,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
                     "code": "verify_table_rows",
                     "label": "verify parsed table rows before accepting or correcting",
                 },
-                "href": "/collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1",
+                "href": "/collections/col-1/objectives/objective-2?review=queue&finding_id=finding-review-1",
                 "next_review_finding_id": "finding-review-1",
             }
         ],
@@ -259,7 +258,6 @@ def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeyp
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
@@ -292,7 +290,6 @@ def test_check_goal_expert_loop_expert_gate_fails_on_remaining_work(monkeypatch)
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         expert_satisfaction_gate=True,
     )
@@ -340,7 +337,6 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
@@ -350,7 +346,7 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "review candidates: 2" in text
     assert "How does porosity affect corrosion?" in text
     assert (
-        "open: /collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1"
+        "open: /collections/col-1/objectives/objective-2?review=queue&finding_id=finding-review-1"
         in text
     )
     assert (
@@ -385,12 +381,12 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     assert "- Experiment design usable: blocked" in text
     assert "Protocol-ready goals:" in text
     assert "How does preheating affect ductility?" in text
-    assert "ai chat: /collections/col-1/assistant?goal_id=goal-1" in text
-    assert "review inputs: /collections/col-1/goals/goal-1?review=training_ready" in text
+    assert "ai chat: /collections/col-1/assistant?objective_id=objective-1" in text
+    assert "review inputs: /collections/col-1/objectives/objective-1?review=training_ready" in text
     assert "Next commands:" in text
     assert (
         "Browser: open the goal review page at "
-        "/collections/col-1/goals/goal-2?review=queue&finding_id=finding-review-1"
+        "/collections/col-1/objectives/objective-2?review=queue&finding_id=finding-review-1"
         in text
     )
     assert (
@@ -459,14 +455,13 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
 
     assert summary["remaining_work"]["pending_goals"] == [
         {
-            "goal_id": "goal-2",
+            "objective_id": "objective-2",
             "question": "How does porosity affect corrosion?",
             "review_candidate_count": 0,
             "training_ready_count": 1,
@@ -474,7 +469,7 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
             "protocol_ready_count": 0,
             "next_action": "inspect_training_messages",
             "next_review_action": {},
-            "href": "/collections/col-1/goals/goal-2?review=training_ready",
+            "href": "/collections/col-1/objectives/objective-2?review=training_ready",
             "next_review_finding_id": "",
         }
     ]
@@ -508,7 +503,6 @@ def test_check_goal_expert_loop_require_complete_passes_when_no_work_remains(mon
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
@@ -542,7 +536,6 @@ def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypa
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         require_all_training_ready=True,
     )
@@ -578,7 +571,6 @@ def test_check_goal_expert_loop_points_protocol_gaps_to_training_samples(monkeyp
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
@@ -588,7 +580,7 @@ def test_check_goal_expert_loop_points_protocol_gaps_to_training_samples(monkeyp
     assert summary["completion_status"] == "incomplete"
     assert summary["remaining_work"]["pending_goals"] == [
         {
-            "goal_id": "goal-2",
+            "objective_id": "objective-2",
             "question": "How does porosity affect corrosion?",
             "review_candidate_count": 0,
             "training_ready_count": 1,
@@ -596,7 +588,7 @@ def test_check_goal_expert_loop_points_protocol_gaps_to_training_samples(monkeyp
             "protocol_ready_count": 0,
             "next_action": "inspect_protocol_inputs",
             "next_review_action": {},
-            "href": "/collections/col-1/goals/goal-2?review=training_ready",
+            "href": "/collections/col-1/objectives/objective-2?review=training_ready",
             "next_review_finding_id": "",
         }
     ]
@@ -630,7 +622,6 @@ def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
     )
 
@@ -667,7 +658,7 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
         check,
         "_fetch_openapi_paths",
         lambda _base_url, **_: {
-            "/api/v1/collections/{collection_id}/goals/{goal_id}/analysis": {
+            "/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis": {
                 "get": {}
             }
         },
@@ -680,7 +671,6 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         require_complete=True,
@@ -704,15 +694,15 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
     assert "missing route: POST /api/v1/goal-sessions" in text
     assert "missing route: POST /api/v1/goal-sessions/{session_id}/messages" in text
     assert (
-        "missing route: GET /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+        "missing route: GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans"
         in text
     )
     assert (
-        "missing route: POST /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+        "missing route: POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans"
         in text
     )
     assert (
-        "missing route: PATCH /api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans/{plan_id}"
+        "missing route: PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}"
         in text
     )
 
@@ -749,7 +739,6 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         require_complete=True,
@@ -839,11 +828,11 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
                 headers={"Set-Cookie": "lens_session=session-1; Path=/"},
             )
         if request.get_method() == "POST" and request.full_url.endswith(
-            "/api/v1/collections/col-1/goals/goal-1/experiment-plans"
+            "/api/v1/collections/col-1/objectives/objective-1/experiment-plans"
         ):
             return FakeResponse({"plan_id": "exp_smoke"})
         if request.get_method() == "PATCH" and request.full_url.endswith(
-            "/api/v1/collections/col-1/goals/goal-1/experiment-plans/exp_smoke"
+            "/api/v1/collections/col-1/objectives/objective-1/experiment-plans/exp_smoke"
         ):
             return FakeResponse({"plan_id": "exp_smoke", "status": "archived"})
         raise AssertionError(request.full_url)
@@ -854,7 +843,6 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         runtime_write_check=True,
@@ -869,7 +857,7 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
     assert runtime_contract["runtime_write_check"] is True
     assert runtime_contract["checks"][-1] == {
         "name": "write smoke experiment plan",
-        "path": "/api/v1/collections/col-1/goals/goal-1/experiment-plans",
+        "path": "/api/v1/collections/col-1/objectives/objective-1/experiment-plans",
         "method": "post/patch",
         "status": "pass",
         "detail": "created and archived smoke plan",
@@ -882,7 +870,7 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
             "",
         ),
         (
-            "http://localhost:5173/api/v1/collections/col-1/goals/goal-1/experiment-plans",
+            "http://localhost:5173/api/v1/collections/col-1/objectives/objective-1/experiment-plans",
             "POST",
             {
                 "title": "Lens runtime smoke protocol",
@@ -893,7 +881,7 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
             "lens_session=session-1",
         ),
         (
-            "http://localhost:5173/api/v1/collections/col-1/goals/goal-1/experiment-plans/exp_smoke",
+            "http://localhost:5173/api/v1/collections/col-1/objectives/objective-1/experiment-plans/exp_smoke",
             "PATCH",
             {
                 "title": "Lens runtime smoke protocol",
@@ -940,8 +928,8 @@ def test_check_goal_expert_loop_runtime_write_uses_protocol_ready_goal(monkeypat
             {
                 "name": "write smoke experiment plan",
                 "path": (
-                    f"/api/v1/collections/{kwargs['collection_id']}/goals/"
-                    f"{kwargs['goal_id']}/experiment-plans"
+                    f"/api/v1/collections/{kwargs['collection_id']}/objectives/"
+                    f"{kwargs['objective_id']}/experiment-plans"
                 ),
                 "method": "post/patch",
                 "status": "pass",
@@ -953,7 +941,6 @@ def test_check_goal_expert_loop_runtime_write_uses_protocol_ready_goal(monkeypat
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         runtime_write_check=True,
@@ -963,13 +950,13 @@ def test_check_goal_expert_loop_runtime_write_uses_protocol_ready_goal(monkeypat
     assert write_kwargs == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-2",
+            "objective_id": "objective-2",
             "cookie": "",
         }
     ]
-    assert runtime_contract["goal_id"] == "goal-2"
+    assert runtime_contract["objective_id"] == "objective-2"
     assert runtime_contract["checks"][-1]["path"] == (
-        "/api/v1/collections/col-1/goals/goal-2/experiment-plans"
+        "/api/v1/collections/col-1/objectives/objective-2/experiment-plans"
     )
 
 
@@ -1009,7 +996,7 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
         return [
             {
                 "name": "write smoke experiment plan",
-                "path": "/api/v1/collections/col-1/goals/goal-1/experiment-plans",
+                "path": "/api/v1/collections/col-1/objectives/objective-1/experiment-plans",
                 "method": "post/patch",
                 "status": "pass",
                 "detail": "created and archived smoke plan",
@@ -1020,7 +1007,6 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
 
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
-        goal_ids=("goal-1", "goal-2"),
         objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         expert_satisfaction_gate=True,
@@ -1091,7 +1077,7 @@ def test_check_goal_expert_loop_runtime_write_check_skips_when_routes_are_missin
         check,
         "_fetch_openapi_paths",
         lambda _base_url, **_: {
-            "/api/v1/collections/{collection_id}/goals/{goal_id}/analysis": {
+            "/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis": {
                 "get": {}
             }
         },
@@ -1100,14 +1086,14 @@ def test_check_goal_expert_loop_runtime_write_check_skips_when_routes_are_missin
     runtime_contract = check._runtime_contract_layer(
         "http://localhost:5173",
         collection_id="col-1",
-        goal_id="goal-1",
+        objective_id="objective-1",
         runtime_write_check=True,
     )
 
     assert runtime_contract["status"] == "fail"
     assert runtime_contract["checks"][-1] == {
         "name": "write smoke experiment plan",
-        "path": "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans",
+        "path": "/api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans",
         "method": "post/patch",
         "status": "skipped",
         "detail": "runtime route checks failed; smoke write was not attempted",
@@ -1150,12 +1136,12 @@ def test_check_goal_expert_loop_runtime_write_check_reports_write_failure(
     runtime_contract = check._runtime_contract_layer(
         "http://localhost:5173",
         collection_id="col-1",
-        goal_id="goal-1",
+        objective_id="objective-1",
         runtime_write_check=True,
     )
 
     assert runtime_contract["status"] == "fail"
     assert runtime_contract["checks"][-1]["status"] == "fail"
-    assert "POST /api/v1/collections/col-1/goals/goal-1/experiment-plans failed" in (
+    assert "POST /api/v1/collections/col-1/objectives/objective-1/experiment-plans failed" in (
         runtime_contract["checks"][-1]["detail"]
     )

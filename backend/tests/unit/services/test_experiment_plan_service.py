@@ -4,9 +4,8 @@ import pytest
 
 from application.goal.experiment_plan_service import ExperimentPlanService
 from domain.goal import ExperimentPlanRecord
-from infra.persistence.sqlite import (
-    SqliteExperimentPlanRepository,
-    SqliteGoalSessionRepository,
+from tests.support.objective_workspace_repository import (
+    InMemoryObjectiveWorkspaceRepository,
 )
 
 
@@ -64,18 +63,37 @@ class _ResearchUnderstandingFeedbackService:
     def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "items": self.items,
         }
 
 
+def _experiment_plan_service(
+    *,
+    repository: InMemoryObjectiveWorkspaceRepository,
+    goal_session_repository: InMemoryObjectiveWorkspaceRepository | None = None,
+    research_understanding_feedback_service: (
+        _ResearchUnderstandingFeedbackService | None
+    ) = None,
+) -> ExperimentPlanService:
+    return ExperimentPlanService(
+        repository=repository,
+        goal_session_repository=(
+            goal_session_repository or InMemoryObjectiveWorkspaceRepository()
+        ),
+        research_understanding_feedback_service=(
+            research_understanding_feedback_service
+            or _ResearchUnderstandingFeedbackService()
+        ),
+    )
+
+
 def _write_goal_message(
-    repository: SqliteGoalSessionRepository,
+    repository: InMemoryObjectiveWorkspaceRepository,
     *,
     user_id: str = "expert-a",
     collection_id: str = "col_1",
-    goal_id: str = "goal_1",
+    objective_id: str = "objective_1",
     message_id: str = "msg_1",
     source_mode: str = "collection_grounded",
     warnings: list[str] | None = None,
@@ -92,8 +110,7 @@ def _write_goal_message(
             "collection_id": collection_id,
             "focused_material_id": None,
             "focused_paper_id": None,
-            "focused_objective_id": None,
-            "focused_goal_id": goal_id,
+            "focused_objective_id": objective_id,
             "goal_text": None,
             "goal_brief_json": {},
             "answer_mode": "hybrid",
@@ -142,15 +159,15 @@ def _write_goal_message(
     )
 
 
-def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+def test_experiment_plan_service_saves_and_lists_objective_scoped_drafts(tmp_path):
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -159,7 +176,7 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
 
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Preheating validation matrix",
         content=_structured_protocol(),
         source_message_id="msg_1",
@@ -173,12 +190,12 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
         ],
         metadata={"source": "client-supplied", "model": "fake-model"},
     )
-    plans = service.list_plans("col_1", "goal_1")
+    plans = service.list_plans("col_1", "objective_1")
 
     assert draft.plan_id.startswith("exp_")
     assert draft.status == "draft"
     assert draft.collection_id == "col_1"
-    assert draft.goal_id == "goal_1"
+    assert draft.objective_id == "objective_1"
     assert draft.title == "Preheating validation matrix"
     assert draft.source_message_id == "msg_1"
     assert draft.created_by == "expert-a"
@@ -205,21 +222,21 @@ def test_experiment_plan_service_saves_and_lists_goal_scoped_drafts(tmp_path):
 def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
     tmp_path,
 ):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
     feedback_service = _ResearchUnderstandingFeedbackService()
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=feedback_service,
     )
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Preheating validation matrix",
         content=_structured_protocol(),
         source_message_id="msg_1",
@@ -231,7 +248,7 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
             protocol_source_fingerprint="protocol-source.v1:changed"
         )
     ]
-    stale = service.list_plans("col_1", "goal_1")[0]
+    stale = service.list_plans("col_1", "objective_1")[0]
 
     assert stale.plan_id == draft.plan_id
     assert stale.metadata["source_validity"] == "stale"
@@ -242,7 +259,7 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
             protocol_status="ready_after_review",
         )
     ]
-    no_longer_ready = service.list_plans("col_1", "goal_1")[0]
+    no_longer_ready = service.list_plans("col_1", "objective_1")[0]
     assert no_longer_ready.metadata["source_validity"] == "stale"
     assert no_longer_ready.metadata["source_validity_reasons"] == [
         "source_finding_no_longer_protocol_ready"
@@ -250,7 +267,7 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
     with pytest.raises(ValueError, match="source Findings are stale or unverified"):
         service.update_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             plan_id=draft.plan_id,
             title=draft.title,
             content=draft.content,
@@ -261,13 +278,13 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
 def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
     tmp_path,
 ):
-    repository = SqliteExperimentPlanRepository(tmp_path / "lens.sqlite")
+    repository = InMemoryObjectiveWorkspaceRepository()
     existing = repository.upsert_plan(
         ExperimentPlanRecord.from_mapping(
             {
                 "plan_id": "exp_inconsistent_ved",
                 "collection_id": "col_1",
-                "goal_id": "goal_1",
+                "objective_id": "objective_1",
                 "title": "Existing VED protocol",
                 "content": _ved_protocol(operational=False),
                 "status": "draft",
@@ -301,14 +318,14 @@ def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
             }
         )
     )
-    service = ExperimentPlanService(
+    service = _experiment_plan_service(
         repository=repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
         ),
     )
 
-    listed = service.list_plans("col_1", "goal_1")[0]
+    listed = service.list_plans("col_1", "objective_1")[0]
 
     assert listed.plan_id == existing.plan_id
     assert listed.metadata["source_validity"] == "stale"
@@ -320,13 +337,13 @@ def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
 def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified(
     tmp_path,
 ):
-    repository = SqliteExperimentPlanRepository(tmp_path / "lens.sqlite")
+    repository = InMemoryObjectiveWorkspaceRepository()
     legacy = repository.upsert_plan(
         ExperimentPlanRecord.from_mapping(
             {
                 "plan_id": "exp_legacy",
                 "collection_id": "col_1",
-                "goal_id": "goal_1",
+                "objective_id": "objective_1",
                 "title": "Legacy protocol",
                 "content": _structured_protocol(),
                 "status": "draft",
@@ -352,14 +369,14 @@ def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified
             }
         )
     )
-    service = ExperimentPlanService(
+    service = _experiment_plan_service(
         repository=repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
         ),
     )
 
-    listed = service.list_plans("col_1", "goal_1")[0]
+    listed = service.list_plans("col_1", "objective_1")[0]
 
     assert listed.plan_id == legacy.plan_id
     assert listed.metadata["source_validity"] == "unverified"
@@ -369,14 +386,14 @@ def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified
 
 
 def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         content="Run 25 C and 150 C LPBF 316L builds [Source 1].",
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -386,7 +403,7 @@ def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path
     with pytest.raises(ValueError, match="structured protocol draft"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content="Run 25 C and 150 C LPBF 316L builds [Source 1].",
             source_message_id="msg_1",
@@ -398,17 +415,17 @@ def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path
 def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate(
     tmp_path,
 ):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(goal_session_repository)
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="protocol-ready findings"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -418,21 +435,21 @@ def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate
 
 
 def test_experiment_plan_service_rejects_training_ready_only_review_gate(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="training_ready_findings",
         content=_structured_protocol(),
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="protocol-ready findings"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -442,21 +459,21 @@ def test_experiment_plan_service_rejects_training_ready_only_review_gate(tmp_pat
 
 
 def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         warnings=["curated_research_findings_empty"],
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="not eligible"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -466,22 +483,22 @@ def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path
 
 
 def test_experiment_plan_service_rejects_invalid_protocol_contract_warning(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         warnings=["goal_copilot_protocol_contract_invalid"],
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="not eligible"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -493,14 +510,14 @@ def test_experiment_plan_service_rejects_invalid_protocol_contract_warning(tmp_p
 def test_experiment_plan_service_rejects_ved_plan_without_operational_constituent(
     tmp_path,
 ):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         content=_ved_protocol(operational=False),
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -510,7 +527,7 @@ def test_experiment_plan_service_rejects_ved_plan_without_operational_constituen
     with pytest.raises(ValueError, match="VED design"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="VED validation matrix",
             content=_ved_protocol(operational=False),
             source_message_id="msg_1",
@@ -520,7 +537,7 @@ def test_experiment_plan_service_rejects_ved_plan_without_operational_constituen
 
 
 def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     content = _ved_protocol(operational=True).replace(
         "validate the isolated effect before causal interpretation",
         "this design isolates the effect of VED from its constituent parameters",
@@ -530,8 +547,8 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
         content=content,
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -541,7 +558,7 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
     with pytest.raises(ValueError, match="VED design"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="VED isolation matrix",
             content=content,
             source_message_id="msg_1",
@@ -553,7 +570,7 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
 def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
     tmp_path,
 ):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     content = _ved_protocol(operational=True).replace(
         "validate the isolated effect before causal interpretation",
         "additional experiments may confirm VED-only effects",
@@ -563,8 +580,8 @@ def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
         content=content,
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -574,7 +591,7 @@ def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
     with pytest.raises(ValueError, match="VED design"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="VED-only validation target",
             content=content,
             source_message_id="msg_1",
@@ -586,7 +603,7 @@ def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
 def test_experiment_plan_service_rejects_unattributed_source_detail_in_proposal(
     tmp_path,
 ):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     content = """**Hypothesis**
 Coupled VED parameter sets were associated with fatigue strength [Source 1].
 
@@ -607,8 +624,8 @@ Coupled VED parameter sets were associated with fatigue strength [Source 1].
         content=content,
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -618,7 +635,7 @@ Coupled VED parameter sets were associated with fatigue strength [Source 1].
     with pytest.raises(ValueError, match="Proposed design choice"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="VED measurement protocol",
             content=content,
             source_message_id="msg_1",
@@ -628,21 +645,21 @@ Coupled VED parameter sets were associated with fatigue strength [Source 1].
 
 
 def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         content="Run a traceable validation matrix based on the accepted evidence.",
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="does not cite a visible source label"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -652,21 +669,21 @@ def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
 
 
 def test_experiment_plan_service_rejects_plan_content_without_source_label(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         content=_structured_protocol(),
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="does not cite a visible source label"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=(
                 "Hypothesis: 150 C preheating improves ductility.\n"
@@ -682,22 +699,22 @@ def test_experiment_plan_service_rejects_plan_content_without_source_label(tmp_p
 
 
 def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         used_evidence_ids=["ev_1"],
         source_href="/collections/col_1/documents/paper-a?evidence_id=ev_other",
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="source links do not match evidence citations"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -707,7 +724,7 @@ def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_p
 
 
 def test_experiment_plan_service_rejects_used_evidence_without_source_link(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         used_evidence_ids=["ev_1", "ev_2"],
@@ -715,15 +732,15 @@ def test_experiment_plan_service_rejects_used_evidence_without_source_link(tmp_p
         content="Run a traceable validation matrix [Source 1].",
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="missing source links for evidence citations"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content=_structured_protocol(),
             source_message_id="msg_1",
@@ -732,22 +749,22 @@ def test_experiment_plan_service_rejects_used_evidence_without_source_link(tmp_p
         )
 
 
-def test_experiment_plan_service_rejects_cross_goal_source_message(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+def test_experiment_plan_service_rejects_cross_objective_source_message(tmp_path):
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        goal_id="goal_other",
+        objective_id="objective_other",
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
-    with pytest.raises(ValueError, match="not focused on this goal"):
+    with pytest.raises(ValueError, match="not focused on this objective"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content="Run 25 C and 150 C LPBF 316L builds.",
             source_message_id="msg_1",
@@ -756,20 +773,20 @@ def test_experiment_plan_service_rejects_cross_goal_source_message(tmp_path):
 
 
 def test_experiment_plan_service_rejects_source_message_without_user(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
     with pytest.raises(ValueError, match="authenticated user"):
         service.create_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             title="Preheating validation matrix",
             content="Run 25 C and 150 C LPBF 316L builds.",
             source_message_id="msg_1",
@@ -777,13 +794,13 @@ def test_experiment_plan_service_rejects_source_message_without_user(tmp_path):
 
 
 def test_experiment_plan_service_allows_manual_draft_without_source_message(tmp_path):
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite")
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository()
     )
 
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Manual validation plan",
         content="Expert-authored plan without a copilot source.",
         created_by="expert-a",
@@ -794,12 +811,12 @@ def test_experiment_plan_service_allows_manual_draft_without_source_message(tmp_
 
 
 def test_experiment_plan_service_updates_existing_draft(tmp_path):
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite")
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository()
     )
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Initial draft",
         content="Initial plan.",
         created_by="expert-a",
@@ -807,7 +824,7 @@ def test_experiment_plan_service_updates_existing_draft(tmp_path):
 
     updated = service.update_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         plan_id=draft.plan_id,
         title="Edited draft",
         content="Edited plan with controls.",
@@ -822,14 +839,14 @@ def test_experiment_plan_service_updates_existing_draft(tmp_path):
 
 
 def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -837,7 +854,7 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
     )
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Preheating validation matrix",
         content=_structured_protocol(),
         source_message_id="msg_1",
@@ -847,7 +864,7 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
 
     updated = service.update_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         plan_id=draft.plan_id,
         title="Edited traceable protocol",
         content=(
@@ -866,19 +883,19 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
 
 
 def test_experiment_plan_service_rejects_copilot_update_without_source_label(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Preheating validation matrix",
         content=_structured_protocol(),
         source_message_id="msg_1",
@@ -889,7 +906,7 @@ def test_experiment_plan_service_rejects_copilot_update_without_source_label(tmp
     with pytest.raises(ValueError, match="visible source label"):
         service.update_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             plan_id=draft.plan_id,
             title="Edited untraceable protocol",
             content=(
@@ -906,19 +923,19 @@ def test_experiment_plan_service_rejects_copilot_update_without_source_label(tmp
 def test_experiment_plan_service_rejects_copilot_update_without_protocol_structure(
     tmp_path,
 ):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="Preheating validation matrix",
         content=_structured_protocol(),
         source_message_id="msg_1",
@@ -929,7 +946,7 @@ def test_experiment_plan_service_rejects_copilot_update_without_protocol_structu
     with pytest.raises(ValueError, match="structured protocol draft"):
         service.update_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             plan_id=draft.plan_id,
             title="Edited unstructured protocol",
             content="Run 25 C and 150 C LPBF builds [Source 1].",
@@ -938,14 +955,14 @@ def test_experiment_plan_service_rejects_copilot_update_without_protocol_structu
 
 
 def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_path):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
         content=_ved_protocol(operational=True),
         review_gate="protocol_ready_findings",
     )
-    service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+    service = _experiment_plan_service(
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
@@ -953,7 +970,7 @@ def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_pat
     )
     draft = service.create_plan(
         collection_id="col_1",
-        goal_id="goal_1",
+        objective_id="objective_1",
         title="VED validation matrix",
         content=_ved_protocol(operational=True),
         source_message_id="msg_1",
@@ -964,7 +981,7 @@ def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_pat
     with pytest.raises(ValueError, match="VED design"):
         service.update_plan(
             collection_id="col_1",
-            goal_id="goal_1",
+            objective_id="objective_1",
             plan_id=draft.plan_id,
             title="Edited VED validation matrix",
             content=_ved_protocol(operational=False),

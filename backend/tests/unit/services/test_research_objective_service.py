@@ -42,10 +42,12 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
-from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from tests.support.objective_understanding_repository import (
+    InMemoryObjectiveUnderstandingRepository,
+)
 
 
 def _build_research_objective_service(
@@ -70,9 +72,7 @@ def _build_research_objective_service(
     )
     research_understanding_repository = kwargs.pop(
         "research_understanding_repository",
-        SqliteResearchUnderstandingRepository(
-            collection_service.root_dir.parent / "lens.sqlite"
-        ),
+        InMemoryObjectiveUnderstandingRepository(),
     )
     document_profile_service = kwargs.pop("document_profile_service", None)
     if document_profile_service is None:
@@ -9902,7 +9902,7 @@ def test_research_objective_service_builds_and_persists_objective_records(
     facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
     assert (
-        service.research_understanding_repository.list_research_understandings(
+        service.research_understanding_repository.list_objective_understandings(
             collection_id
         )
         == ()

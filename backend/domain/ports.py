@@ -162,6 +162,8 @@ class BuildRepository(Protocol):
 
 
 class GoalSessionRepository(Protocol):
+    backend_name: str
+
     def read_session(self, session_id: str) -> dict[str, Any] | None: ...
 
     def read_message_context(self, message_id: str) -> dict[str, Any] | None: ...
@@ -183,14 +185,14 @@ class ExperimentPlanRepository(Protocol):
     def read_plan(
         self,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
         plan_id: str,
     ) -> ExperimentPlanRecord | None: ...
 
     def list_plans(
         self,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]: ...
 
 
@@ -400,30 +402,53 @@ class ComparisonRepository(Protocol):
 class ResearchUnderstandingRepository(Protocol):
     backend_name: str
 
-    def replace_collection_research_understandings(
+    def upsert_objective_understanding(
         self,
         collection_id: str,
-        understandings: tuple[ResearchUnderstanding, ...],
-    ) -> None: ...
-
-    def upsert_research_understanding(
-        self,
-        collection_id: str,
+        objective_id: str,
         understanding: ResearchUnderstanding,
     ) -> None: ...
 
-    def read_research_understanding(
+    def read_objective_understanding(
         self,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
     ) -> ResearchUnderstanding | None: ...
 
-    def list_research_understandings(
+    def list_objective_understandings(
         self,
         collection_id: str,
-        scope_type: str | None = None,
     ) -> tuple[ResearchUnderstanding, ...]: ...
+
+
+class ResearchUnderstandingReviewRepository(Protocol):
+    backend_name: str
+
+    def upsert_feedback(
+        self,
+        feedback: ResearchUnderstandingFeedback,
+    ) -> ResearchUnderstandingFeedback: ...
+
+    def list_feedback(
+        self,
+        collection_id: str,
+        objective_id: str | None = None,
+        finding_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
+
+    def upsert_curation(
+        self,
+        curation: ResearchUnderstandingCuration,
+    ) -> ResearchUnderstandingCuration: ...
+
+    def list_curations(
+        self,
+        collection_id: str,
+        objective_id: str | None = None,
+        finding_id: str | None = None,
+        claim_id: str | None = None,
+    ) -> tuple[ResearchUnderstandingCuration, ...]: ...
 
 
 class EvaluationRepository(Protocol):
@@ -454,31 +479,3 @@ class EvaluationRepository(Protocol):
     def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None: ...
 
     def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]: ...
-
-    def upsert_research_understanding_feedback(
-        self,
-        feedback: ResearchUnderstandingFeedback,
-    ) -> ResearchUnderstandingFeedback: ...
-
-    def list_research_understanding_feedback(
-        self,
-        collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
-        finding_id: str | None = None,
-        claim_id: str | None = None,
-    ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
-
-    def upsert_research_understanding_curation(
-        self,
-        curation: ResearchUnderstandingCuration,
-    ) -> ResearchUnderstandingCuration: ...
-
-    def list_research_understanding_curations(
-        self,
-        collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
-        finding_id: str | None = None,
-        claim_id: str | None = None,
-    ) -> tuple[ResearchUnderstandingCuration, ...]: ...

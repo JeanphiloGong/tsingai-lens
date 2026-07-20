@@ -21,24 +21,23 @@ from domain.core import (
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
-)
-from infra.persistence.sqlite.research_understanding_repository import (
-    SqliteResearchUnderstandingRepository,
+    ResearchUnderstanding,
 )
 from infra.persistence.sqlite.source_artifact_repository import (
     SqliteSourceArtifactRepository,
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.objective_understanding_repository import (
+    InMemoryObjectiveUnderstandingRepository,
+)
 
 
 def _seed_objective_collection(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
-    research_understanding_repository = SqliteResearchUnderstandingRepository(
-        tmp_path / "lens.sqlite"
-    )
+    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
     objective_repository = MemoryObjectiveRepository()
     objective = ResearchObjective.from_mapping(
         {
@@ -148,7 +147,6 @@ def _seed_objective_collection(tmp_path):
             source_artifact_repository=source_repository,
         ),
     )
-    service.persist_objective_understandings(collection_id)
     return collection_id, objective.objective_id, service
 
 
@@ -186,9 +184,7 @@ def test_objective_workspace_detail_returns_frames_and_reserved_fields(tmp_path)
     assert payload["evidence_units"] == []
     assert payload["logic_chain"] is None
     assert payload["existing_comparison_rows"] == []
-    assert payload["understanding"]["state"] == "empty"
-    assert payload["understanding"]["scope"]["scope_type"] == "objective"
-    assert payload["understanding"]["scope"]["objective_id"] == objective_id
+    assert payload["understanding"] is None
 
 
 def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
@@ -283,8 +279,6 @@ def test_objective_workspace_detail_filters_non_target_evidence_units(tmp_path):
             ),
         ),
     )
-    service.persist_objective_understandings(collection_id)
-
     payload = service.get_objective_research_view(collection_id, objective_id)
 
     assert [unit["evidence_unit_id"] for unit in payload["evidence_units"]] == [
@@ -402,7 +396,16 @@ def test_objective_workspace_detail_returns_research_understanding(tmp_path):
             ),
         ),
     )
-    service.persist_objective_understandings(collection_id)
+    understanding = ResearchUnderstanding.from_mapping(
+        service.research_understanding_service.build_objective_understanding(
+            service.get_objective_research_view(collection_id, objective_id)
+        )
+    )
+    service.research_understanding_repository.upsert_objective_understanding(
+        collection_id,
+        objective_id,
+        understanding,
+    )
 
     payload = service.get_objective_research_view(collection_id, objective_id)
 

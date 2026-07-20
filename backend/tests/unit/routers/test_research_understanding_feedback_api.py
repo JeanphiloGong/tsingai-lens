@@ -17,18 +17,24 @@ from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandi
 
 def request_with_user(
     *,
+    feedback_service=None,
+    review_import_service=None,
     user_id: str = "user-materials-expert",
     email: str = "materials-expert@example.com",
     display_name: str | None = "Materials Expert",
 ):
+    state = SimpleNamespace(
+        current_user={
+            "user_id": user_id,
+            "email": email,
+            "display_name": display_name,
+        },
+        research_understanding_feedback_service=feedback_service,
+        research_understanding_review_import_service=review_import_service,
+    )
     return SimpleNamespace(
-        state=SimpleNamespace(
-            current_user={
-                "user_id": user_id,
-                "email": email,
-                "display_name": display_name,
-            }
-        )
+        state=state,
+        app=SimpleNamespace(state=state),
     )
 
 
@@ -41,8 +47,7 @@ class FakeResearchUnderstandingFeedbackService:
                 {
                     "feedback_id": "ruf-existing",
                     "collection_id": "col-1",
-                    "scope_type": "objective",
-                    "scope_id": "obj-1",
+                    "objective_id": "obj-1",
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "review_status": "incorrect",
@@ -58,8 +63,7 @@ class FakeResearchUnderstandingFeedbackService:
                 {
                     "curation_id": "ruc-existing",
                     "collection_id": "col-1",
-                    "scope_type": "objective",
-                    "scope_id": "obj-1",
+                    "objective_id": "obj-1",
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "curated_claim_type": "mechanism",
@@ -80,8 +84,7 @@ class FakeResearchUnderstandingFeedbackService:
             {
                 "feedback_id": "ruf-created",
                 "collection_id": kwargs["collection_id"],
-                "scope_type": kwargs["scope_type"],
-                "scope_id": kwargs["scope_id"],
+                "objective_id": kwargs["objective_id"],
                 "finding_id": kwargs["finding_id"],
                 "claim_id": kwargs["claim_id"],
                 "review_status": kwargs["review_status"],
@@ -102,8 +105,7 @@ class FakeResearchUnderstandingFeedbackService:
             {
                 "curation_id": "ruc-created",
                 "collection_id": kwargs["collection_id"],
-                "scope_type": kwargs["scope_type"],
-                "scope_id": kwargs["scope_id"],
+                "objective_id": kwargs["objective_id"],
                 "finding_id": kwargs["finding_id"],
                 "claim_id": kwargs["claim_id"],
                 "curated_claim_type": kwargs["curated_claim_type"],
@@ -125,8 +127,7 @@ class FakeResearchUnderstandingFeedbackService:
         self.exported = kwargs
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "gold_id": "gold_col-1_obj-1_research_understanding",
             "target_layer": "core",
             "metric_profile": "research_understanding_v1",
@@ -158,10 +159,9 @@ class FakeResearchUnderstandingFeedbackService:
         label_status = "silver" if dataset_use_status == "review_candidate" else "gold"
         return {
             "schema_version": "research_understanding_dataset.v1",
-            "dataset_id": "dataset_col-1_goal_goal-1_research_understanding",
+            "dataset_id": "dataset_col-1_goal_obj-1_research_understanding",
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "task_type": "research_understanding_finding",
             "metric_profile": "research_understanding_v1",
             "label_status_filter": kwargs["label_status"],
@@ -311,8 +311,7 @@ class FakeResearchUnderstandingFeedbackService:
                     "finding_level": "paper_level",
                     "document_ids": ["doc-1"],
                     "collection_id": kwargs["collection_id"],
-                    "scope_type": kwargs["scope_type"],
-                    "scope_id": kwargs["scope_id"],
+                    "objective_id": kwargs["objective_id"],
                     "finding_id": "finding-1",
                     "claim_id": "claim-1",
                     "label_status": label_status,
@@ -468,18 +467,13 @@ class FakeResearchUnderstandingFeedbackService:
         self.collection_dataset_exported = kwargs
         dataset = self.export_dataset(
             collection_id=kwargs["collection_id"],
-            scope_type="goal",
-            scope_id="goal-1",
+            objective_id="obj-1",
             label_status=kwargs["label_status"],
             dataset_use_status=kwargs["dataset_use_status"],
             task_type=kwargs["task_type"],
         )
-        dataset["dataset_id"] = "dataset_col-1_collection_goal_research_understanding"
-        dataset["scope_type"] = "collection"
-        dataset["scope_id"] = kwargs["scope_type"]
-        for item in dataset["items"]:
-            item["scope_type"] = "goal"
-            item["scope_id"] = "goal-1"
+        dataset["dataset_id"] = "dataset_col-1_collection_research_understanding"
+        dataset["objective_id"] = None
         return dataset
 
 
@@ -506,10 +500,10 @@ class FakeResearchUnderstandingReviewImportService:
                 "ready_to_write": True,
                 "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
             },
-            "decision_progress_by_goal": [
+            "decision_progress_by_objective": [
                 {
                     "collection_id": "col-1",
-                    "goal_id": "goal-1",
+                    "objective_id": "obj-1",
                     "total_rows": 1,
                     "actionable_count": 1,
                     "skipped_count": 0,
@@ -519,7 +513,7 @@ class FakeResearchUnderstandingReviewImportService:
                     "next_review_finding_id": "",
                 }
             ],
-            "affected_goals": [],
+            "affected_objectives": [],
             "readiness_summary": {},
         }
 
@@ -541,19 +535,14 @@ class FakeResearchUnderstandingReviewImportService:
                 "ready_to_write": True,
                 "next_steps": [],
             },
-            "decision_progress_by_goal": [],
-            "affected_goals": [],
+            "decision_progress_by_objective": [],
+            "affected_objectives": [],
             "readiness_summary": {},
         }
 
 
 def test_research_understanding_review_decision_import_dry_run(monkeypatch):
     import_service = FakeResearchUnderstandingReviewImportService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "review_import_service",
-        import_service,
-    )
 
     response = asyncio.run(
         feedback_controller.import_research_understanding_review_decisions(
@@ -563,14 +552,14 @@ def test_research_understanding_review_decision_import_dry_run(monkeypatch):
                 fail_on_warnings=True,
                 rows=[
                     {
-                        "goal_id": "goal-1",
+                        "objective_id": "obj-1",
                         "finding_id": "finding-1",
                         "claim_id": "claim-1",
                         "action": "accept",
                     }
                 ],
             ),
-            request_with_user(email="expert@example.com"),
+            request_with_user(review_import_service=import_service, email="expert@example.com"),
         )
     )
 
@@ -578,12 +567,12 @@ def test_research_understanding_review_decision_import_dry_run(monkeypatch):
     assert response.dry_run is True
     assert response.total_rows == 1
     assert response.review_progress["ready_to_write"] is True
-    assert response.decision_progress_by_goal[0]["goal_id"] == "goal-1"
+    assert response.decision_progress_by_objective[0]["objective_id"] == "obj-1"
     assert import_service.imported == {
         "rows": [
             {
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "obj-1",
                 "finding_id": "finding-1",
                 "claim_id": "claim-1",
                 "action": "accept",
@@ -597,11 +586,6 @@ def test_research_understanding_review_decision_import_dry_run(monkeypatch):
 
 def test_research_understanding_review_decision_import_writes(monkeypatch):
     import_service = FakeResearchUnderstandingReviewImportService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "review_import_service",
-        import_service,
-    )
 
     response = asyncio.run(
         feedback_controller.import_research_understanding_review_decisions(
@@ -611,13 +595,13 @@ def test_research_understanding_review_decision_import_writes(monkeypatch):
                 rows=[
                     {
                         "collection_id": "col-other",
-                        "goal_id": "goal-1",
+                        "objective_id": "obj-1",
                         "finding_id": "finding-1",
                         "action": "accept",
                     }
                 ],
             ),
-            request_with_user(email="expert@example.com"),
+            request_with_user(review_import_service=import_service, email="expert@example.com"),
         )
     )
 
@@ -630,14 +614,9 @@ def test_research_understanding_review_decision_import_accepts_decision_board_ts
     monkeypatch,
 ):
     import_service = FakeResearchUnderstandingReviewImportService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "review_import_service",
-        import_service,
-    )
     tsv = (
-        "expert_action\tcollection_id\tgoal_id\tfinding_id\n"
-        "correct\tcol-1\tgoal-1\tfinding-1\n"
+        "expert_action\tcollection_id\tobjective_id\tfinding_id\n"
+        "correct\tcol-1\tobj-1\tfinding-1\n"
     )
 
     response = asyncio.run(
@@ -648,7 +627,7 @@ def test_research_understanding_review_decision_import_accepts_decision_board_ts
                 fail_on_warnings=True,
                 decision_board_tsv=tsv,
             ),
-            request_with_user(email="expert@example.com"),
+            request_with_user(review_import_service=import_service, email="expert@example.com"),
         )
     )
 
@@ -664,18 +643,12 @@ def test_research_understanding_review_decision_import_accepts_decision_board_ts
 
 def test_research_understanding_feedback_route_records_contract_payload(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.create_research_understanding_feedback(
             "col-1",
             ResearchUnderstandingFeedbackCreateRequest(
-                scope_type="objective",
-                scope_id="obj-1",
+                objective_id="obj-1",
                 finding_id="finding-1",
                 claim_id="claim-1",
                 review_status="incorrect",
@@ -683,20 +656,19 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
                 note="The cited table does not support the mechanism claim.",
                 reviewer="materials-expert",
             ),
-            request_with_user(),
+            request_with_user(feedback_service=service),
         )
     )
 
     assert response.feedback_id == "ruf-created"
     assert response.collection_id == "col-1"
-    assert response.scope_id == "obj-1"
+    assert response.objective_id == "obj-1"
     assert response.finding_id == "finding-1"
     assert response.claim_id == "claim-1"
     assert response.review_status == "incorrect"
     assert service.created == {
         "collection_id": "col-1",
-        "scope_type": "objective",
-        "scope_id": "obj-1",
+        "objective_id": "obj-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
         "review_status": "incorrect",
@@ -708,18 +680,12 @@ def test_research_understanding_feedback_route_records_contract_payload(monkeypa
 
 def test_research_understanding_feedback_route_preserves_agent_reviewer(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.create_research_understanding_feedback(
             "col-1",
             ResearchUnderstandingFeedbackCreateRequest(
-                scope_type="objective",
-                scope_id="obj-1",
+                objective_id="obj-1",
                 finding_id="finding-1",
                 claim_id="claim-1",
                 review_status="correct",
@@ -727,7 +693,7 @@ def test_research_understanding_feedback_route_preserves_agent_reviewer(monkeypa
                 note="AI source audit accepted the evidence.",
                 reviewer="ai-reviewer-codex-evidence-audit",
             ),
-            request_with_user(),
+            request_with_user(feedback_service=service),
         )
     )
 
@@ -737,18 +703,12 @@ def test_research_understanding_feedback_route_preserves_agent_reviewer(monkeypa
 
 def test_research_understanding_feedback_route_accepts_material_error_issue_type(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.create_research_understanding_feedback(
             "col-1",
             ResearchUnderstandingFeedbackCreateRequest(
-                scope_type="goal",
-                scope_id="goal-1",
+                objective_id="obj-1",
                 finding_id="finding-1",
                 claim_id="claim-1",
                 review_status="incorrect",
@@ -756,7 +716,7 @@ def test_research_understanding_feedback_route_accepts_material_error_issue_type
                 note="The finding attributes the effect to VED, but the paper varied preheating.",
                 reviewer="materials-expert",
             ),
-            request_with_user(),
+            request_with_user(feedback_service=service),
         )
     )
 
@@ -766,17 +726,12 @@ def test_research_understanding_feedback_route_accepts_material_error_issue_type
 
 def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.list_research_understanding_feedback(
             "col-1",
-            scope_type="objective",
-            scope_id="obj-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             finding_id="finding-1",
             claim_id="claim-1",
         )
@@ -787,8 +742,7 @@ def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch)
     assert response.items[0].issue_type == "evidence_not_grounded"
     assert service.listed == {
         "collection_id": "col-1",
-        "scope_type": "objective",
-        "scope_id": "obj-1",
+        "objective_id": "obj-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
     }
@@ -796,18 +750,12 @@ def test_research_understanding_feedback_route_lists_claim_feedback(monkeypatch)
 
 def test_research_understanding_curation_route_records_expert_claim_curation(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.create_research_understanding_curation(
             "col-1",
             ResearchUnderstandingCurationCreateRequest(
-                scope_type="objective",
-                scope_id="obj-1",
+                objective_id="obj-1",
                 finding_id="finding-1",
                 claim_id="claim-1",
                 curated_claim_type="mechanism",
@@ -820,7 +768,7 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
                 note="Needs microstructure evidence before marking supported.",
                 reviewer="materials-expert",
             ),
-            request_with_user(),
+            request_with_user(feedback_service=service),
         )
     )
 
@@ -833,8 +781,7 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
     assert response.curated_evidence_ref_ids == ["ev-1"]
     assert service.curated == {
         "collection_id": "col-1",
-        "scope_type": "objective",
-        "scope_id": "obj-1",
+        "objective_id": "obj-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
         "curated_claim_type": "mechanism",
@@ -856,18 +803,12 @@ def test_research_understanding_curation_route_records_expert_claim_curation(mon
 
 def test_research_understanding_curation_route_preserves_agent_reviewer(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.create_research_understanding_curation(
             "col-1",
             ResearchUnderstandingCurationCreateRequest(
-                scope_type="objective",
-                scope_id="obj-1",
+                objective_id="obj-1",
                 finding_id="finding-1",
                 claim_id="claim-1",
                 curated_claim_type="mechanism",
@@ -880,7 +821,7 @@ def test_research_understanding_curation_route_preserves_agent_reviewer(monkeypa
                 note="AI curation candidate, keep silver.",
                 reviewer="agent-lens-claim-review",
             ),
-            request_with_user(),
+            request_with_user(feedback_service=service),
         )
     )
 
@@ -890,17 +831,12 @@ def test_research_understanding_curation_route_preserves_agent_reviewer(monkeypa
 
 def test_research_understanding_curation_route_lists_expert_claim_curations(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.list_research_understanding_curations(
             "col-1",
-            scope_type="objective",
-            scope_id="obj-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             finding_id="finding-1",
             claim_id="claim-1",
         )
@@ -911,8 +847,7 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
     assert response.items[0].curated_status == "limited"
     assert service.curations_listed == {
         "collection_id": "col-1",
-        "scope_type": "objective",
-        "scope_id": "obj-1",
+        "objective_id": "obj-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
     }
@@ -920,46 +855,35 @@ def test_research_understanding_curation_route_lists_expert_claim_curations(monk
 
 def test_research_understanding_gold_draft_route_exports_curations(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_gold_draft(
             "col-1",
-            scope_type="objective",
-            scope_id="obj-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
         )
     )
 
     assert response.collection_id == "col-1"
-    assert response.scope_type == "objective"
-    assert response.scope_id == "obj-1"
+    assert response.objective_id == "obj-1"
+    assert response.objective_id == "obj-1"
     assert response.item_count == 1
     assert response.items[0].family == "research_understanding_findings"
     assert response.items[0].payload["claim_type"] == "mechanism"
     assert service.exported == {
         "collection_id": "col-1",
-        "scope_type": "objective",
-        "scope_id": "obj-1",
+        "objective_id": "obj-1",
     }
 
 
 def test_research_understanding_dataset_route_exports_json(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status="gold",
             dataset_use_status="training_ready",
             task_type="research_understanding_finding",
@@ -968,8 +892,8 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     )
 
     assert response.collection_id == "col-1"
-    assert response.scope_type == "goal"
-    assert response.scope_id == "goal-1"
+    assert response.objective_id == "obj-1"
+    assert response.objective_id == "obj-1"
     assert response.label_status_filter == "gold"
     assert response.dataset_use_status_filter == "training_ready"
     assert response.task_type_filter == "research_understanding_finding"
@@ -1018,8 +942,7 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
     assert response.items[0].review_decision_hint["blocked_actions"] == []
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "task_type": "research_understanding_finding",
@@ -1028,17 +951,12 @@ def test_research_understanding_dataset_route_exports_json(monkeypatch):
 
 def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status=None,
             dataset_use_status=None,
             task_type=None,
@@ -1054,8 +972,7 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": None,
         "dataset_use_status": None,
         "task_type": None,
@@ -1064,17 +981,12 @@ def test_research_understanding_dataset_route_exports_jsonl(monkeypatch):
 
 def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status="gold",
             dataset_use_status="training_ready",
             task_type=None,
@@ -1093,8 +1005,7 @@ def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "task_type": None,
@@ -1103,17 +1014,12 @@ def test_research_understanding_dataset_route_exports_messages_jsonl(monkeypatch
 
 def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status="gold",
             dataset_use_status="training_ready",
             task_type=None,
@@ -1131,9 +1037,7 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
         "task_type": "research_understanding_finding",
         "prompt_version": "research_understanding_finding_training_prompt.v1",
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "goal_id": "goal-1",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "sample_id": "rus-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
@@ -1154,8 +1058,7 @@ def test_research_understanding_dataset_route_exports_training_jsonl(monkeypatch
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "task_type": None,
@@ -1176,13 +1079,12 @@ def test_research_understanding_training_jsonl_skips_invalid_training_messages(
         return dataset
 
     service.export_dataset = export_with_invalid_messages
-    monkeypatch.setattr(feedback_controller, "feedback_service", service)
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status="gold",
             dataset_use_status="training_ready",
             task_type=None,
@@ -1195,17 +1097,12 @@ def test_research_understanding_training_jsonl_skips_invalid_training_messages(
 
 def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1217,7 +1114,7 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     body = response.body.decode("utf-8")
     line = json.loads(body.strip())
     assert line["collection_id"] == "col-1"
-    assert line["goal_id"] == "goal-1"
+    assert line["objective_id"] == "obj-1"
     assert line["finding_id"] == "finding-1"
     assert line["claim_id"] == "claim-1"
     assert line["statement"] == "Preheating improves ductility."
@@ -1279,8 +1176,7 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1289,17 +1185,12 @@ def test_research_understanding_dataset_route_exports_review_jsonl(monkeypatch):
 
 def test_research_understanding_dataset_route_exports_decision_template(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1312,7 +1203,7 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
     line = json.loads(body.strip())
     assert line == {
         "collection_id": "col-1",
-        "goal_id": "goal-1",
+        "objective_id": "obj-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
         "action": "skip",
@@ -1384,8 +1275,7 @@ def test_research_understanding_dataset_route_exports_decision_template(monkeypa
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1420,17 +1310,12 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
             "created_at": "2026-06-18T10:00:00+00:00",
         },
     ]
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1459,7 +1344,7 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
     assert "Accept only if the statement" in row["accept_rule"]
     assert "wrong_variable" in row["reject_issue_options"]
     assert row["collection_id"] == "col-1"
-    assert row["goal_id"] == "goal-1"
+    assert row["objective_id"] == "obj-1"
     assert row["finding_id"] == "finding-1"
     assert row["claim_id"] == "claim-1"
     assert row["statement"] == "Preheating improves ductility."
@@ -1478,8 +1363,7 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1488,17 +1372,12 @@ def test_research_understanding_dataset_route_exports_decision_board_tsv(monkeyp
 
 def test_research_understanding_dataset_route_exports_agent_review_prompt(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1511,7 +1390,7 @@ def test_research_understanding_dataset_route_exports_agent_review_prompt(monkey
     line = json.loads(body.strip())
     assert line["task"] == "review_lens_research_finding"
     assert line["collection_id"] == "col-1"
-    assert line["goal_id"] == "goal-1"
+    assert line["objective_id"] == "obj-1"
     assert "action" not in line
     assert line["finding"]["statement"] == "Preheating improves ductility."
     assert line["acceptance_gate"]["status"] == "review_required"
@@ -1528,8 +1407,7 @@ def test_research_understanding_dataset_route_exports_agent_review_prompt(monkey
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1538,17 +1416,12 @@ def test_research_understanding_dataset_route_exports_agent_review_prompt(monkey
 
 def test_research_understanding_dataset_route_exports_review_packet(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
-            scope_id="goal-1",
+            request_with_user(feedback_service=service),
+            objective_id="obj-1",
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1559,7 +1432,7 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
     assert response.media_type == "text/plain"
     body = response.body.decode("utf-8")
     assert "Lens review packet: col-1" in body
-    assert "Scope: goal goal-1" in body
+    assert "Objective: obj-1" in body
     assert "Review candidates: 1" in body
     assert "Preheating improves ductility." in body
     assert "recommended action: Accept as paper-level evidence" in body
@@ -1580,8 +1453,7 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
     assert body.endswith("\n")
     assert service.dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
-        "scope_id": "goal-1",
+        "objective_id": "obj-1",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1590,8 +1462,7 @@ def test_research_understanding_dataset_route_exports_review_packet(monkeypatch)
 
 def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
     item = SimpleNamespace(
-        scope_type="goal",
-        scope_id="goal-1",
+        objective_id="obj-1",
         sample_id="rus-1",
         finding_id="finding-1",
         claim_id="claim-1",
@@ -1644,16 +1515,11 @@ def test_research_understanding_review_jsonl_marks_protocol_blocking_gaps():
 
 def test_research_understanding_collection_dataset_route_exports_json(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status="gold",
             dataset_use_status="training_ready",
             task_type="research_understanding_finding",
@@ -1662,17 +1528,14 @@ def test_research_understanding_collection_dataset_route_exports_json(monkeypatc
     )
 
     assert response.collection_id == "col-1"
-    assert response.scope_type == "collection"
-    assert response.scope_id == "goal"
+    assert response.objective_id is None
     assert response.label_status_filter == "gold"
     assert response.dataset_use_status_filter == "training_ready"
     assert response.task_type_filter == "research_understanding_finding"
     assert response.item_count == 1
-    assert response.items[0].scope_type == "goal"
-    assert response.items[0].scope_id == "goal-1"
+    assert response.items[0].objective_id == "obj-1"
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "task_type": "research_understanding_finding",
@@ -1681,16 +1544,11 @@ def test_research_understanding_collection_dataset_route_exports_json(monkeypatc
 
 def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypatch):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status=None,
             dataset_use_status=None,
             task_type=None,
@@ -1701,13 +1559,11 @@ def test_research_understanding_collection_dataset_route_exports_jsonl(monkeypat
     assert response.media_type == "application/x-ndjson"
     body = response.body.decode("utf-8")
     line = json.loads(body.strip())
-    assert line["scope_type"] == "goal"
-    assert line["scope_id"] == "goal-1"
+    assert line["objective_id"] == "obj-1"
     assert line["sample_id"] == "rus-1"
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": None,
         "task_type": None,
@@ -1718,16 +1574,11 @@ def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status="gold",
             dataset_use_status="training_ready",
             task_type=None,
@@ -1744,7 +1595,6 @@ def test_research_understanding_collection_dataset_route_exports_messages_jsonl(
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "task_type": None,
@@ -1755,16 +1605,11 @@ def test_research_understanding_collection_dataset_route_exports_training_jsonl(
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status="gold",
             dataset_use_status="training_ready",
             task_type=None,
@@ -1777,15 +1622,13 @@ def test_research_understanding_collection_dataset_route_exports_training_jsonl(
     line = json.loads(body.strip())
     assert set(line) == {"messages", "metadata"}
     assert line["metadata"]["collection_id"] == "col-1"
-    assert line["metadata"]["scope_type"] == "goal"
-    assert line["metadata"]["goal_id"] == "goal-1"
+    assert line["metadata"]["objective_id"] == "obj-1"
     assert line["metadata"]["finding_id"] == "finding-1"
     assert line["metadata"]["claim_id"] == "claim-1"
     assert line["metadata"]["evidence_ref_ids"] == ["ev-1"]
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": "gold",
         "dataset_use_status": "training_ready",
         "task_type": None,
@@ -1796,16 +1639,11 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1817,15 +1655,13 @@ def test_research_understanding_collection_dataset_route_exports_review_jsonl(
     body = response.body.decode("utf-8")
     line = json.loads(body.strip())
     assert line["collection_id"] == "col-1"
-    assert line["goal_id"] == "goal-1"
-    assert line["scope_type"] == "goal"
+    assert line["objective_id"] == "obj-1"
     assert line["action"] == "skip"
     assert line["protocol_readiness"]["status"] == "ready_after_review"
     assert line["evidence"][0]["quote"] == "Preheating increased ductility by 14%."
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1836,16 +1672,11 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1857,7 +1688,7 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     body = response.body.decode("utf-8")
     line = json.loads(body.strip())
     assert line["collection_id"] == "col-1"
-    assert line["goal_id"] == "goal-1"
+    assert line["objective_id"] == "obj-1"
     assert line["action"] == "skip"
     assert line["curated_evidence_ref_ids"] == ["ev-1"]
     assert line["acceptance_gate"]["status"] == "review_required"
@@ -1880,7 +1711,6 @@ def test_research_understanding_collection_dataset_route_exports_decision_templa
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1891,16 +1721,11 @@ def test_research_understanding_collection_dataset_route_exports_decision_board_
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1912,13 +1737,12 @@ def test_research_understanding_collection_dataset_route_exports_decision_board_
     rows = list(csv.DictReader(StringIO(response.body.decode("utf-8")), delimiter="\t"))
     assert len(rows) == 1
     assert rows[0]["collection_id"] == "col-1"
-    assert rows[0]["goal_id"] == "goal-1"
+    assert rows[0]["objective_id"] == "obj-1"
     assert rows[0]["finding_id"] == "finding-1"
     assert rows[0]["expert_action"] == ""
     assert rows[0]["quote"] == "Preheating increased ductility by 14%."
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1929,16 +1753,11 @@ def test_research_understanding_collection_dataset_route_exports_agent_review_pr
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1950,14 +1769,12 @@ def test_research_understanding_collection_dataset_route_exports_agent_review_pr
     body = response.body.decode("utf-8")
     line = json.loads(body.strip())
     assert line["task"] == "review_lens_research_finding"
-    assert line["scope_type"] == "goal"
-    assert line["goal_id"] == "goal-1"
+    assert line["objective_id"] == "obj-1"
     assert "action" not in line
     assert line["output_schema"]["agent_review"]["reviewer"] == "ai-reviewer-<name>"
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,
@@ -1968,16 +1785,11 @@ def test_research_understanding_collection_dataset_route_exports_review_packet(
     monkeypatch,
 ):
     service = FakeResearchUnderstandingFeedbackService()
-    monkeypatch.setattr(
-        feedback_controller,
-        "feedback_service",
-        service,
-    )
 
     response = asyncio.run(
         feedback_controller.export_collection_research_understanding_dataset(
             "col-1",
-            scope_type="goal",
+            request_with_user(feedback_service=service),
             label_status=None,
             dataset_use_status="review_candidate",
             task_type=None,
@@ -1988,14 +1800,13 @@ def test_research_understanding_collection_dataset_route_exports_review_packet(
     assert response.media_type == "text/plain"
     body = response.body.decode("utf-8")
     assert "Lens review packet: col-1" in body
-    assert "Scope: collection goal" in body
+    assert "Objective: all" in body
     assert "Review candidates: 1" in body
     assert "recommended action: Accept as paper-level evidence" in body
     assert "quote: Preheating increased ductility by 14%." in body
     assert body.endswith("\n")
     assert service.collection_dataset_exported == {
         "collection_id": "col-1",
-        "scope_type": "goal",
         "label_status": None,
         "dataset_use_status": "review_candidate",
         "task_type": None,

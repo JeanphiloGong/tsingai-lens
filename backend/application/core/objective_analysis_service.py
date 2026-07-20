@@ -73,13 +73,13 @@ class ObjectiveAnalysisService:
             presented = self._with_presentation(understanding)
             if not self._has_research_findings(presented):
                 raise RuntimeError(_NO_RESEARCH_FINDINGS_ERROR)
-            self.research_understanding_repository.upsert_research_understanding(
+            self.research_understanding_repository.upsert_objective_understanding(
                 collection_id,
+                objective_id,
                 presented,
             )
-            persisted = self.research_understanding_repository.read_research_understanding(
+            persisted = self.research_understanding_repository.read_objective_understanding(
                 collection_id,
-                "objective",
                 objective_id,
             )
             persisted = self._with_presentation(persisted)
@@ -110,9 +110,8 @@ class ObjectiveAnalysisService:
         understanding: ResearchUnderstanding | None = None,
     ) -> dict:
         if understanding is None:
-            understanding = self.research_understanding_repository.read_research_understanding(
+            understanding = self.research_understanding_repository.read_objective_understanding(
                 collection_id,
-                "objective",
                 objective.objective_id,
             )
             understanding = self._with_presentation(understanding)

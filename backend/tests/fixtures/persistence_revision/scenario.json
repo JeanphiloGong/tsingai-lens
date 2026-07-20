@@ -335,9 +335,8 @@
         "schema_version": "research_understanding.v1",
         "state": "ready",
         "scope": {
-          "scope_type": "goal",
+          "scope_type": "objective",
           "collection_id": "col_baseline",
-          "goal_id": "goal_strength",
           "material_id": null,
           "objective_id": "objective_strength",
           "document_id": null,
@@ -399,7 +398,6 @@
         "focused_material_id": null,
         "focused_paper_id": null,
         "focused_objective_id": "objective_strength",
-        "focused_goal_id": "goal_strength",
         "goal_text": "How does heat treatment affect yield strength?",
         "goal_brief_json": {"objective_id": "objective_strength"},
         "answer_mode": "grounded",
@@ -446,7 +444,7 @@
       {
         "plan_id": "plan_strength",
         "collection_id": "col_baseline",
-        "goal_id": "goal_strength",
+        "objective_id": "objective_strength",
         "title": "Synthetic validation plan",
         "content": "Repeat the synthetic room-temperature tensile test.",
         "status": "ready_for_review",
@@ -468,8 +466,7 @@
       {
         "feedback_id": "feedback_strength",
         "collection_id": "col_baseline",
-        "scope_type": "goal",
-        "scope_id": "goal_strength",
+        "objective_id": "objective_strength",
         "finding_id": "finding_strength",
         "claim_id": "claim_strength",
         "finding_fingerprint": "finding.v1:synthetic-strength",
@@ -484,8 +481,7 @@
       {
         "curation_id": "curation_strength",
         "collection_id": "col_baseline",
-        "scope_type": "goal",
-        "scope_id": "goal_strength",
+        "objective_id": "objective_strength",
         "finding_id": "finding_strength",
         "claim_id": "claim_strength",
         "finding_fingerprint": "finding.v1:synthetic-strength",

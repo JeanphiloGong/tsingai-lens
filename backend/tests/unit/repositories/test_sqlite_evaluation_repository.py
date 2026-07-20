@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-
 from domain.evaluation import (
     EvaluationFailure,
     EvaluationGoldItem,
@@ -10,8 +8,6 @@ from domain.evaluation import (
     EvaluationPredictionSnapshot,
     EvaluationRun,
     EvaluationScore,
-    ResearchUnderstandingCuration,
-    ResearchUnderstandingFeedback,
 )
 from infra.persistence.sqlite import SqliteEvaluationRepository
 
@@ -165,119 +161,3 @@ def test_sqlite_evaluation_repository_replaces_gold_and_snapshot_items(tmp_path)
     assert [item.gold_item_id for item in repository.list_gold_items("gold-v1")] == [
         "gold-2"
     ]
-
-
-def test_sqlite_evaluation_repository_records_research_understanding_feedback(tmp_path):
-    repository = SqliteEvaluationRepository(tmp_path / "lens.sqlite")
-    feedback = ResearchUnderstandingFeedback.from_mapping(
-        {
-            "feedback_id": "ruf-1",
-            "collection_id": "col-gold",
-            "scope_type": "objective",
-            "scope_id": "obj-1",
-            "finding_id": "finding-1",
-            "claim_id": "claim-1",
-            "finding_fingerprint": "finding.v1:feedback-test",
-            "review_status": "incorrect",
-            "issue_type": "evidence_not_grounded",
-            "note": "The claim cites a tensile table but makes a mechanism conclusion.",
-            "reviewer": "materials-expert",
-            "created_at": "2026-06-18T08:00:00+00:00",
-        }
-    )
-
-    stored = repository.upsert_research_understanding_feedback(feedback)
-
-    assert stored == feedback
-    assert repository.list_research_understanding_feedback(
-        collection_id="col-gold",
-        scope_type="objective",
-        scope_id="obj-1",
-        finding_id="finding-1",
-        claim_id="claim-1",
-    ) == (feedback,)
-
-
-def test_sqlite_evaluation_repository_upserts_research_understanding_curation(tmp_path):
-    repository = SqliteEvaluationRepository(tmp_path / "lens.sqlite")
-    curation = ResearchUnderstandingCuration.from_mapping(
-        {
-            "curation_id": "ruc-1",
-            "collection_id": "col-gold",
-            "scope_type": "objective",
-            "scope_id": "obj-1",
-            "finding_id": "finding-1",
-            "claim_id": "claim-1",
-            "finding_fingerprint": "finding.v1:curation-test",
-            "curated_claim_type": "mechanism",
-            "curated_status": "limited",
-            "curated_statement": (
-                "Nitrogen-assisted LPBF may improve strength, but the mechanism "
-                "is only partially supported by the cited evidence."
-            ),
-            "curated_support_grade": "partial",
-            "curated_review_status": "needs_review",
-            "curated_variables": ["nitrogen"],
-            "curated_mediators": ["microstructure"],
-            "curated_outcomes": ["strength"],
-            "curated_direction": "improves",
-            "curated_scope_summary": "LPBF 316L",
-            "curated_evidence_ref_ids": ["ev-1", "ev-2"],
-            "curated_context_ids": ["ctx-1"],
-            "note": "Keep as a limited mechanism claim until microstructure evidence is added.",
-            "reviewer": "materials-expert",
-            "updated_at": "2026-06-18T08:00:00+00:00",
-        }
-    )
-    updated = ResearchUnderstandingCuration.from_mapping(
-        {
-            **curation.to_record(),
-            "curated_status": "supported",
-            "updated_at": "2026-06-18T09:00:00+00:00",
-        }
-    )
-
-    repository.upsert_research_understanding_curation(curation)
-    stored = repository.upsert_research_understanding_curation(updated)
-
-    assert stored == updated
-    assert repository.list_research_understanding_curations(
-        collection_id="col-gold",
-        scope_type="objective",
-        scope_id="obj-1",
-        finding_id="finding-1",
-        claim_id="claim-1",
-    ) == (updated,)
-
-
-def test_sqlite_evaluation_repository_schema_repair_tolerates_duplicate_column_race(
-    tmp_path,
-):
-    repository = SqliteEvaluationRepository(tmp_path / "lens.sqlite")
-
-    class _Cursor:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def fetchall(self):
-            return self._rows
-
-    class _RacingConnection:
-        def __init__(self):
-            self.pragma_calls = 0
-
-        def execute(self, sql):
-            if sql.startswith("PRAGMA table_info"):
-                self.pragma_calls += 1
-                if self.pragma_calls == 1:
-                    return _Cursor([])
-                return _Cursor([{"name": "finding_id"}])
-            if sql.startswith("ALTER TABLE"):
-                raise sqlite3.OperationalError("duplicate column name: finding_id")
-            raise AssertionError(sql)
-
-    connection = _RacingConnection()
-
-    repository._ensure_column(connection, "example", "finding_id", "TEXT")
-
-    assert connection.pragma_calls == 2

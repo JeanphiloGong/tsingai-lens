@@ -19,7 +19,6 @@ from domain.core import (
     MethodFact,
     ObjectiveEvidenceUnit,
     ObjectiveFactSet,
-    ResearchUnderstanding,
     ResearchObjective,
     SampleVariant,
     StructureFeature,
@@ -47,41 +46,6 @@ class FakeCollectionService:
         if not self.has_files:
             return []
         return [{"filename": "paper.pdf"}]
-
-
-class FakeResearchUnderstandingRepository:
-    backend_name = "fake"
-
-    def __init__(self) -> None:
-        self.research_understandings: dict[tuple[str, str], ResearchUnderstanding] = {}
-
-    def replace_collection_research_understandings(
-        self,
-        collection_id: str,  # noqa: ARG002
-        understandings: tuple[ResearchUnderstanding, ...],
-    ) -> None:
-        self.research_understandings = {
-            (understanding.scope.scope_type, understanding.scope_id): understanding
-            for understanding in understandings
-        }
-
-    def read_research_understanding(
-        self,
-        collection_id: str,  # noqa: ARG002
-        scope_type: str,
-        scope_id: str,
-    ) -> ResearchUnderstanding | None:
-        return self.research_understandings.get((scope_type, scope_id))
-
-    def list_research_understandings(
-        self,
-        collection_id: str,  # noqa: ARG002
-        scope_type: str | None = None,
-    ) -> tuple[ResearchUnderstanding, ...]:
-        items = tuple(self.research_understandings.values())
-        if scope_type is None:
-            return items
-        return tuple(item for item in items if item.scope.scope_type == scope_type)
 
 
 def _frames(collection_id: str = "col-1") -> tuple[list[dict], dict[str, list[dict]]]:
@@ -356,7 +320,6 @@ def _service(
 ) -> ResearchViewAggregationService:
     profiles, frames = _frames()
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    research_understanding_repository = FakeResearchUnderstandingRepository()
     objective_repository = MemoryObjectiveRepository()
     source_repository = SimpleNamespace()
     collection_service = FakeCollectionService(has_files=has_files)
@@ -365,7 +328,6 @@ def _service(
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        research_understanding_repository=research_understanding_repository,
         comparison_service=_comparison_service(
             collection_service,
             paper_fact_repository,
@@ -374,17 +336,6 @@ def _service(
         ),
         research_understanding_service=ResearchUnderstandingService(source_repository),
     )
-
-
-def _service_with_material_understandings(
-    *,
-    has_files: bool = True,
-    comparison_rows: list[dict] | None = None,
-) -> ResearchViewAggregationService:
-    service = _service(has_files=has_files, comparison_rows=comparison_rows)
-    service.persist_material_understandings("col-1")
-    return service
-
 
 def _service_from_frames(
     profiles: list[dict],
@@ -395,7 +346,6 @@ def _service_from_frames(
     research_objectives: list[dict] | None = None,
 ) -> ResearchViewAggregationService:
     paper_fact_repository = _paper_fact_repository(profiles, frames)
-    research_understanding_repository = FakeResearchUnderstandingRepository()
     objective_repository = MemoryObjectiveRepository()
     objective_repository.replace(
         "col-1",
@@ -419,7 +369,6 @@ def _service_from_frames(
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        research_understanding_repository=research_understanding_repository,
         comparison_service=_comparison_service(
             collection_service,
             paper_fact_repository,
@@ -691,7 +640,6 @@ def test_collection_materials_can_use_objective_evidence_units_without_old_facts
     )
 
     materials = service.list_collection_materials("col-1")
-    service.persist_material_understandings("col-1")
 
     assert materials["state"] == "ready"
     assert [item["material_id"] for item in materials["materials"]] == [
@@ -770,7 +718,8 @@ def test_collection_material_profile_uses_objective_profile_when_available():
     }
     assert profile["overview"]["measured_properties"] == ["elongation"]
     assert profile["evidence_refs"][0]["fact_ids"] == ["oeu-objective-only-note"]
-    assert profile.get("understanding") is None
+    assert profile["understanding"]["scope"]["scope_type"] == "material"
+    assert profile["understanding"]["state"] == "ready"
 
 
 def test_collection_research_view_uses_objective_units_without_old_facts():

@@ -8,7 +8,7 @@ artifacts.
 - registering gold answers for a collection
 - exporting research-understanding curation drafts before gold registration
 - freezing Core artifacts into prediction snapshots
-- scoring Core and future Goal outputs against gold answers
+- scoring Core and Objective outputs against gold answers
 - producing summary scores and failure records that can guide parser, prompt,
   schema, model, or reasoning improvements
 
@@ -17,7 +17,7 @@ artifacts.
 - This package does not parse source documents or rebuild collections.
 - This package does not own HTTP routes or response schemas.
 - Source artifacts are diagnostic inputs only; the user-facing evaluation
-  target is Core or Goal output.
+  target is Core or Objective output.
 - Persistence details belong under `infra/persistence/`.
 
 ## Current Services
@@ -59,6 +59,11 @@ artifacts.
   accept/reject/correct rules, stale finding checks, evidence-ref validation,
   acceptance-gate enforcement, warning handling, and review-progress summaries
   remain consistent. Dry-run responses include the current readiness counts for
-  affected goals, plus pending accept/reject/correct counts, so experts can see
+  affected Objectives, plus pending accept/reject/correct counts, so experts can see
   whether a batch of decisions will move the dataset toward training export or
   protocol drafting before writing labels.
+
+All review records, datasets, imports, and exports use `objective_id` as their
+only research scope. The FastAPI lifespan composes the feedback service with
+the direct PostgreSQL Understanding and review repositories. SQLite remains
+only for unrelated gold-set, prediction-snapshot, and evaluation-run records.

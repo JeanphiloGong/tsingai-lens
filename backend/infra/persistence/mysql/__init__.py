@@ -1,1 +1,0 @@
-"""MySQL persistence adapters."""

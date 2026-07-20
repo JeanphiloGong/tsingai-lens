@@ -11,7 +11,6 @@ The stable data ownership and identity contract lives in
 - `memory/`
 - `postgres/`
 - `sqlite/`
-- `mysql/`
 
 ## Responsibilities
 
@@ -45,10 +44,9 @@ The stable data ownership and identity contract lives in
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
-  Retains only a legacy Source repository for isolated migration and baseline
-  tests. It is not composed into maintained runtime readers or writers.
-- `mysql/`
-  Unimplemented placeholder with no active runtime selection path.
+  Retains one Source repository as a lightweight fixture for isolated unit,
+  router, export, and migration-baseline tests. It is not composed into
+  maintained runtime readers or writers and is not a selectable backend.
 
 Auth, collection, build, Source, paper-fact, objective, comparison,
 Understanding, review, session/message, and experiment-plan aggregates are
@@ -57,6 +55,10 @@ PostgreSQL repository explicitly. No aggregate has a repository factory or
 runtime fallback. Source pipeline JSON and Parquet outputs live under
 `infra/source/` runtime storage and are rebuildable intermediates, not a second
 persistence authority.
+
+No vector persistence exists. The accepted retrieval gate stopped before
+`pgvector`, embedding tables, or a runtime retrieval service were added;
+canonical PostgreSQL Source records remain authoritative.
 
 `database.py` owns the validated synchronous SQLAlchemy engine and session
 factory. The FastAPI lifespan shares this contract between auth, collection,
@@ -164,9 +166,7 @@ factory, and SQLite Goal-session, experiment-plan, Understanding, review, and
 evaluation repositories have been deleted. There is no aggregate facade,
 fallback alias, compatibility path, or runtime storage selector.
 
-## Target Boundary
-
-Approved cutover slices replace the current owners directly:
+## Runtime Boundary
 
 - PostgreSQL repositories own structured mutable state.
 - A single approved local object-store implementation owns immutable binary

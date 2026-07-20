@@ -5,10 +5,10 @@
 This document is the backend authority for persistence ownership, durable
 identities, relationships, build lineage, and deletion boundaries.
 
-The target model is being adopted one data family at a time. Until each family
-is cut over, the current repositories described below still own its runtime behavior.
-The [revision plan](../plans/backend-wide/persistence-model-revision/implementation-plan.md)
-owns sequencing; this document owns the stable destination.
+The PostgreSQL cutover is complete for every maintained structured data family.
+This document describes the implemented runtime, not a future migration target.
+The retained [revision plan](../plans/backend-wide/persistence-model-revision/implementation-plan.md)
+records sequencing and acceptance history; this document owns the stable model.
 
 This revision does not change the public HTTP contract or the Lens evidence
 model. In particular:
@@ -27,10 +27,14 @@ Use the least powerful store that can own the data correctly.
 | Structured mutable state | PostgreSQL | Own identity, relationships, lifecycle, and queryable metadata. |
 | Immutable binary bytes | Object storage | Address bytes by stable storage key and SHA-256, never by a domain-owned absolute path. |
 | Runtime scratch | Local ephemeral files | Treat as purgeable and rebuildable; never read it as durable product state. |
-| Semantic retrieval index | Optional `pgvector` in PostgreSQL | Rebuild from canonical Source text units; never treat a match as evidence. |
 
 There is no fourth authority. JSON exports, caches, projections, and indexes
 must name the authoritative records from which they can be rebuilt.
+
+The accepted retrieval decision for this revision is `stop`. There is no
+`pgvector` extension, embedding table, vector index, or vector runtime path.
+Canonical PostgreSQL Source text units remain the retrieval and evidence
+authority.
 
 ## Current Runtime Model
 
@@ -63,9 +67,9 @@ accidentally restore legacy ownership.
 | Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
 | Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
 | Report, GraphML, archive, and review exports | generated output paths | Yes from versioned records | Object storage; PostgreSQL stores export metadata |
-| Embedding, parser, and model caches | `cache/` and runtime cache paths | Yes | Local scratch; optional accepted embeddings use `pgvector` |
+| Embedding, parser, and model caches | `cache/` and runtime cache paths | Yes | Local scratch; no runtime vector index exists |
 | Trace payloads and logs | `traces/` and log paths | Yes for product behavior; retained only for diagnostics | Local scratch or object storage when an explicit retention rule requires it |
-| Legacy document indexes, graph store, and file Goal sessions | `documents/`, `graph_store.json`, and `collections/_goal_sessions/` | Legacy residue, not a supported authority | Offline migration input or removal after approved cleanup |
+| Legacy document indexes, graph store, and file Goal sessions | `documents/`, `graph_store.json`, and `collections/_goal_sessions/` | Legacy residue, not a supported authority | Retained outside runtime or removed after approved cleanup |
 
 The collection aggregate is now one direct relational boundary. One import
 transaction creates or reuses canonical document identity and collection
@@ -172,7 +176,7 @@ The table count is evidence about the current model, not a target table-count
 requirement. Later migrations may combine or split tables only when an actual
 identity, constraint, or query requires it.
 
-## Target Identity Model
+## Identity Model
 
 ### Identity Rules
 
@@ -301,7 +305,7 @@ Do not store a second copy of an authoritative row in JSONB. Do not use JSONB
 arrays in place of foreign keys for claims, evidence, facts, documents, goals,
 or review records.
 
-## Object And Vector Boundaries
+## Object And Retrieval Boundaries
 
 Object storage owns PDFs, uploaded text, extracted image bytes, downloadable
 reports, GraphML, archives, and retained large trace payloads. PostgreSQL owns
@@ -315,11 +319,12 @@ Source figure row authorizes the read and supplies the expected hash and media
 metadata. Removing `output/image_assets` must not affect document trees,
 reference reads, Markdown image links, or image delivery.
 
-No vector index is required for the relational cutover. If the retrieval gate
-later proves value, `pgvector` rows must reference canonical Source text units
-and record embedding model, dimensions, content hash, and build version. A
-vector query returns candidate IDs; authoritative text and evidence are then
-loaded from Source records.
+The retrieval gate was completed and the human decision was `stop`: measured
+embedding recall did not meet the accepted threshold or outperform the keyword
+baseline. This revision therefore has no vector schema, dependency, indexing
+lifecycle, or runtime retrieval service. The accepted evidence and reasoning
+are recorded in the
+[Source text-unit retrieval decision](../plans/backend-wide/persistence-model-revision/retrieval-decision.md).
 
 ## Repository And Model Boundaries
 
@@ -353,12 +358,12 @@ coordination layer without creating a second aggregate.
 | Delete a goal | Remove its analysis builds and mutable workspace state. Evaluation snapshots with an explicit retention purpose remain versioned records rather than dangling references. |
 | Delete object bytes | Require zero durable references and an elapsed retention window; object deletion follows relational deletion, not the reverse. |
 | Purge scratch | Safe at any time when no running task owns the path. Product reads must continue to work. |
-| Retire SQLite or JSON state | Keep the accepted pre-cutover snapshot read-only for the rollback window. Destructive cleanup requires a separate operator approval. |
+| Retire SQLite or JSON state | Do not import or consult legacy state at runtime. Any destructive cleanup of retained local data requires separate operator approval. |
 
-Migration is offline and one-way per accepted data family. There are no runtime
-dual writes, fallback reads, or SQLite compatibility paths. If a cutover fails,
-restore the accepted snapshot and application version; do not merge two live
-authorities.
+The cutover did not import historical runtime data. There are no runtime dual
+writes, fallback reads, or SQLite compatibility paths. Recovery uses the
+PostgreSQL and object-data backup procedures for the deployed application
+version; it never merges two live authorities.
 
 For the current collection aggregate, deletion validates all storage keys,
 deletes collection-owned relational records, memberships, and stored-object
@@ -385,6 +390,7 @@ Anything that cannot answer one of those questions is not ready to persist.
 - [Backend architecture overview](overview.md)
 - [Persistence adapter boundary](../../infra/persistence/README.md)
 - [Public backend API contract](../specs/api.md)
+- [Accepted Source retrieval decision](../plans/backend-wide/persistence-model-revision/retrieval-decision.md)
 - [Lens core artifact contracts](../../../docs/contracts/lens-core-artifact-contracts.md)
 - [Comparable-result substrate direction](../../../docs/decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - [Research-objective-first product flow](../../../docs/decisions/rfc-research-objective-first-product-flow.md)

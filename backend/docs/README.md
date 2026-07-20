@@ -26,6 +26,8 @@ authority page, current-state page, or implementation lineage.
   [`specs/api.md`](specs/api.md)
 - Backend architecture and ownership seams:
   [`architecture/overview.md`](architecture/overview.md)
+- Persistence ownership, identities, and build lineage:
+  [`architecture/persistence-model.md`](architecture/persistence-model.md)
 - Local development and operations:
   [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
 - Objective identity offline migration:
@@ -50,6 +52,9 @@ authority page, current-state page, or implementation lineage.
   comparable-result substrate
 - [`architecture/application-layer-boundary.md`](architecture/application-layer-boundary.md)
   Backend ADR for HTTP and application ownership separation
+- [`architecture/persistence-model.md`](architecture/persistence-model.md)
+  Implemented PostgreSQL, object-storage, scratch, identity, and build-lineage
+  authority
 - [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
   Local development and operations runbook
 - [`runbooks/objective-identity-migration.md`](runbooks/objective-identity-migration.md)

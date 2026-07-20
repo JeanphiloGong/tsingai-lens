@@ -17,7 +17,6 @@ from application.core.semantic_build.document_profile_service import (
 from application.core.research_understanding_service import ResearchUnderstandingService
 from application.source.collection_service import CollectionService
 from domain.core import (
-    ConfirmedGoal,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
@@ -381,18 +380,32 @@ class ResearchObjectiveService:
         return self.objective_repository.read(collection_id).objective_contexts
 
     def list_objective_workspaces(self, collection_id: str) -> dict[str, Any]:
-        facts = self._read_objective_workspace_facts(collection_id)
-        objectives = [
-            self._objective_list_item(
-                self._display_objective_from_facts(objective, facts=facts),
-                facts=facts,
+        active_facts = self._read_objective_workspace_facts(collection_id)
+        objectives = []
+        for objective in self.objective_repository.list_objective_workspaces(
+            collection_id
+        ):
+            facts = self.objective_repository.read(
+                collection_id,
+                build_id=objective.source_build_id,
             )
-            for objective in facts.research_objectives
-        ]
+            objectives.append(
+                self._objective_list_item(
+                    self._display_objective_from_facts(objective, facts=facts),
+                    facts=facts,
+                    understanding=self._read_objective_understanding(
+                        collection_id,
+                        objective.objective_id,
+                    ),
+                )
+            )
         return {
             "collection_id": collection_id,
-            "state": self._objective_collection_state(facts=facts, objectives=objectives),
-            "readiness": self._objective_workspace_readiness(facts),
+            "state": self._objective_collection_state(
+                facts=active_facts,
+                objectives=objectives,
+            ),
+            "readiness": self._objective_workspace_readiness(active_facts),
             "objectives": objectives,
             "warnings": [],
         }
@@ -402,17 +415,17 @@ class ResearchObjectiveService:
         collection_id: str,
         objective_id: str,
     ) -> dict[str, Any]:
-        facts = self._read_objective_workspace_facts(collection_id)
-        objective = next(
-            (
-                candidate
-                for candidate in facts.research_objectives
-                if candidate.objective_id == objective_id
-            ),
-            None,
+        self._read_objective_workspace_facts(collection_id)
+        objective = self.objective_repository.read_objective_workspace(
+            collection_id,
+            objective_id,
         )
         if objective is None:
             raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        facts = self.objective_repository.read(
+            collection_id,
+            build_id=objective.source_build_id,
+        )
         objective = self._display_objective_from_facts(objective, facts=facts)
 
         context = next(
@@ -460,13 +473,8 @@ class ResearchObjectiveService:
         )
         payload = {
             "collection_id": collection_id,
-            "state": self._objective_detail_state(
-                frames=frames,
-                routes=routes,
-                evidence_units=evidence_units,
-                logic_chain=logic_chain,
-            ),
-            "objective": objective.to_record(),
+            "state": self._objective_detail_state(objective.status),
+            "objective": objective.to_workspace_record(),
             "objective_context": context.to_record() if context is not None else None,
             "readiness": self._objective_workspace_readiness(
                 facts,
@@ -479,16 +487,9 @@ class ResearchObjectiveService:
             "existing_comparison_rows": [],
             "warnings": [],
         }
-        understanding = (
-            self.research_understanding_repository.read_research_understanding(
-                collection_id,
-                "objective",
-                objective_id,
-            )
-        )
-        payload["understanding"] = self.research_understanding_service.with_presentation(
-            understanding
-        )
+        understanding = self._read_objective_understanding(collection_id, objective_id)
+        payload["understanding"] = understanding
+        payload["review_summary"] = self._objective_review_summary(understanding)
         return payload
 
     def build_research_objectives(
@@ -615,27 +616,35 @@ class ResearchObjectiveService:
         )
         return objective_inputs["research_objectives"]
 
-    def analyze_confirmed_goal(
+    def analyze_objective(
         self,
-        goal: ConfirmedGoal,
+        collection_id: str,
+        objective_id: str,
         progress_callback: ProgressCallback | None = None,
     ) -> ResearchUnderstanding:
-        objective_inputs = self._build_confirmed_goal_analysis_inputs(
-            goal,
-            progress_callback=progress_callback,
+        objective = self.objective_repository.read_objective_workspace(
+            collection_id,
+            objective_id,
         )
-        objective = self._objective_from_confirmed_goal(
-            goal,
-            candidates=objective_inputs["research_objectives"],
+        if objective is None:
+            raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        if objective.source_build_id is None:
+            raise RuntimeError(f"research objective has no source build: {objective_id}")
+        objective_inputs = self._build_objective_analysis_inputs(
+            collection_id,
+            build_id=objective.source_build_id,
         )
-        active_facts = self.objective_repository.read(goal.collection_id)
+        source_facts = self.objective_repository.read(
+            collection_id,
+            build_id=objective.source_build_id,
+        )
         objective_contexts = self._build_objective_contexts(
             paper_skims=objective_inputs["paper_skims"],
             objectives=(objective,),
             tables=objective_inputs["artifacts"].tables,
         )
         objective_paper_frames = self._build_objective_paper_frames(
-            collection_id=goal.collection_id,
+            collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
             objective_contexts=objective_contexts,
@@ -650,7 +659,7 @@ class ResearchObjectiveService:
             progress_callback=progress_callback,
         )
         objective_evidence_routes = self._build_objective_evidence_routes(
-            collection_id=goal.collection_id,
+            collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
             objective_contexts=objective_contexts,
@@ -663,7 +672,7 @@ class ResearchObjectiveService:
             progress_callback=progress_callback,
         )
         objective_evidence_units = self._build_objective_evidence_units(
-            collection_id=goal.collection_id,
+            collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
             objective_contexts=objective_contexts,
@@ -680,7 +689,7 @@ class ResearchObjectiveService:
             progress_callback=progress_callback,
         )
         objective_logic_chains = self._build_objective_logic_chains(
-            collection_id=goal.collection_id,
+            collection_id=collection_id,
             objectives=(objective,),
             objective_contexts=objective_contexts,
             objective_evidence_units=objective_evidence_units,
@@ -704,18 +713,17 @@ class ResearchObjectiveService:
             evidence_units=evidence_units,
         )
         understanding = ResearchUnderstanding.from_mapping(
-            self.research_understanding_service.build_goal_understanding(
+            self.research_understanding_service.build_objective_understanding(
                 {
-                    "collection_id": goal.collection_id,
-                    "goal_id": goal.goal_id,
+                    "collection_id": collection_id,
                     "objective": objective.to_record(),
                     "objective_context": (
                         context.to_record() if context is not None else None
                     ),
                     "paper_frames": self._objective_paper_frame_views(
                         list(objective_paper_frames),
-                        collection_id=goal.collection_id,
-                        facts=active_facts,
+                        collection_id=collection_id,
+                        facts=source_facts,
                     ),
                     "evidence_routes": [
                         route.to_record() for route in objective_evidence_routes
@@ -727,67 +735,7 @@ class ResearchObjectiveService:
                 }
             )
         )
-        self.research_understanding_repository.upsert_research_understanding(
-            goal.collection_id,
-            understanding,
-        )
         return understanding
-
-    def _objective_from_confirmed_goal(
-        self,
-        goal: ConfirmedGoal,
-        *,
-        candidates: tuple[ResearchObjective, ...],
-    ) -> ResearchObjective:
-        source_candidate = next(
-            (
-                candidate
-                for candidate in candidates
-                if candidate.objective_id == goal.source_objective_id
-            ),
-            None,
-        )
-        payload = source_candidate.to_record() if source_candidate is not None else {}
-        payload.update(
-            {
-                "objective_id": (
-                    source_candidate.objective_id
-                    if source_candidate is not None
-                    else build_research_objective_id(goal.question)
-                ),
-                "question": goal.question,
-                "material_scope": list(
-                    goal.material_hints
-                    or (
-                        source_candidate.material_scope
-                        if source_candidate is not None
-                        else ()
-                    )
-                ),
-                "process_axes": list(
-                    goal.process_hints
-                    or (
-                        source_candidate.process_axes
-                        if source_candidate is not None
-                        else ()
-                    )
-                ),
-                "property_axes": list(
-                    goal.property_hints
-                    or (
-                        source_candidate.property_axes
-                        if source_candidate is not None
-                        else ()
-                    )
-                ),
-            }
-        )
-        objective = ResearchObjective.from_mapping(payload)
-        if objective.comparison_intent:
-            return objective
-        record = objective.to_record()
-        record["comparison_intent"] = self._build_comparison_intent(record)
-        return ResearchObjective.from_mapping(record)
 
     def _evidence_units_with_route_evidence_roles(
         self,
@@ -1005,13 +953,17 @@ class ResearchObjectiveService:
             "objective_contexts": objective_contexts,
         }
 
-    def _build_confirmed_goal_analysis_inputs(
+    def _build_objective_analysis_inputs(
         self,
-        goal: ConfirmedGoal,
-        progress_callback: ProgressCallback | None = None,
+        collection_id: str,
+        *,
+        build_id: str,
     ) -> dict[str, Any]:
-        source_inputs = self._load_objective_source_inputs(goal.collection_id)
-        facts = self.objective_repository.read(goal.collection_id)
+        source_inputs = self._load_objective_source_inputs(
+            collection_id,
+            build_id=build_id,
+        )
+        facts = self.objective_repository.read(collection_id, build_id=build_id)
         if facts.research_objectives_ready and facts.paper_skims:
             return {
                 **source_inputs,
@@ -1019,10 +971,7 @@ class ResearchObjectiveService:
                 "research_objectives": facts.research_objectives,
                 "objective_contexts": facts.objective_contexts,
             }
-        return self._build_objective_candidate_inputs(
-            goal.collection_id,
-            progress_callback=progress_callback,
-        )
+        raise ResearchObjectivesNotReadyError(collection_id)
 
     def _load_objective_source_inputs(
         self,
@@ -1410,7 +1359,13 @@ class ResearchObjectiveService:
         )
 
 
-    def _objective_list_item(self, objective: ResearchObjective, *, facts) -> dict[str, Any]:
+    def _objective_list_item(
+        self,
+        objective: ResearchObjective,
+        *,
+        facts,
+        understanding,
+    ) -> dict[str, Any]:
         frames = self._filter_objective_records(
             facts.objective_paper_frames,
             objective_id=objective.objective_id,
@@ -1427,15 +1382,11 @@ class ResearchObjectiveService:
             facts.objective_logic_chains,
             objective_id=objective.objective_id,
         )
-        record = objective.to_record()
+        record = objective.to_workspace_record()
         record.update(
             {
-                "state": self._objective_detail_state(
-                    frames=frames,
-                    routes=routes,
-                    evidence_units=evidence_units,
-                    logic_chain=self._select_objective_logic_chain(logic_chains),
-                ),
+                "state": self._objective_detail_state(objective.status),
+                "review_summary": self._objective_review_summary(understanding),
                 "paper_frame_count": len(frames),
                 "evidence_route_count": len(routes),
                 "evidence_unit_count": len(evidence_units),
@@ -1482,6 +1433,16 @@ class ResearchObjectiveService:
         payload["property_axes"] = property_axes
         payload["question"] = self._build_research_objective_question(payload)
         payload["comparison_intent"] = self._build_comparison_intent(payload)
+        payload.update(
+            {
+                "source_build_id": objective.source_build_id,
+                "status": objective.status,
+                "analysis_error": objective.analysis_error,
+                "analysis_progress": objective.analysis_progress,
+                "created_at": objective.created_at,
+                "updated_at": objective.updated_at,
+            }
+        )
         return ResearchObjective.from_mapping(payload)
 
     def _display_process_axes(
@@ -1577,19 +1538,37 @@ class ResearchObjectiveService:
             return "partial"
         return "empty"
 
-    def _objective_detail_state(
-        self,
-        *,
-        frames,
-        routes,
-        evidence_units,
-        logic_chain,
-    ) -> str:
-        if logic_chain is not None:
+    @staticmethod
+    def _objective_detail_state(status: str) -> str:
+        if status in {"queued", "running"}:
+            return "processing"
+        if status == "ready":
             return "ready"
-        if frames or routes or evidence_units:
-            return "partial"
-        return "empty"
+        if status == "failed":
+            return "failed"
+        return "partial"
+
+    def _read_objective_understanding(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any] | None:
+        understanding = self.research_understanding_repository.read_research_understanding(
+            collection_id,
+            "objective",
+            objective_id,
+        )
+        return self.research_understanding_service.with_presentation(understanding)
+
+    @staticmethod
+    def _objective_review_summary(understanding) -> dict[str, int]:
+        presentation = (understanding or {}).get("presentation") or {}
+        return {
+            "primary_finding_count": len(presentation.get("primary_findings") or []),
+            "review_candidate_count": len(
+                presentation.get("review_queue_findings") or []
+            ),
+        }
 
     def _select_objective_logic_chain(self, logic_chains):
         for chain in logic_chains:

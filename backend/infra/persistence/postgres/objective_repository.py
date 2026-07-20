@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -17,11 +18,13 @@ from domain.core import (
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
+    require_objective_status_transition,
 )
 from infra.persistence.postgres.models.build import (
     CollectionActiveBuild,
     CollectionBuild,
 )
+from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.objective import (
     ObjectiveBuild,
     ObjectiveContextRecord,
@@ -31,6 +34,7 @@ from infra.persistence.postgres.models.objective import (
     ObjectivePaperFrameRecord,
     ObjectivePaperSkim,
     ObjectiveResearchRecord,
+    ResearchObjectiveLifecycle,
     objective_document_links,
     objective_frame_table_links,
     objective_logic_chain_unit_links,
@@ -277,6 +281,240 @@ class PostgresObjectiveRepository:
                     )
                 ),
             )
+
+    def list_objective_workspaces(
+        self,
+        collection_id: str,
+    ) -> tuple[ResearchObjective, ...]:
+        with self.session_factory() as session:
+            active_build_id = self._resolve_read_build(session, collection_id, None)
+            lifecycle_rows = tuple(
+                session.scalars(
+                    select(ResearchObjectiveLifecycle)
+                    .where(ResearchObjectiveLifecycle.collection_id == collection_id)
+                    .order_by(
+                        ResearchObjectiveLifecycle.created_at,
+                        ResearchObjectiveLifecycle.objective_id,
+                    )
+                )
+            )
+
+        active_objectives = (
+            self.read(collection_id, build_id=active_build_id).research_objectives
+            if active_build_id is not None
+            else ()
+        )
+        lifecycles_by_id = {row.objective_id: row for row in lifecycle_rows}
+        workspaces: list[ResearchObjective] = []
+        seen: set[str] = set()
+        for objective in active_objectives:
+            lifecycle = lifecycles_by_id.get(objective.objective_id)
+            if lifecycle is None:
+                workspaces.append(
+                    self._with_workspace(objective, source_build_id=active_build_id)
+                )
+            else:
+                workspaces.append(self._objective_for_lifecycle(collection_id, lifecycle))
+            seen.add(objective.objective_id)
+        workspaces.extend(
+            self._objective_for_lifecycle(collection_id, lifecycle)
+            for lifecycle in lifecycle_rows
+            if lifecycle.objective_id not in seen
+        )
+        return tuple(workspaces)
+
+    def read_objective_workspace(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective | None:
+        with self.session_factory() as session:
+            lifecycle = session.get(
+                ResearchObjectiveLifecycle,
+                (collection_id, objective_id),
+            )
+            active_build_id = (
+                None
+                if lifecycle is not None
+                else self._resolve_read_build(session, collection_id, None)
+            )
+        if lifecycle is not None:
+            return self._objective_for_lifecycle(collection_id, lifecycle)
+        if active_build_id is None:
+            return None
+        objective = self._objective_for_build(
+            collection_id,
+            active_build_id,
+            objective_id,
+        )
+        return (
+            self._with_workspace(objective, source_build_id=active_build_id)
+            if objective is not None
+            else None
+        )
+
+    def confirm_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        with self.session_factory.begin() as session:
+            collection = session.scalar(
+                select(Collection)
+                .where(Collection.collection_id == collection_id)
+                .with_for_update()
+            )
+            if collection is None:
+                raise FileNotFoundError(
+                    f"research objective not found: {collection_id}/{objective_id}"
+                )
+            lifecycle = session.get(
+                ResearchObjectiveLifecycle,
+                (collection_id, objective_id),
+            )
+            if lifecycle is None:
+                active = session.get(CollectionActiveBuild, collection_id)
+                if active is None:
+                    raise FileNotFoundError(
+                        f"research objective not found: {collection_id}/{objective_id}"
+                    )
+                objective = session.get(
+                    ObjectiveResearchRecord,
+                    (active.build_id, objective_id),
+                )
+                if objective is None or objective.collection_id != collection_id:
+                    raise FileNotFoundError(
+                        f"research objective not found: {collection_id}/{objective_id}"
+                    )
+                require_objective_status_transition("candidate", "confirmed")
+                now = datetime.now(timezone.utc)
+                session.add(
+                    ResearchObjectiveLifecycle(
+                        collection_id=collection_id,
+                        objective_id=objective_id,
+                        source_build_id=active.build_id,
+                        status="confirmed",
+                        analysis_error=None,
+                        analysis_progress=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+        return self._require_objective_workspace(collection_id, objective_id)
+
+    def queue_objective_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        with self.session_factory.begin() as session:
+            lifecycle = self._locked_lifecycle(session, collection_id, objective_id)
+            if lifecycle is None:
+                candidate = self.read_objective_workspace(collection_id, objective_id)
+                if candidate is None:
+                    raise FileNotFoundError(
+                        f"research objective not found: {collection_id}/{objective_id}"
+                    )
+                require_objective_status_transition("candidate", "queued")
+            elif lifecycle.status not in {"queued", "running"}:
+                require_objective_status_transition(lifecycle.status, "queued")
+                lifecycle.status = "queued"
+                lifecycle.analysis_error = None
+                lifecycle.analysis_progress = {
+                    "phase": "queued",
+                    "unit": "steps",
+                    "message": "Objective analysis is queued.",
+                }
+                lifecycle.updated_at = datetime.now(timezone.utc)
+        return self._require_objective_workspace(collection_id, objective_id)
+
+    def claim_objective_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective | None:
+        claimed = False
+        with self.session_factory.begin() as session:
+            lifecycle = self._locked_lifecycle(session, collection_id, objective_id)
+            if lifecycle is None:
+                raise FileNotFoundError(
+                    f"research objective not found: {collection_id}/{objective_id}"
+                )
+            if lifecycle.status == "queued":
+                require_objective_status_transition("queued", "running")
+                lifecycle.status = "running"
+                lifecycle.analysis_error = None
+                lifecycle.analysis_progress = {
+                    "phase": "objective_analysis_started",
+                    "unit": "steps",
+                    "message": "Objective analysis has started.",
+                }
+                lifecycle.updated_at = datetime.now(timezone.utc)
+                claimed = True
+        return (
+            self._require_objective_workspace(collection_id, objective_id)
+            if claimed
+            else None
+        )
+
+    def update_objective_analysis_progress(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_progress: dict[str, Any],
+    ) -> ResearchObjective:
+        with self.session_factory.begin() as session:
+            lifecycle = self._require_locked_lifecycle(
+                session, collection_id, objective_id
+            )
+            if lifecycle.status != "running":
+                raise ValueError(
+                    f"objective analysis is not running: {lifecycle.status}"
+                )
+            lifecycle.analysis_progress = dict(analysis_progress)
+            lifecycle.updated_at = datetime.now(timezone.utc)
+        return self._require_objective_workspace(collection_id, objective_id)
+
+    def mark_objective_analysis_ready(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        with self.session_factory.begin() as session:
+            lifecycle = self._require_locked_lifecycle(
+                session, collection_id, objective_id
+            )
+            require_objective_status_transition(lifecycle.status, "ready")
+            lifecycle.status = "ready"
+            lifecycle.analysis_error = None
+            lifecycle.analysis_progress = {
+                "phase": "completed",
+                "unit": "steps",
+                "message": "Objective analysis is ready.",
+            }
+            lifecycle.updated_at = datetime.now(timezone.utc)
+        return self._require_objective_workspace(collection_id, objective_id)
+
+    def mark_objective_analysis_failed(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_error: str,
+    ) -> ResearchObjective:
+        with self.session_factory.begin() as session:
+            lifecycle = self._require_locked_lifecycle(
+                session, collection_id, objective_id
+            )
+            require_objective_status_transition(lifecycle.status, "failed")
+            lifecycle.status = "failed"
+            lifecycle.analysis_error = str(analysis_error)
+            lifecycle.analysis_progress = {
+                "phase": "failed",
+                "unit": "steps",
+                "message": "Objective analysis failed.",
+            }
+            lifecycle.updated_at = datetime.now(timezone.utc)
+        return self._require_objective_workspace(collection_id, objective_id)
 
     @staticmethod
     def _skim_row(
@@ -766,6 +1004,113 @@ class PostgresObjectiveRepository:
             raise FileNotFoundError(
                 f"source document not found: {collection_id}/{source_document_id}"
             )
+
+    def _objective_for_lifecycle(
+        self,
+        collection_id: str,
+        lifecycle: ResearchObjectiveLifecycle,
+    ) -> ResearchObjective:
+        objective = self._objective_for_build(
+            collection_id,
+            lifecycle.source_build_id,
+            lifecycle.objective_id,
+        )
+        if objective is None:
+            raise FileNotFoundError(
+                "research objective lifecycle source not found: "
+                f"{collection_id}/{lifecycle.objective_id}"
+            )
+        return self._with_workspace(
+            objective,
+            source_build_id=lifecycle.source_build_id,
+            status=lifecycle.status,
+            analysis_error=lifecycle.analysis_error,
+            analysis_progress=lifecycle.analysis_progress,
+            created_at=lifecycle.created_at.isoformat(),
+            updated_at=lifecycle.updated_at.isoformat(),
+        )
+
+    def _objective_for_build(
+        self,
+        collection_id: str,
+        build_id: str,
+        objective_id: str,
+    ) -> ResearchObjective | None:
+        return next(
+            (
+                objective
+                for objective in self.read(
+                    collection_id,
+                    build_id=build_id,
+                ).research_objectives
+                if objective.objective_id == objective_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _with_workspace(
+        objective: ResearchObjective,
+        *,
+        source_build_id: str | None,
+        status: str = "candidate",
+        analysis_error: str | None = None,
+        analysis_progress: dict[str, Any] | None = None,
+        created_at: str | None = None,
+        updated_at: str | None = None,
+    ) -> ResearchObjective:
+        return ResearchObjective.from_mapping(
+            {
+                **objective.to_record(),
+                "source_build_id": source_build_id,
+                "status": status,
+                "analysis_error": analysis_error,
+                "analysis_progress": analysis_progress,
+                "created_at": created_at,
+                "updated_at": updated_at,
+            }
+        )
+
+    def _require_objective_workspace(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        objective = self.read_objective_workspace(collection_id, objective_id)
+        if objective is None:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            )
+        return objective
+
+    @staticmethod
+    def _locked_lifecycle(
+        session: Session,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjectiveLifecycle | None:
+        return session.scalar(
+            select(ResearchObjectiveLifecycle)
+            .where(
+                ResearchObjectiveLifecycle.collection_id == collection_id,
+                ResearchObjectiveLifecycle.objective_id == objective_id,
+            )
+            .with_for_update()
+        )
+
+    @classmethod
+    def _require_locked_lifecycle(
+        cls,
+        session: Session,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjectiveLifecycle:
+        lifecycle = cls._locked_lifecycle(session, collection_id, objective_id)
+        if lifecycle is None:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            )
+        return lifecycle
 
     @staticmethod
     def _require_build(

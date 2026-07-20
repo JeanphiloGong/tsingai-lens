@@ -20,6 +20,14 @@ DEFAULT_GOAL_IDS = (
     "goal_6bf7d2c1030e",
     "goal_3037e425673a",
 )
+DEFAULT_OBJECTIVE_IDS = (
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac",
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba",
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8",
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8",
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
+)
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 EXPERT_NOTE_PROMPTS = {
     "accept_as_paper_level": "Required: explain accepted paper-level scope.",
@@ -77,6 +85,15 @@ def parse_args() -> argparse.Namespace:
         help="Goal id to prepare. May repeat. Defaults to the local 6-goal 316L set.",
     )
     parser.add_argument(
+        "--objective-id",
+        action="append",
+        dest="objective_ids",
+        help=(
+            "Objective id paired by position with --goal-id. May repeat. "
+            "Defaults to the local 6-objective 316L set."
+        ),
+    )
+    parser.add_argument(
         "--api-base-url",
         help=(
             "Optional running Lens API or frontend origin to read, for example "
@@ -99,6 +116,7 @@ def main() -> None:
     result = prepare_goal_review_workspace(
         collection_id=args.collection_id,
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        objective_ids=tuple(args.objective_ids or DEFAULT_OBJECTIVE_IDS),
         api_base_url=args.api_base_url,
         output_dir=(
             Path(args.output_dir)
@@ -115,9 +133,12 @@ def prepare_goal_review_workspace(
     *,
     collection_id: str,
     goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    objective_ids: tuple[str, ...] = DEFAULT_OBJECTIVE_IDS,
     output_dir: Path,
     api_base_url: str | None = None,
 ) -> dict[str, Any]:
+    if len(goal_ids) != len(objective_ids):
+        raise ValueError("goal_ids and objective_ids must have the same length")
     _ensure_empty_output_dir(output_dir)
     dataset_module = _load_dataset_quality_module()
     summary = dataset_module.check_goal_dataset_quality(
@@ -132,6 +153,7 @@ def prepare_goal_review_workspace(
         summary,
         collection_id=collection_id,
         goal_ids=goal_ids,
+        objective_ids=objective_ids,
         api_base_url=api_base_url,
     )
     files = _write_workspace_files(
@@ -1139,8 +1161,8 @@ def _load_dataset_quality_module():
 
 def _load_findings_projection_module():
     return _load_sibling_module(
-        "check_goal_findings_projection.py",
-        "check_goal_findings_projection",
+        "check_objective_findings_projection.py",
+        "check_objective_findings_projection",
     )
 
 
@@ -1163,21 +1185,26 @@ def _enrich_goal_questions(
     *,
     collection_id: str,
     goal_ids: tuple[str, ...],
+    objective_ids: tuple[str, ...],
     api_base_url: str | None,
 ) -> None:
     try:
         findings_module = _load_findings_projection_module()
-        findings_summary = findings_module.check_goal_findings_projection(
+        findings_summary = findings_module.check_objective_findings_projection(
             collection_id=collection_id,
-            goal_ids=goal_ids,
+            objective_ids=objective_ids,
             api_base_url=api_base_url,
         )
     except Exception as exc:  # noqa: BLE001
         summary["goal_question_warning"] = f"goal question lookup failed: {exc}"
         return
+    questions_by_objective = {
+        _text(objective.get("objective_id")): _text(objective.get("question"))
+        for objective in _mapping_list(findings_summary.get("objectives"))
+    }
     questions = {
-        _text(goal.get("goal_id")): _text(goal.get("question"))
-        for goal in _mapping_list(findings_summary.get("goals"))
+        goal_id: questions_by_objective.get(objective_id, "")
+        for objective_id, goal_id in zip(objective_ids, goal_ids, strict=True)
     }
     for goal in _mapping_list(summary.get("goals")):
         goal_id = _text(goal.get("goal_id"))

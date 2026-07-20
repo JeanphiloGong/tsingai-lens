@@ -28,15 +28,15 @@ def _load_goal_expert_loop_module():
 def _findings_payload(status: str = "pass"):
     return {
         "status": status,
-        "goals": [
+        "objectives": [
             {
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "question": "How does preheating affect ductility?",
                 "primary_finding_count": 1,
                 "direct_evidence_count": 2,
             },
             {
-                "goal_id": "goal-2",
+                "objective_id": "objective-2",
                 "question": "How does porosity affect corrosion?",
                 "primary_finding_count": 1,
                 "direct_evidence_count": 1,
@@ -121,9 +121,9 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -135,6 +135,7 @@ def test_check_goal_expert_loop_passes_when_reviewable_and_protocol_ready(monkey
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
     )
 
     assert summary["status"] == "pass"
@@ -245,9 +246,9 @@ def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeyp
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -259,6 +260,7 @@ def test_check_goal_expert_loop_require_complete_fails_on_remaining_work(monkeyp
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
 
@@ -277,9 +279,9 @@ def test_check_goal_expert_loop_expert_gate_fails_on_remaining_work(monkeypatch)
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -291,6 +293,7 @@ def test_check_goal_expert_loop_expert_gate_fails_on_remaining_work(monkeypatch)
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         expert_satisfaction_gate=True,
     )
 
@@ -324,9 +327,9 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -338,6 +341,7 @@ def test_check_goal_expert_loop_renders_human_review_summary(monkeypatch):
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
     text = check.render_text_summary(summary)
@@ -442,9 +446,9 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -456,6 +460,7 @@ def test_check_goal_expert_loop_points_message_gaps_to_training_samples(monkeypa
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
 
@@ -490,9 +495,9 @@ def test_check_goal_expert_loop_require_complete_passes_when_no_work_remains(mon
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -504,6 +509,7 @@ def test_check_goal_expert_loop_require_complete_passes_when_no_work_remains(mon
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
 
@@ -523,9 +529,9 @@ def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypa
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -537,6 +543,7 @@ def test_check_goal_expert_loop_strict_mode_requires_all_training_ready(monkeypa
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         require_all_training_ready=True,
     )
 
@@ -558,9 +565,9 @@ def test_check_goal_expert_loop_points_protocol_gaps_to_training_samples(monkeyp
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -572,6 +579,7 @@ def test_check_goal_expert_loop_points_protocol_gaps_to_training_samples(monkeyp
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         require_complete=True,
     )
 
@@ -609,9 +617,9 @@ def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -623,6 +631,7 @@ def test_check_goal_expert_loop_fails_without_protocol_ready_goal(monkeypatch):
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
     )
 
     assert summary["status"] == "fail"
@@ -640,9 +649,9 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -672,6 +681,7 @@ def test_check_goal_expert_loop_fails_when_runtime_plan_routes_are_missing(monke
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         require_complete=True,
     )
@@ -717,9 +727,9 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -740,6 +750,7 @@ def test_check_goal_expert_loop_passes_when_runtime_plan_routes_exist(monkeypatc
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         require_complete=True,
     )
@@ -776,9 +787,9 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -844,6 +855,7 @@ def test_check_goal_expert_loop_runtime_write_check_creates_and_updates_smoke_pl
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         runtime_write_check=True,
         require_complete=True,
@@ -906,9 +918,9 @@ def test_check_goal_expert_loop_runtime_write_uses_protocol_ready_goal(monkeypat
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -942,6 +954,7 @@ def test_check_goal_expert_loop_runtime_write_uses_protocol_ready_goal(monkeypat
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         runtime_write_check=True,
     )
@@ -972,9 +985,9 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
             type(
                 "FindingsModule",
                 (),
-                {"check_goal_findings_projection": staticmethod(lambda **_: _findings_payload())},
+                {"check_objective_findings_projection": staticmethod(lambda **_: _findings_payload())},
             )
-            if module_name == "check_goal_findings_projection"
+            if module_name == "check_objective_findings_projection"
             else type(
                 "DatasetModule",
                 (),
@@ -1008,6 +1021,7 @@ def test_check_goal_expert_loop_expert_gate_passes_with_complete_runtime_write(
     summary = check.check_goal_expert_loop(
         collection_id="col-1",
         goal_ids=("goal-1", "goal-2"),
+        objective_ids=("objective-1", "objective-2"),
         api_base_url="http://localhost:5173",
         expert_satisfaction_gate=True,
     )

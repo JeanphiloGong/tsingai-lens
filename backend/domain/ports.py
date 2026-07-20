@@ -10,8 +10,8 @@ from domain.core.comparison import (
 from domain.core.document_profile import DocumentProfile
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
-    ConfirmedGoal,
     ObjectiveFactSet,
+    ResearchObjective,
 )
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.source import (
@@ -329,6 +329,55 @@ class ObjectiveRepository(Protocol):
         build_id: str | None = None,
     ) -> ObjectiveFactSet: ...
 
+    def list_objective_workspaces(
+        self,
+        collection_id: str,
+    ) -> tuple[ResearchObjective, ...]: ...
+
+    def read_objective_workspace(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective | None: ...
+
+    def confirm_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective: ...
+
+    def queue_objective_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective: ...
+
+    def claim_objective_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective | None: ...
+
+    def update_objective_analysis_progress(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_progress: dict[str, Any],
+    ) -> ResearchObjective: ...
+
+    def mark_objective_analysis_ready(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective: ...
+
+    def mark_objective_analysis_failed(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_error: str,
+    ) -> ResearchObjective: ...
+
 
 class ComparisonRepository(Protocol):
     backend_name: str
@@ -375,20 +424,6 @@ class ResearchUnderstandingRepository(Protocol):
         collection_id: str,
         scope_type: str | None = None,
     ) -> tuple[ResearchUnderstanding, ...]: ...
-
-
-class ConfirmedGoalRepository(Protocol):
-    backend_name: str
-
-    def upsert_confirmed_goal(self, goal: ConfirmedGoal) -> ConfirmedGoal: ...
-
-    def read_confirmed_goal(
-        self,
-        collection_id: str,
-        goal_id: str,
-    ) -> ConfirmedGoal | None: ...
-
-    def list_confirmed_goals(self, collection_id: str) -> tuple[ConfirmedGoal, ...]: ...
 
 
 class EvaluationRepository(Protocol):

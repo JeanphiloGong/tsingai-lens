@@ -38,13 +38,13 @@ The stable data ownership and identity contract lives in
   build-versioned Source structure, figures, references, document profiles,
   reusable paper facts, research objectives, contexts, paper frames, evidence
   routes, evidence units, logic chains, comparable results, collection
-  comparison assessments, and pairwise relations through SQLAlchemy mappings
-  and direct aggregate repositories.
+  comparison assessments, pairwise relations, and Research Objective lifecycle
+  state through SQLAlchemy mappings and direct aggregate repositories.
   The application creates one engine and session factory and composes these
   repositories and services in the FastAPI lifespan.
 - `sqlite/`
   Handwritten repositories share `backend/data/lens.sqlite` for Goal sessions
-  and plans, confirmed goals, understandings, and evaluation/review state.
+  and plans, understandings, and evaluation/review state.
   These remaining repositories currently create schema at runtime. SQLite
   Source, paper-fact, objective, and comparison tables are isolated
   test/legacy residue and are not composed into maintained runtime readers,
@@ -52,8 +52,8 @@ The stable data ownership and identity contract lives in
 - `mysql/`
   Unimplemented placeholder with no active runtime selection path.
 
-`factory.py` constructs SQLite repositories only for the remaining Goal,
-Understanding, and evaluation families. Auth, collection, build, Source,
+`factory.py` constructs SQLite repositories only for the remaining Goal session
+and plan, Understanding, and evaluation families. Auth, collection, build, Source,
 paper-fact, objective, and comparison aggregates are composed directly in
 `main.py`; none
 has a repository factory or
@@ -121,11 +121,13 @@ composite repository or SQLite paper-fact fallback exists.
 objectives, contexts, paper frames, evidence routes, evidence units, logic
 chains, and their ordered document, Source, paper-fact anchor, and evidence-unit
 links. Writes replace one explicitly named pending build; default reads resolve
-only the active successful build. Goal analysis reads that active aggregate,
-derives goal-specific stages in memory, and persists only the final
-understanding through its current owner. It does not mutate the active
-collection objective build. No SQLite objective read, write, fallback, or dual
-path remains.
+only the active successful build. The same repository owns
+`research_objective_lifecycles`, keyed by `(collection_id, objective_id)`, and
+pins each confirmed Objective to its exact immutable source build. Objective
+analysis derives its stages in memory and persists only the final
+objective-scoped Understanding through its current owner. It does not mutate
+the collection Objective build. No second Goal identity, lifecycle repository,
+SQLite objective path, fallback, or dual path remains.
 
 `PostgresComparisonRepository` is the single structured owner for comparable
 results, collection-scoped assessments, pairwise relations, and their ordered
@@ -135,13 +137,11 @@ regenerates `ComparisonRowRecord` values from those semantic records for every
 row-facing read. No comparison-row table, SQLite comparison read, fallback, or
 dual write exists.
 
-The former broad Core persistence path has been deleted.
-`SqliteConfirmedGoalRepository` and `SqliteResearchUnderstandingRepository`
-are direct temporary owners for their respective legacy tables, and services
-receive the matching narrow repository contract explicitly. Sharing the same
-SQLite file does not combine their contracts or runtime ownership. Their later
-PostgreSQL cutovers replace these concrete implementations directly; there is
-no aggregate facade, fallback alias, or compatibility path.
+The former broad Core persistence path and ConfirmedGoal runtime path have been
+deleted. `SqliteResearchUnderstandingRepository` is the direct temporary owner
+for its legacy table, and services receive that narrow repository contract
+explicitly. Its later PostgreSQL cutover replaces the concrete implementation
+directly; there is no aggregate facade, fallback alias, or compatibility path.
 
 ## Target Boundary
 

@@ -6,7 +6,7 @@ from time import perf_counter
 from config import DATA_DIR
 from application.auth import AuthSessionService, SessionNotFoundError
 from application.core.comparison_service import ComparisonService
-from application.core.confirmed_goal_service import ConfirmedGoalService
+from application.core.objective_analysis_service import ObjectiveAnalysisService
 from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
@@ -22,7 +22,6 @@ from application.core.workspace_overview_service import WorkspaceService
 from application.goal.brief_service import GoalService
 from application.goal.session_service import GoalSessionService
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
-from application.pipeline.goal_analysis.service import GoalAnalysisPipelineService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.document_markdown_service import DocumentMarkdownService
@@ -32,10 +31,8 @@ from controllers import auth
 from controllers.core import (
     comparable_results,
     comparisons,
-    confirmed_goals,
     documents,
     evidence,
-    goal_analysis,
     research_objectives,
     research_understanding_feedback,
     research_view,
@@ -74,16 +71,12 @@ from infra.persistence.postgres.source_artifact_repository import (
 )
 from domain.ports import (
     ComparisonRepository,
-    ConfirmedGoalRepository,
     ObjectiveRepository,
     PaperFactRepository,
     ResearchUnderstandingRepository,
     SourceArtifactRepository,
 )
-from infra.persistence.factory import (
-    build_confirmed_goal_repository,
-    build_research_understanding_repository,
-)
+from infra.persistence.factory import build_research_understanding_repository
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -120,7 +113,6 @@ def create_app(
     paper_fact_repository: PaperFactRepository | None = None,
     objective_repository: ObjectiveRepository | None = None,
     comparison_repository: ComparisonRepository | None = None,
-    confirmed_goal_repository: ConfirmedGoalRepository | None = None,
     research_understanding_repository: ResearchUnderstandingRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -165,9 +157,6 @@ def create_app(
             )
             active_comparison_repository = (
                 comparison_repository or PostgresComparisonRepository(session_factory)
-            )
-            active_confirmed_goal_repository = (
-                confirmed_goal_repository or build_confirmed_goal_repository()
             )
             active_research_understanding_repository = (
                 research_understanding_repository
@@ -233,24 +222,14 @@ def create_app(
                 comparison_service=comparison_service,
                 research_understanding_service=research_understanding_service,
             )
-            confirmed_goal_service = ConfirmedGoalService(
-                active_confirmed_goal_repository,
-                active_objective_repository,
-                active_research_understanding_repository,
-            )
-
             application.state.collection_service = active_collection_service
             application.state.task_service = active_task_service
             application.state.paper_fact_repository = active_paper_fact_repository
             application.state.objective_repository = active_objective_repository
             application.state.comparison_repository = active_comparison_repository
-            application.state.confirmed_goal_repository = (
-                active_confirmed_goal_repository
-            )
             application.state.research_understanding_repository = (
                 active_research_understanding_repository
             )
-            application.state.confirmed_goal_service = confirmed_goal_service
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(
@@ -284,9 +263,12 @@ def create_app(
                 paper_facts_service=paper_facts_service,
                 research_objective_service=research_objective_service,
             )
-            application.state.goal_analysis_service = GoalAnalysisPipelineService(
+            application.state.objective_analysis_service = ObjectiveAnalysisService(
+                objective_repository=active_objective_repository,
+                research_understanding_repository=(
+                    active_research_understanding_repository
+                ),
                 research_objective_service=research_objective_service,
-                confirmed_goal_service=confirmed_goal_service,
                 research_understanding_service=research_understanding_service,
             )
             yield
@@ -410,8 +392,6 @@ def create_app(
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(confirmed_goals.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(goal_analysis.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX

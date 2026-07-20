@@ -7,7 +7,6 @@ from pathlib import Path
 
 from domain.core import (
     BaselineReference,
-    ConfirmedGoal,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
@@ -48,7 +47,6 @@ from infra.persistence.postgres.collection_repository import (
 )
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.sqlite import (
-    SqliteConfirmedGoalRepository,
     SqliteEvaluationRepository,
     SqliteExperimentPlanRepository,
     SqliteGoalSessionRepository,
@@ -88,7 +86,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    confirmed_goal_repository = SqliteConfirmedGoalRepository(db_path)
     research_understanding_repository = SqliteResearchUnderstandingRepository(db_path)
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
@@ -281,10 +278,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             ),
         ),
     )
-    for item in records["confirmed_goals"]:
-        confirmed_goal_repository.upsert_confirmed_goal(
-            ConfirmedGoal.from_mapping(item)
-        )
     for item in records["research_understandings"]:
         research_understanding_repository.upsert_research_understanding(
             collection_id,
@@ -414,10 +407,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ],
         "research_objectives": [
             item.to_record() for item in objective_facts.research_objectives
-        ],
-        "confirmed_goals": [
-            item.to_record()
-            for item in confirmed_goal_repository.list_confirmed_goals(collection_id)
         ],
         "research_understandings": [
             item.to_record()

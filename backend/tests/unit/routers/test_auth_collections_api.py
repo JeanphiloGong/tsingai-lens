@@ -130,7 +130,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
             state.research_objective_service,
             state.research_view_service,
             state.workspace_service,
-            state.goal_analysis_service.research_objective_service,
+            state.objective_analysis_service.research_objective_service,
         )
 
         assert all(

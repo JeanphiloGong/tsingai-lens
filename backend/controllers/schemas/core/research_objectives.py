@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,21 @@ from controllers.schemas.core.research_view import (
 from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingResponse,
 )
+
+
+ObjectiveStatus = Literal[
+    "candidate",
+    "confirmed",
+    "queued",
+    "running",
+    "ready",
+    "failed",
+]
+
+
+class ObjectiveReviewSummaryResponse(BaseModel):
+    primary_finding_count: int = 0
+    review_candidate_count: int = 0
 
 
 class ObjectiveWorkspaceReadinessResponse(BaseModel):
@@ -39,12 +54,18 @@ class ObjectiveSummaryResponse(BaseModel):
     property_axes: list[str] = Field(default_factory=list, description="Property axes")
     comparison_intent: str | None = Field(default=None, description="Comparison intent")
     confidence: float = Field(default=0.0, description="Objective confidence")
+    status: ObjectiveStatus = "candidate"
+    analysis_error: str | None = None
+    analysis_progress: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ObjectiveListItemResponse(ObjectiveSummaryResponse):
     """Research objective row for collection lists."""
 
     state: ResearchViewState = Field(..., description="Objective workspace state")
+    review_summary: ObjectiveReviewSummaryResponse
     paper_frame_count: int = Field(default=0, description="Paper frame count")
     evidence_route_count: int = Field(default=0, description="Evidence route count")
     evidence_unit_count: int = Field(default=0, description="Evidence unit count")
@@ -191,6 +212,7 @@ class ObjectiveResearchViewResponse(BaseModel):
     collection_id: str = Field(..., description="Collection ID")
     state: ResearchViewState = Field(..., description="Objective workspace state")
     objective: ObjectiveSummaryResponse
+    review_summary: ObjectiveReviewSummaryResponse
     objective_context: ObjectiveContextResponse | None = Field(default=None)
     readiness: ObjectiveWorkspaceReadinessResponse
     paper_frames: list[ObjectivePaperFrameResponse] = Field(default_factory=list)
@@ -203,3 +225,10 @@ class ObjectiveResearchViewResponse(BaseModel):
     )
     existing_comparison_rows: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[ResearchViewWarningResponse] = Field(default_factory=list)
+
+
+class ObjectiveAnalysisResponse(BaseModel):
+    collection_id: str
+    objective: ObjectiveSummaryResponse
+    understanding: ResearchUnderstandingResponse | None = None
+    warnings: list[str] = Field(default_factory=list)

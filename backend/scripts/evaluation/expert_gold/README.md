@@ -221,13 +221,13 @@ python3 scripts/evaluation/expert_gold/evaluate_research_objective_target.py \
 
 ## Check Runtime Goal Readiness
 
-For the local six-goal 316L validation collection, run the two read-only
+For the local six-objective 316L validation collection, run the two read-only
 runtime checks against a running frontend/API origin:
 
 ```bash
 LENS_CHECK_EMAIL=lens-admin@example.com \
 LENS_CHECK_PASSWORD=admin.. \
-./.venv/bin/python scripts/evaluation/expert_gold/check_goal_findings_projection.py \
+./.venv/bin/python scripts/evaluation/expert_gold/check_objective_findings_projection.py \
   --api-base-url http://localhost:5173
 
 LENS_CHECK_EMAIL=lens-admin@example.com \
@@ -236,7 +236,7 @@ LENS_CHECK_PASSWORD=admin.. \
   --api-base-url http://localhost:5173
 ```
 
-`check_goal_findings_projection.py` verifies the expert-facing finding rows,
+`check_objective_findings_projection.py` verifies the expert-facing finding rows,
 evidence roles, boundaries, and source traceback. `check_goal_dataset_quality.py`
 verifies the dataset preparation side: each confirmed goal has at least one
 active sample for review or training, no failed or unavailable trace warnings,

@@ -16,6 +16,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    DateTime,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -123,6 +124,38 @@ class ObjectiveResearchRecord(Base):
     comparison_intent: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ResearchObjectiveLifecycle(Base):
+    __tablename__ = "research_objective_lifecycles"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('confirmed', 'queued', 'running', 'ready', 'failed')",
+            name="status_valid",
+        ),
+        ForeignKeyConstraint(
+            ["collection_id", "source_build_id", "objective_id"],
+            [
+                "research_objectives.collection_id",
+                "research_objectives.build_id",
+                "research_objectives.objective_id",
+            ],
+            name="fk_objective_lifecycles_objective",
+            ondelete="RESTRICT",
+        ),
+    )
+
+    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_build_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    analysis_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_progress: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=True,
+    )
+    created_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 objective_document_links = Table(

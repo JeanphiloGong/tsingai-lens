@@ -444,17 +444,15 @@ dataset 比较，并在响应 metadata 中附加 `source_validity=current | stal
 ### Research Objectives
 
 - `GET /api/v1/collections/{collection_id}/objectives`
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
-- `POST /api/v1/collections/{collection_id}/goals`
-- `GET /api/v1/collections/{collection_id}/goals`
-- `GET /api/v1/collections/{collection_id}/goals/{goal_id}`
-- `POST /api/v1/collections/{collection_id}/goals/{goal_id}/analysis`
-- `GET /api/v1/collections/{collection_id}/goals/{goal_id}/analysis`
 
-这是 objective-first / confirmed-goal 工作区的主读取合同。collection build
+这是 objective-first 工作区的主合同。collection build
 默认只生成 lightweight objective candidates；深度证据路由、证据单元、
-logic chain 和 research-understanding 投影必须在用户确认 goal 后，通过
-confirmed-goal analysis 运行。
+logic chain 和 research-understanding 投影必须在用户确认 Objective 后，通过
+Objective analysis 运行。
 
 Objective 接口只读取已经落库的 Core research-objective records，不在 GET
 请求中触发 LLM 构建。
@@ -472,6 +470,7 @@ Objective research-view 最小返回结构：
 - `collection_id`
 - `state`
 - `objective`
+- `review_summary`
 - `objective_context`
 - `readiness`
 - `paper_frames`
@@ -491,6 +490,27 @@ Objective research-view 最小返回结构：
 - `property_axes`
 - `comparison_intent`
 - `confidence`
+- `status`
+- `analysis_error`
+- `analysis_progress`
+- `created_at`
+- `updated_at`
+
+`status` 只使用：
+
+- `candidate`
+- `confirmed`
+- `queued`
+- `running`
+- `ready`
+- `failed`
+
+`ObjectiveAnalysisResponse` 最小返回结构：
+
+- `collection_id`
+- `objective`
+- `understanding`
+- `warnings`
 
 `readiness` 使用：
 
@@ -502,20 +522,20 @@ Objective research-view 最小返回结构：
 
 语义要求：
 
-- objective candidate 是系统推荐的候选研究问题；confirmed goal 是用户或
-  benchmark 确认后的深度分析输入
-- goal analysis 输出的 `understanding.scope.scope_type` 为 `goal`，并使用
-  `goal_id` 作为人工标注、纠错和后续 AI grounding 的稳定 scope id
-- objective 是候选资源身份；material 只作为 scope/facet 展示
+- Objective candidate 是系统推荐的候选研究问题；确认操作固定该
+  `objective_id` 对应的不可变 build 版本，并使其成为深度分析输入
+- `objective_id` 是确认、分析、后台任务和新 Research Understanding 的唯一研究
+  目标身份；analysis 输出的 `understanding.scope.scope_type` 为 `objective`
+- Objective 是研究目标资源身份；material 只作为 scope/facet 展示
 - `/materials` 不返回 objective records
 - `paper_frames` 来自 `ObjectivePaperFrame`，并补充 document title 与
   source filename
 - `relevant_tables` 与 `excluded_tables` 必须是真实 Source table id
 - `evidence_routes`、`evidence_units`、`logic_chain`
   在下游 builder 未完成时可以为空，但字段必须保留
-- `understanding` 是 confirmed-goal analysis 持久化的 Core research
+- `understanding` 是 Objective analysis 持久化的 Core research
   understanding artifact。系统先遍历候选文献并按文献积累 objective evidence
-  units，再把可比的 direct results 对齐为瞬时 result sets，并用一次 goal-level
+  units，再把可比的 direct results 对齐为瞬时 result sets，并用一次 objective-level
   synthesis 直接生成可包含多个 `outcomes` 的 Findings；不会持久化单篇 Finding，
   也不会再运行第二次字段聚类。GET 请求只读取已持久化 artifact，不触发新的
   LLM 调用或重建
@@ -523,13 +543,18 @@ Objective research-view 最小返回结构：
   `summary`、`effects`、`evidence_items` 和 `context_summaries`；前端应优先用
   `effects` 展示变量轴、目标性能、证据数量、文献数量和待复核状态，内部
   `claim_id` / `evidence_ref_id` 只用于反馈、校正、跳转和审计绑定
-- confirmed goal analysis 的 `POST` 是显式深度分析入口；失败只更新该
-  `goal_id` 的 `status=failed` 和 `analysis_error`，不应让 collection build
+- Objective analysis 的 `POST` 是显式深度分析入口；失败只更新该
+  `objective_id` 的 `status=failed` 和 `analysis_error`，不应让 collection build
   整体失败
-- confirmed goal analysis 的 `POST` 只启动后台分析并立即返回当前
-  `GoalAnalysisResponse`；前端应轮询 `GET .../analysis` 读取
-  `goal.status`、`goal.analysis_progress` 和最终 `understanding`
-- `goal.analysis_progress` 是可选对象，运行中可包含 `phase`、`current`、
+- Objective analysis 的 `POST` 只排队后台分析并立即返回当前
+  `ObjectiveAnalysisResponse`；前端应轮询 `GET .../analysis` 读取
+  `objective.status`、`objective.analysis_progress` 和最终 `understanding`
+- PostgreSQL 原子 claim 决定哪个 worker 可以把 `queued` 变成 `running`；重复
+  请求不会并行运行同一个 Objective
+- `ready` 只表示已经持久化的 Understanding 至少包含一个
+  `primary_findings` 或 `review_queue_findings`；logic chain 本身不代表分析完成
+- `review_summary` 与处理 `status` 分离，分别表达 Findings 审阅数量与后台处理状态
+- `objective.analysis_progress` 是可选对象，运行中可包含 `phase`、`current`、
   `total`、`unit`、`message`、`active_document_id`、
   `active_document_title`、`active_source_filename` 和
   `active_objective_id`，用于展示当前阶段和正在分析的文献
@@ -541,6 +566,7 @@ Objective research-view 最小返回结构：
 - collection 不存在：`404`
 - research objectives 尚未生成且 collection 非空：`409 research_objectives_not_ready`
 - objective research-view 指向不存在目标：`404 research_objective_not_found`
+- 未确认的 candidate 直接请求 analysis：`409`
 
 ### Research View
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from domain.core import (
+    OBJECTIVE_STATUSES,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
@@ -14,6 +15,7 @@ from domain.core import (
     is_question_shaped_objective,
     normalize_objective_confidence,
     normalize_objective_terms,
+    require_objective_status_transition,
 )
 
 
@@ -48,6 +50,82 @@ def test_research_objective_normalizes_mapping_and_round_trips_record() -> None:
     assert record["property_axes"] == ["corrosion", "EIS"]
     assert record["confidence"] == 1.0
     assert is_question_shaped_objective(objective) is True
+
+
+def test_research_objective_workspace_lifecycle_does_not_pollute_build_record() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "question": "How does heat treatment affect strength?",
+            "status": "running",
+            "source_build_id": "build-1",
+            "analysis_progress": {"phase": "routing", "current": 2, "total": 4},
+            "analysis_error": None,
+            "created_at": "2026-07-20T01:00:00+00:00",
+            "updated_at": "2026-07-20T01:01:00+00:00",
+        }
+    )
+
+    assert objective.status == "running"
+    assert objective.to_record() == {
+        "objective_id": "objective-1",
+        "question": "How does heat treatment affect strength?",
+        "material_scope": [],
+        "process_axes": [],
+        "property_axes": [],
+        "comparison_intent": None,
+        "seed_document_ids": [],
+        "excluded_document_ids": [],
+        "confidence": 0.0,
+        "reason": None,
+    }
+    assert objective.to_workspace_record()["source_build_id"] == "build-1"
+    assert objective.to_workspace_record()["status"] == "running"
+    assert objective.to_workspace_record()["analysis_progress"] == {
+        "phase": "routing",
+        "current": 2,
+        "total": 4,
+    }
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("candidate", "confirmed"),
+        ("confirmed", "queued"),
+        ("failed", "queued"),
+        ("ready", "queued"),
+        ("queued", "running"),
+        ("queued", "failed"),
+        ("running", "ready"),
+        ("running", "failed"),
+    ],
+)
+def test_objective_lifecycle_accepts_only_declared_transitions(
+    current: str,
+    target: str,
+) -> None:
+    assert current in OBJECTIVE_STATUSES
+    require_objective_status_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("candidate", "queued"),
+        ("confirmed", "ready"),
+        ("queued", "ready"),
+        ("running", "queued"),
+        ("failed", "ready"),
+        ("ready", "running"),
+    ],
+)
+def test_objective_lifecycle_rejects_undeclared_transitions(
+    current: str,
+    target: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"{current} -> {target}"):
+        require_objective_status_transition(current, target)
 
 
 def test_paper_skim_normalizes_missing_and_repeated_values() -> None:

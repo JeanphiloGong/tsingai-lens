@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
 import os
+from threading import Barrier
 
 from alembic import command
 from alembic.config import Config
@@ -242,6 +244,121 @@ def test_failed_objective_build_cannot_replace_active_facts(
 
     assert repository.read("col_source") == first
     assert repository.read("col_source", build_id="build_failed") == failed
+
+
+def test_objective_lifecycle_pins_confirmed_semantics_across_candidate_refresh(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    first = _objective_facts("How does temperature affect strength?")
+    first_task = _write_build(source_repository, builds, "build_first", first)
+    _finish(builds, first_task, success=True)
+
+    candidate = repository.read_objective_workspace("col_source", "objective-1")
+    assert candidate is not None
+    assert candidate.status == "candidate"
+    assert candidate.source_build_id == "build_first"
+
+    confirmed = repository.confirm_objective("col_source", "objective-1")
+    assert confirmed.status == "confirmed"
+    assert confirmed.source_build_id == "build_first"
+
+    refreshed = _objective_facts("How does speed affect strength?")
+    refreshed_task = _write_build(
+        source_repository,
+        builds,
+        "build_refreshed",
+        refreshed,
+    )
+    _finish(builds, refreshed_task, success=True)
+
+    workspaces = repository.list_objective_workspaces("col_source")
+    assert [(item.objective_id, item.question, item.status) for item in workspaces] == [
+        (
+            "objective-1",
+            "How does temperature affect strength?",
+            "confirmed",
+        )
+    ]
+    assert repository.confirm_objective("col_source", "objective-1").status == "confirmed"
+
+
+def test_objective_analysis_lifecycle_is_idempotent_and_claims_once(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    task = _write_build(
+        source_repository,
+        builds,
+        "build_lifecycle",
+        _objective_facts(),
+    )
+    _finish(builds, task, success=True)
+
+    with pytest.raises(ValueError, match="candidate -> queued"):
+        repository.queue_objective_analysis("col_source", "objective-1")
+
+    repository.confirm_objective("col_source", "objective-1")
+    first_queue = repository.queue_objective_analysis("col_source", "objective-1")
+    second_queue = repository.queue_objective_analysis("col_source", "objective-1")
+    assert first_queue.status == second_queue.status == "queued"
+
+    claimed = repository.claim_objective_analysis("col_source", "objective-1")
+    assert claimed is not None
+    assert claimed.status == "running"
+    assert repository.claim_objective_analysis("col_source", "objective-1") is None
+
+    progressed = repository.update_objective_analysis_progress(
+        "col_source",
+        "objective-1",
+        {"phase": "routing", "current": 1, "total": 2},
+    )
+    assert progressed.analysis_progress == {
+        "phase": "routing",
+        "current": 1,
+        "total": 2,
+    }
+
+    ready = repository.mark_objective_analysis_ready("col_source", "objective-1")
+    assert ready.status == "ready"
+    assert ready.analysis_error is None
+    assert ready.analysis_progress == {
+        "phase": "completed",
+        "unit": "steps",
+        "message": "Objective analysis is ready.",
+    }
+    assert repository.queue_objective_analysis("col_source", "objective-1").status == "queued"
+
+
+def test_objective_analysis_failure_keeps_error_and_is_retryable(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    task = _write_build(
+        source_repository,
+        builds,
+        "build_failed_analysis",
+        _objective_facts(),
+    )
+    _finish(builds, task, success=True)
+    repository.confirm_objective("col_source", "objective-1")
+    repository.queue_objective_analysis("col_source", "objective-1")
+    repository.claim_objective_analysis("col_source", "objective-1")
+
+    failed = repository.mark_objective_analysis_failed(
+        "col_source",
+        "objective-1",
+        "model request failed",
+    )
+    assert failed.status == "failed"
+    assert failed.analysis_error == "model request failed"
+
+    retried = repository.queue_objective_analysis("col_source", "objective-1")
+    assert retried.status == "queued"
+    assert retried.analysis_error is None
 
 
 def test_objective_replacement_is_atomic_for_invalid_links(source_repositories) -> None:
@@ -507,6 +624,48 @@ def test_postgresql_enforces_objective_contract() -> None:
         _finish(builds, task, success=True)
 
         assert repository.read("col_source") == facts
+
+        barrier = Barrier(2)
+
+        def confirm() -> ResearchObjective:
+            barrier.wait()
+            return repository.confirm_objective("col_source", "objective-1")
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (executor.submit(confirm), executor.submit(confirm))
+            confirmed = tuple(future.result() for future in futures)
+
+        assert [objective.status for objective in confirmed] == [
+            "confirmed",
+            "confirmed",
+        ]
+
+        queue_barrier = Barrier(2)
+
+        def queue() -> ResearchObjective:
+            queue_barrier.wait()
+            return repository.queue_objective_analysis("col_source", "objective-1")
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (executor.submit(queue), executor.submit(queue))
+            queued = tuple(future.result() for future in futures)
+
+        assert [objective.status for objective in queued] == ["queued", "queued"]
+
+        claim_barrier = Barrier(2)
+
+        def claim() -> ResearchObjective | None:
+            claim_barrier.wait()
+            return repository.claim_objective_analysis("col_source", "objective-1")
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (executor.submit(claim), executor.submit(claim))
+            claimed = tuple(future.result() for future in futures)
+
+        assert sum(objective is not None for objective in claimed) == 1
+        assert next(objective for objective in claimed if objective is not None).status == (
+            "running"
+        )
     finally:
         with engine.begin() as connection:
             config.attributes["connection"] = connection

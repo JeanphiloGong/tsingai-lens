@@ -27,10 +27,7 @@ from domain.source import (
     SourceReferenceSet,
     build_source_document_tree,
 )
-from infra.persistence.sqlite import (
-    SqliteConfirmedGoalRepository,
-    SqliteResearchUnderstandingRepository,
-)
+from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import (
@@ -715,7 +712,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    confirmed_goal_repository = SqliteConfirmedGoalRepository(tmp_path / "lens.sqlite")
     research_understanding_repository = SqliteResearchUnderstandingRepository(
         tmp_path / "lens.sqlite"
     )
@@ -736,7 +732,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
             comparison_repository=comparison_repository,
-            confirmed_goal_repository=confirmed_goal_repository,
             research_understanding_repository=research_understanding_repository,
         )
     ) as client:

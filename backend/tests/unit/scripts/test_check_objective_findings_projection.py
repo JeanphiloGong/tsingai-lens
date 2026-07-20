@@ -7,17 +7,17 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 
-def _load_goal_findings_check_module():
+def _load_objective_findings_check_module():
     backend_root = Path(__file__).resolve().parents[3]
     script_path = (
         backend_root
         / "scripts"
         / "evaluation"
         / "expert_gold"
-        / "check_goal_findings_projection.py"
+        / "check_objective_findings_projection.py"
     )
     spec = importlib.util.spec_from_file_location(
-        "check_goal_findings_projection",
+        "check_objective_findings_projection",
         script_path,
     )
     assert spec is not None
@@ -254,7 +254,7 @@ def _ved_fatigue_test_condition_evidence(**extra):
     ]
 
 
-def _goal_3037_axis_summary(
+def _objective_3037_axis_summary(
     evidence_count: int = 6,
     primary_finding_count: int = 1,
     review_queue_finding_count: int = 0,
@@ -280,7 +280,7 @@ def _goal_3037_axis_summary(
     }
 
 
-def _goal_6bf7_axis_summary(
+def _objective_6bf7_axis_summary(
     evidence_count: int = 2,
     primary_finding_count: int = 1,
     review_queue_finding_count: int = 0,
@@ -306,7 +306,7 @@ def _goal_6bf7_axis_summary(
     }
 
 
-def _goal_1a7_axis_summary(
+def _objective_1a7_axis_summary(
     evidence_count: int = 3,
     primary_finding_count: int = 1,
     review_queue_finding_count: int = 2,
@@ -333,7 +333,7 @@ def _goal_1a7_axis_summary(
     }
 
 
-def _goal_061_axis_summary(
+def _objective_061_axis_summary(
     evidence_count: int = 2,
     primary_finding_count: int = 1,
     review_queue_finding_count: int = 1,
@@ -357,7 +357,7 @@ def _goal_061_axis_summary(
     }
 
 
-def _goal_399_corrosion_payload():
+def _objective_399_corrosion_payload():
     statement = (
         "At fixed energy density 100 J/mm3 and layer thickness 20 μm, the coupled "
         "SLM conditions were 375 W / 2100 mm/s (relative density 97.83%, pitting "
@@ -370,8 +370,8 @@ def _goal_399_corrosion_payload():
         "association, not an isolated porosity effect."
     )
     return {
-        "goal": {
-            "goal_id": "goal_399171646354",
+        "objective": {
+            "objective_id": "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
             "question": "How does porosity affect pitting corrosion behavior?",
         },
         "understanding": {
@@ -531,16 +531,16 @@ def _goal_399_corrosion_payload():
     }
 
 
-def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_passes_expert_ready_projection():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
-                    "summary": _goal_3037_axis_summary(),
+                    "summary": _objective_3037_axis_summary(),
                     "primary_findings": [_ved_fatigue_strength_primary_finding()],
                     "review_queue_findings": [],
                     "evidence_items": [
@@ -567,17 +567,17 @@ def test_evaluate_goal_analysis_payload_passes_expert_ready_projection():
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
-def test_evaluate_goal_analysis_payload_accepts_paper_level_corrosion_association():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_accepts_paper_level_corrosion_association():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(_goal_399_corrosion_payload())
+    summary = check.evaluate_objective_analysis_payload(_objective_399_corrosion_payload())
 
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
-def test_evaluate_goal_analysis_payload_rejects_causal_corrosion_projection():
-    check = _load_goal_findings_check_module()
-    payload = _goal_399_corrosion_payload()
+def test_evaluate_objective_analysis_payload_rejects_causal_corrosion_projection():
+    check = _load_objective_findings_check_module()
+    payload = _objective_399_corrosion_payload()
     finding = payload["understanding"]["presentation"]["primary_findings"][0]
     finding["statement"] = (
         "Lower porosity in SLM 316L increased pitting potential and stabilized "
@@ -585,42 +585,42 @@ def test_evaluate_goal_analysis_payload_rejects_causal_corrosion_projection():
     )
     finding["direction"] = "improves"
 
-    summary = check.evaluate_goal_analysis_payload(payload)
+    summary = check.evaluate_objective_analysis_payload(payload)
 
     failed_checks = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "primary findings match goal-specific expert expectations" in failed_checks
+    assert "primary findings match objective-specific expert expectations" in failed_checks
     assert "primary findings avoid over-specific unsupported terms" in failed_checks
 
 
-def test_evaluate_goal_analysis_payload_rejects_unbound_passive_film_evidence():
-    check = _load_goal_findings_check_module()
-    payload = _goal_399_corrosion_payload()
+def test_evaluate_objective_analysis_payload_rejects_unbound_passive_film_evidence():
+    check = _load_objective_findings_check_module()
+    payload = _objective_399_corrosion_payload()
     evidence = payload["understanding"]["presentation"]["evidence_items"][0]
     evidence["quote"] = (
         "Porosities were highly sensitive to pitting corrosion. The passive film "
         "on the low-porosity sample was more stable and corrosion rate was lower."
     )
 
-    summary = check.evaluate_goal_analysis_payload(payload)
+    summary = check.evaluate_objective_analysis_payload(payload)
 
     failed_checks = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "direct evidence quotes cover goal-specific source claims" in failed_checks
+    assert "direct evidence quotes cover objective-specific source claims" in failed_checks
 
 
-def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artifacts():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_resolves_direct_evidence_to_source_artifacts():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
-                    "summary": _goal_3037_axis_summary(),
+                    "summary": _objective_3037_axis_summary(),
                     "primary_findings": [_ved_fatigue_strength_primary_finding()],
                     "review_queue_findings": [],
                     "evidence_items": [
@@ -723,16 +723,16 @@ def test_evaluate_goal_analysis_payload_resolves_direct_evidence_to_source_artif
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
-def test_evaluate_goal_analysis_payload_requires_table_evidence_audit_rows():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_requires_table_evidence_audit_rows():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
-                    "summary": _goal_3037_axis_summary(),
+                    "summary": _objective_3037_axis_summary(),
                     "primary_findings": [_ved_fatigue_strength_primary_finding()],
                     "review_queue_findings": [],
                     "evidence_items": [
@@ -802,8 +802,8 @@ def test_evaluate_goal_analysis_payload_requires_table_evidence_audit_rows():
     assert "table direct evidence exposes relevant rows and columns" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoints():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_requires_table_rows_cover_from_to_endpoints():
+    check = _load_objective_findings_check_module()
 
     evidence = _ved_fatigue_strength_table_evidence()
     evidence["table_audit"]["relevant_rows"] = [
@@ -813,13 +813,13 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
             "aligned": True,
         },
     ]
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
-                    "summary": _goal_3037_axis_summary(),
+                    "summary": _objective_3037_axis_summary(),
                     "primary_findings": [_ved_fatigue_strength_primary_finding()],
                     "review_queue_findings": [],
                     "evidence_items": [
@@ -851,7 +851,7 @@ def test_evaluate_goal_analysis_payload_requires_table_rows_cover_from_to_endpoi
 
 
 def test_statement_numeric_endpoints_ignore_single_author_summary_percentage():
-    check = _load_goal_findings_check_module()
+    check = _load_objective_findings_check_module()
 
     endpoints = check._statement_numeric_endpoint_terms(
         "Changing scan rotation from 0° to 45° increased experimental yield "
@@ -862,12 +862,12 @@ def test_statement_numeric_endpoints_ignore_single_author_summary_percentage():
     assert endpoints == ["0", "45", "334.2", "351.9"]
 
 
-def test_evaluate_goal_analysis_payload_fails_unreferenced_presentation_evidence():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_unreferenced_presentation_evidence():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
@@ -932,12 +932,12 @@ def test_evaluate_goal_analysis_payload_fails_unreferenced_presentation_evidence
     )
 
 
-def test_evaluate_goal_analysis_payload_fails_missing_goal_axis_coverage():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_missing_objective_axis_coverage():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
@@ -977,16 +977,16 @@ def test_evaluate_goal_analysis_payload_fails_missing_goal_axis_coverage():
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "goal coverage exposes requested variable axes" in failed_names
-    assert "goal coverage exposes requested property axes" in failed_names
+    assert "objective coverage exposes requested variable axes" in failed_names
+    assert "objective coverage exposes requested property axes" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_domain_mismatched_projection():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_domain_mismatched_projection():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_3037e425673a"},
+            "objective": {"objective_id": "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
@@ -1020,20 +1020,20 @@ def test_evaluate_goal_analysis_payload_fails_domain_mismatched_projection():
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "primary findings match goal-specific expert expectations" in failed_names
-    assert "direct evidence quotes cover goal-specific source claims" in failed_names
+    assert "primary findings match objective-specific expert expectations" in failed_names
+    assert "direct evidence quotes cover objective-specific source claims" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_specific_scan_speed_projection_without_table_evidence():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_specific_scan_speed_projection_without_table_evidence():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_6bf7d2c1030e"},
+            "objective": {"objective_id": "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_6bf7_axis_summary(evidence_count=1),
+                    "summary": _objective_6bf7_axis_summary(evidence_count=1),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
@@ -1078,19 +1078,19 @@ def test_evaluate_goal_analysis_payload_fails_specific_scan_speed_projection_wit
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "direct evidence quotes cover goal-specific source claims" in failed_names
+    assert "direct evidence quotes cover objective-specific source claims" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_with_table_evidence():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_accepts_specific_scan_speed_projection_with_table_evidence():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_6bf7d2c1030e"},
+            "objective": {"objective_id": "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_6bf7_axis_summary(evidence_count=3),
+                    "summary": _objective_6bf7_axis_summary(evidence_count=3),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
@@ -1212,16 +1212,16 @@ def test_evaluate_goal_analysis_payload_accepts_specific_scan_speed_projection_w
     )
 
 
-def test_evaluate_goal_analysis_payload_rejects_scan_speed_confounded_review_rows():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_rejects_scan_speed_confounded_review_rows():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_6bf7d2c1030e"},
+            "objective": {"objective_id": "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_6bf7_axis_summary(evidence_count=4),
+                    "summary": _objective_6bf7_axis_summary(evidence_count=4),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
@@ -1329,19 +1329,19 @@ def test_evaluate_goal_analysis_payload_rejects_scan_speed_confounded_review_row
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "all expert findings avoid goal-specific noise rows" in failed_names
+    assert "all expert findings avoid objective-specific noise rows" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_scan_speed_primary_with_table_wide_range():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_scan_speed_primary_with_table_wide_range():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_6bf7d2c1030e"},
+            "objective": {"objective_id": "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_6bf7_axis_summary(evidence_count=3),
+                    "summary": _objective_6bf7_axis_summary(evidence_count=3),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
@@ -1401,16 +1401,16 @@ def test_evaluate_goal_analysis_payload_fails_scan_speed_primary_with_table_wide
     assert "primary findings avoid over-specific unsupported terms" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_missing_primary_goal_axis_titles():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_missing_primary_objective_axis_titles():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_1a7a26d850b9"},
+            "objective": {"objective_id": "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_1a7_axis_summary(),
+                    "summary": _objective_1a7_axis_summary(),
                     "primary_findings": [
                         {
                             "finding_id": "finding-1",
@@ -1446,19 +1446,19 @@ def test_evaluate_goal_analysis_payload_fails_missing_primary_goal_axis_titles()
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "review queue preserves goal-specific table axes" in failed_names
+    assert "review queue preserves objective-specific table axes" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_accepts_table_axes_in_review_queue():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_accepts_table_axes_in_review_queue():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_1a7a26d850b9"},
+            "objective": {"objective_id": "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_1a7_axis_summary(
+                    "summary": _objective_1a7_axis_summary(
                         evidence_count=5,
                         primary_finding_count=2,
                     ),
@@ -1619,16 +1619,16 @@ def test_evaluate_goal_analysis_payload_accepts_table_axes_in_review_queue():
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
-def test_evaluate_goal_analysis_payload_rejects_low_magnitude_density_review_row():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_rejects_low_magnitude_density_review_row():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_1a7a26d850b9"},
+            "objective": {"objective_id": "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_1a7_axis_summary(
+                    "summary": _objective_1a7_axis_summary(
                         evidence_count=3,
                         review_queue_finding_count=2,
                     ),
@@ -1713,15 +1713,15 @@ def test_evaluate_goal_analysis_payload_rejects_low_magnitude_density_review_row
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "all expert findings avoid goal-specific noise rows" in failed_names
+    assert "all expert findings avoid objective-specific noise rows" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_accepts_single_paper_review_candidate_boundary():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_accepts_single_paper_review_candidate_boundary():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-review-boundary"},
+            "objective": {"objective_id": "objective-review-boundary"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -1800,12 +1800,12 @@ def test_evaluate_goal_analysis_payload_accepts_single_paper_review_candidate_bo
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
-def test_evaluate_goal_analysis_payload_fails_stale_review_queue_multi_paper_boundary():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_stale_review_queue_multi_paper_boundary():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_1a7a26d850b9"},
+            "objective": {"objective_id": "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -1890,8 +1890,8 @@ def test_evaluate_goal_analysis_payload_fails_stale_review_queue_multi_paper_bou
     )
 
 
-def test_evaluate_goal_analysis_payload_accepts_model_validation_primary_target():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_accepts_model_validation_primary_target():
+    check = _load_objective_findings_check_module()
     result_quote = (
         "The yield strength increased from the 0-0-0 configuration to the "
         "45-22.5-0 condition, with deviations generally less than 5%."
@@ -1919,13 +1919,13 @@ def test_evaluate_goal_analysis_payload_accepts_model_validation_primary_target(
         ],
     }
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_061c9c049e69"},
+            "objective": {"objective_id": "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_061_axis_summary(
+                    "summary": _objective_061_axis_summary(
                         evidence_count=4,
                         primary_finding_count=2,
                         review_queue_finding_count=0,
@@ -2104,16 +2104,16 @@ def test_evaluate_goal_analysis_payload_accepts_model_validation_primary_target(
     assert all(item["status"] == "pass" for item in summary["checks"])
 
 
-def test_evaluate_goal_analysis_payload_rejects_small_prediction_review_row():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_rejects_small_prediction_review_row():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal_061c9c049e69"},
+            "objective": {"objective_id": "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
-                    "summary": _goal_061_axis_summary(
+                    "summary": _objective_061_axis_summary(
                         evidence_count=2,
                         review_queue_finding_count=1,
                     ),
@@ -2205,15 +2205,15 @@ def test_evaluate_goal_analysis_payload_rejects_small_prediction_review_row():
     failed_names = {
         item["name"] for item in summary["checks"] if item["status"] == "fail"
     }
-    assert "all expert findings avoid goal-specific noise rows" in failed_names
+    assert "all expert findings avoid objective-specific noise rows" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_noisy_scope_summary():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_noisy_scope_summary():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2255,12 +2255,12 @@ def test_evaluate_goal_analysis_payload_fails_noisy_scope_summary():
     )
 
 
-def test_evaluate_goal_analysis_payload_fails_symbol_axis_scope_mismatch():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_symbol_axis_scope_mismatch():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2310,12 +2310,12 @@ def test_evaluate_goal_analysis_payload_fails_symbol_axis_scope_mismatch():
     assert "symbol-axis findings keep title and scope aligned" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_broken_source_artifact_trace():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_broken_source_artifact_trace():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2374,12 +2374,12 @@ def test_evaluate_goal_analysis_payload_fails_broken_source_artifact_trace():
     assert "direct evidence quotes overlap resolved source artifacts" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_duplicate_source_target_evidence():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_duplicate_source_target_evidence():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2431,12 +2431,12 @@ def test_evaluate_goal_analysis_payload_fails_duplicate_source_target_evidence()
     assert "finding evidence does not duplicate source targets" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_allows_direct_evidence_as_mechanism_ref():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_allows_direct_evidence_as_mechanism_ref():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2479,12 +2479,12 @@ def test_evaluate_goal_analysis_payload_allows_direct_evidence_as_mechanism_ref(
     assert "finding evidence bundles do not repeat ref ids" not in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_duplicate_bundle_ref_ids():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_duplicate_bundle_ref_ids():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2527,12 +2527,12 @@ def test_evaluate_goal_analysis_payload_fails_duplicate_bundle_ref_ids():
     assert "finding evidence bundles do not repeat ref ids" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_stale_summary_finding_counts():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_stale_summary_finding_counts():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "ready",
                 "presentation": {
@@ -2578,12 +2578,12 @@ def test_evaluate_goal_analysis_payload_fails_stale_summary_finding_counts():
     assert "summary finding counts match visible findings" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_stale_or_untraceable_projection():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_stale_or_untraceable_projection():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "empty",
                 "presentation": {
@@ -2618,12 +2618,12 @@ def test_evaluate_goal_analysis_payload_fails_stale_or_untraceable_projection():
     assert "presentation evidence text excludes replacement characters" in failed_names
 
 
-def test_evaluate_goal_analysis_payload_fails_missing_expert_boundary_fields():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_missing_expert_boundary_fields():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
@@ -2673,12 +2673,12 @@ def test_evaluate_goal_analysis_payload_fails_missing_expert_boundary_fields():
     )
 
 
-def test_evaluate_goal_analysis_payload_fails_single_paper_cross_paper_status():
-    check = _load_goal_findings_check_module()
+def test_evaluate_objective_analysis_payload_fails_single_paper_cross_paper_status():
+    check = _load_objective_findings_check_module()
 
-    summary = check.evaluate_goal_analysis_payload(
+    summary = check.evaluate_objective_analysis_payload(
         {
-            "goal": {"goal_id": "goal-1"},
+            "objective": {"objective_id": "objective-1"},
             "understanding": {
                 "state": "limited",
                 "presentation": {
@@ -2721,8 +2721,8 @@ def test_evaluate_goal_analysis_payload_fails_single_paper_cross_paper_status():
     )
 
 
-def test_fetch_goal_analysis_payload_from_api_logs_in_and_reads_goal(monkeypatch):
-    check = _load_goal_findings_check_module()
+def test_fetch_objective_analysis_payload_from_api_logs_in_and_reads_objective(monkeypatch):
+    check = _load_objective_findings_check_module()
     requests: list[tuple[str, str, dict | None]] = []
 
     class FakeResponse:
@@ -2750,23 +2750,23 @@ def test_fetch_goal_analysis_payload_from_api_logs_in_and_reads_goal(monkeypatch
                 headers={"Set-Cookie": "lens_session=session-1; Path=/"},
             )
         if request.full_url.endswith(
-            "/api/v1/collections/col-1/goals/goal-1/analysis"
+            "/api/v1/collections/col-1/objectives/objective-1/analysis"
         ):
             assert request.headers["Cookie"] == "lens_session=session-1"
-            return FakeResponse({"goal": {"goal_id": "goal-1"}})
+            return FakeResponse({"objective": {"objective_id": "objective-1"}})
         raise AssertionError(request.full_url)
 
     monkeypatch.setenv("LENS_CHECK_EMAIL", "admin@example.com")
     monkeypatch.setenv("LENS_CHECK_PASSWORD", "secret")
     monkeypatch.setattr(check.request_url, "urlopen", fake_urlopen)
 
-    payload = check.fetch_goal_analysis_payload_from_api(
+    payload = check.fetch_objective_analysis_payload_from_api(
         api_base_url="http://127.0.0.1:8000",
         collection_id="col-1",
-        goal_id="goal-1",
+        objective_id="objective-1",
     )
 
-    assert payload == {"goal": {"goal_id": "goal-1"}}
+    assert payload == {"objective": {"objective_id": "objective-1"}}
     assert requests == [
         (
             "http://127.0.0.1:8000/api/v1/auth/login",
@@ -2774,20 +2774,20 @@ def test_fetch_goal_analysis_payload_from_api_logs_in_and_reads_goal(monkeypatch
             {"email": "admin@example.com", "password": "secret"},
         ),
         (
-            "http://127.0.0.1:8000/api/v1/collections/col-1/goals/goal-1/analysis",
+            "http://127.0.0.1:8000/api/v1/collections/col-1/objectives/objective-1/analysis",
             "GET",
             None,
         ),
     ]
 
 
-def test_fetch_goal_analysis_payload_from_api_reports_http_errors(monkeypatch):
-    check = _load_goal_findings_check_module()
+def test_fetch_objective_analysis_payload_from_api_reports_http_errors(monkeypatch):
+    check = _load_objective_findings_check_module()
 
     def fake_urlopen(request, timeout):
         del request, timeout
         raise HTTPError(
-            "http://127.0.0.1:8000/api/v1/collections/col-1/goals/goal-1/analysis",
+            "http://127.0.0.1:8000/api/v1/collections/col-1/objectives/objective-1/analysis",
             401,
             "Unauthorized",
             hdrs=None,
@@ -2799,13 +2799,13 @@ def test_fetch_goal_analysis_payload_from_api_reports_http_errors(monkeypatch):
     monkeypatch.setattr(check.request_url, "urlopen", fake_urlopen)
 
     try:
-        check.fetch_goal_analysis_payload_from_api(
+        check.fetch_objective_analysis_payload_from_api(
             api_base_url="http://127.0.0.1:8000",
             collection_id="col-1",
-            goal_id="goal-1",
+            objective_id="objective-1",
         )
     except RuntimeError as exc:
-        assert "GET /api/v1/collections/col-1/goals/goal-1/analysis failed" in str(exc)
+        assert "GET /api/v1/collections/col-1/objectives/objective-1/analysis failed" in str(exc)
         assert "401 Unauthorized" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")

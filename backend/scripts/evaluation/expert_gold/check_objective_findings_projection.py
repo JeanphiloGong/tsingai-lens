@@ -18,13 +18,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_COLLECTION_ID = "col_0cc5013fdb3c"
-DEFAULT_GOAL_IDS = (
-    "goal_0914003ad572",
-    "goal_1a7a26d850b9",
-    "goal_399171646354",
-    "goal_061c9c049e69",
-    "goal_6bf7d2c1030e",
-    "goal_3037e425673a",
+DEFAULT_OBJECTIVE_IDS = (
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac",
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba",
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8",
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8",
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
 )
 
 EXPERT_USE_STATUSES = {
@@ -41,8 +41,8 @@ GENERALIZATION_STATUSES = {
     "conflict_review_needed",
 }
 
-GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
-    "goal_0914003ad572": {
+OBJECTIVE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac": {
         "finding_terms": [
             ["preheating", "build platform"],
             ["ductility"],
@@ -74,7 +74,7 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ],
         ],
     },
-    "goal_1a7a26d850b9": {
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba": {
         "finding_terms": [
             ["heat treatment"],
             ["density"],
@@ -110,7 +110,7 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ["no superiority", "furnace ht", "hip", "pore reduction"],
         ],
     },
-    "goal_399171646354": {
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e": {
         "finding_terms": [
             ["coupled slm process conditions with observed porosity level"],
             ["pitting corrosion"],
@@ -144,7 +144,7 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ],
         ],
     },
-    "goal_061c9c049e69": {
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8": {
         "finding_terms": [
             ["α and β build orientation angles"],
             ["scan strategy rotation angle"],
@@ -193,7 +193,7 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
         ],
         "require_table_direct_evidence_per_primary_finding": True,
     },
-    "goal_6bf7d2c1030e": {
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8": {
         "finding_terms": [
             ["coupled SLM parameter sets"],
             ["scanning speed"],
@@ -268,7 +268,7 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
             ],
         ],
     },
-    "goal_3037e425673a": {
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419": {
         "finding_terms": [
             [
                 "coupled pbf-lb parameter sets grouped by volumetric energy "
@@ -326,13 +326,13 @@ GOAL_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
     },
 }
 
-GOAL_REVIEW_QUEUE_AXIS_EXPECTATIONS: dict[str, list[list[str]]] = {
-    "goal_1a7a26d850b9": [
+OBJECTIVE_REVIEW_QUEUE_AXIS_EXPECTATIONS: dict[str, list[list[str]]] = {
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba": [
         ["scan speed", "scanning speed"],
     ],
 }
-GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
-    "goal_1a7a26d850b9": {
+OBJECTIVE_REVIEW_QUEUE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba": {
         "finding_terms": [
             ["scan speed", "scanning speed"],
             ["density"],
@@ -349,26 +349,26 @@ GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS: dict[str, dict[str, list[list[str]]]] = {
         ],
     },
 }
-GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
-    "goal_0914003ad572": [
+OBJECTIVE_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac": [
         ["author_attributed_mechanism"],
     ],
-    "goal_399171646354": [
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e": [
         ["paper_level_association"],
         ["process_conditions_not_isolated"],
         ["porosity_response_not_monotonic"],
     ],
-    "goal_1a7a26d850b9": [
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba": [
         ["heat_treatment_parameters_not_isolated"],
         ["single_variable_effect_not_isolated"],
     ],
-    "goal_061c9c049e69": [
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8": [
         ["model_validation_finding"],
         ["author_summary_table_mismatch"],
         ["non_single_variable_table_comparison"],
         ["single_variable_effect_not_isolated"],
     ],
-    "goal_6bf7d2c1030e": [
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8": [
         ["non_single_variable_table_comparison"],
         ["single_variable_effect_not_isolated"],
         ["author_summary_table_mismatch"],
@@ -376,7 +376,7 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
         ["author_attributed_mechanism"],
         ["density_mediator_not_isolated"],
     ],
-    "goal_3037e425673a": [
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419": [
         ["process_conditions_not_isolated"],
         ["single_variable_effect_not_isolated"],
         ["fatigue_test_conditions_required"],
@@ -384,8 +384,8 @@ GOAL_PRIMARY_WARNING_EXPECTATIONS: dict[str, list[list[str]]] = {
         ["source_sign_inconsistency"],
     ],
 }
-GOAL_AXIS_SEMANTIC_EXPECTATIONS: dict[str, dict[str, list[str]]] = {
-    "goal_061c9c049e69": {
+OBJECTIVE_AXIS_SEMANTIC_EXPECTATIONS: dict[str, dict[str, list[str]]] = {
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8": {
         "required": [
             "scan strategy rotation angle",
             "α build orientation angle",
@@ -394,43 +394,43 @@ GOAL_AXIS_SEMANTIC_EXPECTATIONS: dict[str, dict[str, list[str]]] = {
         "forbidden": ["β ->", "β scan strategy rotation angle"],
     },
 }
-GOAL_ALL_FINDING_FORBIDDEN_TERMS: dict[str, list[str]] = {
-    "goal_1a7a26d850b9": [
+OBJECTIVE_ALL_FINDING_FORBIDDEN_TERMS: dict[str, list[str]] = {
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba": [
         "laser power from 100 to 120 decreased density from 98.70 % to 98.45 %",
     ],
-    "goal_061c9c049e69": [
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8": [
         "scan strategy rotation angle and build orientation -> yield strength",
         "β build orientation angle remained at 0°",
         "prediction deviations were generally below 5%",
         "yield strength prediction from 310.48 mpa",
         "prediction from 310.48 mpa to 314.37 mpa",
     ],
-    "goal_6bf7d2c1030e": [
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8": [
         "scan speed is associated with mechanical properties",
         "scanning speed is associated with mechanical properties",
         "multi-axis table contrast",
         "table-row comparison changes",
     ],
 }
-GOAL_ALL_FINDING_REQUIRED_TERMS: dict[str, list[list[str]]] = {
-    "goal_3037e425673a": [
+OBJECTIVE_ALL_FINDING_REQUIRED_TERMS: dict[str, list[list[str]]] = {
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419": [
         ["volumetric energy density", "50.8", "79.4", "fatigue strength"],
     ],
 }
-GOAL_MIN_PRIMARY_AXIS_COVERAGE: dict[str, dict[str, int]] = {
-    "goal_0914003ad572": {"variables": 2, "properties": 2},
-    "goal_1a7a26d850b9": {"variables": 3, "properties": 2},
-    "goal_399171646354": {"variables": 1, "properties": 1},
-    "goal_061c9c049e69": {"variables": 2, "properties": 2},
-    "goal_6bf7d2c1030e": {"variables": 3, "properties": 3},
-    "goal_3037e425673a": {"variables": 1, "properties": 1},
+OBJECTIVE_MIN_PRIMARY_AXIS_COVERAGE: dict[str, dict[str, int]] = {
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac": {"variables": 2, "properties": 2},
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba": {"variables": 3, "properties": 2},
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e": {"variables": 1, "properties": 1},
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8": {"variables": 2, "properties": 2},
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8": {"variables": 3, "properties": 3},
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419": {"variables": 1, "properties": 1},
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Check confirmed-goal research understanding findings for "
+            "Check confirmed-objective research understanding findings for "
             "materials-expert review readiness."
         )
     )
@@ -440,10 +440,10 @@ def parse_args() -> argparse.Namespace:
         help="Collection id to check.",
     )
     parser.add_argument(
-        "--goal-id",
+        "--objective-id",
         action="append",
-        dest="goal_ids",
-        help="Goal id to check. May repeat. Defaults to the local 6-goal 316L set.",
+        dest="objective_ids",
+        help="Objective id to check. May repeat. Defaults to the local 6-objective 316L set.",
     )
     parser.add_argument(
         "--api-base-url",
@@ -459,9 +459,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    summary = check_goal_findings_projection(
+    summary = check_objective_findings_projection(
         collection_id=args.collection_id,
-        goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        objective_ids=tuple(args.objective_ids or DEFAULT_OBJECTIVE_IDS),
         api_base_url=args.api_base_url,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -469,10 +469,10 @@ def main() -> None:
         raise SystemExit(1)
 
 
-def check_goal_findings_projection(
+def check_objective_findings_projection(
     *,
     collection_id: str,
-    goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    objective_ids: tuple[str, ...] = DEFAULT_OBJECTIVE_IDS,
     api_base_url: str | None = None,
 ) -> dict[str, Any]:
     backend_root = str(DEFAULT_BACKEND_ROOT)
@@ -480,59 +480,91 @@ def check_goal_findings_projection(
         sys.path.insert(0, backend_root)
 
     source_index = build_source_artifact_index(collection_id)
-    goal_summaries = []
+    objective_summaries = []
     checks: list[dict[str, str]] = []
-    for goal_id in goal_ids:
+    for objective_id in objective_ids:
         response = (
-            fetch_goal_analysis_payload_from_api(
+            fetch_objective_analysis_payload_from_api(
                 api_base_url=api_base_url,
                 collection_id=collection_id,
-                goal_id=goal_id,
+                objective_id=objective_id,
             )
             if api_base_url
-            else _local_goal_analysis_payload(collection_id, goal_id)
+            else _local_objective_analysis_payload(collection_id, objective_id)
         )
-        goal_summary = evaluate_goal_analysis_payload(
+        objective_summary = evaluate_objective_analysis_payload(
             response,
             source_index=source_index,
         )
-        goal_summary["goal_id"] = goal_id
-        goal_summaries.append(goal_summary)
-        checks.extend(goal_summary["checks"])
+        objective_summary["objective_id"] = objective_id
+        objective_summaries.append(objective_summary)
+        checks.extend(objective_summary["checks"])
 
     return {
         "status": "fail"
         if any(check["status"] == "fail" for check in checks)
         else "pass",
         "collection_id": collection_id,
-        "goal_count": len(goal_ids),
-        "goals": goal_summaries,
+        "objective_count": len(objective_ids),
+        "objectives": objective_summaries,
         "checks": checks,
     }
 
 
-def _local_goal_analysis_payload(collection_id: str, goal_id: str) -> dict[str, Any]:
+def _local_objective_analysis_payload(
+    collection_id: str,
+    objective_id: str,
+) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
-        from application.pipeline.goal_analysis.service import (  # noqa: PLC0415
-            goal_analysis_service,
+        from infra.persistence.database import (  # noqa: PLC0415
+            DatabaseSettings,
+            build_database_engine,
+            build_session_factory,
         )
-        from controllers.core.goal_analysis import _analysis_response  # noqa: PLC0415
+        from infra.persistence.factory import (  # noqa: PLC0415
+            build_research_understanding_repository,
+        )
+        from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
+            PostgresObjectiveRepository,
+        )
 
-        payload = goal_analysis_service.get_goal_analysis(collection_id, goal_id)
-        return _analysis_response(collection_id, payload).model_dump(mode="json")
+        engine = build_database_engine(DatabaseSettings())
+        try:
+            objective = PostgresObjectiveRepository(
+                build_session_factory(engine)
+            ).read_objective_workspace(collection_id, objective_id)
+        finally:
+            engine.dispose()
+        if objective is None:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            )
+        understanding = build_research_understanding_repository().read_research_understanding(
+            collection_id,
+            "objective",
+            objective_id,
+        )
+        return {
+            "collection_id": collection_id,
+            "objective": objective.to_workspace_record(),
+            "understanding": (
+                understanding.to_record() if understanding is not None else None
+            ),
+            "warnings": [],
+        }
 
 
-def fetch_goal_analysis_payload_from_api(
+def fetch_objective_analysis_payload_from_api(
     *,
     api_base_url: str,
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
 ) -> dict[str, Any]:
     base_url = api_base_url.rstrip("/")
     cookie = _api_login_cookie(base_url)
     return _api_json_request(
         base_url,
-        f"/api/v1/collections/{collection_id}/goals/{goal_id}/analysis",
+        f"/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis",
         cookie=cookie,
     )
 
@@ -649,14 +681,14 @@ def build_source_artifact_index(collection_id: str) -> dict[str, Any]:
     return {"documents": documents, "sources": sources}
 
 
-def evaluate_goal_analysis_payload(
+def evaluate_objective_analysis_payload(
     payload: dict[str, Any],
     *,
     source_index: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    goal = payload.get("goal") if isinstance(payload.get("goal"), dict) else {}
-    goal_id = str(goal.get("goal_id") or "")
-    question = _source_page(goal.get("question"))
+    objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
+    objective_id = str(objective.get("objective_id") or "")
+    question = _source_page(objective.get("question"))
     understanding = payload.get("understanding") or {}
     presentation = understanding.get("presentation") or {}
     primary_findings = _dict_rows(presentation.get("primary_findings"))
@@ -704,7 +736,7 @@ def evaluate_goal_analysis_payload(
         for evidence_id in _finding_evidence_role_ids(finding, "condition_context")
         if evidence_id in evidence_items
     ]
-    review_expectation = GOAL_REVIEW_QUEUE_EXPERT_EXPECTATIONS.get(goal_id)
+    review_expectation = OBJECTIVE_REVIEW_QUEUE_EXPERT_EXPECTATIONS.get(objective_id)
     target_findings = review_findings if review_expectation else primary_findings
     target_evidence_ids = review_evidence_ids if review_expectation else direct_evidence_ids
     resolved_target_evidence = [
@@ -749,7 +781,7 @@ def evaluate_goal_analysis_payload(
     scope_noise_failures = _finding_scope_noise_failures(boundary_findings)
     symbol_scope_failures = _finding_symbol_scope_failures(boundary_findings)
     axis_coverage = _axis_coverage_summary(summary.get("axis_coverage"))
-    axis_coverage_requirement = GOAL_MIN_PRIMARY_AXIS_COVERAGE.get(goal_id, {})
+    axis_coverage_requirement = OBJECTIVE_MIN_PRIMARY_AXIS_COVERAGE.get(objective_id, {})
     variable_primary_count = axis_coverage["variables"].get("primary", 0) + axis_coverage[
         "variables"
     ].get("mechanism", 0)
@@ -758,7 +790,7 @@ def evaluate_goal_analysis_payload(
     ].get("mechanism", 0)
     checks = [
         _check(
-            goal_id,
+            objective_id,
             "expert findings or review targets are available",
             bool(target_findings),
             (
@@ -767,19 +799,19 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "understanding state is not empty when findings exist",
             not target_findings or understanding.get("state") != "empty",
             f"state={understanding.get('state')}",
         ),
         _check(
-            goal_id,
+            objective_id,
             "expert findings or review targets have direct evidence ids",
             all(_direct_evidence_ids(finding) for finding in target_findings),
             f"direct_evidence_ids={len(target_evidence_ids)}",
         ),
         _check(
-            goal_id,
+            objective_id,
             "direct evidence ids resolve to presentation evidence items",
             len(resolved_target_evidence) == len(target_evidence_ids),
             (
@@ -788,7 +820,7 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "direct evidence items include quote and href",
             bool(resolved_target_evidence)
             and len(resolved_target_evidence) == len(target_evidence_ids)
@@ -799,25 +831,25 @@ def evaluate_goal_analysis_payload(
             f"items={len(resolved_target_evidence)}",
         ),
         _check(
-            goal_id,
+            objective_id,
             "table direct evidence exposes relevant rows and columns",
             not table_audit["failures"],
             _table_audit_detail(table_audit),
         ),
         _check(
-            goal_id,
+            objective_id,
             "table evidence covers statement numeric endpoints",
             not endpoint_audit["failures"],
             _table_audit_detail(endpoint_audit),
         ),
         _check(
-            goal_id,
+            objective_id,
             "presentation evidence only contains referenced finding evidence",
             not unreferenced_evidence_ids,
             _unreferenced_evidence_detail(unreferenced_evidence_ids),
         ),
         _check(
-            goal_id,
+            objective_id,
             "summary evidence count matches visible finding evidence",
             _int_value(summary.get("evidence_count")) == len(evidence_items),
             (
@@ -826,7 +858,7 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "summary finding counts match visible findings",
             _int_value(summary.get("primary_finding_count")) == len(primary_findings)
             and _int_value(summary.get("review_queue_finding_count"))
@@ -844,26 +876,26 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "presentation evidence text excludes replacement characters",
             "\ufffd" not in json.dumps(presentation, ensure_ascii=False),
             "replacement_char_present="
             + str("\ufffd" in json.dumps(presentation, ensure_ascii=False)),
         ),
         _check(
-            goal_id,
+            objective_id,
             "finding evidence does not duplicate source targets",
             not duplicate_source_targets,
             _duplicate_source_target_detail(duplicate_source_targets),
         ),
         _check(
-            goal_id,
+            objective_id,
             "finding evidence bundles do not repeat ref ids",
             not duplicate_bundle_ref_ids,
             _duplicate_ref_id_detail(duplicate_bundle_ref_ids),
         ),
         _check(
-            goal_id,
+            objective_id,
             "expert findings and review targets include expert use status",
             not boundary["missing_expert_use_status"]
             and not boundary["invalid_expert_use_status"],
@@ -873,7 +905,7 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "expert findings and review targets include generalization status",
             not boundary["missing_generalization_status"]
             and not boundary["invalid_generalization_status"],
@@ -883,61 +915,61 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "expert findings and review targets include generalization note",
             not boundary["missing_generalization_note"],
             _boundary_detail(missing=boundary["missing_generalization_note"]),
         ),
         _check(
-            goal_id,
+            objective_id,
             "expert findings and review targets include evidence gap summary",
             not boundary["missing_evidence_gap_summary"],
             _boundary_detail(missing=boundary["missing_evidence_gap_summary"]),
         ),
         _check(
-            goal_id,
+            objective_id,
             "single-paper findings and review targets are labeled as paper-level only",
             not boundary["single_paper_status_failures"],
             _boundary_detail(invalid=boundary["single_paper_status_failures"]),
         ),
         _check(
-            goal_id,
+            objective_id,
             "multi-paper findings and review targets are labeled as cross-paper",
             not boundary["multi_paper_status_failures"],
             _boundary_detail(invalid=boundary["multi_paper_status_failures"]),
         ),
         _check(
-            goal_id,
+            objective_id,
             "findings and review targets without direct evidence are labeled for repair",
             not boundary["missing_evidence_status_failures"],
             _boundary_detail(invalid=boundary["missing_evidence_status_failures"]),
         ),
         _check(
-            goal_id,
+            objective_id,
             "finding scope summaries exclude parser and sample-label noise",
             not scope_noise_failures,
             _scope_noise_detail(scope_noise_failures),
         ),
         _check(
-            goal_id,
+            objective_id,
             "symbol-axis findings keep title and scope aligned",
             not symbol_scope_failures,
             _symbol_scope_detail(symbol_scope_failures),
         ),
         _check(
-            goal_id,
-            "goal coverage exposes requested variable axes",
+            objective_id,
+            "objective coverage exposes requested variable axes",
             axis_coverage["variables"].get("total", 0) > 0,
             _axis_coverage_detail(axis_coverage["variables"], required=1),
         ),
         _check(
-            goal_id,
-            "goal coverage exposes requested property axes",
+            objective_id,
+            "objective coverage exposes requested property axes",
             axis_coverage["properties"].get("total", 0) > 0,
             _axis_coverage_detail(axis_coverage["properties"], required=1),
         ),
         _check(
-            goal_id,
+            objective_id,
             "primary findings cover enough requested variable axes",
             variable_primary_count
             >= int(axis_coverage_requirement.get("variables", 1)),
@@ -947,7 +979,7 @@ def evaluate_goal_analysis_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "primary findings cover enough requested property axes",
             property_primary_count
             >= int(axis_coverage_requirement.get("properties", 1)),
@@ -965,7 +997,7 @@ def evaluate_goal_analysis_payload(
         checks.extend(
             [
                 _check(
-                    goal_id,
+                    objective_id,
                     "direct evidence hrefs resolve to source artifacts",
                     not source_resolution["target_failures"],
                     _source_resolution_detail(
@@ -974,7 +1006,7 @@ def evaluate_goal_analysis_payload(
                     ),
                 ),
                 _check(
-                    goal_id,
+                    objective_id,
                     "direct evidence quotes overlap resolved source artifacts",
                     not source_resolution["quote_failures"],
                     _source_resolution_detail(
@@ -984,7 +1016,7 @@ def evaluate_goal_analysis_payload(
                 ),
             ]
         )
-    expectation = GOAL_EXPERT_EXPECTATIONS.get(goal_id)
+    expectation = OBJECTIVE_EXPERT_EXPECTATIONS.get(objective_id)
     if expectation:
         finding_text = _combined_text(primary_findings)
         evidence_text = _combined_text(resolved_direct_evidence, keys=("quote", "source_text"))
@@ -1025,14 +1057,14 @@ def evaluate_goal_analysis_payload(
         checks.extend(
             [
                 _check(
-                    goal_id,
-                    "primary findings match goal-specific expert expectations",
+                    objective_id,
+                    "primary findings match objective-specific expert expectations",
                     not missing_finding_terms,
                     _missing_terms_detail(missing_finding_terms),
                 ),
                 _check(
-                    goal_id,
-                    "direct evidence quotes cover goal-specific source claims",
+                    objective_id,
+                    "direct evidence quotes cover objective-specific source claims",
                     not missing_evidence_terms and not missing_direct_evidence_sets,
                     _missing_terms_detail(
                         [*missing_evidence_terms, *missing_direct_evidence_sets]
@@ -1043,7 +1075,7 @@ def evaluate_goal_analysis_payload(
         if expectation.get("comparison_terms"):
             checks.append(
                 _check(
-                    goal_id,
+                    objective_id,
                     "primary finding comparison summary preserves expert comparison",
                     not missing_comparison_terms,
                     _missing_terms_detail(missing_comparison_terms),
@@ -1052,7 +1084,7 @@ def evaluate_goal_analysis_payload(
         if expectation.get("required_condition_evidence_sets"):
             checks.append(
                 _check(
-                    goal_id,
+                    objective_id,
                     "condition evidence preserves confounded process settings",
                     not missing_condition_evidence_sets,
                     _missing_terms_detail(missing_condition_evidence_sets),
@@ -1061,7 +1093,7 @@ def evaluate_goal_analysis_payload(
         if expectation.get("required_primary_finding_sets"):
             checks.append(
                 _check(
-                    goal_id,
+                    objective_id,
                     "primary findings preserve distinct expert comparisons",
                     not missing_distinct_finding_sets,
                     _missing_terms_detail(missing_distinct_finding_sets),
@@ -1070,7 +1102,7 @@ def evaluate_goal_analysis_payload(
         if expectation.get("require_table_direct_evidence_per_primary_finding"):
             checks.append(
                 _check(
-                    goal_id,
+                    objective_id,
                     "each primary finding cites direct table evidence",
                     bool(primary_findings) and not missing_table_finding_ids,
                     (
@@ -1098,7 +1130,7 @@ def evaluate_goal_analysis_payload(
         if forbidden_terms:
             checks.append(
                 _check(
-                    goal_id,
+                    objective_id,
                     "primary findings avoid over-specific unsupported terms",
                     not forbidden_hits,
                     (
@@ -1108,7 +1140,7 @@ def evaluate_goal_analysis_payload(
                     ),
                 )
             )
-    primary_warning_expectation = GOAL_PRIMARY_WARNING_EXPECTATIONS.get(goal_id)
+    primary_warning_expectation = OBJECTIVE_PRIMARY_WARNING_EXPECTATIONS.get(objective_id)
     if primary_warning_expectation:
         primary_warning_text = _combined_text(
             primary_findings,
@@ -1120,13 +1152,13 @@ def evaluate_goal_analysis_payload(
         )
         checks.append(
             _check(
-                goal_id,
+                objective_id,
                 "primary findings preserve required expert review warnings",
                 not missing_primary_warning_terms,
                 _missing_terms_detail(missing_primary_warning_terms),
             )
         )
-    axis_semantic_expectation = GOAL_AXIS_SEMANTIC_EXPECTATIONS.get(goal_id)
+    axis_semantic_expectation = OBJECTIVE_AXIS_SEMANTIC_EXPECTATIONS.get(objective_id)
     if axis_semantic_expectation:
         axis_text = _combined_text(
             [*primary_findings, *review_findings],
@@ -1144,7 +1176,7 @@ def evaluate_goal_analysis_payload(
         ]
         checks.append(
             _check(
-                goal_id,
+                objective_id,
                 "angle symbols preserve expert axis semantics",
                 not missing_axis_terms and not forbidden_axis_terms,
                 _axis_semantics_detail(missing_axis_terms, forbidden_axis_terms),
@@ -1156,14 +1188,14 @@ def evaluate_goal_analysis_payload(
     )
     forbidden_all_terms = [
         term
-        for term in GOAL_ALL_FINDING_FORBIDDEN_TERMS.get(goal_id, [])
+        for term in OBJECTIVE_ALL_FINDING_FORBIDDEN_TERMS.get(objective_id, [])
         if term.lower() in all_finding_text
     ]
-    if goal_id in GOAL_ALL_FINDING_FORBIDDEN_TERMS:
+    if objective_id in OBJECTIVE_ALL_FINDING_FORBIDDEN_TERMS:
         checks.append(
             _check(
-                goal_id,
-                "all expert findings avoid goal-specific noise rows",
+                objective_id,
+                "all expert findings avoid objective-specific noise rows",
                 not forbidden_all_terms,
                 (
                     "none"
@@ -1172,7 +1204,7 @@ def evaluate_goal_analysis_payload(
                 ),
             )
         )
-    required_all_terms = GOAL_ALL_FINDING_REQUIRED_TERMS.get(goal_id, [])
+    required_all_terms = OBJECTIVE_ALL_FINDING_REQUIRED_TERMS.get(objective_id, [])
     if required_all_terms:
         missing_all_terms = _missing_term_groups(
             all_finding_text,
@@ -1180,7 +1212,7 @@ def evaluate_goal_analysis_payload(
         )
         checks.append(
             _check(
-                goal_id,
+                objective_id,
                 "all expert findings preserve context-valued comparisons",
                 not missing_all_terms,
                 _missing_terms_detail(missing_all_terms),
@@ -1216,27 +1248,27 @@ def evaluate_goal_analysis_payload(
         checks.extend(
             [
                 _check(
-                    goal_id,
+                    objective_id,
                     "review queue preserves model-validation finding",
                     bool(review_findings) and not missing_review_finding_terms,
                     _missing_terms_detail(missing_review_finding_terms),
                 ),
                 _check(
-                    goal_id,
+                    objective_id,
                     "review queue evidence covers model-validation source claims",
                     bool(resolved_review_evidence)
                     and not missing_review_evidence_terms,
                     _missing_terms_detail(missing_review_evidence_terms),
                 ),
                 _check(
-                    goal_id,
+                    objective_id,
                     "review queue marks model-validation finding for expert review",
                     not missing_review_warning_terms,
                     _missing_terms_detail(missing_review_warning_terms),
                 ),
             ]
         )
-    review_queue_axis_expectation = GOAL_REVIEW_QUEUE_AXIS_EXPECTATIONS.get(goal_id)
+    review_queue_axis_expectation = OBJECTIVE_REVIEW_QUEUE_AXIS_EXPECTATIONS.get(objective_id)
     if review_queue_axis_expectation:
         review_queue_axis_text = _combined_text(
             review_findings,
@@ -1248,14 +1280,14 @@ def evaluate_goal_analysis_payload(
         )
         checks.append(
             _check(
-                goal_id,
-                "review queue preserves goal-specific table axes",
+                objective_id,
+                "review queue preserves objective-specific table axes",
                 bool(review_findings) and not missing_review_axis_terms,
                 _missing_terms_detail(missing_review_axis_terms),
             )
         )
     return {
-        "goal_id": goal_id,
+        "objective_id": objective_id,
         "question": question,
         "state": understanding.get("state"),
         "primary_finding_count": len(primary_findings),
@@ -2073,10 +2105,10 @@ def _dict_rows(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
-def _check(goal_id: str, name: str, passed: bool, detail: str) -> dict[str, str]:
+def _check(objective_id: str, name: str, passed: bool, detail: str) -> dict[str, str]:
     return {
         "status": "pass" if passed else "fail",
-        "goal_id": goal_id,
+        "objective_id": objective_id,
         "name": name,
         "detail": detail,
     }

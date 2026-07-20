@@ -33,7 +33,6 @@ REQUIRED_FAMILIES = (
     "core_baseline_references",
     "core_measurement_results",
     "research_objectives",
-    "confirmed_goals",
     "research_understandings",
     "goal_sessions",
     "goal_messages",
@@ -161,14 +160,6 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                         }
                     )
 
-    for goal in records["confirmed_goals"]:
-        if goal.get("collection_id") not in collections:
-            raise ValueError(
-                f"unresolved goal collection: {goal.get('collection_id')}"
-            )
-        objective_id = goal.get("source_objective_id")
-        if objective_id and objective_id not in objectives:
-            raise ValueError(f"unresolved goal objective: {objective_id}")
     for item in records["feedback"]:
         claim_id = item.get("claim_id")
         if claim_id and claim_id not in claims_by_id:
@@ -189,17 +180,20 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
     collection = records["collections"][0]
     task = records["tasks"][0]
     artifacts = records["artifacts"][0]
-    goal = records["confirmed_goals"][0]
+    objective = records["research_objectives"][0]
     understanding = next(
         (
             item
             for item in records["research_understandings"]
-            if item.get("scope", {}).get("goal_id") == goal["goal_id"]
+            if item.get("scope", {}).get("objective_id")
+            == objective["objective_id"]
         ),
         None,
     )
     if understanding is None:
-        raise ValueError(f"missing understanding for goal: {goal['goal_id']}")
+        raise ValueError(
+            f"missing understanding for objective: {objective['objective_id']}"
+        )
     if not evidence_traces:
         raise ValueError("scenario has no complete evidence trace")
     trace = evidence_traces[0]
@@ -223,7 +217,6 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
         "source_text_units": "id",
         "core_measurement_results": "result_id",
         "research_objectives": "objective_id",
-        "confirmed_goals": "goal_id",
         "goal_messages": "message_id",
         "feedback": "feedback_id",
         "curations": "curation_id",
@@ -240,7 +233,6 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
         "task": records["tasks"][0],
         "source_document": records["source_documents"][0],
         "measurement_result": records["core_measurement_results"][0],
-        "confirmed_goal": records["confirmed_goals"][0],
         "research_understanding": records["research_understandings"][0],
         "feedback": records["feedback"][0],
         "evaluation_run": records["evaluation_runs"][0],
@@ -292,13 +284,13 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
             },
             "goal_analysis": {
                 "endpoint": (
-                    f"/api/v1/collections/{collection_id}/goals/"
-                    f"{goal['goal_id']}/analysis"
+                    f"/api/v1/collections/{collection_id}/objectives/"
+                    f"{objective['objective_id']}/analysis"
                 ),
                 "status_code": 200,
-                "goal_id": goal["goal_id"],
-                "status": goal["status"],
-                "phase": goal.get("analysis_progress", {}).get("phase"),
+                "objective_id": objective["objective_id"],
+                "status": "ready",
+                "phase": "completed",
                 "understanding_state": understanding["state"],
                 "summary": summary,
             },

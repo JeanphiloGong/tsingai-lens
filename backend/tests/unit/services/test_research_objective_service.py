@@ -31,7 +31,6 @@ from application.core.research_understanding_service import (
 )
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
-    ConfirmedGoal,
     DocumentProfile,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
@@ -41,7 +40,6 @@ from domain.core import (
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
-    build_research_objective_id,
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
 from infra.persistence.sqlite import SqliteResearchUnderstandingRepository
@@ -10632,68 +10630,7 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     assert len(facts.research_objectives) == 1
 
 
-def test_confirmed_goal_analysis_keeps_source_objective_id(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        structured_extractor=_ObjectiveExtractor(),
-    )
-    source_objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "obj_source",
-            "question": "How does heat treatment affect strength?",
-            "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["strength"],
-            "comparison_intent": "Compare heat treatment effects on strength.",
-            "confidence": 0.9,
-        }
-    )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": "col_1",
-            "goal_id": "goal_strength",
-            "question": "How does heat treatment affect strength?",
-            "source_objective_id": "obj_source",
-            "status": "pending",
-        }
-    )
-
-    objective = service._objective_from_confirmed_goal(
-        goal,
-        candidates=(source_objective,),
-    )
-
-    assert objective.objective_id == "obj_source"
-    assert objective.objective_id != goal.goal_id
-
-
-def test_confirmed_goal_analysis_builds_objective_id_for_user_input_goal(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        structured_extractor=_ObjectiveExtractor(),
-    )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": "col_1",
-            "goal_id": "goal_custom",
-            "question": "Which coating improves corrosion resistance?",
-            "material_hints": ["316L stainless steel"],
-            "process_hints": ["coating"],
-            "property_hints": ["corrosion resistance"],
-            "status": "pending",
-        }
-    )
-
-    objective = service._objective_from_confirmed_goal(goal, candidates=())
-
-    assert objective.objective_id == build_research_objective_id(goal.question)
-    assert objective.objective_id != goal.goal_id
-    assert objective.material_scope == ("316L stainless steel",)
-    assert objective.process_axes == ("coating",)
-    assert objective.property_axes == ("corrosion resistance",)
-
-
-def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails(
+def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -10780,26 +10717,21 @@ def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails
             objective_contexts=(objective_context,),
         ),
     )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": collection_id,
-            "goal_id": "goal_texture_yield",
-            "question": objective.question,
-            "source_type": "objective_candidate",
-            "source_objective_id": objective.objective_id,
-        }
+    service.objective_repository.confirm_objective(
+        collection_id,
+        objective.objective_id,
     )
 
-    understanding = service.analyze_confirmed_goal(goal)
+    understanding = service.analyze_objective(collection_id, objective.objective_id)
 
     facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
     assert facts.objective_paper_frames == ()
     assert facts.objective_evidence_units == ()
-    assert understanding.scope.scope_type == "goal"
+    assert understanding.scope.scope_type == "objective"
 
 
-def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails(
+def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -10892,22 +10824,17 @@ def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails
             objective_contexts=(objective_context,),
         ),
     )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": collection_id,
-            "goal_id": "goal_corrosion",
-            "question": objective.question,
-            "source_type": "objective_candidate",
-            "source_objective_id": objective.objective_id,
-        }
+    service.objective_repository.confirm_objective(
+        collection_id,
+        objective.objective_id,
     )
 
     failing_extractor = _FailingRouteExtractor()
     service._structured_extractor = failing_extractor
     service.research_understanding_service.structured_extractor = failing_extractor
-    understanding = service.analyze_confirmed_goal(goal)
+    understanding = service.analyze_objective(collection_id, objective.objective_id)
 
-    assert understanding.scope.scope_type == "goal"
+    assert understanding.scope.scope_type == "objective"
     assert failing_extractor.route_payloads
     facts = service.objective_repository.read(collection_id)
     assert facts.objective_paper_frames == ()
@@ -10916,7 +10843,7 @@ def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails
     assert facts.objective_logic_chains == ()
 
 
-def test_confirmed_goal_analysis_does_not_mutate_active_objective_facts(
+def test_objective_analysis_does_not_mutate_active_objective_facts(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -11061,23 +10988,18 @@ def test_confirmed_goal_analysis_does_not_mutate_active_objective_facts(
         ),
     )
     active_facts = service.objective_repository.read(collection_id)
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": collection_id,
-            "goal_id": "goal_corrosion",
-            "question": objective.question,
-            "source_type": "objective_candidate",
-            "source_objective_id": objective.objective_id,
-        }
+    service.objective_repository.confirm_objective(
+        collection_id,
+        objective.objective_id,
     )
 
-    understanding = service.analyze_confirmed_goal(goal)
+    understanding = service.analyze_objective(collection_id, objective.objective_id)
 
     facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
     assert extractor.route_payloads
     assert facts == active_facts
-    assert understanding.scope.scope_type == "goal"
+    assert understanding.scope.scope_type == "objective"
 
 
 def _build_duplicate_paper_objectives(

@@ -23,6 +23,14 @@ DEFAULT_GOAL_IDS = (
     "goal_6bf7d2c1030e",
     "goal_3037e425673a",
 )
+DEFAULT_OBJECTIVE_IDS = (
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac",
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba",
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8",
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8",
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
+)
 PLAN_LIST_PATH = "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
 PLAN_DETAIL_PATH = f"{PLAN_LIST_PATH}/{{plan_id}}"
 GOAL_SESSION_PATH = "/api/v1/goal-sessions"
@@ -57,6 +65,15 @@ def parse_args() -> argparse.Namespace:
         action="append",
         dest="goal_ids",
         help="Goal id to check. May repeat. Defaults to the local 6-goal 316L set.",
+    )
+    parser.add_argument(
+        "--objective-id",
+        action="append",
+        dest="objective_ids",
+        help=(
+            "Objective id paired by position with --goal-id. May repeat. "
+            "Defaults to the local 6-objective 316L set."
+        ),
     )
     parser.add_argument(
         "--api-base-url",
@@ -113,6 +130,7 @@ def main() -> None:
     summary = check_goal_expert_loop(
         collection_id=args.collection_id,
         goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        objective_ids=tuple(args.objective_ids or DEFAULT_OBJECTIVE_IDS),
         api_base_url=args.api_base_url,
         runtime_write_check=args.runtime_write_check,
         expert_satisfaction_gate=args.expert_satisfaction_gate,
@@ -131,28 +149,31 @@ def check_goal_expert_loop(
     *,
     collection_id: str,
     goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    objective_ids: tuple[str, ...] = DEFAULT_OBJECTIVE_IDS,
     api_base_url: str | None = None,
     runtime_write_check: bool = False,
     expert_satisfaction_gate: bool = False,
     require_all_training_ready: bool = False,
     require_complete: bool = False,
 ) -> dict[str, Any]:
+    if len(goal_ids) != len(objective_ids):
+        raise ValueError("goal_ids and objective_ids must have the same length")
     effective_require_all_training_ready = (
         require_all_training_ready or expert_satisfaction_gate
     )
     effective_require_complete = require_complete or expert_satisfaction_gate
     effective_runtime_write_check = runtime_write_check or expert_satisfaction_gate
     findings_module = _load_sibling_module(
-        "check_goal_findings_projection.py",
-        "check_goal_findings_projection",
+        "check_objective_findings_projection.py",
+        "check_objective_findings_projection",
     )
     dataset_module = _load_sibling_module(
         "check_goal_dataset_quality.py",
         "check_goal_dataset_quality",
     )
-    findings = findings_module.check_goal_findings_projection(
+    findings = findings_module.check_objective_findings_projection(
         collection_id=collection_id,
-        goal_ids=goal_ids,
+        objective_ids=objective_ids,
         api_base_url=api_base_url,
     )
     dataset = dataset_module.check_goal_dataset_quality(
@@ -181,7 +202,12 @@ def check_goal_expert_loop(
             require_runtime_write=effective_runtime_write_check,
         ),
     }
-    goals = _goal_rollup(findings, dataset, collection_id=collection_id)
+    goals = _goal_rollup(
+        findings,
+        dataset,
+        collection_id=collection_id,
+        objective_goal_pairs=tuple(zip(objective_ids, goal_ids, strict=True)),
+    )
     completion = _completion_summary(goals)
     expert_satisfaction = _expert_satisfaction_summary(
         layers,
@@ -223,9 +249,13 @@ def _load_sibling_module(filename: str, module_name: str):
 
 
 def _expert_review_layer(findings: dict[str, Any]) -> dict[str, Any]:
-    goals = _mapping_list(findings.get("goals"))
-    primary_count = sum(int(goal.get("primary_finding_count") or 0) for goal in goals)
-    direct_evidence_count = sum(int(goal.get("direct_evidence_count") or 0) for goal in goals)
+    objectives = _mapping_list(findings.get("objectives"))
+    primary_count = sum(
+        int(objective.get("primary_finding_count") or 0) for objective in objectives
+    )
+    direct_evidence_count = sum(
+        int(objective.get("direct_evidence_count") or 0) for objective in objectives
+    )
     return {
         "status": "pass" if findings.get("status") == "pass" else "fail",
         "primary_finding_count": primary_count,
@@ -623,19 +653,25 @@ def _goal_rollup(
     dataset: dict[str, Any],
     *,
     collection_id: str,
+    objective_goal_pairs: tuple[tuple[str, str], ...],
 ) -> list[dict[str, Any]]:
     dataset_by_goal = {
         str(goal.get("goal_id")): goal for goal in _mapping_list(dataset.get("goals"))
     }
+    objectives_by_id = {
+        str(objective.get("objective_id")): objective
+        for objective in _mapping_list(findings.get("objectives"))
+    }
     rows = []
-    for goal in _mapping_list(findings.get("goals")):
-        goal_id = str(goal.get("goal_id"))
+    for objective_id, goal_id in objective_goal_pairs:
+        objective = objectives_by_id.get(objective_id, {})
         dataset_goal = dataset_by_goal.get(goal_id, {})
         rows.append(
             {
                 "goal_id": goal_id,
+                "objective_id": objective_id,
                 "collection_id": collection_id,
-                "question": _text(goal.get("question")),
+                "question": _text(objective.get("question")),
                 "review_url": _goal_review_url(collection_id, goal_id),
                 "training_ready_url": _goal_training_ready_url(collection_id, goal_id),
                 "next_review_finding_id": (
@@ -648,8 +684,12 @@ def _goal_rollup(
                     if int(dataset_goal.get("review_candidate_count") or 0) > 0
                     else {}
                 ),
-                "primary_finding_count": int(goal.get("primary_finding_count") or 0),
-                "direct_evidence_count": int(goal.get("direct_evidence_count") or 0),
+                "primary_finding_count": int(
+                    objective.get("primary_finding_count") or 0
+                ),
+                "direct_evidence_count": int(
+                    objective.get("direct_evidence_count") or 0
+                ),
                 "dataset_item_count": int(dataset_goal.get("item_count") or 0),
                 "training_ready_count": int(dataset_goal.get("training_ready_count") or 0),
                 "training_message_ready_count": int(

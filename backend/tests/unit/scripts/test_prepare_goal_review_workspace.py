@@ -134,10 +134,10 @@ def _dataset_module(summary):
 
 def _findings_module():
     return SimpleNamespace(
-        check_goal_findings_projection=lambda **_kwargs: {
-            "goals": [
+        check_objective_findings_projection=lambda **_kwargs: {
+            "objectives": [
                 {
-                    "goal_id": "goal-1",
+                    "objective_id": "objective-1",
                     "question": "How does preheating affect ductility?",
                 }
             ]
@@ -162,6 +162,7 @@ def test_prepare_goal_review_workspace_writes_review_files(tmp_path, monkeypatch
     result = module.prepare_goal_review_workspace(
         collection_id="col-1",
         goal_ids=("goal-1",),
+        objective_ids=("objective-1",),
         output_dir=tmp_path / "workspace",
     )
 
@@ -408,6 +409,7 @@ def test_prepare_goal_review_workspace_refuses_non_empty_output_dir(tmp_path):
         module.prepare_goal_review_workspace(
             collection_id="col-1",
             goal_ids=("goal-1",),
+            objective_ids=("objective-1",),
             output_dir=output_dir,
         )
     except ValueError as exc:
@@ -758,6 +760,7 @@ def test_enrich_goal_questions_adds_question_to_matching_goals(monkeypatch):
         summary,
         collection_id="col-1",
         goal_ids=("goal-1",),
+        objective_ids=("objective-1",),
         api_base_url=None,
     )
 

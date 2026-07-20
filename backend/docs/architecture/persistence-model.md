@@ -55,9 +55,9 @@ accidentally preserve it.
 | Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Document profiles and reusable paper facts | PostgreSQL build-versioned paper-fact tables | No | PostgreSQL |
 | Research objectives, contexts, paper frames, evidence routes, evidence units, and logic chains | PostgreSQL build-versioned objective tables | No | PostgreSQL |
+| Research Objective confirmation and analysis lifecycle | PostgreSQL `research_objective_lifecycles` | No | PostgreSQL |
 | Comparable results, collection assessments, and pairwise comparison relations | PostgreSQL build-versioned comparison tables | No | PostgreSQL |
 | Comparison rows | In-memory deterministic projection | Yes | No durable store |
-| Confirmed goals | `lens.sqlite` `core_confirmed_goals` through `SqliteConfirmedGoalRepository` | No | PostgreSQL |
 | Research understandings | `lens.sqlite` `core_research_understanding_artifacts` through `SqliteResearchUnderstandingRepository` | No | PostgreSQL |
 | Feedback, curation, and evaluation | `lens.sqlite` evaluation tables | No | PostgreSQL |
 | Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
@@ -132,15 +132,14 @@ not resolve comparison projection for material-list or document-only paths.
 representative response counts, including generated-but-empty comparison
 semantics.
 
-Confirmed-goal analysis reads the active objective candidates, derives its
-goal-specific frames, routes, evidence units, and logic chain in memory, and
-persists only the final `ResearchUnderstanding` through the still-temporary
-`SqliteResearchUnderstandingRepository`. Confirmed-goal lifecycle state uses
-the separate `SqliteConfirmedGoalRepository`. The broad `CoreFactRepository`,
-its SQLite implementation, and its factory no longer exist; each service
-receives only the narrow state family it consumes. Goal analysis never rewrites
-an active collection objective build. Later cutover slices replace these two
-temporary SQLite implementations directly with PostgreSQL repositories.
+Objective analysis reads the exact immutable Objective build pinned by
+`research_objective_lifecycles`, derives frames, routes, evidence units, and a
+logic chain in memory, and persists only the final objective-scoped
+`ResearchUnderstanding` through the still-temporary
+`SqliteResearchUnderstandingRepository`. Lifecycle state stays on the existing
+`PostgresObjectiveRepository`; there is no separate Goal identity or lifecycle
+repository. Analysis never rewrites an active collection objective build. A
+later cutover replaces the temporary Understanding repository directly.
 
 ### Legacy SQLite Inventory
 
@@ -181,8 +180,8 @@ identity, constraint, or query requires it.
 - A storage key locates bytes. PostgreSQL metadata records its SHA-256, media
   type, byte size, object kind, and creation time.
 - Source and Core records identify the immutable build that produced them.
-- Goal analysis records belong to one confirmed goal and one immutable analysis
-  build.
+- One Objective lifecycle row points to the exact immutable Objective build
+  version selected at confirmation.
 - DOI and other external identifiers are deduplication signals with uniqueness
   rules appropriate to their issuer; they do not replace internal identity.
 
@@ -222,10 +221,8 @@ erDiagram
     COLLECTION ||--o{ RESEARCH_OBJECTIVE : frames
     RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_FACT : selects
     CORE_FACT ||--o{ OBJECTIVE_FACT : reused_by
-    COLLECTION ||--o{ CONFIRMED_GOAL : scopes
-    RESEARCH_OBJECTIVE o|--o{ CONFIRMED_GOAL : grounds
-    CONFIRMED_GOAL ||--o{ GOAL_ANALYSIS_BUILD : versions
-    GOAL_ANALYSIS_BUILD ||--o| RESEARCH_UNDERSTANDING : produces
+    RESEARCH_OBJECTIVE ||--o| OBJECTIVE_LIFECYCLE : pins
+    OBJECTIVE_LIFECYCLE ||--o| RESEARCH_UNDERSTANDING : produces
     RESEARCH_UNDERSTANDING ||--o{ CLAIM : contains
     CLAIM ||--o{ CLAIM_EVIDENCE : cites
     EVIDENCE_ANCHOR ||--o{ CLAIM_EVIDENCE : supports
@@ -247,9 +244,9 @@ Concrete migration names may differ, but these identity rules may not.
 | Source records | Existing domain IDs per record family | Every structure, figure, and reference row references one collection build and valid Source document ownership; reference links use declared foreign keys. Figure metadata records object key, SHA-256, MIME type, dimensions, and byte size, never image bytes. |
 | Evidence anchor | `anchor_id` | References document version and build stage plus exactly one supported Source locator, such as a text unit, block, table cell, or figure. |
 | Reusable Core facts | Existing domain IDs per fact family | Every fact references document version and Core build stage; many-to-many evidence uses link tables. |
-| Objective and collection assessment | `objective_id` and family-specific IDs | References collection; reusable fact selection and assessment use foreign-keyed links rather than copied payloads. |
-| Confirmed goal | `goal_id` | References collection and, when present, the objective that established its scope. |
-| Goal analysis | `goal_analysis_build_id`, `understanding_id` | Build references goal; understanding references exactly one immutable analysis build. |
+| Objective and collection assessment | `objective_id` and family-specific IDs | Objective semantics are immutable within one collection build; reusable fact selection and assessment use foreign-keyed links rather than copied payloads. |
+| Objective lifecycle | `(collection_id, objective_id)` | References the exact `(collection_id, source_build_id, objective_id)` semantic row; stores only typed status, progress, error, and timestamps. |
+| Objective analysis | `objective_id`, `understanding_id` | New Understanding writes use `scope_type=objective` and the same `objective_id`; ready requires persisted reviewable Findings. |
 | Understanding graph | `claim_id`, `relation_id`, `context_id`, `evidence_ref_id` | Child records reference understanding; claim, relation, context, and evidence associations use link tables. |
 | Feedback, curation, evaluation | Existing evaluation IDs | Review records reference immutable understanding/claim or prediction identities and their version. |
 
@@ -270,10 +267,11 @@ Build output is immutable. Activation is the only mutable selection step.
 5. A failed or cancelled build remains diagnostic history and cannot change the
    pointer.
 
-Goal analysis follows the same rule under `ConfirmedGoal`: a new
-`GoalAnalysisBuild` is written separately and becomes active only after its
-understanding is complete. Readers follow the owning active pointer; they do
-not search for the newest timestamp.
+Objective analysis does not create another research-goal identity. Confirmation
+inserts one lifecycle row that pins an immutable Objective build. Analysis moves
+that row through `confirmed -> queued -> running -> ready|failed`; PostgreSQL
+claims `queued -> running` atomically. The service writes and verifies the
+objective-scoped Understanding before marking the lifecycle `ready`.
 
 ## JSONB Policy
 

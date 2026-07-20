@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "name": "LPBF 316L densification retrieval",
+  "filters": {
+    "collection_id": "col_a39df172e56f",
+    "document_ids": [
+      "17e11380f8cea0538fce7b787385abfc45d19932a1fdeae8666992c75abd2df688b3b9f7fb819386c5c90cf804c0ae145adee10bd866989c9a26c0393c5f8c9b",
+      "4df3287be4616880d07c914f0d70e0face2e79e880236d4ea91e5889dd7e48df467fa05be2a6532e2b669f06354ca307460761dfa431e7e28a95b885a985ceda",
+      "739ae2977f8384a58c6fa263081133526823023d28c00e77a226e843bd0083f8da73108f5e0d1cb3211745a4ec32035f1e5ad929cea392b3cca0f7dc300abb0e",
+      "930f08f02812a505f7ab796d4c0a981241e3ce812f596fd18182c370c21117755b63287ab53aafe37718687cdbedb30b7de7a583d949b9006254bf50061ed50a",
+      "9a7085a487fc5a2e5f74aa95f6e1b5055bdc98bf427e449a3aecc216b334ac60599511b99ce8703ec9539d2b9800a467e93b763be0b7843e56dca9c17a8fcd81",
+      "c9f4925e1c56b1e31b0a1652d526904f13245d447010c3ab591d347b0d6b56622dc7fbdee5dc5765d958fe77925075cd2431252fc8a30969d39cc9ffa9a39007"
+    ]
+  },
+  "queries": [
+    {
+      "id": "scan-speed-controlled-effect",
+      "query": "When laser power and spot size are held constant, how does increasing scanning speed affect densification and why?",
+      "relevant_text_unit_ids": [
+        "bb2bb692ac32a6cdbd7a03c8bbac654977072bb6caee07774d7b8d8b80875a8af5b2082dac7008c9e176c77eceb2e9ebebf2a003ff70ee6bc5bf588ac18d9498"
+      ],
+      "source_locators": [
+        {
+          "text_unit_id": "bb2bb692ac32a6cdbd7a03c8bbac654977072bb6caee07774d7b8d8b80875a8af5b2082dac7008c9e176c77eceb2e9ebebf2a003ff70ee6bc5bf588ac18d9498",
+          "document_id": "4df3287be4616880d07c914f0d70e0face2e79e880236d4ea91e5889dd7e48df467fa05be2a6532e2b669f06354ca307460761dfa431e7e28a95b885a985ceda",
+          "block_id": "blk_4df3287be4616880d07c914f0d70e0face2e79e880236d4ea91e5889dd7e48df467fa05be2a6532e2b669f06354ca307460761dfa431e7e28a95b885a985ceda_92",
+          "page": 11
+        }
+      ]
+    },
+    {
+      "id": "scan-strategy-densification",
+      "query": "Which scanning strategy produced the highest densification, and what scan pattern did it use?",
+      "relevant_text_unit_ids": [
+        "4fd0761b9d5ab2f7dd73b37feb6faa7ab917e8c18c4f089b35b37308ceb4e33c94c0696f8c74c80367f31e64dcc7502ba7a9c19d16bd597c0370ead3aaad81fa"
+      ],
+      "source_locators": [
+        {
+          "text_unit_id": "4fd0761b9d5ab2f7dd73b37feb6faa7ab917e8c18c4f089b35b37308ceb4e33c94c0696f8c74c80367f31e64dcc7502ba7a9c19d16bd597c0370ead3aaad81fa",
+          "document_id": "4df3287be4616880d07c914f0d70e0face2e79e880236d4ea91e5889dd7e48df467fa05be2a6532e2b669f06354ca307460761dfa431e7e28a95b885a985ceda",
+          "block_id": "blk_4df3287be4616880d07c914f0d70e0face2e79e880236d4ea91e5889dd7e48df467fa05be2a6532e2b669f06354ca307460761dfa431e7e28a95b885a985ceda_99",
+          "page": 12
+        }
+      ]
+    },
+    {
+      "id": "constant-energy-density-porosity",
+      "query": "At the same 100 J/mm3 energy density, what densities resulted from the three laser power and scanning speed pairs, and how did lowering both parameters affect porosity?",
+      "relevant_text_unit_ids": [
+        "83d75aa5db93af85064fed994fc3c4471119edac0ee167fe7b6884d74f32f75558f55c941c9350fc9a8d8f8d0b313ea0939bf0d2f705dde4675e8748e4370380",
+        "158e6dbd642a9e74885f4610d3df47a9cc0a9c368c40c22bd85e1600d93aa328f0d02f9954b75cae170ffcd116b3e6e9d37237e0813d417705b1fbd0843a8f12"
+      ],
+      "source_locators": [
+        {
+          "text_unit_id": "83d75aa5db93af85064fed994fc3c4471119edac0ee167fe7b6884d74f32f75558f55c941c9350fc9a8d8f8d0b313ea0939bf0d2f705dde4675e8748e4370380",
+          "document_id": "17e11380f8cea0538fce7b787385abfc45d19932a1fdeae8666992c75abd2df688b3b9f7fb819386c5c90cf804c0ae145adee10bd866989c9a26c0393c5f8c9b",
+          "block_id": "blk_17e11380f8cea0538fce7b787385abfc45d19932a1fdeae8666992c75abd2df688b3b9f7fb819386c5c90cf804c0ae145adee10bd866989c9a26c0393c5f8c9b_38",
+          "page": 3
+        },
+        {
+          "text_unit_id": "158e6dbd642a9e74885f4610d3df47a9cc0a9c368c40c22bd85e1600d93aa328f0d02f9954b75cae170ffcd116b3e6e9d37237e0813d417705b1fbd0843a8f12",
+          "document_id": "17e11380f8cea0538fce7b787385abfc45d19932a1fdeae8666992c75abd2df688b3b9f7fb819386c5c90cf804c0ae145adee10bd866989c9a26c0393c5f8c9b",
+          "block_id": "blk_17e11380f8cea0538fce7b787385abfc45d19932a1fdeae8666992c75abd2df688b3b9f7fb819386c5c90cf804c0ae145adee10bd866989c9a26c0393c5f8c9b_90",
+          "page": 8
+        }
+      ]
+    },
+    {
+      "id": "ved-defect-density",
+      "query": "How did increasing volumetric energy density change relative density, defect fraction, and lack-of-fusion defect prevalence?",
+      "relevant_text_unit_ids": [
+        "deadfc03bc39cca48f4bf5cf1070474c6a63552695a62c427166341fb154cffd3e72802e491c4b0a96b70fd59ebd2e8fb147f0d959a1aabdd2e1a8e598880154",
+        "d4095e6a5c0f7318c6e86a671141436bdd5c9d65bb1d946116190d0df8478273431009034de37f2e90fce9f8b3a7b384b9e2e9f7f0606c2a4d5ce4eeca76771e"
+      ],
+      "source_locators": [
+        {
+          "text_unit_id": "deadfc03bc39cca48f4bf5cf1070474c6a63552695a62c427166341fb154cffd3e72802e491c4b0a96b70fd59ebd2e8fb147f0d959a1aabdd2e1a8e598880154",
+          "document_id": "9a7085a487fc5a2e5f74aa95f6e1b5055bdc98bf427e449a3aecc216b334ac60599511b99ce8703ec9539d2b9800a467e93b763be0b7843e56dca9c17a8fcd81",
+          "block_id": "blk_9a7085a487fc5a2e5f74aa95f6e1b5055bdc98bf427e449a3aecc216b334ac60599511b99ce8703ec9539d2b9800a467e93b763be0b7843e56dca9c17a8fcd81_61",
+          "page": 3
+        },
+        {
+          "text_unit_id": "d4095e6a5c0f7318c6e86a671141436bdd5c9d65bb1d946116190d0df8478273431009034de37f2e90fce9f8b3a7b384b9e2e9f7f0606c2a4d5ce4eeca76771e",
+          "document_id": "9a7085a487fc5a2e5f74aa95f6e1b5055bdc98bf427e449a3aecc216b334ac60599511b99ce8703ec9539d2b9800a467e93b763be0b7843e56dca9c17a8fcd81",
+          "block_id": "blk_9a7085a487fc5a2e5f74aa95f6e1b5055bdc98bf427e449a3aecc216b334ac60599511b99ce8703ec9539d2b9800a467e93b763be0b7843e56dca9c17a8fcd81_150",
+          "page": 12
+        }
+      ]
+    }
+  ]
+}

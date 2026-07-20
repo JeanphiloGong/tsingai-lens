@@ -120,7 +120,8 @@ class FakeResearchObjectiveService:
 
 
 class FakeResearchUnderstandingService:
-    def with_presentation(self, understanding):
+    def with_presentation(self, understanding, *, recover_source_findings=True):
+        assert recover_source_findings is False
         return understanding.to_record()
 
 

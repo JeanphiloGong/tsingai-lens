@@ -182,7 +182,10 @@ class ObjectiveAnalysisService:
     ) -> ResearchUnderstanding | None:
         if understanding is None:
             return None
-        record = self.research_understanding_service.with_presentation(understanding)
+        record = self.research_understanding_service.with_presentation(
+            understanding,
+            recover_source_findings=False,
+        )
         return ResearchUnderstanding.from_mapping(record or {})
 
     @classmethod

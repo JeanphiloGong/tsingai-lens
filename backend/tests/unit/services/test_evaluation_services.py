@@ -196,7 +196,8 @@ class FakeResearchUnderstandingProjectionService:
         self.projected = projected
         self.inputs = []
 
-    def with_presentation(self, understanding):
+    def with_presentation(self, understanding, *, recover_source_findings=True):
+        assert recover_source_findings is False
         self.inputs.append(understanding)
         return (
             self.projected if self.projected is not None else understanding.to_record()
@@ -2718,14 +2719,14 @@ def test_research_understanding_feedback_service_requires_actionable_protocol_in
 
 
 def test_research_understanding_feedback_service_exports_collection_dataset():
-    goal_one = _sample_understanding()
-    goal_two_record = _sample_understanding().to_record()
-    goal_two_record["scope"]["objective_id"] = "objective-2"
-    goal_two_record["scope"]["title"] = "How does VED affect density?"
-    goal_two_record["presentation"]["findings"] = [
-        goal_two_record["presentation"]["findings"][1]
+    objective_one = _sample_understanding()
+    objective_two_record = _sample_understanding().to_record()
+    objective_two_record["scope"]["objective_id"] = "objective-2"
+    objective_two_record["scope"]["title"] = "How does VED affect density?"
+    objective_two_record["presentation"]["findings"] = [
+        objective_two_record["presentation"]["findings"][1]
     ]
-    goal_two = ResearchUnderstanding.from_mapping(goal_two_record)
+    objective_two = ResearchUnderstanding.from_mapping(objective_two_record)
     repository = FakeEvaluationRepository()
     repository.feedback = (
         _feedback_record(
@@ -2761,7 +2762,7 @@ def test_research_understanding_feedback_service_exports_collection_dataset():
         review_repository=repository,
         research_understanding_repository=FakeResearchUnderstandingRepository(
             None,
-            understandings=(goal_one, goal_two),
+            understandings=(objective_one, objective_two),
         ),
         research_understanding_service=FakeResearchUnderstandingProjectionService(),
     )
@@ -3055,7 +3056,7 @@ def test_research_understanding_feedback_service_reports_missing_dataset_scope()
 
     dataset = service.export_dataset(
         collection_id="col-gold",
-        objective_id="missing-goal",
+        objective_id="missing-objective",
     )
 
     assert dataset["item_count"] == 0

@@ -713,7 +713,7 @@ class ResearchObjectiveService:
             evidence_units=evidence_units,
         )
         understanding = ResearchUnderstanding.from_mapping(
-            self.research_understanding_service.build_objective_understanding(
+            self.research_understanding_service.synthesize_objective_understanding(
                 {
                     "collection_id": collection_id,
                     "objective": objective.to_record(),
@@ -1468,7 +1468,10 @@ class ResearchObjectiveService:
             collection_id,
             objective_id,
         )
-        return self.research_understanding_service.with_presentation(understanding)
+        return self.research_understanding_service.with_presentation(
+            understanding,
+            recover_source_findings=False,
+        )
 
     @staticmethod
     def _objective_review_summary(understanding) -> dict[str, int]:
@@ -5266,14 +5269,14 @@ class ResearchObjectiveService:
             )
             for axis in changed_sample_axes:
                 if not any(
-                    self._axis_values_match(axis, goal_axis)
-                    or self._axis_label_is_mentioned(axis, goal_axis)
+                    self._axis_values_match(axis, objective_axis)
+                    or self._axis_label_is_mentioned(axis, objective_axis)
                     or self._objective_preheating_condition_column_matches_axis(
                         axis,
                         current_sample_axes[axis],
-                        axis_key=self._normalize_property_label(goal_axis) or "",
+                        axis_key=self._normalize_property_label(objective_axis) or "",
                     )
-                    for goal_axis in objective_context.variable_process_axes
+                    for objective_axis in objective_context.variable_process_axes
                 ):
                     return None
         return self._objective_single_changed_axis_from_values(
@@ -5288,7 +5291,7 @@ class ResearchObjectiveService:
         *,
         objective_context: ObjectiveContext | None,
     ) -> dict[str, str]:
-        goal_axes = (
+        objective_axes = (
             tuple(objective_context.variable_process_axes)
             if objective_context is not None
             else ()
@@ -5310,7 +5313,7 @@ class ResearchObjectiveService:
             canonical_axis = next(
                 (
                     axis
-                    for axis in goal_axes
+                    for axis in objective_axes
                     if self._axis_values_match(axis_label, axis)
                     or self._axis_label_is_mentioned(axis_label, axis)
                     or self._objective_preheating_condition_column_matches_axis(
@@ -5377,24 +5380,24 @@ class ResearchObjectiveService:
         independent_axes = [axis for axis in changed_axes if axis not in energy_axes]
         candidate_axes = independent_axes or energy_axes
         if len(candidate_axes) == 1:
-            return self._objective_goal_axis_label(
+            return self._objective_axis_label(
                 candidate_axes[0],
                 objective_context=objective_context,
             )
         if not allow_multi_axis:
             return None
-        goal_labels = [
-            self._objective_goal_axis_label(
+        objective_labels = [
+            self._objective_axis_label(
                 axis,
                 objective_context=objective_context,
             )
             for axis in candidate_axes
         ]
-        if any(label is None for label in goal_labels):
+        if any(label is None for label in objective_labels):
             return None
-        return ", ".join(str(label) for label in goal_labels)
+        return ", ".join(str(label) for label in objective_labels)
 
-    def _objective_goal_axis_label(
+    def _objective_axis_label(
         self,
         axis: str,
         *,
@@ -5402,23 +5405,23 @@ class ResearchObjectiveService:
     ) -> str | None:
         if objective_context is None or not objective_context.variable_process_axes:
             return axis
-        goal_label = next(
+        objective_label = next(
             (
-                self._normalize_property_label(goal_axis) or goal_axis
-                for goal_axis in objective_context.variable_process_axes
-                if self._axis_values_match(axis, goal_axis)
-                or self._axis_label_is_mentioned(axis, goal_axis)
+                self._normalize_property_label(objective_axis) or objective_axis
+                for objective_axis in objective_context.variable_process_axes
+                if self._axis_values_match(axis, objective_axis)
+                or self._axis_label_is_mentioned(axis, objective_axis)
             ),
             None,
         )
-        if goal_label is not None:
-            return goal_label
-        goal_keys = {
-            goal_key
-            for goal_axis in objective_context.variable_process_axes
-            if (goal_key := self._normalize_property_label(goal_axis))
+        if objective_label is not None:
+            return objective_label
+        objective_keys = {
+            objective_key
+            for objective_axis in objective_context.variable_process_axes
+            if (objective_key := self._normalize_property_label(objective_axis))
         }
-        if self._objective_process_column_axis_keys(axis) & goal_keys:
+        if self._objective_process_column_axis_keys(axis) & objective_keys:
             return axis
         return None
 

@@ -46,7 +46,7 @@ class _FindingSynthesisExtractor:
         return _ModelFindings(self.findings)
 
     def extract_research_understanding_relations(self, payload: dict[str, Any]):
-        raise AssertionError("goal Finding synthesis must not use relation extraction")
+        raise AssertionError("objective Finding synthesis must not use relation extraction")
 
     def consume_last_trace(self):
         return None
@@ -139,7 +139,7 @@ def _payload(evidence_units: list[dict[str, Any]]) -> dict[str, Any]:
     document_ids = list(dict.fromkeys(unit["document_id"] for unit in evidence_units))
     return {
         "collection_id": "col-1",
-        "goal_id": "goal-density",
+        "objective_id": "obj-density",
         "objective": {
             "objective_id": "obj-density",
             "question": "How does energy density affect relative density?",
@@ -245,7 +245,7 @@ def _model_finding(
     }
 
 
-def test_goal_synthesis_preserves_one_composite_single_paper_finding():
+def test_objective_synthesis_preserves_one_composite_single_paper_finding():
     defect = _evidence_unit(
         "unit-defect",
         "paper-ved",
@@ -421,8 +421,11 @@ def test_goal_synthesis_preserves_one_composite_single_paper_finding():
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
+    assert understanding["scope"]["scope_type"] == "objective"
+    assert understanding["scope"]["objective_id"] == "obj-density"
+    assert "goal_id" not in understanding["scope"]
     context_payload = extractor.payloads[0]["document_context"]
     assert {
         unit["evidence_unit_id"]
@@ -451,7 +454,30 @@ def test_goal_synthesis_preserves_one_composite_single_paper_finding():
     assert len(finding["evidence_bundle"]["mechanism"]) == 1
 
 
-def test_goal_synthesis_aligns_one_multi_outcome_condition_contrast():
+def test_objective_synthesis_failure_does_not_fall_back_to_projection():
+    direct = _evidence_unit(
+        "unit-density",
+        "paper-density",
+        statement="Increasing laser power raised relative density to 99.1%.",
+        direction="increases",
+    )
+    service, extractor = _service([])
+
+    def fail_synthesis(_payload: dict[str, Any]) -> _ModelFindings:
+        raise RuntimeError("synthesis unavailable")
+
+    extractor.synthesize_research_understanding_findings = fail_synthesis
+
+    understanding = service.synthesize_objective_understanding(_payload([direct]))
+
+    assert understanding["scope"]["scope_type"] == "objective"
+    assert understanding["claims"] == []
+    assert understanding["relations"] == []
+    assert understanding["presentation"]["findings"] == []
+    assert "finding_synthesis_failed" in understanding["warnings"]
+
+
+def test_objective_synthesis_aligns_one_multi_outcome_condition_contrast():
     fatigue_limit = _evidence_unit(
         "unit-fatigue-limit",
         "paper-ved",
@@ -552,7 +578,7 @@ def test_goal_synthesis_aligns_one_multi_outcome_condition_contrast():
     )
     service, extractor = _service([])
 
-    service.build_goal_understanding(payload)
+    service.synthesize_objective_understanding(payload)
 
     assert len(extractor.payloads[0]["result_sets"]) == 1
     result_set = extractor.payloads[0]["result_sets"][0]
@@ -582,7 +608,7 @@ def test_goal_synthesis_aligns_one_multi_outcome_condition_contrast():
     )
 
 
-def test_goal_synthesis_context_from_noncontributing_paper_cannot_raise_paper_count():
+def test_objective_synthesis_context_from_noncontributing_paper_cannot_raise_paper_count():
     direct = _evidence_unit(
         "unit-direct",
         "paper-direct",
@@ -606,7 +632,7 @@ def test_goal_synthesis_context_from_noncontributing_paper_cannot_raise_paper_co
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     assert extractor.payloads[0]["document_context"] == []
     assert [
@@ -618,7 +644,7 @@ def test_goal_synthesis_context_from_noncontributing_paper_cannot_raise_paper_co
     assert finding["synthesis_status"] == "insufficient_confirmation"
 
 
-def test_goal_synthesis_context_excerpt_does_not_repeat_compact_statement():
+def test_objective_synthesis_context_excerpt_does_not_repeat_compact_statement():
     direct = _evidence_unit(
         "unit-direct",
         "paper-direct",
@@ -636,7 +662,7 @@ def test_goal_synthesis_context_excerpt_does_not_repeat_compact_statement():
     )
     service, extractor = _service([])
 
-    service.build_goal_understanding(_payload([direct, context]))
+    service.synthesize_objective_understanding(_payload([direct, context]))
 
     context_unit = extractor.payloads[0]["document_context"][0]["context_units"][0]
     assert context_unit["source_excerpt"] == (
@@ -648,7 +674,7 @@ def test_goal_synthesis_context_excerpt_does_not_repeat_compact_statement():
     assert "omitted_by_document" not in extractor.payloads[0]["input_coverage"]
 
 
-def test_goal_synthesis_model_payload_omits_redundant_evidence_fields():
+def test_objective_synthesis_model_payload_omits_redundant_evidence_fields():
     direct = _evidence_unit(
         "unit-direct",
         "paper-direct",
@@ -663,7 +689,7 @@ def test_goal_synthesis_model_payload_omits_redundant_evidence_fields():
     )
     service, extractor = _service([])
 
-    service.build_goal_understanding(_payload([direct, context]))
+    service.synthesize_objective_understanding(_payload([direct, context]))
 
     model_payload = extractor.payloads[0]
     assert set(model_payload["paper_frames"][0]) == {
@@ -687,7 +713,7 @@ def test_goal_synthesis_model_payload_omits_redundant_evidence_fields():
     assert len(context_excerpt) <= 421
 
 
-def test_goal_synthesis_does_not_combine_different_properties_across_papers():
+def test_objective_synthesis_does_not_combine_different_properties_across_papers():
     defect = _evidence_unit(
         "unit-defect-paper-one",
         "paper-one",
@@ -742,12 +768,12 @@ def test_goal_synthesis_does_not_combine_different_properties_across_papers():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload([defect, fatigue]))
+    understanding = service.synthesize_objective_understanding(_payload([defect, fatigue]))
 
     assert understanding["presentation"]["findings"] == []
 
 
-def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
+def test_objective_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
     units = [
         _evidence_unit(
             "unit-paper-1",
@@ -776,7 +802,7 @@ def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload(units))
+    understanding = service.synthesize_objective_understanding(_payload(units))
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["synthesis_status"] == "agreement"
@@ -809,7 +835,7 @@ def test_goal_synthesis_builds_one_cross_paper_finding_from_two_direct_papers():
     ] == ["paper-1", "paper-2"]
 
 
-def test_goal_synthesis_backend_binds_all_result_set_evidence():
+def test_objective_synthesis_backend_binds_all_result_set_evidence():
     units = [
         _evidence_unit(
             "unit-paper-1",
@@ -830,7 +856,7 @@ def test_goal_synthesis_backend_binds_all_result_set_evidence():
     )
     service, _ = _service([model_finding])
 
-    understanding = service.build_goal_understanding(_payload(units))
+    understanding = service.synthesize_objective_understanding(_payload(units))
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["paper_count"] == 2
@@ -839,7 +865,7 @@ def test_goal_synthesis_backend_binds_all_result_set_evidence():
     } == {"paper-1", "paper-2"}
 
 
-def test_goal_synthesis_groups_matching_relationships_across_documents():
+def test_objective_synthesis_groups_matching_relationships_across_documents():
     paper_one_speed = _evidence_unit(
         "unit-paper-1-speed",
         "paper-1",
@@ -869,7 +895,7 @@ def test_goal_synthesis_groups_matching_relationships_across_documents():
     ]
     service, extractor = _service([])
 
-    service.build_goal_understanding(payload)
+    service.synthesize_objective_understanding(payload)
 
     result_sets = extractor.payloads[0]["result_sets"]
     by_source_axes = {
@@ -883,7 +909,7 @@ def test_goal_synthesis_groups_matching_relationships_across_documents():
     assert ("laser power",) in by_source_axes
 
 
-def test_goal_synthesis_groups_comparison_contrasts_across_documents():
+def test_objective_synthesis_groups_comparison_contrasts_across_documents():
     comparisons = [
         (
             _evidence_unit(
@@ -960,7 +986,7 @@ def test_goal_synthesis_groups_comparison_contrasts_across_documents():
     payload["objective_context"]["variable_process_axes"] = ["scan speed"]
     service, extractor = _service([])
 
-    service.build_goal_understanding(payload)
+    service.synthesize_objective_understanding(payload)
 
     result_sets = extractor.payloads[0]["result_sets"]
     assert len(result_sets) == 1
@@ -983,7 +1009,7 @@ def test_goal_synthesis_groups_comparison_contrasts_across_documents():
     }
 
 
-def test_goal_synthesis_groups_overlapping_coupled_axes_as_condition_dependent():
+def test_objective_synthesis_groups_overlapping_coupled_axes_as_condition_dependent():
     coupled = _evidence_unit(
         "unit-coupled-density",
         "paper-coupled",
@@ -1068,7 +1094,7 @@ def test_goal_synthesis_groups_overlapping_coupled_axes_as_condition_dependent()
     )
     service, extractor = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     result_sets = extractor.payloads[0]["result_sets"]
     assert len(result_sets) == 1
@@ -1093,7 +1119,7 @@ def test_goal_synthesis_groups_overlapping_coupled_axes_as_condition_dependent()
     assert "condition_dependent" in relation["warnings"]
 
 
-def test_goal_synthesis_rejects_finding_that_mixes_result_sets():
+def test_objective_synthesis_rejects_finding_that_mixes_result_sets():
     density = _evidence_unit(
         "unit-density",
         "paper-density",
@@ -1148,7 +1174,7 @@ def test_goal_synthesis_rejects_finding_that_mixes_result_sets():
     }
     service, extractor = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     assert [item["result_set_id"] for item in extractor.payloads[0]["result_sets"]] == [
         "result_set_1",
@@ -1157,7 +1183,7 @@ def test_goal_synthesis_rejects_finding_that_mixes_result_sets():
     assert understanding["presentation"]["findings"] == []
 
 
-def test_goal_synthesis_rejects_energy_density_context_for_density_outcome():
+def test_objective_synthesis_rejects_energy_density_context_for_density_outcome():
     direct = _evidence_unit(
         "unit-density",
         "paper-1",
@@ -1198,7 +1224,7 @@ def test_goal_synthesis_rejects_energy_density_context_for_density_outcome():
     )
     service, _ = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     relation = understanding["relations"][0]
     assert relation["statement"] == direct["value_payload"]["statement"]
@@ -1206,7 +1232,7 @@ def test_goal_synthesis_rejects_energy_density_context_for_density_outcome():
     assert relation["object"] == "relative density"
 
 
-def test_goal_synthesis_rebuilds_cross_paper_statement_from_direct_evidence():
+def test_objective_synthesis_rebuilds_cross_paper_statement_from_direct_evidence():
     paper_one = _evidence_unit(
         "unit-paper-1-density",
         "paper-1",
@@ -1255,7 +1281,7 @@ def test_goal_synthesis_rebuilds_cross_paper_statement_from_direct_evidence():
     )
     service, _ = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     relation = understanding["relations"][0]
     assert relation["synthesis_status"] == "agreement"
@@ -1267,7 +1293,7 @@ def test_goal_synthesis_rebuilds_cross_paper_statement_from_direct_evidence():
     assert relation["object"] == "relative density"
 
 
-def test_goal_synthesis_rejects_finding_with_outcomes_bound_to_another_property():
+def test_objective_synthesis_rejects_finding_with_outcomes_bound_to_another_property():
     paper_one = _evidence_unit(
         "unit-paper-1-density",
         "paper-1",
@@ -1336,12 +1362,12 @@ def test_goal_synthesis_rejects_finding_with_outcomes_bound_to_another_property(
     )
     service, _ = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     assert understanding["relations"] == []
 
 
-def test_goal_synthesis_flags_cross_paper_axis_scale_mismatch():
+def test_objective_synthesis_flags_cross_paper_axis_scale_mismatch():
     paper_one = _evidence_unit(
         "unit-paper-1-density",
         "paper-1",
@@ -1398,7 +1424,7 @@ def test_goal_synthesis_flags_cross_paper_axis_scale_mismatch():
     )
     service, _ = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     relation = understanding["relations"][0]
     assert relation["incomparable_conditions"] == [
@@ -1408,7 +1434,7 @@ def test_goal_synthesis_flags_cross_paper_axis_scale_mismatch():
     ]
 
 
-def test_goal_synthesis_downgrades_model_agreement_with_one_direct_paper():
+def test_objective_synthesis_downgrades_model_agreement_with_one_direct_paper():
     units = [
         _evidence_unit(
             "unit-paper-1",
@@ -1426,7 +1452,7 @@ def test_goal_synthesis_downgrades_model_agreement_with_one_direct_paper():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload(units))
+    understanding = service.synthesize_objective_understanding(_payload(units))
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["synthesis_status"] == "insufficient_confirmation"
@@ -1435,7 +1461,7 @@ def test_goal_synthesis_downgrades_model_agreement_with_one_direct_paper():
     assert "needs_cross_paper_confirmation" in finding["review_reasons"]
 
 
-def test_goal_synthesis_projects_single_paper_microstructure_finding_for_review():
+def test_objective_synthesis_projects_single_paper_microstructure_finding_for_review():
     unit = _evidence_unit(
         "unit-preheating-microstructure",
         "paper-preheating",
@@ -1493,7 +1519,7 @@ def test_goal_synthesis_projects_single_paper_microstructure_finding_for_review(
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     assert understanding["presentation"]["primary_findings"] == []
     finding = understanding["presentation"]["review_queue_findings"][0]
@@ -1502,7 +1528,7 @@ def test_goal_synthesis_projects_single_paper_microstructure_finding_for_review(
     assert finding["evidence_bundle"]["direct_result"]
 
 
-def test_goal_synthesis_excludes_low_relevance_background_evidence_from_ledger():
+def test_objective_synthesis_excludes_low_relevance_background_evidence_from_ledger():
     unit = _evidence_unit(
         "unit-background",
         "paper-background",
@@ -1525,13 +1551,13 @@ def test_goal_synthesis_excludes_low_relevance_background_evidence_from_ledger()
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
 
 
-def test_goal_synthesis_keeps_low_relevance_direct_result_table_in_ledger():
+def test_objective_synthesis_keeps_low_relevance_direct_result_table_in_ledger():
     unit = _evidence_unit(
         "unit-result-table",
         "paper-result-table",
@@ -1559,7 +1585,7 @@ def test_goal_synthesis_keeps_low_relevance_direct_result_table_in_ledger():
     model_finding["source_concept"] = "scan speed"
     service, extractor = _service([model_finding])
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     assert extractor.payloads[0]["result_sets"][0]["document_evidence"][0][
         "document_id"
@@ -1569,7 +1595,7 @@ def test_goal_synthesis_keeps_low_relevance_direct_result_table_in_ledger():
     assert finding["evidence_bundle"]["direct_result"]
 
 
-def test_goal_synthesis_keeps_supporting_and_conflicting_evidence_separate():
+def test_objective_synthesis_keeps_supporting_and_conflicting_evidence_separate():
     units = [
         _evidence_unit(
             "unit-support",
@@ -1594,7 +1620,7 @@ def test_goal_synthesis_keeps_supporting_and_conflicting_evidence_separate():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload(units))
+    understanding = service.synthesize_objective_understanding(_payload(units))
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["synthesis_status"] == "conflict"
@@ -1608,7 +1634,7 @@ def test_goal_synthesis_keeps_supporting_and_conflicting_evidence_separate():
     }
 
 
-def test_goal_synthesis_preserves_condition_dependent_boundaries():
+def test_objective_synthesis_preserves_condition_dependent_boundaries():
     units = [
         _evidence_unit(
             "unit-lpbf",
@@ -1636,7 +1662,7 @@ def test_goal_synthesis_preserves_condition_dependent_boundaries():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload(units))
+    understanding = service.synthesize_objective_understanding(_payload(units))
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["synthesis_status"] == "condition_dependent"
@@ -1648,7 +1674,7 @@ def test_goal_synthesis_preserves_condition_dependent_boundaries():
     assert finding["generalization_status"] == "cross_paper_candidate"
 
 
-def test_goal_synthesis_rejects_raw_measurement_as_relationship_support():
+def test_objective_synthesis_rejects_raw_measurement_as_relationship_support():
     unit = _evidence_unit(
         "unit-measurement",
         "paper-1",
@@ -1665,13 +1691,13 @@ def test_goal_synthesis_rejects_raw_measurement_as_relationship_support():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload([unit]))
+    understanding = service.synthesize_objective_understanding(_payload([unit]))
 
     assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
 
 
-def test_goal_synthesis_rejects_characterization_built_from_isolated_number():
+def test_objective_synthesis_rejects_characterization_built_from_isolated_number():
     unit = _evidence_unit(
         "unit-characterization-fragment",
         "paper-1",
@@ -1696,13 +1722,13 @@ def test_goal_synthesis_rejects_characterization_built_from_isolated_number():
         ]
     )
 
-    understanding = service.build_goal_understanding(_payload([unit]))
+    understanding = service.synthesize_objective_understanding(_payload([unit]))
 
     assert extractor.payloads[0]["result_sets"] == []
     assert understanding["presentation"]["findings"] == []
 
 
-def test_goal_synthesis_excludes_direct_units_without_relation_axes_or_target():
+def test_objective_synthesis_excludes_direct_units_without_relation_axes_or_target():
     missing_source_axis = _evidence_unit(
         "unit-missing-source-axis",
         "paper-1",
@@ -1718,12 +1744,12 @@ def test_goal_synthesis_excludes_direct_units_without_relation_axes_or_target():
     missing_target["property_normalized"] = None
     service, extractor = _service([])
 
-    service.build_goal_understanding(_payload([missing_source_axis, missing_target]))
+    service.synthesize_objective_understanding(_payload([missing_source_axis, missing_target]))
 
     assert extractor.payloads[0]["result_sets"] == []
 
 
-def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
+def test_objective_synthesis_bounds_ledger_while_covering_each_paper():
     long_statement = "Higher energy density increased relative density. " * 24
     units = [
         _evidence_unit(
@@ -1737,7 +1763,7 @@ def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
     ]
     service, extractor = _service([])
 
-    service.build_goal_understanding(_payload(units))
+    service.synthesize_objective_understanding(_payload(units))
 
     payload = extractor.payloads[0]
     included = _result_units(payload)
@@ -1754,7 +1780,7 @@ def test_goal_synthesis_bounds_ledger_while_covering_each_paper():
     )
 
 
-def test_goal_synthesis_prioritizes_direct_results_before_measurements(monkeypatch):
+def test_objective_synthesis_prioritizes_direct_results_before_measurements(monkeypatch):
     measurement = _evidence_unit(
         "unit-measurement",
         "paper-measurements",
@@ -1804,7 +1830,7 @@ def test_goal_synthesis_prioritizes_direct_results_before_measurements(monkeypat
         direct_result_budget,
     )
 
-    service.build_goal_understanding(payload)
+    service.synthesize_objective_understanding(payload)
 
     included_units = _result_units(extractor.payloads[0])
     assert {
@@ -1817,7 +1843,7 @@ def test_goal_synthesis_prioritizes_direct_results_before_measurements(monkeypat
     }
 
 
-def test_goal_synthesis_balances_bounded_ledger_across_source_axes():
+def test_objective_synthesis_balances_bounded_ledger_across_source_axes():
     laser_units = []
     for index in range(20):
         unit = _evidence_unit(
@@ -1866,7 +1892,7 @@ def test_goal_synthesis_balances_bounded_ledger_across_source_axes():
     ]
     service, extractor = _service([])
 
-    service.build_goal_understanding(payload)
+    service.synthesize_objective_understanding(payload)
 
     included_units = _result_units(extractor.payloads[0])
     included_axes = {
@@ -1886,7 +1912,7 @@ def test_goal_synthesis_balances_bounded_ledger_across_source_axes():
     )["evidence_unit_id"] == "unit-laser-1"
 
 
-def test_goal_synthesis_calibrates_numeric_axis_direction_from_direct_comparison():
+def test_objective_synthesis_calibrates_numeric_axis_direction_from_direct_comparison():
     unit = _evidence_unit(
         "unit-scan-speed-density",
         "paper-density",
@@ -1959,7 +1985,7 @@ def test_goal_synthesis_calibrates_numeric_axis_direction_from_direct_comparison
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["direction"] == "decreases"
@@ -1969,7 +1995,7 @@ def test_goal_synthesis_calibrates_numeric_axis_direction_from_direct_comparison
     ) in finding["statement"].lower()
 
 
-def test_goal_synthesis_preserves_coupled_axis_and_transition_direction():
+def test_objective_synthesis_preserves_coupled_axis_and_transition_direction():
     unit = _evidence_unit(
         "unit-coupled-corrosion",
         "paper-corrosion",
@@ -2049,7 +2075,7 @@ def test_goal_synthesis_preserves_coupled_axis_and_transition_direction():
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     result_unit = _result_units(extractor.payloads[0])[0]
     assert result_unit["source_axes"] == ["laser power", "scanning speed"]
@@ -2062,7 +2088,7 @@ def test_goal_synthesis_preserves_coupled_axis_and_transition_direction():
     assert finding["direction"] == "decreases"
 
 
-def test_goal_synthesis_rejects_source_concept_not_supported_by_cited_unit_axis():
+def test_objective_synthesis_rejects_source_concept_not_supported_by_cited_unit_axis():
     unit = _evidence_unit(
         "unit-defect-characterization",
         "paper-defects",
@@ -2138,14 +2164,14 @@ def test_goal_synthesis_rejects_source_concept_not_supported_by_cited_unit_axis(
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     result_unit = _result_units(extractor.payloads[0])[0]
     assert result_unit["source_axes"] == ["laser power", "scanning speed"]
     assert understanding["presentation"]["findings"] == []
 
 
-def test_goal_synthesis_matches_qualified_axis_to_source_statement():
+def test_objective_synthesis_matches_qualified_axis_to_source_statement():
     unit = _evidence_unit(
         "unit-porosity-corrosion",
         "paper-corrosion",
@@ -2223,14 +2249,14 @@ def test_goal_synthesis_matches_qualified_axis_to_source_statement():
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     result_unit = _result_units(extractor.payloads[0])[0]
     assert result_unit["source_axes"] == ["porosity level"]
     assert understanding["claims"] == []
 
 
-def test_goal_synthesis_presentation_does_not_reinfer_source_axis_from_table_quote():
+def test_objective_synthesis_presentation_does_not_reinfer_source_axis_from_table_quote():
     unit = _evidence_unit(
         "unit-scan-strategy-yield",
         "paper-strategy",
@@ -2315,7 +2341,7 @@ def test_goal_synthesis_presentation_does_not_reinfer_source_axis_from_table_quo
         ]
     )
 
-    understanding = service.build_goal_understanding(payload)
+    understanding = service.synthesize_objective_understanding(payload)
 
     finding = understanding["presentation"]["findings"][0]
     assert finding["variables"] == ["scanning strategy"]

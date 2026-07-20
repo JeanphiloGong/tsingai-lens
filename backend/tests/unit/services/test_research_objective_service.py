@@ -6747,7 +6747,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     )
 
 
-def test_pairwise_selection_keeps_valid_pairs_when_non_goal_axes_define_groups(
+def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_groups(
     tmp_path,
 ):
     service = _build_research_objective_service(
@@ -10634,7 +10634,7 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Goal frame fallback")
+    collection = collection_service.create_collection("Objective frame fallback")
     collection_id = collection["collection_id"]
     extractor = _FailingFrameExtractor()
     service = _build_research_objective_service(
@@ -10735,7 +10735,7 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Goal stage retry")
+    collection = collection_service.create_collection("Objective stage retry")
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
@@ -10847,7 +10847,7 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Goal force rebuild")
+    collection = collection_service.create_collection("Objective force rebuild")
     collection_id = collection["collection_id"]
     extractor = _ObjectiveExtractor()
     service = _build_research_objective_service(

@@ -687,7 +687,7 @@ empty | processing | partial | ready | failed
   `context_ids` 和 `source_object_ids`
 - `relations`：claim 或条件之间的关系；每条至少包含
   `relation_id`、`relation_type`、`subject`、`predicate`、`object`、
-  `status`、`evidence_ref_ids` 和 `context_ids`；goal-level synthesis relation
+  `status`、`evidence_ref_ids` 和 `context_ids`；objective-level synthesis relation
   还可包含 `synthesis_status`、`supporting_evidence_ref_ids`、
   `conflicting_evidence_ref_ids`、`context_evidence_ref_ids`、
   `mechanism_evidence_ref_ids`、`common_conditions`、`incomparable_conditions`

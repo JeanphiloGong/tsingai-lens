@@ -30,7 +30,7 @@ def _load_prepare_module():
 def _row(**overrides):
     row = {
         "collection_id": "col-1",
-        "goal_id": "goal-1",
+        "objective_id": "objective-1",
         "finding_id": "finding-1",
         "action": "skip",
         "statement": "Preheating increased ductility by 14%.",

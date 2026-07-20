@@ -29,7 +29,13 @@ class StaticResearchUnderstandingRepository:
 
 
 class PassthroughResearchUnderstandingService:
-    def with_presentation(self, understanding: ResearchUnderstanding):
+    def with_presentation(
+        self,
+        understanding: ResearchUnderstanding,
+        *,
+        recover_source_findings: bool = True,
+    ):
+        assert recover_source_findings is False
         return understanding.to_record()
 
 

@@ -503,7 +503,10 @@ class ResearchUnderstandingFeedbackService:
         understanding: Any,
     ) -> list[dict[str, object]]:
         understanding_record = (
-            self.research_understanding_service.with_presentation(understanding)
+            self.research_understanding_service.with_presentation(
+                understanding,
+                recover_source_findings=False,
+            )
             or understanding.to_record()
         )
         feedback = self.list_feedback(
@@ -598,7 +601,10 @@ class ResearchUnderstandingFeedbackService:
         if understanding is None:
             return ()
         understanding_record = (
-            self.research_understanding_service.with_presentation(understanding)
+            self.research_understanding_service.with_presentation(
+                understanding,
+                recover_source_findings=False,
+            )
             or understanding.to_record()
         )
         return self._finding_records(understanding_record)

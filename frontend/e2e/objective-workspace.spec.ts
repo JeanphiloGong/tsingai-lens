@@ -83,7 +83,12 @@ function objectivePayload() {
 			process_axes: ['heat treatment'],
 			property_axes: ['yield strength'],
 			comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
-			confidence: 0.91
+			confidence: 0.91,
+			status: 'ready',
+			analysis_error: null,
+			analysis_progress: null,
+			created_at: '2026-05-14T00:00:00Z',
+			updated_at: '2026-05-14T00:00:00Z'
 		},
 		objective_context: {
 			objective_id: objectiveId,
@@ -479,14 +484,18 @@ async function mockObjectiveApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/research-view`) {
 			return route.fulfill(json(objectivePayload()));
 		}
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-plans`) {
+			return route.fulfill(
+				json({ collection_id: collectionId, objective_id: objectiveId, items: [] })
+			);
+		}
 		if (path === `/api/v1/collections/${collectionId}/research-understanding/dataset`) {
 			return route.fulfill(
 				json({
 					schema_version: 'research_understanding_dataset.v1',
 					dataset_id: 'rud_obj_1',
 					collection_id: collectionId,
-					scope_type: 'objective',
-					scope_id: objectiveId,
+					objective_id: objectiveId,
 					task_type: 'research_understanding_finding',
 					metric_profile: 'materials_expert',
 					label_status_filter: null,
@@ -580,10 +589,9 @@ test('objective workspace renders research understanding screenshots and source 
 	await expect(page.getByRole('cell', { name: 'heat treatment', exact: true })).toBeVisible();
 	await expect(page.getByRole('cell', { name: 'cellular substructure', exact: true })).toBeVisible();
 	await expect(page.getByLabel('Research findings table').getByText('Paper-level finding')).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Give feedback' })).toBeVisible();
-	await page.getByRole('button', { name: 'Give feedback' }).click();
+	await expect(page.getByRole('button', { name: 'Review evidence' })).toBeVisible();
+	await page.getByRole('button', { name: 'Review evidence' }).click();
 	await expect(page.getByRole('heading', { name: 'Finding detail' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Expert feedback' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Direct result evidence' })).toBeVisible();
 	await expect(page.getByText('table · table-2 · p. 5').first()).toBeVisible();
 	const understandingEvidence = page.getByRole('link', { name: 'Open source' }).first();
@@ -620,7 +628,7 @@ test('objectives page treats not-ready responses as a pending workflow state', a
 
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.goto(`/collections/${collectionId}/objectives`);
-	await expect(page.getByRole('heading', { name: 'Research objectives are pending' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Research objectives are not ready yet' })).toBeVisible();
 	await expect(
 		page.getByText('Finish collection processing before reviewing objectives.')
 	).toBeVisible();

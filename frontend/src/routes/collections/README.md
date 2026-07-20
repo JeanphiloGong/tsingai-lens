@@ -29,7 +29,7 @@ This node owns the collection workspace route family in the frontend.
 - render global comparison review as a More / All Comparisons surface
 - render the collection-bound AI research copilot as a top-level collection tab
   with explicit answer source modes and clickable document/evidence source links
-  back to Core-owned surfaces; goal-scoped experiment readiness links send
+  back to Core-owned surfaces; objective-scoped experiment readiness links send
   experts back to the review queue, training-ready findings, or protocol draft
   action according to the current curated Finding state, and saved protocol
   drafts preserve review-gate and used-evidence metadata for later audit;
@@ -44,12 +44,10 @@ This node owns the collection workspace route family in the frontend.
 - poll task status and artifact readiness
 - surface graph, research-understanding, evidence, and comparison capabilities
   to the user
-- surface confirmed-goal review progress on the objectives page so experts can
-  see training-ready, message-exportable, protocol-ready experiment-input, and
-  still-unreviewed finding counts before opening individual goal workspaces,
-  with top review-priority diagnostics and pending review actions linking
-  directly to the next candidate finding when the dataset summary provides one
-- render confirmed Goal detail as the primary expert Finding workspace:
+- surface Objective lifecycle and review progress on the objectives page so
+  experts can distinguish candidate, queued, running, ready, and failed analysis
+  state from downstream Finding review state before opening a workspace
+- render Objective detail as the primary expert Finding workspace:
   users scan a compact Finding table, open one full-width Finding detail, inspect
   its variable-mechanism-outcome chain and applicability, and review one
   paper-by-paper evidence table with original quotes, paper titles, pages,
@@ -58,7 +56,7 @@ This node owns the collection workspace route family in the frontend.
   finding, claim, evidence, document, and context identifiers out of visible UI;
   requested-variable and requested-outcome coverage live in a separate Coverage
   view, while dataset exports, reanalysis, and experiment plans remain available
-  from secondary Goal actions instead of competing with Findings in the primary
+  from secondary Objective actions instead of competing with Findings in the primary
   page flow
 - keep source traceback on the document page user-facing: parsed Markdown is
   the default reading surface, original PDF/PDF.js preview remains available

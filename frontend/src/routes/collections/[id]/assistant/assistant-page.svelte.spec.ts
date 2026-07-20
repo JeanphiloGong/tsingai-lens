@@ -13,7 +13,7 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 	const subscribers = new Set<(value: AssistantPageState) => void>();
 	let current: AssistantPageState = {
 		params: { id: 'col_123' },
-		url: new URL('http://localhost/collections/col_123/assistant?goal_id=goal_1')
+		url: new URL('http://localhost/collections/col_123/assistant?objective_id=obj_1')
 	};
 
 	return {
@@ -83,10 +83,9 @@ function datasetResponse({
 } = {}) {
 	return {
 		schema_version: 'research_understanding_dataset.v1',
-		dataset_id: 'dataset_goal_1',
+		dataset_id: 'dataset_obj_1',
 		collection_id: 'col_123',
-		scope_type: 'goal',
-		scope_id: 'goal_1',
+		objective_id: 'obj_1',
 		task_type: 'research_understanding_finding',
 		metric_profile: 'research_understanding_v1',
 		label_status_filter: null,
@@ -137,7 +136,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		localStorage.clear();
 		setPage({
 			params: { id: 'col_123' },
-			url: new URL('http://localhost/collections/col_123/assistant?goal_id=goal_1')
+			url: new URL('http://localhost/collections/col_123/assistant?objective_id=obj_1')
 		});
 		fetchMock.mockReset();
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
@@ -154,8 +153,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -205,12 +203,12 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			if (path === '/api/v1/collections/col_123/goals/goal_1/experiment-plans' && method === 'POST') {
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/experiment-plans' && method === 'POST') {
 				return Promise.resolve(
 					jsonResponse({
 						plan_id: 'plan_1',
 						collection_id: 'col_123',
-						goal_id: 'goal_1',
+						objective_id: 'obj_1',
 						title: 'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].',
 						content:
 							'**Hypothesis**\n' +
@@ -253,8 +251,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Open goal review' }))
-			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=training_ready');
+			.element(browserPage.getByRole('link', { name: 'Open objective review' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=training_ready');
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
 			.toBeInTheDocument();
@@ -279,7 +277,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		}) as [string | URL | Request, RequestInit];
 		expect(JSON.parse(sessionInit.body as string)).toMatchObject({
 			collection_id: 'col_123',
-			focused_goal_id: 'goal_1',
+			focused_objective_id: 'obj_1',
 			answer_mode: 'hybrid'
 		});
 
@@ -291,8 +289,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			);
 		}) as [string | URL | Request, RequestInit | undefined];
 		const datasetUrl = requestUrl(datasetRequest);
-		expect(datasetUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(datasetUrl.searchParams.get('scope_id')).toBe('goal_1');
+		expect(datasetUrl.searchParams.get('objective_id')).toBe('obj_1');
 	});
 
 	it('shows pending protocol inputs before protocol drafts are ready', async () => {
@@ -319,8 +316,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -347,8 +343,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Check goal readiness' }))
-			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=training_ready');
+			.element(browserPage.getByRole('link', { name: 'Check objective readiness' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=training_ready');
 		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
 	});
 
@@ -377,8 +373,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -406,7 +401,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Review findings first' }))
-			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=queue');
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=queue');
 		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
 	});
 
@@ -433,8 +428,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -461,8 +455,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Check goal readiness' }))
-			.toHaveAttribute('href', '/collections/col_123/goals/goal_1?review=training_ready');
+			.element(browserPage.getByRole('link', { name: 'Check objective readiness' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=training_ready');
 		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
 	});
 
@@ -507,7 +501,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		const [, planInit] = fetchMock.mock.calls.find(([input, init]) => {
 			return (
 				requestPath(input as string | URL | Request) ===
-					'/api/v1/collections/col_123/goals/goal_1/experiment-plans' &&
+					'/api/v1/collections/col_123/objectives/obj_1/experiment-plans' &&
 				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
 			);
 		}) as [string | URL | Request, RequestInit];
@@ -534,7 +528,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 			.element(browserPage.getByRole('link', { name: 'Open plan' }))
 			.toHaveAttribute(
 				'href',
-				'/collections/col_123/goals/goal_1?plan_id=plan_1#experiment-plans-title'
+				'/collections/col_123/objectives/obj_1?plan_id=plan_1#experiment-plans-title'
 			);
 	});
 
@@ -550,8 +544,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -616,8 +609,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -695,8 +687,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -769,8 +760,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -835,8 +825,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -917,8 +906,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -966,7 +954,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Save is disabled until this goal has expert-reviewed protocol-ready findings.'))
+			.element(browserPage.getByText('Save is disabled until this objective has expert-reviewed protocol-ready findings.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
 		expect(
@@ -991,8 +979,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -1073,8 +1060,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -1155,8 +1141,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -1234,8 +1219,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						collection_id: 'col_123',
 						focused_material_id: null,
 						focused_paper_id: null,
-						focused_objective_id: null,
-						focused_goal_id: 'goal_1',
+						focused_objective_id: 'obj_1',
 						goal_text: null,
 						goal_brief_json: {},
 						answer_mode: 'hybrid',
@@ -1283,7 +1267,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText(/unreviewed collection evidence/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Save is disabled until this goal has expert-reviewed protocol-ready findings.'))
+			.element(browserPage.getByText('Save is disabled until this objective has expert-reviewed protocol-ready findings.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
 		expect(

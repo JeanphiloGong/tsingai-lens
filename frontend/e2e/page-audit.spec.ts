@@ -437,11 +437,38 @@ async function mockApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/research-understanding/curations`) {
 			return route.fulfill(json({ collection_id: collectionId, items: [] }));
 		}
+		if (path === `/api/v1/collections/${collectionId}/research-understanding/feedback`) {
+			return route.fulfill(json({ collection_id: collectionId, items: [] }));
+		}
+		if (path === `/api/v1/collections/${collectionId}/research-understanding/dataset`) {
+			return route.fulfill(
+				json({
+					schema_version: 'research_understanding_dataset.v1',
+					dataset_id: 'rud_obj_1',
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					task_type: 'research_understanding_finding',
+					metric_profile: 'materials_expert',
+					label_status_filter: null,
+					dataset_use_status_filter: null,
+					item_count: 0,
+					label_counts: { candidate: 0, silver: 0, gold: 0, rejected: 0 },
+					quality_summary: {},
+					items: [],
+					warnings: []
+				})
+			);
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
 			return route.fulfill(json(objectives()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/research-view`) {
 			return route.fulfill(json(objectiveView()));
+		}
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-plans`) {
+			return route.fulfill(
+				json({ collection_id: collectionId, objective_id: objectiveId, items: [] })
+			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/results`)
 			return route.fulfill(json(results()));
@@ -1228,6 +1255,11 @@ function objectives() {
 				property_axes: ['yield strength'],
 				comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
 				confidence: 0.91,
+				status: 'ready',
+				analysis_error: null,
+				analysis_progress: null,
+				created_at: now(),
+				updated_at: now(),
 				state: 'ready',
 				paper_frame_count: 1,
 				evidence_route_count: 1,

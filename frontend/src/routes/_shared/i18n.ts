@@ -268,7 +268,7 @@ const translations: Record<Language, Translations> = {
 				open: 'Open plan',
 				defaultTitle: 'Experiment plan draft',
 				reviewRequired:
-					'Save is disabled until this goal has expert-reviewed protocol-ready findings.',
+					'Save is disabled until this objective has expert-reviewed protocol-ready findings.',
 				evidenceRequired:
 					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.',
 				sourceTraceRequired:
@@ -286,8 +286,8 @@ const translations: Record<Language, Translations> = {
 			},
 			experimentReadiness: {
 				title: 'Experiment readiness',
-				loading: 'Checking reviewed findings for this goal...',
-				noGoal: 'Select a confirmed goal before saving protocol drafts.',
+				loading: 'Checking reviewed findings for this objective...',
+				noObjective: 'Select a confirmed objective before saving protocol drafts.',
 				ready:
 					'{training} training-ready finding(s) and {messages} message-ready sample(s) are available for traceable protocol drafts.',
 				protocolInputsPending:
@@ -298,14 +298,14 @@ const translations: Record<Language, Translations> = {
 					'{review} finding(s) still need expert review before protocol drafts can be saved.',
 				needsReviewAction:
 					'{review} finding(s) still need expert review before protocol drafts can be saved. Next: {action}.',
-				empty: 'No protocol-ready findings are available for this goal yet.',
+				empty: 'No protocol-ready findings are available for this objective yet.',
 				error: 'Readiness is unavailable: {message}',
-				openGoal: 'Open goal review',
+				openObjective: 'Open objective review',
 				reviewFindings: 'Review findings first',
-				checkReadiness: 'Check goal readiness',
+				checkObjectiveReadiness: 'Check objective readiness',
 				draftProtocol: 'Draft protocol',
 				protocolPrompt:
-					'Draft a traceable next-step experiment protocol from the protocol-ready findings for this goal. Include these exact sections: Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. Cite every evidence-backed recommendation with the visible source labels.'
+					'Draft a traceable next-step experiment protocol from the protocol-ready findings for this objective. Include these exact sections: Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. Cite every evidence-backed recommendation with the visible source labels.'
 			},
 			sourceMode: {
 				collection_grounded: 'Collection evidence',
@@ -378,7 +378,7 @@ const translations: Record<Language, Translations> = {
 				reviewImportErrors: 'Errors',
 				reviewImportReadinessTitle: 'Readiness after import',
 				reviewImportReadinessCounts:
-					'{goals} goal(s): {training} training-ready, {messages} message-ready, {protocol} protocol-ready, {review} review-candidate, {rejected} rejected.',
+					'{goals} objective(s): {training} training-ready, {messages} message-ready, {protocol} protocol-ready, {review} review-candidate, {rejected} rejected.',
 				reviewImportReadinessGates:
 					'Training export: {trainingStatus}. Protocol drafting: {protocolStatus}.',
 				reviewImportReady: 'ready',
@@ -396,18 +396,18 @@ const translations: Record<Language, Translations> = {
 				reviewImportScopeGateReasonReviewCandidates: 'Some findings still need review.',
 				reviewImportScopeGateReasonTraining: 'Training export is not ready yet.',
 				reviewImportScopeGateReasonProtocol: 'Protocol drafting inputs are not ready yet.',
-				reviewImportGoalProgressTitle: 'Goal review progress',
-				reviewImportGoalProgress:
+				reviewImportObjectiveProgressTitle: 'Objective review progress',
+				reviewImportObjectiveProgress:
 					'{actionable} actionable, {skipped} skipped · accept {accept}, reject {reject}, correct {correct}',
 				reviewImportNextFinding: 'Next finding: {finding}',
 				reviewImportOpenNextFinding: 'Review next finding {finding}',
-				reviewImportUnknownGoal: 'Unknown goal',
-				reviewImportAffectedGoalsTitle: 'Affected goal readiness',
-				reviewImportAffectedGoalReadiness:
+				reviewImportUnknownObjective: 'Unknown objective',
+				reviewImportAffectedObjectivesTitle: 'Affected objective readiness',
+				reviewImportAffectedObjectiveReadiness:
 					'Current: {training} training-ready, {messages} message-exportable, {protocol} protocol-ready, {review} review-candidate, {rejected} rejected.',
-				reviewImportAffectedGoalPending:
+				reviewImportAffectedObjectivePending:
 					'Pending write: {actionable} actionable ({accept} accept, {reject} reject, {correct} correct).',
-				reviewImportAffectedGoalProjected:
+				reviewImportAffectedObjectiveProjected:
 					'After import: {training} training-ready, {review} review-candidate, {rejected} rejected.',
 				reviewImportWarningsTitle: 'Import warnings',
 				reviewImportErrorsTitle: 'Import errors',
@@ -420,7 +420,7 @@ const translations: Record<Language, Translations> = {
 				datasetSummary: 'Dataset',
 				collectionDatasetSummary: 'Collection dataset',
 				collectionDatasetReady:
-					'{training} training-ready, {messages} message-exportable, {protocol} protocol-ready, and {review} review-candidate goal sample(s) in this collection.',
+					'{training} training-ready, {messages} message-exportable, {protocol} protocol-ready, and {review} review-candidate objective sample(s) in this collection.',
 				datasetTrainingReady: 'Training ready',
 				datasetTrainingMessages: 'Training messages',
 				datasetProtocolReady: 'Protocol ready',
@@ -1187,7 +1187,7 @@ const translations: Record<Language, Translations> = {
 				body: 'Question-shaped objectives discovered for this collection, with material scope, process axes, property axes, and paper-frame coverage.',
 				loading: 'Loading research objectives...',
 				errorTitle: 'Research objectives are unavailable',
-				pendingTitle: 'Research objectives are pending',
+				pendingTitle: 'Research objectives are not ready yet',
 				pendingBody: 'Finish collection processing before reviewing objectives.',
 				emptyTitle: 'No research objectives yet',
 				emptyBody: 'The objective endpoint returned no objective summaries for this collection.',
@@ -1261,10 +1261,23 @@ const translations: Record<Language, Translations> = {
 				noIntent: 'No comparison intent returned.',
 				openWorkspace: 'Open objective workspace',
 				confirmAndAnalyze: 'Confirm and analyze',
+				retryAnalysis: 'Retry analysis',
 				analyzing: 'Analyzing...',
+				processing: 'Processing',
+				needReview: 'Need review',
+				findingCount: '{count} findings',
+				reviewCount: '{count} need review',
+				lifecycle: {
+					candidate: 'Candidate',
+					confirmed: 'Confirmed',
+					queued: 'Queued',
+					running: 'Running',
+					ready: 'Ready',
+					failed: 'Failed'
+				},
 				noAnalysisCoverage:
 					'No routed evidence has been built yet. Confirming this objective will run goal analysis and build coverage.',
-				analysisErrorTitle: 'Goal analysis failed',
+				analysisErrorTitle: 'Objective analysis failed',
 				analysisWarningTitle: 'Goal analysis needs review'
 			},
 			objectiveWorkspace: {
@@ -3813,7 +3826,7 @@ const translations: Record<Language, Translations> = {
 			experimentReadiness: {
 				title: '实验方案就绪度',
 				loading: '正在检查该目标下已复核的 Findings...',
-				noGoal: '请选择一个已确认研究目标后，再保存实验方案草稿。',
+				noObjective: '请选择一个已确认研究目标后，再保存实验方案草稿。',
 				ready:
 					'当前有 {training} 条可训练 Finding，{messages} 条可导出 messages，可用于带证据的实验方案草稿。',
 				protocolInputsPending:
@@ -3825,9 +3838,9 @@ const translations: Record<Language, Translations> = {
 					'还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。下一步：{action}。',
 				empty: '该目标还没有可用于实验方案的 protocol-ready Findings。',
 				error: '就绪度不可用：{message}',
-				openGoal: '打开目标复核',
+				openObjective: '打开目标复核',
 				reviewFindings: '先复核 Findings',
-				checkReadiness: '检查目标就绪度',
+				checkObjectiveReadiness: '检查目标就绪度',
 				draftProtocol: '生成实验方案',
 				protocolPrompt:
 					'请基于该研究目标下 protocol-ready Findings 生成一个可追溯的下一步实验方案，并包含这些固定小节：Hypothesis、Variable matrix、Measurements、Controls、Risks or limits。每个有证据支撑的建议都必须引用可见的 source label。'
@@ -3916,18 +3929,18 @@ const translations: Record<Language, Translations> = {
 				reviewImportScopeGateReasonReviewCandidates: '仍有 Finding 需要复核。',
 				reviewImportScopeGateReasonTraining: '训练导出尚未就绪。',
 				reviewImportScopeGateReasonProtocol: '实验方案输入尚未就绪。',
-				reviewImportGoalProgressTitle: '研究目标复核进度',
-				reviewImportGoalProgress:
+				reviewImportObjectiveProgressTitle: '研究目标复核进度',
+				reviewImportObjectiveProgress:
 					'{actionable} 行可写入，{skipped} 行待复核 · accept {accept}，reject {reject}，correct {correct}',
 				reviewImportNextFinding: '下一条 Finding：{finding}',
 				reviewImportOpenNextFinding: '复核下一条 Finding {finding}',
-				reviewImportUnknownGoal: '未知研究目标',
-				reviewImportAffectedGoalsTitle: '受影响研究目标状态',
-				reviewImportAffectedGoalReadiness:
+				reviewImportUnknownObjective: '未知研究目标',
+				reviewImportAffectedObjectivesTitle: '受影响研究目标状态',
+				reviewImportAffectedObjectiveReadiness:
 					'当前：{training} 条可训练，{messages} 条可导出 messages，{protocol} 条可生成方案输入，{review} 条待复核，{rejected} 条已拒绝。',
-				reviewImportAffectedGoalPending:
+				reviewImportAffectedObjectivePending:
 					'即将写入：{actionable} 行可写入（accept {accept}，reject {reject}，correct {correct}）。',
-				reviewImportAffectedGoalProjected:
+				reviewImportAffectedObjectiveProjected:
 					'导入后预计：{training} 条可训练，{review} 条待复核，{rejected} 条已拒绝。',
 				reviewImportWarningsTitle: '导入警告',
 				reviewImportErrorsTitle: '导入错误',
@@ -4706,7 +4719,20 @@ const translations: Record<Language, Translations> = {
 				noIntent: '接口未返回比较意图。',
 				openWorkspace: '打开目标工作区',
 				confirmAndAnalyze: '确认并分析',
+				retryAnalysis: '重试分析',
 				analyzing: '分析中...',
+				processing: '处理中',
+				needReview: '待复核',
+				findingCount: '{count} 条发现',
+				reviewCount: '{count} 条待复核',
+				lifecycle: {
+					candidate: '候选',
+					confirmed: '已确认',
+					queued: '已排队',
+					running: '分析中',
+					ready: '已就绪',
+					failed: '失败'
+				},
 				noAnalysisCoverage: '该目标尚未构建证据覆盖。确认后会运行目标分析并构建覆盖。',
 				analysisErrorTitle: '目标分析失败',
 				analysisWarningTitle: '目标分析需要复核'
